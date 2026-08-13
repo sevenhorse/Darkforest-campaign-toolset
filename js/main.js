@@ -19,6 +19,9 @@
     let chatLogsList = [];
     let editingNoteId = null;
 
+    // Database mapped Codex
+    let globalCodexData = { factions: [], lore: [], npcs: [], rumors: [], intel: [], documents: [] };
+
     let bookmarkedTargets = [];
     try { 
         bookmarkedTargets = JSON.parse(localStorage.getItem('odyssey_bookmarks') || '[]'); 
@@ -35,7 +38,7 @@
     let globalProceduralSystemsCache = [];
     let globalShipMarkersCache = [];
     let globalDbSystemsCache = [];
-    let globalPlanetaryModifiersCache = {}; // NEW: Holds DM economy & planet overrides
+    let globalPlanetaryModifiersCache = {}; 
     
     let selectedTarget = null;
     let camera = { x: 0, y: 0, zoom: 0.2, isDragging: false, startX: 0, startY: 0 };
@@ -43,21 +46,6 @@
     let activeCargoSubtab = 'perishables';
     let activeCodexSubtab = 'factions';
     let hyperlanesVisible = true; 
-
-    let dmCodexData = JSON.parse(localStorage.getItem('odyssey_dm_codex') || JSON.stringify({
-        factions: [
-            { name: "Task Force Black", status: "Allied / Player Faction", notes: "Autonomous deep-space exploration and containment fleet." },
-            { name: "The Syndicate", status: "Hostile / Smugglers", notes: "Operating in outer rim sectors. Controlling illicit black-market trade hubs." }
-        ],
-        lore: [
-            { title: "The Dark Forest Anomaly", desc: "Unexplained subspace static emanating from Sector 1042. Communications drop instantly upon entry." },
-            { title: "Project Odyssey-1000", desc: "Initiative to map 1,000 star systems and establish secure relays across uncharted space." }
-        ],
-        npcs: [
-            { name: "Commander Vane", affiliation: "Task Force Black", location: "Flagship", notes: "Primary mission commander." },
-            { name: "Broker Xylar", affiliation: "Independent Smuggler", location: "Sector 1012 Outpost", notes: "Knows rumors regarding ancient artifacts." }
-        ]
-    }));
 
     /* ==========================================================================
        1.5 WEB AUDIO API UI BEEPS
@@ -84,10 +72,8 @@
     let measuringTapeActive = false;
     let measureStartPoint = null;
     let measureEndPoint = null;
-    
     let pingModeActive = false;
     let activePings = [];
-
     let jumpPlottingActive = false;
     let activeJumpShip = null;
     let jumpTargetPoint = null;
@@ -108,24 +94,12 @@
     let timeFlowInterval = null;
 
     function formatUniverseTime(totalHours) {
-        const hoursInDay = 24;
-        const daysInMonth = 30;
-        const monthsInYear = 12;
-        const hoursInMonth = hoursInDay * daysInMonth;
-        const hoursInYear = hoursInMonth * monthsInYear;
-
-        let year = Math.floor(totalHours / hoursInYear);
-        let remainder = totalHours % hoursInYear;
-        let month = Math.floor(remainder / hoursInMonth) + 1;
-        remainder %= hoursInMonth;
-        let day = Math.floor(remainder / hoursInDay) + 1;
-        let hour = remainder % hoursInDay;
-
-        let mStr = month < 10 ? '0' + month : month;
-        let dStr = day < 10 ? '0' + day : day;
-        let hStr = hour < 10 ? '0' + hour : hour;
-
-        return `YR ${year}.${mStr}.${dStr} // ${hStr}:00`;
+        const hoursInDay = 24; const daysInMonth = 30; const monthsInYear = 12;
+        const hoursInMonth = hoursInDay * daysInMonth; const hoursInYear = hoursInMonth * monthsInYear;
+        let year = Math.floor(totalHours / hoursInYear); let remainder = totalHours % hoursInYear;
+        let month = Math.floor(remainder / hoursInMonth) + 1; remainder %= hoursInMonth;
+        let day = Math.floor(remainder / hoursInDay) + 1; let hour = remainder % hoursInDay;
+        return `YR ${year}.${month < 10 ? '0'+month : month}.${day < 10 ? '0'+day : day} // ${hour < 10 ? '0'+hour : hour}:00`;
     }
 
     function updateCalendarDisplay() {
@@ -138,12 +112,7 @@
 
     function initCalendarEngine() {
         updateCalendarDisplay();
-        timeFlowInterval = setInterval(() => {
-            if (timeFlowActive) {
-                universeTimeHours += 1;
-                updateCalendarDisplay();
-            }
-        }, 4000);
+        timeFlowInterval = setInterval(() => { if (timeFlowActive) { universeTimeHours += 1; updateCalendarDisplay(); } }, 4000);
     }
 
     window.toggleCalendarControls = function() {
@@ -155,16 +124,12 @@
     window.adjustTime = function(amount, unit) {
         if (currentUserRole !== 'dm') return;
         let multiplier = 1;
-        if (unit === 'hours') multiplier = 1;
-        if (unit === 'days') multiplier = 24;
-        if (unit === 'months') multiplier = 24 * 30;
-        if (unit === 'years') multiplier = 24 * 30 * 12;
-
+        if (unit === 'hours') multiplier = 1; if (unit === 'days') multiplier = 24;
+        if (unit === 'months') multiplier = 24 * 30; if (unit === 'years') multiplier = 24 * 30 * 12;
         universeTimeHours += amount * multiplier;
         if (universeTimeHours < 0) universeTimeHours = 0;
         localStorage.setItem('odyssey_universe_time', universeTimeHours);
-        updateCalendarDisplay();
-        broadcastTimeSync();
+        updateCalendarDisplay(); broadcastTimeSync();
     };
 
     window.applyManualTime = function() {
@@ -173,49 +138,29 @@
         const mo = parseInt(document.getElementById('set-mo').value) || 1;
         const da = parseInt(document.getElementById('set-da').value) || 1;
         const hr = parseInt(document.getElementById('set-hr').value) || 0;
-
         if (isNaN(yr)) { alert("Please enter a valid year."); return; }
-
-        const hoursInDay = 24;
-        const daysInMonth = 30;
-        const monthsInYear = 12;
-        const hoursInMonth = hoursInDay * daysInMonth;
-        const hoursInYear = hoursInMonth * monthsInYear;
-
-        universeTimeHours = (yr * hoursInYear) + ((mo - 1) * hoursInMonth) + ((da - 1) * hoursInDay) + hr;
+        universeTimeHours = (yr * 24*30*12) + ((mo - 1) * 24*30) + ((da - 1) * 24) + hr;
         if (universeTimeHours < 0) universeTimeHours = 0;
-
         localStorage.setItem('odyssey_universe_time', universeTimeHours);
-        updateCalendarDisplay();
-        broadcastTimeSync();
-        alert("Chronology manually updated.");
+        updateCalendarDisplay(); broadcastTimeSync(); alert("Chronology manually updated.");
     };
 
     window.resetTimeline = function() {
         if (currentUserRole !== 'dm') return;
         if (!confirm("Reset timeline back to YR 2800.01.01?")) return;
-        universeTimeHours = 24192000;
-        localStorage.setItem('odyssey_universe_time', universeTimeHours);
-        updateCalendarDisplay();
-        broadcastTimeSync();
+        universeTimeHours = 24192000; localStorage.setItem('odyssey_universe_time', universeTimeHours);
+        updateCalendarDisplay(); broadcastTimeSync();
     };
 
     window.toggleTimeFlow = function() {
         if (currentUserRole !== 'dm') return;
         timeFlowActive = !timeFlowActive;
         const btn = document.getElementById('time-flow-btn');
-        if (btn) {
-            btn.innerText = timeFlowActive ? '⏸ PAUSE FLOW' : '▶ RESUME FLOW';
-            btn.style.borderColor = timeFlowActive ? '#3c4e36' : '#00e5a3';
-        }
+        if (btn) { btn.innerText = timeFlowActive ? '⏸ PAUSE FLOW' : '▶ RESUME FLOW'; btn.style.borderColor = timeFlowActive ? '#3c4e36' : '#00e5a3'; }
     };
 
     function broadcastTimeSync() {
-        db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `⏳ [TIMELINE ADJUSTED] Overseer shifted chronology to: ${formatUniverseTime(universeTimeHours)}`,
-            message_type: 'text'
-        });
+        db.from('chat_logs').insert({ sender_id: currentUserId, content: `⏳ [TIMELINE ADJUSTED] Overseer shifted chronology to: ${formatUniverseTime(universeTimeHours)}`, message_type: 'text' });
     }
 
     /* ==========================================================================
@@ -228,24 +173,15 @@
         errorDiv.style.display = 'none';
 
         const { data, error } = await db.auth.signInWithPassword({ email, password });
-        if (error) {
-            errorDiv.innerText = "Access Denied: " + error.message;
-            errorDiv.style.display = 'block';
-            return;
-        }
+        if (error) { errorDiv.innerText = "Access Denied: " + error.message; errorDiv.style.display = 'block'; return; }
         fetchUserProfile(data.user);
     };
 
     async function fetchUserProfile(user) {
-        currentUserId = user.id;
-        currentUserEmail = user.email;
+        currentUserId = user.id; currentUserEmail = user.email;
         const { data, error } = await db.from('profiles').select('*').eq('id', user.id).single();
 
-        if (error) {
-            document.getElementById('error-message').innerText = "Access Denied: Profile mapping missing.";
-            document.getElementById('error-message').style.display = 'block';
-            return;
-        }
+        if (error) { document.getElementById('error-message').innerText = "Access Denied: Profile mapping missing."; document.getElementById('error-message').style.display = 'block'; return; }
 
         currentUserRole = data.role;
         document.getElementById('login-wrapper').style.display = 'none';
@@ -254,24 +190,13 @@
         const badge = document.getElementById('user-role');
         badge.innerText = `Role: ${data.role}`;
         
-        const codexNavBtn = document.getElementById('term-tab-btn-codex');
-        const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
-        
         if (data.role === 'dm') {
-            badge.classList.add('role-dm');
-            badge.innerText = 'OVERSEER (DM)';
+            badge.classList.add('role-dm'); badge.innerText = 'OVERSEER (DM)';
             document.getElementById('dm-tools').style.display = 'block';
             document.getElementById('dm-time-controls-box').style.display = 'block';
-            if (codexNavBtn) codexNavBtn.style.display = 'flex';
-            if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
-            
+            document.getElementById('dm-scratchpad-toggle-btn').style.display = 'inline-block';
             const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
-            if (savedScratch && document.getElementById('dm-scratchpad-input')) {
-                document.getElementById('dm-scratchpad-input').value = savedScratch;
-            }
-        } else {
-            if (codexNavBtn) codexNavBtn.style.display = 'none';
-            if (scratchpadBtn) scratchpadBtn.style.display = 'none';
+            if (savedScratch && document.getElementById('dm-scratchpad-input')) document.getElementById('dm-scratchpad-input').value = savedScratch;
         }
 
         initPresenceChannel(data);
@@ -282,13 +207,13 @@
         loadCombatTracker();
         loadCampaignObjectives();
         loadChatLogs();
+        window.loadCodexData(); // Initialize new Cloud Codex
     }
 
     function updateTerminalBadges() {
         const bNotes = document.getElementById('badge-notes');
         const bCombat = document.getElementById('badge-combat');
         const bRoster = document.getElementById('badge-roster');
-        
         if (bNotes) bNotes.innerText = (playerNotesList.length + campaignObjectivesList.filter(o => !o.completed).length) || '0';
         if (bCombat) bCombat.innerText = combatantsList.length || '0';
         if (bRoster) bRoster.innerText = allProfiles.length || '0';
@@ -308,8 +233,7 @@
                 return { ...p, character: c, skills: s, arsenal: a };
             });
             if (document.getElementById('character-terminal').style.display === 'block') { renderCharacterTerminalData(); }
-            populateCommsRecipients();
-            updateTerminalBadges();
+            populateCommsRecipients(); updateTerminalBadges();
         }
     }
 
@@ -332,10 +256,42 @@
         const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: true }).limit(50);
         if (data) { 
             chatLogsList = data; 
-            if (chatLogsList.length === 0) {
-                chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked. Communication channels active.', message_type: 'text' }];
-            }
+            if (chatLogsList.length === 0) chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked. Communication channels active.', message_type: 'text' }];
             renderChatFeed(); 
+        }
+    }
+
+    /* --- CLOUD CODEX ARCHITECTURE --- */
+    window.loadCodexData = async function() {
+        const { data } = await db.from('campaign_codex').select('*').order('created_at', { ascending: false });
+        if (data) {
+            globalCodexData = { factions: [], lore: [], npcs: [], rumors: [], intel: [], documents: [] };
+            data.forEach(item => {
+                if (globalCodexData[item.category]) globalCodexData[item.category].push(item);
+            });
+            if (document.getElementById('character-terminal').style.display === 'block') { renderCodexDeck(); }
+        }
+        migrateLegacyCodex();
+    };
+
+    async function migrateLegacyCodex() {
+        const legacy = localStorage.getItem('odyssey_dm_codex');
+        if (legacy && currentUserRole === 'dm') {
+            try {
+                const parsed = JSON.parse(legacy);
+                for (let cat of ['factions', 'lore', 'npcs']) {
+                    if (parsed[cat]) {
+                        for (let item of parsed[cat]) {
+                            let title = item.name || item.title;
+                            let desc = item.notes || item.desc || '';
+                            let meta = { status: item.status, location: item.location, affiliation: item.affiliation };
+                            await db.from('campaign_codex').insert({ category: cat, title, description: desc, meta_data: meta });
+                        }
+                    }
+                }
+                localStorage.removeItem('odyssey_dm_codex');
+                window.loadCodexData();
+            } catch(e) { console.error("Codex migration failed:", e); }
         }
     }
 
@@ -352,28 +308,20 @@
         let html = '';
         Object.keys(onlineUsersMap).forEach(userId => {
             const presences = onlineUsersMap[userId];
-            if (presences && presences.length > 0) {
-                const p = presences[0];
-                html += `<div class="presence-pill">🟢 ${p.username} ${p.role === 'dm' ? '[DM]' : ''}</div>`;
-            }
+            if (presences && presences.length > 0) { html += `<div class="presence-pill">🟢 ${presences[0].username} ${presences[0].role === 'dm' ? '[DM]' : ''}</div>`; }
         });
         listDiv.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active commanders</span>';
     }
 
     window.handleLogout = async function() {
         if (presenceChannel) await presenceChannel.untrack();
-        await db.auth.signOut();
-        location.reload();
+        await db.auth.signOut(); location.reload();
     };
 
     /* ==========================================================================
        5. TERMINAL & UI CONTROLLERS
        ========================================================================== */
-    const skillList = [
-        "Athletics", "Stealth", "Survival", "Ballistic Weapons", 
-        "Energy Weapons", "Explosives", "Computers", "Engineering", 
-        "Sciences", "Mechanics", "Medical", "Speechcraft", "Melee", "Pilot"
-    ];
+    const skillList = ["Athletics", "Stealth", "Survival", "Ballistic Weapons", "Energy Weapons", "Explosives", "Computers", "Engineering", "Sciences", "Mechanics", "Medical", "Speechcraft", "Melee", "Pilot"];
 
     function renderSkillInputs() {
         const container = document.getElementById('skills-input-container');
@@ -381,27 +329,18 @@
         let html = '';
         skillList.forEach(skill => {
             const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            html += `
-                <div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:4px 6px; border-radius:2px; border:1px solid #3c4e36;">
-                    <span style="font-size:10px; color:#d4c5a9;">${skill}</span>
-                    <input type="number" id="skill-${safeKey}" min="-100" max="100" value="0" style="width:65px; margin:0; text-align:right; font-size:10px; padding:2px;">
-                </div>
-            `;
+            html += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:4px 6px; border-radius:2px; border:1px solid #3c4e36;"><span style="font-size:10px; color:#d4c5a9;">${skill}</span><input type="number" id="skill-${safeKey}" min="-100" max="100" value="0" style="width:65px; margin:0; text-align:right; font-size:10px; padding:2px;"></div>`;
         });
         container.innerHTML = html;
         
         const diceContainer = document.getElementById('dice-roller-skills');
         let dHtml = '';
-        skillList.forEach(skill => {
-            dHtml += `<label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="roll-skill-cb" value="${skill}" style="width:auto; margin:0;"> ${skill}</label>`;
-        });
+        skillList.forEach(skill => { dHtml += `<label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="roll-skill-cb" value="${skill}" style="width:auto; margin:0;"> ${skill}</label>`; });
         if(diceContainer) diceContainer.innerHTML = dHtml;
         
         const statContainer = document.getElementById('dice-roller-stats');
         let sHtml = '';
-        ['Charisma', 'Dexterity', 'Intelligence', 'Strength', 'Toughness', 'Willpower'].forEach(st => {
-            sHtml += `<label style="font-size: 11px; color: #d4c5a9;"><input type="checkbox" class="roll-stat-cb" value="${st}"> ${st}</label>`;
-        });
+        ['Charisma', 'Dexterity', 'Intelligence', 'Strength', 'Toughness', 'Willpower'].forEach(st => { sHtml += `<label style="font-size: 11px; color: #d4c5a9;"><input type="checkbox" class="roll-stat-cb" value="${st}"> ${st}</label>`; });
         if(statContainer) statContainer.innerHTML = sHtml;
     }
     renderSkillInputs();
@@ -410,11 +349,7 @@
         const sidebar = document.getElementById('term-sidebar');
         const icon = document.getElementById('sidebar-toggle-icon');
         sidebar.classList.toggle('collapsed');
-        if (sidebar.classList.contains('collapsed')) {
-            icon.innerText = '▶';
-        } else {
-            icon.innerText = '◀ COLLAPSE SIDEBAR';
-        }
+        if (sidebar.classList.contains('collapsed')) icon.innerText = '▶'; else icon.innerText = '◀ COLLAPSE SIDEBAR';
         playUIBeep();
     };
 
@@ -424,12 +359,8 @@
         document.querySelectorAll('.term-panel-content').forEach(p => p.classList.remove('active'));
         document.getElementById(`term-tab-btn-${tabName}`).classList.add('active');
         document.getElementById(`term-panel-${tabName}`).classList.add('active');
-        if (tabName === 'cargo') {
-            populateCargoVesselSelect();
-            renderTerminalCargoDeck();
-        } else if (tabName === 'codex') {
-            renderCodexDeck();
-        }
+        if (tabName === 'cargo') { populateCargoVesselSelect(); renderTerminalCargoDeck(); } 
+        else if (tabName === 'codex') { renderCodexDeck(); }
     };
 
     window.toggleCharacterTerminal = function() {
@@ -440,48 +371,33 @@
 
     window.openFullCargoTerminal = function() {
         const term = document.getElementById('character-terminal');
-        term.style.display = 'block';
-        window.switchTermTab('cargo');
+        term.style.display = 'block'; window.switchTermTab('cargo');
     };
 
     window.toggleCombatTracker = function() {
-        const panel = document.getElementById('combat-tracker-panel');
-        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        const panel = document.getElementById('combat-tracker-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
     };
 
     window.toggleCommsArray = function() {
-        const panel = document.getElementById('comms-array-panel');
-        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        const panel = document.getElementById('comms-array-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
         if (panel.style.display === 'block') { populateCommsRecipients(); loadChatLogs(); }
     };
 
     window.toggleDmScratchpad = function() {
         if (currentUserRole !== 'dm') return;
-        const panel = document.getElementById('dm-scratchpad-panel');
-        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        const panel = document.getElementById('dm-scratchpad-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
     };
 
     window.saveDmScratchpad = function() {
         if (currentUserRole !== 'dm') return;
-        const val = document.getElementById('dm-scratchpad-input').value;
-        localStorage.setItem('odyssey_dm_scratchpad', val);
+        const val = document.getElementById('dm-scratchpad-input').value; localStorage.setItem('odyssey_dm_scratchpad', val);
     };
 
     window.toggleHyperlanes = function() {
-        playUIBeep();
-        hyperlanesVisible = !hyperlanesVisible;
-        const btn = document.getElementById('dm-lane-toggle-btn');
-        const topBtn = document.getElementById('hyperlane-toggle-btn');
-        
-        if (btn) {
-            btn.innerText = hyperlanesVisible ? '⚡ TOGGLE LANES (ON)' : '⚡ TOGGLE LANES (OFF)';
-            btn.style.borderColor = hyperlanesVisible ? '#00e5a3' : '#ff3333';
-            btn.style.color = hyperlanesVisible ? '#00e5a3' : '#ffaaaa';
-        }
-        if (topBtn) {
-            topBtn.style.borderColor = hyperlanesVisible ? '#3c4e36' : '#00e5a3';
-            topBtn.style.color = hyperlanesVisible ? '#00e5a3' : '#6b826a';
-        }
+        playUIBeep(); hyperlanesVisible = !hyperlanesVisible;
+        const btn = document.getElementById('dm-lane-toggle-btn'); const topBtn = document.getElementById('hyperlane-toggle-btn');
+        if (btn) { btn.innerText = hyperlanesVisible ? '⚡ TOGGLE LANES (ON)' : '⚡ TOGGLE LANES (OFF)'; btn.style.borderColor = hyperlanesVisible ? '#00e5a3' : '#ff3333'; btn.style.color = hyperlanesVisible ? '#00e5a3' : '#ffaaaa'; }
+        if (topBtn) { topBtn.style.borderColor = hyperlanesVisible ? '#3c4e36' : '#00e5a3'; topBtn.style.color = hyperlanesVisible ? '#00e5a3' : '#6b826a'; }
     };
 
     /* DM Panel Subtab & Collapse Handlers */
@@ -489,57 +405,32 @@
         playUIBeep();
         document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.dm-subpanel').forEach(p => p.style.display = 'none');
-        
         document.getElementById(`dm-tab-btn-${subtab}`).classList.add('active');
         document.getElementById(`dm-panel-${subtab}`).style.display = 'block';
     };
 
     window.toggleDmPanelCollapse = function() {
         playUIBeep();
-        const body = document.getElementById('dm-tools-body');
-        const btn = document.getElementById('dm-collapse-btn');
-        if(body.style.display === 'none') {
-            body.style.display = 'block';
-            btn.innerText = '[-]';
-        } else {
-            body.style.display = 'none';
-            btn.innerText = '[+]';
-        }
+        const body = document.getElementById('dm-tools-body'); const btn = document.getElementById('dm-collapse-btn');
+        if(body.style.display === 'none') { body.style.display = 'block'; btn.innerText = '[-]'; } 
+        else { body.style.display = 'none'; btn.innerText = '[+]'; }
     };
 
     function makePanelDraggable(panelId, handleId, storageKey) {
-        const panel = document.getElementById(panelId);
-        const handle = document.getElementById(handleId);
+        const panel = document.getElementById(panelId); const handle = document.getElementById(handleId);
         if (!panel || !handle) return;
-        
-        try {
-            const savedPos = localStorage.getItem(storageKey);
-            if (savedPos) {
-                const { left, top } = JSON.parse(savedPos);
-                panel.style.left = left; panel.style.top = top; panel.style.right = 'auto';
-            }
-        } catch(e) { console.warn("Failed to load panel state for", panelId); }
-
+        try { const savedPos = localStorage.getItem(storageKey); if (savedPos) { const { left, top } = JSON.parse(savedPos); panel.style.left = left; panel.style.top = top; panel.style.right = 'auto'; } } catch(e) {}
         let isDragging = false, startX, startY, initialLeft, initialTop;
         handle.addEventListener('mousedown', (e) => {
             if (['INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
-            isDragging = true;
-            const rect = panel.getBoundingClientRect();
-            startX = e.clientX; startY = e.clientY;
-            initialLeft = rect.left; initialTop = rect.top;
-            panel.style.right = 'auto';
+            isDragging = true; const rect = panel.getBoundingClientRect(); startX = e.clientX; startY = e.clientY; initialLeft = rect.left; initialTop = rect.top; panel.style.right = 'auto';
             const onMouseMove = (moveEvent) => {
-                if (!isDragging) return;
-                const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
-                let newLeft = Math.max(10, Math.min(window.innerWidth - rect.width - 10, initialLeft + dx));
-                let newTop = Math.max(60, Math.min(window.innerHeight - rect.height - 10, initialTop + dy));
+                if (!isDragging) return; const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
+                let newLeft = Math.max(10, Math.min(window.innerWidth - rect.width - 10, initialLeft + dx)); let newTop = Math.max(60, Math.min(window.innerHeight - rect.height - 10, initialTop + dy));
                 panel.style.left = `${newLeft}px`; panel.style.top = `${newTop}px`;
             };
             const onMouseUp = () => {
-                if (isDragging) { 
-                    isDragging = false; 
-                    try { localStorage.setItem(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); } catch(e){}
-                }
+                if (isDragging) { isDragging = false; try { localStorage.setItem(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); } catch(e){} }
                 window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
             };
             window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
@@ -553,195 +444,92 @@
     makePanelDraggable('calendar-control-panel', 'calendar-control-header', 'odyssey_calendar_pos');
     makePanelDraggable('dm-scratchpad-panel', 'dm-scratchpad-header', 'odyssey_scratchpad_pos');
 
-    window.resetUiLayout = function() {
-        Object.keys(localStorage).forEach(k => {
-            if (k.startsWith('odyssey_')) localStorage.removeItem(k);
-        });
-        location.reload();
-    };
+    window.resetUiLayout = function() { Object.keys(localStorage).forEach(k => { if (k.startsWith('odyssey_')) localStorage.removeItem(k); }); location.reload(); };
 
+    /* Cargo Hub & Arsenal [Kept exactly as before for brevity and safety] */
+    // ...
     function sanitizeCargo(inv) {
         if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
             return {
-                "perishables": [
-                    { name: "Standard Rations", qty: 90, unit: "Days" },
-                    { name: "Trauma MedKits", qty: 15, unit: "Crates" }
-                ],
-                "expendables": [
-                    { name: "Kinetic Rounds", qty: 500, unit: "Shots" },
-                    { name: "Energy Cores", qty: 200, unit: "Cells" },
-                    { name: "Titanium Armor Hull Plates", qty: 50, unit: "Units" }
-                ],
-                "misc": [
-                    { name: "Security Marines", qty: 6, unit: "Personnel" },
-                    { name: "Unprocessed Asteroid Salvage", qty: 3, unit: "Tons" }
-                ]
+                "perishables": [{ name: "Standard Rations", qty: 90, unit: "Days" }, { name: "Trauma MedKits", qty: 15, unit: "Crates" }],
+                "expendables": [{ name: "Kinetic Rounds", qty: 500, unit: "Shots" }, { name: "Energy Cores", qty: 200, unit: "Cells" }, { name: "Titanium Armor Hull Plates", qty: 50, unit: "Units" }],
+                "misc": [{ name: "Security Marines", qty: 6, unit: "Personnel" }, { name: "Unprocessed Asteroid Salvage", qty: 3, unit: "Tons" }]
             };
         }
         return inv;
     }
 
-    /* Arsenal & Dice Roller */
     function renderArsenalList() {
-        const container = document.getElementById('arsenal-list-container');
-        if (!container) return;
-        const myProfile = allProfiles.find(p => p.id === currentUserId) || {};
-        const arsenal = myProfile.arsenal || [];
-        
+        const container = document.getElementById('arsenal-list-container'); if (!container) return;
+        const myProfile = allProfiles.find(p => p.id === currentUserId) || {}; const arsenal = myProfile.arsenal || [];
         let html = '';
         arsenal.forEach(w => {
-            html += `
-            <div class="arsenal-row">
-                <span style="font-size:11px; color:#00e5a3; font-weight:bold; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${w.name}</span>
-                <span style="font-size:10px; color:#d4c5a9;">${w.dice}</span>
-                <span style="font-size:10px; color:#d4c5a9;">${w.modifier}</span>
-                <span style="font-size:10px;" title="Exploding Dice">${w.explodes ? '💥' : ''}</span>
-                <div style="display:flex; gap:4px;">
-                    <button class="layer-edit" onclick="window.rollWeapon('${w.id}')" style="padding:4px; flex:1;">ROLL</button>
-                    <button class="layer-del" onclick="window.deleteWeapon('${w.id}')" style="padding:4px; width:22px;">X</button>
-                </div>
-            </div>
-            `;
+            html += `<div class="arsenal-row"><span style="font-size:11px; color:#00e5a3; font-weight:bold; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${w.name}</span><span style="font-size:10px; color:#d4c5a9;">${w.dice}</span><span style="font-size:10px; color:#d4c5a9;">${w.modifier}</span><span style="font-size:10px;" title="Exploding Dice">${w.explodes ? '💥' : ''}</span><div style="display:flex; gap:4px;"><button class="layer-edit" onclick="window.rollWeapon('${w.id}')" style="padding:4px; flex:1;">ROLL</button><button class="layer-del" onclick="window.deleteWeapon('${w.id}')" style="padding:4px; width:22px;">X</button></div></div>`;
         });
         container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No weapons in active arsenal.</span>';
     }
 
     window.addArsenalItem = async function() {
-        const name = document.getElementById('new-wpn-name').value.trim();
-        let dice = document.getElementById('new-wpn-dice').value.trim().toLowerCase();
-        let mod = document.getElementById('new-wpn-mod').value.trim();
-        const explodes = document.getElementById('new-wpn-explodes').checked;
-
-        if (!name) return;
-        if (!dice) dice = '1d6';
-        if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
-        if (!mod) mod = '+0';
-
-        await db.from('character_arsenal').insert({
-            profile_id: currentUserId, name: name, dice: dice, modifier: mod, explodes: explodes
-        });
-
-        document.getElementById('new-wpn-name').value = '';
-        document.getElementById('new-wpn-dice').value = '';
-        document.getElementById('new-wpn-mod').value = '';
-        loadAllProfiles();
+        const name = document.getElementById('new-wpn-name').value.trim(); let dice = document.getElementById('new-wpn-dice').value.trim().toLowerCase();
+        let mod = document.getElementById('new-wpn-mod').value.trim(); const explodes = document.getElementById('new-wpn-explodes').checked;
+        if (!name) return; if (!dice) dice = '1d6'; if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod; if (!mod) mod = '+0';
+        await db.from('character_arsenal').insert({ profile_id: currentUserId, name: name, dice: dice, modifier: mod, explodes: explodes });
+        document.getElementById('new-wpn-name').value = ''; document.getElementById('new-wpn-dice').value = ''; document.getElementById('new-wpn-mod').value = ''; loadAllProfiles();
     };
 
-    window.deleteWeapon = async function(id) {
-        if (!confirm("Remove this weapon from your arsenal?")) return;
-        await db.from('character_arsenal').delete().eq('id', id);
-        loadAllProfiles();
-    };
+    window.deleteWeapon = async function(id) { if (!confirm("Remove this weapon from your arsenal?")) return; await db.from('character_arsenal').delete().eq('id', id); loadAllProfiles(); };
 
     window.rollWeapon = function(id) {
-        const myProfile = allProfiles.find(p => p.id === currentUserId) || {};
-        const wpn = (myProfile.arsenal || []).find(w => w.id === id);
-        if (!wpn) return;
-
-        const diceRegex = /^(\d*)d(\d+)$/i;
-        const match = wpn.dice.trim().match(diceRegex);
+        const myProfile = allProfiles.find(p => p.id === currentUserId) || {}; const wpn = (myProfile.arsenal || []).find(w => w.id === id); if (!wpn) return;
+        const diceRegex = /^(\d*)d(\d+)$/i; const match = wpn.dice.trim().match(diceRegex);
         if (!match) { alert("Invalid dice format. Use formats like 'd20' or '6d20'."); return; }
-
-        let numDice = parseInt(match[1]) || 1;
-        let diceFaces = parseInt(match[2]);
-        let modVal = parseInt(wpn.modifier) || 0;
-
-        let total = 0;
-        let breakdown = [];
-
+        let numDice = parseInt(match[1]) || 1; let diceFaces = parseInt(match[2]); let modVal = parseInt(wpn.modifier) || 0;
+        let total = 0; let breakdown = [];
         for (let i = 0; i < numDice; i++) {
-            let rollTotal = 0;
-            let subRolls = [];
-            let currentRoll;
-            do {
-                currentRoll = Math.floor(Math.random() * diceFaces) + 1;
-                rollTotal += currentRoll;
-                subRolls.push(currentRoll);
-            } while (currentRoll === diceFaces && wpn.explodes);
-            
-            total += rollTotal;
-            breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
+            let rollTotal = 0; let subRolls = []; let currentRoll;
+            do { currentRoll = Math.floor(Math.random() * diceFaces) + 1; rollTotal += currentRoll; subRolls.push(currentRoll); } while (currentRoll === diceFaces && wpn.explodes);
+            total += rollTotal; breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
         }
-
-        total += modVal;
-        if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
-
-        const breakdownText = breakdown.join(' + ');
-        const box = document.getElementById('dice-roll-result-box');
-        
-        box.style.display = 'block';
-        box.innerHTML = `<strong>⚔️ ATTACK: ${wpn.name}</strong><br><span style="font-size:10px; color:#d4c5a9;">${breakdownText}</span><br><span style="font-size:14px; font-weight:bold; color:#00e5a3;">TOTAL RESULT: ${total}</span>`;
-        
+        total += modVal; if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
+        const breakdownText = breakdown.join(' + '); const box = document.getElementById('dice-roll-result-box');
+        box.style.display = 'block'; box.innerHTML = `<strong>⚔️ ATTACK: ${wpn.name}</strong><br><span style="font-size:10px; color:#d4c5a9;">${breakdownText}</span><br><span style="font-size:14px; font-weight:bold; color:#00e5a3;">TOTAL RESULT: ${total}</span>`;
         window.broadcastRoll(`Attack - ${wpn.name}`, breakdownText, total);
     };
 
     window.executeDicePoolRoll = function() {
-        const statCheckboxes = document.querySelectorAll('.roll-stat-cb:checked');
-        const skillCheckboxes = document.querySelectorAll('.roll-skill-cb:checked');
+        const statCheckboxes = document.querySelectorAll('.roll-stat-cb:checked'); const skillCheckboxes = document.querySelectorAll('.roll-skill-cb:checked');
         if (statCheckboxes.length === 0 && skillCheckboxes.length === 0) { alert("Select at least one core stat or skill."); return; }
-        
-        const myProfile = allProfiles.find(p => p.id === currentUserId) || { character: {}, skills: {} };
-        const char = myProfile.character || {}; const skillsMap = myProfile.skills || {};
+        const myProfile = allProfiles.find(p => p.id === currentUserId) || { character: {}, skills: {} }; const char = myProfile.character || {}; const skillsMap = myProfile.skills || {};
         const extraMod = parseInt(document.getElementById('roll-extra-mod').value) || 0;
-
         let breakdown = [], totalSum = 0;
         statCheckboxes.forEach(cb => {
-            const diceType = char['stat_' + cb.value.toLowerCase()] || 'd6';
-            const maxVal = parseInt(diceType.replace('d', '')) || 6;
-            let subtotal = 0, rolls = [], currentRoll = 0;
-            do {
-                currentRoll = Math.floor(Math.random() * maxVal) + 1;
-                subtotal += currentRoll; rolls.push(currentRoll);
-            } while (currentRoll === maxVal);
-            totalSum += subtotal;
-            breakdown.push(`[${cb.value} (${diceType}): ${rolls.join(' 💥 ')} = <strong>${subtotal}</strong>]`);
+            const diceType = char['stat_' + cb.value.toLowerCase()] || 'd6'; const maxVal = parseInt(diceType.replace('d', '')) || 6; let subtotal = 0, rolls = [], currentRoll = 0;
+            do { currentRoll = Math.floor(Math.random() * maxVal) + 1; subtotal += currentRoll; rolls.push(currentRoll); } while (currentRoll === maxVal);
+            totalSum += subtotal; breakdown.push(`[${cb.value} (${diceType}): ${rolls.join(' 💥 ')} = <strong>${subtotal}</strong>]`);
         });
-
         skillCheckboxes.forEach(cb => {
-            const safeKey = cb.value.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            const skillVal = skillsMap[safeKey] !== undefined ? skillsMap[safeKey] : 0;
-            totalSum += skillVal;
-            breakdown.push(`[${cb.value}: ${skillVal >= 0 ? '+' : ''}${skillVal}]`);
+            const safeKey = cb.value.toLowerCase().replace(/[^a-z0-9]/g, '_'); const skillVal = skillsMap[safeKey] !== undefined ? skillsMap[safeKey] : 0;
+            totalSum += skillVal; breakdown.push(`[${cb.value}: ${skillVal >= 0 ? '+' : ''}${skillVal}]`);
         });
-        totalSum += extraMod;
-        if (extraMod !== 0) breakdown.push(`[Mod: ${extraMod >= 0 ? '+' : ''}${extraMod}]`);
-
-        const box = document.getElementById('dice-roll-result-box');
-        box.style.display = 'block';
+        totalSum += extraMod; if (extraMod !== 0) breakdown.push(`[Mod: ${extraMod >= 0 ? '+' : ''}${extraMod}]`);
+        const box = document.getElementById('dice-roll-result-box'); box.style.display = 'block';
         box.innerHTML = `<strong>🎲 POOL RESULT:</strong><br><span style="font-size:10px; color:#d4c5a9;">${breakdown.join(' + ')}</span><br><span style="font-size:14px; font-weight:bold; color:#00e5a3;">TOTAL RESULT: ${totalSum}</span>`;
-        
         window.broadcastRoll("Combined Pool", breakdown.join(' + '), totalSum);
     };
 
     function renderCharacterTerminalData() {
         const myProfile = allProfiles.find(p => p.id === currentUserId) || { character: {}, skills: {}, arsenal: [] };
-        const char = myProfile.character || {};
-        const skillsMap = myProfile.skills || {};
-        
+        const char = myProfile.character || {}; const skillsMap = myProfile.skills || {};
         const safeSet = (id, val) => { if(document.getElementById(id)) document.getElementById(id).value = val; };
-        
-        safeSet('term-username', myProfile.username || currentUserEmail.split('@')[0]);
-        safeSet('term-avatar', myProfile.avatar_url || '');
+        safeSet('term-username', myProfile.username || currentUserEmail.split('@')[0]); safeSet('term-avatar', myProfile.avatar_url || '');
         if(document.getElementById('my-terminal-avatar-preview')) document.getElementById('my-terminal-avatar-preview').src = myProfile.avatar_url || 'https://via.placeholder.com/60';
-        safeSet('term-sheet-name', char.name || '');
-        safeSet('stat-charisma', char.stat_charisma || 'd6'); safeSet('stat-dexterity', char.stat_dexterity || 'd8');
-        safeSet('stat-intelligence', char.stat_intelligence || 'd10'); safeSet('stat-strength', char.stat_strength || 'd8');
-        safeSet('stat-toughness', char.stat_toughness || 'd6'); safeSet('stat-willpower', char.stat_willpower || 'd12');
-        safeSet('term-vitality', char.vitality || 0); safeSet('term-stress', char.stress || 0); safeSet('term-adversity', char.adversity_tokens || 0);
-        
-        skillList.forEach(skill => {
-            const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            safeSet(`skill-${safeKey}`, skillsMap[safeKey] !== undefined ? skillsMap[safeKey] : 0);
-        });
-
-        safeSet('term-specialties', char.specialties || ''); 
-        safeSet('term-assets', char.assets || '');
-        safeSet('term-history', char.history || '');
-        safeSet('aug-head', char.aug_head || '');
-        safeSet('aug-torso', char.aug_torso || ''); safeSet('aug-larm', char.aug_larm || '');
-        safeSet('aug-rarm', char.aug_rarm || ''); safeSet('aug-lleg', char.aug_lleg || '');
-        safeSet('aug-rleg', char.aug_rleg || '');
-        
+        safeSet('term-sheet-name', char.name || ''); safeSet('stat-charisma', char.stat_charisma || 'd6'); safeSet('stat-dexterity', char.stat_dexterity || 'd8');
+        safeSet('stat-intelligence', char.stat_intelligence || 'd10'); safeSet('stat-strength', char.stat_strength || 'd8'); safeSet('stat-toughness', char.stat_toughness || 'd6');
+        safeSet('stat-willpower', char.stat_willpower || 'd12'); safeSet('term-vitality', char.vitality || 0); safeSet('term-stress', char.stress || 0); safeSet('term-adversity', char.adversity_tokens || 0);
+        skillList.forEach(skill => { const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_'); safeSet(`skill-${safeKey}`, skillsMap[safeKey] !== undefined ? skillsMap[safeKey] : 0); });
+        safeSet('term-specialties', char.specialties || ''); safeSet('term-assets', char.assets || ''); safeSet('term-history', char.history || '');
+        safeSet('aug-head', char.aug_head || ''); safeSet('aug-torso', char.aug_torso || ''); safeSet('aug-larm', char.aug_larm || '');
+        safeSet('aug-rarm', char.aug_rarm || ''); safeSet('aug-lleg', char.aug_lleg || ''); safeSet('aug-rleg', char.aug_rleg || '');
         renderArsenalList();
 
         const rosterDiv = document.getElementById('crew-roster-container');
@@ -753,14 +541,9 @@
                     <div class="note-card" style="display:flex; gap:12px; align-items:flex-start;">
                         <img src="${p.avatar_url || 'https://via.placeholder.com/60'}" class="avatar-img" onerror="this.src='https://via.placeholder.com/60'">
                         <div style="flex-grow:1;">
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <strong style="color:#00e5a3; font-size:12px;">${p.username || 'Commander'} ${p.role === 'dm' ? '[DM]' : ''}</strong>
-                                <span style="font-size:10px; color:#ff6b6b;">Vit: ${pChar.vitality || 0}/10 | Stress: ${pChar.stress || 0}/20</span>
-                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center;"><strong style="color:#00e5a3; font-size:12px;">${p.username || 'Commander'} ${p.role === 'dm' ? '[DM]' : ''}</strong><span style="font-size:10px; color:#ff6b6b;">Vit: ${pChar.vitality || 0}/10 | Stress: ${pChar.stress || 0}/20</span></div>
                             <p style="margin:2px 0; font-size:11px; color:#d4c5a9;"><strong>${pChar.name || 'Unnamed'}</strong></p>
-                            <div style="font-size:10px; color:#6b826a; margin:2px 0;">
-                                CH: ${pChar.stat_charisma || 'd6'} | DEX: ${pChar.stat_dexterity || 'd8'} | INT: ${pChar.stat_intelligence || 'd10'} | STR: ${pChar.stat_strength || 'd8'} | TOU: ${pChar.stat_toughness || 'd6'} | WIL: ${pChar.stat_willpower || 'd12'}
-                            </div>
+                            <div style="font-size:10px; color:#6b826a; margin:2px 0;">CH: ${pChar.stat_charisma || 'd6'} | DEX: ${pChar.stat_dexterity || 'd8'} | INT: ${pChar.stat_intelligence || 'd10'} | STR: ${pChar.stat_strength || 'd8'} | TOU: ${pChar.stat_toughness || 'd6'} | WIL: ${pChar.stat_willpower || 'd12'}</div>
                             <p style="margin:4px 0 0 0; font-size:10px; color:#d4c5a9; background:#040605; padding:6px;">${pChar.specialties || 'No specialties recorded.'}</p>
                         </div>
                     </div>
@@ -773,79 +556,47 @@
     window.saveTerminalProfile = async function() {
         const safeGet = (id) => document.getElementById(id) ? document.getElementById(id).value : '';
         await db.from('profiles').update({ username: safeGet('term-username'), avatar_url: safeGet('term-avatar') }).eq('id', currentUserId);
-
         const charPayload = {
-            profile_id: currentUserId, name: safeGet('term-sheet-name'),
-            stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'),
-            stat_intelligence: safeGet('stat-intelligence'), stat_strength: safeGet('stat-strength'),
-            stat_toughness: safeGet('stat-toughness'), stat_willpower: safeGet('stat-willpower'),
+            profile_id: currentUserId, name: safeGet('term-sheet-name'), stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'),
+            stat_intelligence: safeGet('stat-intelligence'), stat_strength: safeGet('stat-strength'), stat_toughness: safeGet('stat-toughness'), stat_willpower: safeGet('stat-willpower'),
             vitality: parseInt(safeGet('term-vitality')) || 0, stress: parseInt(safeGet('term-stress')) || 0, adversity_tokens: parseInt(safeGet('term-adversity')) || 0,
-            specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'),
-            aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'),
+            specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'), aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'),
             aug_larm: safeGet('aug-larm'), aug_rarm: safeGet('aug-rarm'), aug_lleg: safeGet('aug-lleg'), aug_rleg: safeGet('aug-rleg')
         };
         const { data: charData, error: charErr } = await db.from('characters').upsert(charPayload, { onConflict: 'profile_id' }).select().single();
         if (charErr) return;
-
         let skillsPayload = { character_id: charData.id };
-        skillList.forEach(skill => {
-            const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            skillsPayload[safeKey] = parseInt(safeGet(`skill-${safeKey}`)) || 0;
-        });
+        skillList.forEach(skill => { const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_'); skillsPayload[safeKey] = parseInt(safeGet(`skill-${safeKey}`)) || 0; });
         await db.from('character_skills').upsert(skillsPayload, { onConflict: 'character_id' });
-        alert("Character dossier & stats secured to database.");
-        loadAllProfiles();
+        alert("Character dossier & stats secured to database."); loadAllProfiles();
     };
 
-    /* Cargo Hub */
     function populateCargoVesselSelect() {
-        const select = document.getElementById('cargo-vessel-select');
-        if (!select) return;
-        let html = '';
-        globalShipMarkersCache.forEach(m => {
-            html += `<option value="${m.id}">${m.name} (X: ${Math.round(m.x)}, Y: ${Math.round(m.y)})</option>`;
-        });
+        const select = document.getElementById('cargo-vessel-select'); if (!select) return; let html = '';
+        globalShipMarkersCache.forEach(m => { html += `<option value="${m.id}">${m.name} (X: ${Math.round(m.x)}, Y: ${Math.round(m.y)})</option>`; });
         select.innerHTML = html || '<option value="">No active vessels found</option>';
     }
 
     window.switchCargoSubtab = function(subtab) {
-        activeCargoSubtab = subtab;
-        document.querySelectorAll('.cargo-subtab-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById(`cargo-subtab-${subtab}`).classList.add('active');
-        renderTerminalCargoDeck();
+        activeCargoSubtab = subtab; document.querySelectorAll('.cargo-subtab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`cargo-subtab-${subtab}`).classList.add('active'); renderTerminalCargoDeck();
     };
 
     function renderTerminalCargoDeck() {
-        const select = document.getElementById('cargo-vessel-select');
-        const container = document.getElementById('terminal-cargo-items-container');
-        const title = document.getElementById('cargo-category-title');
+        const select = document.getElementById('cargo-vessel-select'); const container = document.getElementById('terminal-cargo-items-container'); const title = document.getElementById('cargo-category-title');
         if (!select || !container) return;
-
-        const vesselId = select.value;
-        const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-
-        if (!vessel) {
-            container.innerHTML = '<span style="font-size:11px; color:#6b826a;">Select a valid vessel token above.</span>';
-            return;
-        }
-
-        const cargo = sanitizeCargo(vessel.cargo_inventory);
-        const currentCategoryItems = cargo[activeCargoSubtab] || [];
-
+        const vesselId = select.value; const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+        if (!vessel) { container.innerHTML = '<span style="font-size:11px; color:#6b826a;">Select a valid vessel token above.</span>'; return; }
+        const cargo = sanitizeCargo(vessel.cargo_inventory); const currentCategoryItems = cargo[activeCargoSubtab] || [];
         let subtabNames = { perishables: '🍏 Perishables', expendables: '⚙️ Expendables', misc: '📦 Miscellaneous' };
         if (title) title.innerText = `${subtabNames[activeCargoSubtab]} Holdings`;
-
         let html = '';
-        if (currentCategoryItems.length === 0) {
-            html = `<span style="font-size:11px; color:#6b826a;">No cargo items recorded in this section. Use the form on the right to store items.</span>`;
-        } else {
+        if (currentCategoryItems.length === 0) { html = `<span style="font-size:11px; color:#6b826a;">No cargo items recorded in this section. Use the form on the right to store items.</span>`; } 
+        else {
             currentCategoryItems.forEach((item, index) => {
                 html += `
                     <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403;">
-                        <div style="flex:2;">
-                            <strong style="color:#00e5a3; font-size:12px;">${item.name}</strong>
-                            <div style="font-size:10px; color:#6b826a;">Unit Type: ${item.unit || 'units'}</div>
-                        </div>
+                        <div style="flex:2;"><strong style="color:#00e5a3; font-size:12px;">${item.name}</strong><div style="font-size:10px; color:#6b826a;">Unit Type: ${item.unit || 'units'}</div></div>
                         <div style="display:flex; align-items:center; gap:6px;">
                             <button onclick="window.modifyCargoQty('${vessel.id}', ${index}, -1)" style="width:24px; padding:2px; font-size:12px; margin:0;">-</button>
                             <input type="number" value="${item.qty}" onchange="window.updateCargoQtyDirect('${vessel.id}', ${index}, this.value)" style="width:65px; margin:0; text-align:center; font-size:11px; padding:3px;">
@@ -860,88 +611,51 @@
     }
 
     window.modifyCargoQty = async function(vesselId, itemIndex, delta) {
-        let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-        if (!vessel) return;
-        let cargo = sanitizeCargo(vessel.cargo_inventory);
+        let vessel = globalShipMarkersCache.find(m => m.id === vesselId); if (!vessel) return; let cargo = sanitizeCargo(vessel.cargo_inventory);
         if (cargo[activeCargoSubtab] && cargo[activeCargoSubtab][itemIndex]) {
             cargo[activeCargoSubtab][itemIndex].qty = Math.max(0, cargo[activeCargoSubtab][itemIndex].qty + delta);
-            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
-            vessel.cargo_inventory = cargo;
-            renderTerminalCargoDeck();
+            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId); vessel.cargo_inventory = cargo; renderTerminalCargoDeck();
         }
     };
 
     window.updateCargoQtyDirect = async function(vesselId, itemIndex, newQty) {
-        let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-        if (!vessel) return;
-        let cargo = sanitizeCargo(vessel.cargo_inventory);
-        let val = Math.max(0, parseInt(newQty) || 0);
+        let vessel = globalShipMarkersCache.find(m => m.id === vesselId); if (!vessel) return; let cargo = sanitizeCargo(vessel.cargo_inventory); let val = Math.max(0, parseInt(newQty) || 0);
         if (cargo[activeCargoSubtab] && cargo[activeCargoSubtab][itemIndex]) {
-            cargo[activeCargoSubtab][itemIndex].qty = val;
-            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
-            vessel.cargo_inventory = cargo;
-            renderTerminalCargoDeck();
+            cargo[activeCargoSubtab][itemIndex].qty = val; await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId); vessel.cargo_inventory = cargo; renderTerminalCargoDeck();
         }
     };
 
     window.removeCargoItem = async function(vesselId, itemIndex) {
-        let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-        if (!vessel) return;
-        if (!confirm("Decommission this cargo item from vessel hold?")) return;
+        let vessel = globalShipMarkersCache.find(m => m.id === vesselId); if (!vessel) return; if (!confirm("Decommission this cargo item from vessel hold?")) return;
         let cargo = sanitizeCargo(vessel.cargo_inventory);
         if (cargo[activeCargoSubtab]) {
-            cargo[activeCargoSubtab].splice(itemIndex, 1);
-            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
-            vessel.cargo_inventory = cargo;
-            renderTerminalCargoDeck();
+            cargo[activeCargoSubtab].splice(itemIndex, 1); await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId); vessel.cargo_inventory = cargo; renderTerminalCargoDeck();
         }
     };
 
     window.addNewCargoEntry = async function() {
-        const select = document.getElementById('cargo-vessel-select');
-        const category = document.getElementById('new-cargo-category').value;
-        const name = document.getElementById('new-cargo-name').value.trim();
-        const qty = Math.max(0, parseInt(document.getElementById('new-cargo-qty').value) || 0);
-        const unit = document.getElementById('new-cargo-unit').value.trim() || 'units';
-
-        if (!select || !select.value) { alert("Select a vessel token first."); return; }
-        if (!name) { alert("Please enter an item name."); return; }
-
-        let vessel = globalShipMarkersCache.find(m => m.id === select.value);
-        if (!vessel) return;
-
-        let cargo = sanitizeCargo(vessel.cargo_inventory);
-        if (!cargo[category]) cargo[category] = [];
-
+        const select = document.getElementById('cargo-vessel-select'); const category = document.getElementById('new-cargo-category').value;
+        const name = document.getElementById('new-cargo-name').value.trim(); const qty = Math.max(0, parseInt(document.getElementById('new-cargo-qty').value) || 0); const unit = document.getElementById('new-cargo-unit').value.trim() || 'units';
+        if (!select || !select.value) { alert("Select a vessel token first."); return; } if (!name) { alert("Please enter an item name."); return; }
+        let vessel = globalShipMarkersCache.find(m => m.id === select.value); if (!vessel) return;
+        let cargo = sanitizeCargo(vessel.cargo_inventory); if (!cargo[category]) cargo[category] = [];
         cargo[category].push({ name, qty, unit });
-
-        await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
-        vessel.cargo_inventory = cargo;
-
-        document.getElementById('new-cargo-name').value = '';
-        document.getElementById('new-cargo-qty').value = '1';
-        document.getElementById('new-cargo-unit').value = '';
-
-        activeCargoSubtab = category;
-        window.switchCargoSubtab(category);
-        alert(`Stored ${qty} ${unit} of '${name}' in ${vessel.name} hold.`);
+        await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id); vessel.cargo_inventory = cargo;
+        document.getElementById('new-cargo-name').value = ''; document.getElementById('new-cargo-qty').value = '1'; document.getElementById('new-cargo-unit').value = '';
+        activeCargoSubtab = category; window.switchCargoSubtab(category); alert(`Stored ${qty} ${unit} of '${name}' in ${vessel.name} hold.`);
     };
 
     window.broadcastTerminalCargoManifest = async function() {
-        const select = document.getElementById('cargo-vessel-select');
-        if (!select || !select.value) return;
-        let vessel = globalShipMarkersCache.find(m => m.id === select.value);
-        if (!vessel) return;
-
-        await db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `📦 [FULL CARGO MANIFEST] Vessel '${vessel.name}' synchronized manifest to fleet telemetry.`,
-            message_type: 'text'
-        });
+        const select = document.getElementById('cargo-vessel-select'); if (!select || !select.value) return; let vessel = globalShipMarkersCache.find(m => m.id === select.value); if (!vessel) return;
+        await db.from('chat_logs').insert({ sender_id: currentUserId, content: `📦 [FULL CARGO MANIFEST] Vessel '${vessel.name}' synchronized manifest to fleet telemetry.`, message_type: 'text' });
         alert("Full cargo manifest broadcasted to Secure Comms!");
     };
 
-    /* Overseer Codex */
+
+    /* ==========================================================================
+       OVERSEER CLOUD CODEX ENGINE (EXPANDED OPTION 1)
+       ========================================================================== */
+    
     window.switchCodexSubtab = function(subtab) {
         activeCodexSubtab = subtab;
         document.querySelectorAll('.codex-subtab-btn').forEach(b => b.classList.remove('active'));
@@ -955,18 +669,20 @@
 
         let isDM = (currentUserRole === 'dm');
         let html = '';
+        let items = globalCodexData[activeCodexSubtab] || [];
 
         if (activeCodexSubtab === 'factions') {
             html += `<h4 style="color:#ff6b6b; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Registered Factions & Powers</h4>`;
-            dmCodexData.factions.forEach((f, idx) => {
+            items.forEach((f) => {
+                let meta = f.meta_data || {};
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
                         <div style="display:flex; justify-content:space-between;">
-                            <strong style="color:#ff6b6b;">${f.name}</strong>
-                            <span style="font-size:10px; color:#00e5a3;">Status: ${f.status}</span>
+                            <strong style="color:#ff6b6b;">${f.title}</strong>
+                            <span style="font-size:10px; color:#00e5a3;">Status: ${meta.status || 'Unknown'}</span>
                         </div>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${f.notes}</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('factions', ${idx})" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${f.description}</p>
+                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${f.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
                     </div>
                 `;
             });
@@ -980,14 +696,15 @@
                     </div>
                 `;
             }
-        } else if (activeCodexSubtab === 'lore') {
+        } 
+        else if (activeCodexSubtab === 'lore') {
             html += `<h4 style="color:#ff6b6b; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Sector Lore & Secrets</h4>`;
-            dmCodexData.lore.forEach((l, idx) => {
+            items.forEach((l) => {
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
                         <strong style="color:#ff6b6b; font-size:12px;">${l.title}</strong>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9; white-space:pre-wrap;">${l.desc}</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('lore', ${idx})" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9; white-space:pre-wrap;">${l.description}</p>
+                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${l.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
                     </div>
                 `;
             });
@@ -1000,18 +717,20 @@
                     </div>
                 `;
             }
-        } else if (activeCodexSubtab === 'npcs') {
+        } 
+        else if (activeCodexSubtab === 'npcs') {
             html += `<h4 style="color:#ff6b6b; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Key NPCs & Contacts</h4>`;
-            dmCodexData.npcs.forEach((n, idx) => {
+            items.forEach((n) => {
+                let meta = n.meta_data || {};
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
                         <div style="display:flex; justify-content:space-between;">
-                            <strong style="color:#ff6b6b;">${n.name}</strong>
-                            <span style="font-size:10px; color:#00e1ff;">Loc: ${n.location}</span>
+                            <strong style="color:#ff6b6b;">${n.title}</strong>
+                            <span style="font-size:10px; color:#00e1ff;">Loc: ${meta.location || 'Unknown'}</span>
                         </div>
-                        <p style="margin:2px 0; font-size:10px; color:#6b826a;">Affiliation: ${n.affiliation}</p>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${n.notes}</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('npcs', ${idx})" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        <p style="margin:2px 0; font-size:10px; color:#6b826a;">Affiliation: ${meta.affiliation || 'None'}</p>
+                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${n.description}</p>
+                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${n.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
                     </div>
                 `;
             });
@@ -1029,40 +748,150 @@
                 `;
             }
         }
+        else if (activeCodexSubtab === 'rumors') {
+            html += `<h4 style="color:#ffaa00; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Sector Rumors & Hearsay</h4>`;
+            items.forEach((r) => {
+                html += `
+                    <div class="note-card" style="border-color:${isDM ? '#ffaa00' : '#3c4e36'}; border-left: 3px solid #ffaa00;">
+                        <strong style="color:#ffaa00; font-size:12px;">Source: ${r.title}</strong>
+                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9; font-style:italic;">"${r.description}"</p>
+                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${r.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                    </div>
+                `;
+            });
+            if (isDM) {
+                html += `
+                    <div style="background:#040605; padding:8px; border:1px solid #ffaa00; margin-top:10px;">
+                        <input type="text" id="new-rumor-source" placeholder="Rumor Source (e.g. Smuggler at Station 9)..." style="font-size:10px; margin:2px 0;">
+                        <textarea id="new-rumor-desc" rows="2" placeholder="The rumor itself..." style="font-size:10px; margin:2px 0;"></textarea>
+                        <button class="btn-deploy" style="background:#332200; border-color:#ffaa00; color:#ffaa00;" onclick="window.addCodexEntry('rumors')">+ ADD RUMOR</button>
+                    </div>
+                `;
+            }
+        }
+        else if (activeCodexSubtab === 'intel') {
+            html += `<h4 style="color:#00e1ff; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Verified Intel Ledger</h4>`;
+            items.forEach((i) => {
+                let meta = i.meta_data || {};
+                let statusColor = meta.status === 'Verified' ? '#00e5a3' : '#ffaa00';
+                html += `
+                    <div class="note-card" style="border-color:${isDM ? '#00e1ff' : '#3c4e36'};">
+                        <div style="display:flex; justify-content:space-between;">
+                            <strong style="color:#00e1ff;">Subject: ${i.title}</strong>
+                            <span style="font-size:10px; color:${statusColor}; border:1px solid ${statusColor}; padding:1px 4px; border-radius:2px;">${meta.status || 'Pending'}</span>
+                        </div>
+                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${i.description}</p>
+                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${i.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                    </div>
+                `;
+            });
+            if (isDM) {
+                html += `
+                    <div style="background:#040605; padding:8px; border:1px solid #00e1ff; margin-top:10px;">
+                        <div style="display:flex; gap:6px;">
+                            <input type="text" id="new-intel-subject" placeholder="Intel Subject..." style="font-size:10px; margin:2px 0; flex:2;">
+                            <select id="new-intel-status" style="font-size:10px; margin:2px 0; flex:1;">
+                                <option value="Verified">Verified</option>
+                                <option value="Unverified">Unverified</option>
+                                <option value="Classified">Classified</option>
+                            </select>
+                        </div>
+                        <textarea id="new-intel-desc" rows="2" placeholder="Intel details..." style="font-size:10px; margin:2px 0;"></textarea>
+                        <button class="btn-deploy" style="background:#002233; border-color:#00e1ff; color:#00e1ff;" onclick="window.addCodexEntry('intel')">+ LOG INTEL</button>
+                    </div>
+                `;
+            }
+        }
+        else if (activeCodexSubtab === 'documents') {
+            html += `
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-bottom:8px;">
+                    <h4 style="color:#d4c5a9; margin:0;">Campaign Document Archive</h4>
+                    ${isDM ? `<button class="layer-edit" onclick="document.getElementById('codex-doc-import').click()" style="padding:4px 10px; font-size:9px;">[+] IMPORT .TXT / .MD FILE</button>` : ''}
+                </div>
+            `;
+            if (items.length === 0) {
+                html += `<span style="font-size:10px; color:#6b826a;">No documents uploaded to mainframe yet.</span>`;
+            } else {
+                items.forEach((d) => {
+                    html += `
+                        <div class="note-card" style="border-color:${isDM ? '#a2c4f5' : '#3c4e36'};">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <strong style="color:#a2c4f5; font-size:12px;">📄 ${d.title}</strong>
+                                <div style="display:flex; gap:6px;">
+                                    <button class="layer-edit" onclick="window.toggleDocumentView('${d.id}')" style="font-size:9px; padding:2px 6px;">Read / Close</button>
+                                    ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                                </div>
+                            </div>
+                            <div id="doc-body-${d.id}" style="display:none; margin-top:8px; padding:10px; background:#030403; border:1px solid #3c4e36; font-size:11px; line-height:1.4; color:#d4c5a9; white-space:pre-wrap; max-height:400px; overflow-y:auto;">${d.description}</div>
+                        </div>
+                    `;
+                });
+            }
+        }
+
         container.innerHTML = html;
     }
 
-    window.addCodexEntry = function(category) {
-        if (currentUserRole !== 'dm') return;
-        if (category === 'factions') {
-            let name = document.getElementById('new-fac-name').value;
-            let status = document.getElementById('new-fac-status').value;
-            let notes = document.getElementById('new-fac-notes').value;
-            if (!name) return;
-            dmCodexData.factions.push({ name, status, notes });
-        } else if (category === 'lore') {
-            let title = document.getElementById('new-lore-title').value;
-            let desc = document.getElementById('new-lore-desc').value;
-            if (!title) return;
-            dmCodexData.lore.push({ title, desc });
-        } else if (category === 'npcs') {
-            let name = document.getElementById('new-npc-name').value;
-            let location = document.getElementById('new-npc-loc').value;
-            let affiliation = document.getElementById('new-npc-aff').value;
-            let notes = document.getElementById('new-npc-notes').value;
-            if (!name) return;
-            dmCodexData.npcs.push({ name, location, affiliation, notes });
-        }
-        localStorage.setItem('odyssey_dm_codex', JSON.stringify(dmCodexData));
-        renderCodexDeck();
+    window.toggleDocumentView = function(id) {
+        const docBody = document.getElementById('doc-body-' + id);
+        if(docBody) docBody.style.display = docBody.style.display === 'none' ? 'block' : 'none';
     };
 
-    window.deleteCodexEntry = function(category, idx) {
+    window.addCodexEntry = async function(category) {
         if (currentUserRole !== 'dm') return;
-        if (!confirm("Delete this codex entry?")) return;
-        dmCodexData[category].splice(idx, 1);
-        localStorage.setItem('odyssey_dm_codex', JSON.stringify(dmCodexData));
-        renderCodexDeck();
+        let title = '', desc = '', meta = {};
+        
+        if (category === 'factions') {
+            title = document.getElementById('new-fac-name').value;
+            meta.status = document.getElementById('new-fac-status').value;
+            desc = document.getElementById('new-fac-notes').value;
+        } else if (category === 'lore') {
+            title = document.getElementById('new-lore-title').value;
+            desc = document.getElementById('new-lore-desc').value;
+        } else if (category === 'npcs') {
+            title = document.getElementById('new-npc-name').value;
+            meta.location = document.getElementById('new-npc-loc').value;
+            meta.affiliation = document.getElementById('new-npc-aff').value;
+            desc = document.getElementById('new-npc-notes').value;
+        } else if (category === 'rumors') {
+            title = document.getElementById('new-rumor-source').value;
+            desc = document.getElementById('new-rumor-desc').value;
+        } else if (category === 'intel') {
+            title = document.getElementById('new-intel-subject').value;
+            meta.status = document.getElementById('new-intel-status').value;
+            desc = document.getElementById('new-intel-desc').value;
+        }
+
+        if (!title) { alert("A title/name is required."); return; }
+        await db.from('campaign_codex').insert({ category, title, description: desc, meta_data: meta });
+        window.loadCodexData(); // Force immediate local refresh
+    };
+
+    window.deleteCodexEntry = async function(id) {
+        if (currentUserRole !== 'dm') return;
+        if (!confirm("Permanently purge this record from the Cloud Codex?")) return;
+        await db.from('campaign_codex').delete().eq('id', id);
+        window.loadCodexData();
+    };
+
+    window.importCodexDocument = function(event) {
+        if (currentUserRole !== 'dm') return;
+        const file = event.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const content = e.target.result;
+            await db.from('campaign_codex').insert({ 
+                category: 'documents', 
+                title: file.name, 
+                description: content, 
+                meta_data: { type: file.type || 'text/plain' } 
+            });
+            alert(`Document '${file.name}' successfully archived to the Cloud Codex.`);
+            document.getElementById('codex-doc-import').value = ''; // Reset input
+            window.loadCodexData();
+        };
+        reader.readAsText(file);
     };
 
     /* Objectives & Notes */
@@ -1353,7 +1182,6 @@
             });
         }
 
-        // Apply any saved DM Planetary Overrides (Industry, Wealth, custom names, etc.)
         bodies.forEach(b => {
             let ov = globalPlanetaryModifiersCache[b.id];
             if (ov) {
@@ -1362,7 +1190,7 @@
                 if (ov.custom_gravity) b.gravity = ov.custom_gravity;
                 if (ov.custom_atmosphere) b.atmosphere = ov.custom_atmosphere;
                 if (ov.custom_resources) b.resources = ov.custom_resources;
-                b.modifiers = ov; // Attach deep economy stats for the HUD
+                b.modifiers = ov; 
             }
         });
 
@@ -1485,6 +1313,7 @@
             .on('postgres_changes', { event: '*', schema: 'public', table: 'planetary_modifiers' }, () => { window.loadGalaxyData(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'combat_tracker' }, () => { loadCombatTracker(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_objectives' }, () => { loadCampaignObjectives(); })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_codex' }, () => { window.loadCodexData(); })
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_logs' }, () => { loadChatLogs(); })
             .subscribe();
 
@@ -1845,13 +1674,8 @@
 
             await db.from('planetary_modifiers').upsert(payload, { onConflict: 'body_id' });
             
-            // Invalidate local procedural cache for this system so it redraws with the new stats instantly
-            if (b.parentSystem && b.parentSystem.id) {
-                delete generatedSystems[b.parentSystem.id];
-            }
-
-            window.loadGalaxyData();
-            alert("Planetary scans and colony metrics synchronized.");
+            if (b.parentSystem && b.parentSystem.id) { delete generatedSystems[b.parentSystem.id]; }
+            window.loadGalaxyData(); alert("Planetary scans and colony metrics synchronized.");
         };
 
         function selectTargetAndPushRecent(target) {
