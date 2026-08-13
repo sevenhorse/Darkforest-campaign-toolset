@@ -20,8 +20,9 @@
     let editingNoteId = null;
     let editingCodexId = null; 
 
-    // Database mapped Codex
+    // Database mapped structures
     let globalCodexData = { factions: [], lore: [], npcs: [], rumors: [], intel: [], documents: [] };
+    let globalExploredCache = []; // NEW: Fog of War ledger
 
     let bookmarkedTargets = [];
     try { 
@@ -194,7 +195,6 @@
         const codexNavBtn = document.getElementById('term-tab-btn-codex');
         const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
         
-        // Codex is now visible to everyone, no matter the role.
         if (codexNavBtn) codexNavBtn.style.display = 'flex';
         
         if (data.role === 'dm') {
@@ -388,7 +388,6 @@
         if (topBtn) { topBtn.style.borderColor = hyperlanesVisible ? '#3c4e36' : '#00e5a3'; topBtn.style.color = hyperlanesVisible ? '#00e5a3' : '#6b826a'; }
     };
 
-    /* DM Panel Subtab & Collapse Handlers */
     window.switchDmTab = function(subtab) {
         playUIBeep();
         document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
@@ -961,72 +960,30 @@
         if(docBody) docBody.style.display = docBody.style.display === 'none' ? 'block' : 'none';
     };
 
-    window.addCodexEntry = async function(category) {
-        if (currentUserRole !== 'dm') return;
-        let title = '', desc = '', meta = {};
+    window.executeSectorScan = async function(systemId) {
+        let s = globalProceduralSystemsCache.find(x => x.id === systemId) || globalDbSystemsCache.find(x => x.id === systemId);
+        if (!s) return;
         
-        if (category === 'factions') {
-            title = document.getElementById('new-fac-name')?.value || '';
-            meta.status = document.getElementById('new-fac-status')?.value || '';
-            desc = document.getElementById('new-fac-notes')?.value || '';
-        } else if (category === 'lore') {
-            title = document.getElementById('new-lore-title')?.value || '';
-            desc = document.getElementById('new-lore-desc')?.value || '';
-        } else if (category === 'npcs') {
-            title = document.getElementById('new-npc-name')?.value || '';
-            meta.location = document.getElementById('new-npc-loc')?.value || '';
-            meta.affiliation = document.getElementById('new-npc-aff')?.value || '';
-            desc = document.getElementById('new-npc-notes')?.value || '';
-        } else if (category === 'rumors') {
-            title = document.getElementById('new-rumor-source')?.value || '';
-            desc = document.getElementById('new-rumor-desc')?.value || '';
-        } else if (category === 'intel') {
-            title = document.getElementById('new-intel-subject')?.value || '';
-            meta.status = document.getElementById('new-intel-status')?.value || '';
-            desc = document.getElementById('new-intel-desc')?.value || '';
-        } else if (category === 'documents') {
-            title = document.getElementById('new-doc-title')?.value || '';
-            desc = document.getElementById('new-doc-content')?.value || '';
-            meta.type = 'text/plain';
+        let shipsInRange = globalShipMarkersCache.filter(m => Math.hypot(m.x - s.x, m.y - s.y) < 40 && (currentUserRole === 'dm' || m.owner_id === currentUserId));
+        if (shipsInRange.length === 0 && currentUserRole !== 'dm') {
+            alert("You do not control a vessel in orbit of this sector.");
+            return;
         }
 
-        if (!title.trim()) { alert("A title/source/name is required."); return; }
+        await db.from('explored_sectors').insert({ system_id: systemId, discovered_by: currentUserId });
+        
+        universeTimeHours += 6; 
+        localStorage.setItem('odyssey_universe_time', universeTimeHours);
+        updateCalendarDisplay();
 
-        if (editingCodexId) {
-            await db.from('campaign_codex').update({ title, description: desc, meta_data: meta }).eq('id', editingCodexId);
-            editingCodexId = null;
-        } else {
-            await db.from('campaign_codex').insert({ category, title, description: desc, meta_data: meta });
-        }
+        await db.from('chat_logs').insert({
+            sender_id: currentUserId,
+            content: `📡 [SENSOR SWEEP] Sector '${s.name}' fully mapped. Timeline advanced 6 hours.`,
+            message_type: 'text'
+        });
 
-        window.loadCodexData(); 
-    };
-
-    window.deleteCodexEntry = async function(id) {
-        if (currentUserRole !== 'dm') return;
-        if (!confirm("Permanently purge this record from the Cloud Codex?")) return;
-        await db.from('campaign_codex').delete().eq('id', id);
-        window.loadCodexData();
-    };
-
-    window.importCodexDocument = function(event) {
-        if (currentUserRole !== 'dm') return;
-        const file = event.target.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const content = e.target.result;
-            await db.from('campaign_codex').insert({ 
-                category: 'documents', 
-                title: file.name, 
-                description: content, 
-                meta_data: { type: file.type || 'text/plain' } 
-            });
-            alert(`Document '${file.name}' successfully archived to the Cloud Codex.`);
-            document.getElementById('codex-doc-import').value = ''; 
-            window.loadCodexData();
-        };
-        reader.readAsText(file);
+        globalExploredCache.push(systemId);
+        if(window.renderHUDTelemetry) window.renderHUDTelemetry();
     };
 
     /* Objectives & Notes */
@@ -1434,6 +1391,10 @@
                 globalPlanetaryModifiersCache = {};
                 pmData.forEach(pm => globalPlanetaryModifiersCache[pm.body_id] = pm);
             }
+            const { data: expData } = await db.from('explored_sectors').select('system_id');
+            if (expData) {
+                globalExploredCache = expData.map(e => e.system_id);
+            }
             if(window.renderHUDTelemetry) window.renderHUDTelemetry();
         };
         window.loadGalaxyData();
@@ -1445,6 +1406,7 @@
             .on('postgres_changes', { event: '*', schema: 'public', table: 'star_systems' }, () => { window.loadGalaxyData(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'ship_markers' }, () => { window.loadGalaxyData(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'planetary_modifiers' }, () => { window.loadGalaxyData(); })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'explored_sectors' }, () => { window.loadGalaxyData(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'combat_tracker' }, () => { loadCombatTracker(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_objectives' }, () => { loadCampaignObjectives(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_codex' }, () => { window.loadCodexData(); })
@@ -1459,7 +1421,11 @@
             const ownership = document.getElementById('dm-star-ownership').value || 'Unclaimed';
             const color = document.getElementById('dm-star-color').value || '#ffe9c4';
 
-            await db.from('star_systems').insert({ name, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, size: 5.0, color, luminosity, ownership, control: 'Uncontested', industry_tier });
+            const { data: newStar } = await db.from('star_systems').insert({ name, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, size: 5.0, color, luminosity, ownership, control: 'Uncontested', industry_tier }).select().single();
+            if (newStar) {
+                // Auto-explore DM spawned custom stars
+                await db.from('explored_sectors').insert({ system_id: newStar.id, discovered_by: currentUserId });
+            }
             window.loadGalaxyData();
             alert(`Star system '${name}' deployed successfully.`);
         };
@@ -1548,12 +1514,17 @@
                 for (let s of allSystems) {
                     let dx = s.x - worldPos.x, dy = s.y - worldPos.y;
                     if (Math.sqrt(dx*dx + dy*dy) < 250 && s.type !== 'Nebula') { 
-                        for (let b of getSystemBodies(s)) {
-                            let angle = b.baseAngle + (time * b.speed);
-                            let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
-                            let pdx = bx - worldPos.x, pdy = by - worldPos.y;
-                            let hitThreshold = b.isStar ? starHitRadius : planetHitRadius;
-                            if (Math.sqrt(pdx*pdx + pdy*pdy) < hitThreshold) { selectTargetAndPushRecent({ type: 'body', data: b }); return; }
+                        let dmOverride = document.getElementById('dm-fow-override') && document.getElementById('dm-fow-override').checked;
+                        let isScanned = globalExploredCache.includes(s.id) || dmOverride;
+                        
+                        if (isScanned) {
+                            for (let b of getSystemBodies(s)) {
+                                let angle = b.baseAngle + (time * b.speed);
+                                let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
+                                let pdx = bx - worldPos.x, pdy = by - worldPos.y;
+                                let hitThreshold = b.isStar ? starHitRadius : planetHitRadius;
+                                if (Math.sqrt(pdx*pdx + pdy*pdy) < hitThreshold) { selectTargetAndPushRecent({ type: 'body', data: b }); return; }
+                            }
                         }
                     }
                 }
@@ -1895,45 +1866,68 @@
             let bookmarkBtn = `<button class="btn-reveal" onclick="window.toggleBookmarkSelected()" style="font-size:9px; padding:4px; margin-top:4px;">${isBookmarked ? '★ BOOKMARKED' : '☆ BOOKMARK'}</button>`;
             let lockBtn = `<button class="btn-reveal" onclick="window.lockCameraOnSelected()" style="font-size:9px; padding:4px; margin-top:4px;">🎯 LOCK VIEW (F)</button>`;
 
+            let dmOverride = document.getElementById('dm-fow-override') && document.getElementById('dm-fow-override').checked;
+
             if (selectedTarget.type === 'star') {
                 const s = selectedTarget.data;
-                let multiTag = s.multiType !== 'Single' ? ` | <span style="color: #ffaa00;">${s.multiType} System</span>` : '';
-                let dmEditorBox = '';
-                if (currentUserRole === 'dm' && s.isCustom) {
-                    dmEditorBox = `
-                        <div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
-                            <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER STAR EDITOR</span>
-                            <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Name:</label>
-                            <input type="text" id="edit-star-name" value="${s.name}" style="font-size:10px; margin:2px 0;">
-                            <label style="font-size:9px; color:#6b826a; display:block;">Faction Claim / Ownership:</label>
-                            <input type="text" id="edit-star-ownership" value="${s.ownership || 'Unclaimed'}" style="font-size:10px; margin:2px 0;">
-                            <div style="display:flex; gap:6px;">
-                                <div style="flex:1;">
-                                    <label style="font-size:9px; color:#6b826a;">Class:</label>
-                                    <select id="edit-star-luminosity" style="font-size:9px; margin:2px 0;">
-                                        <option value="Class G (Yellow)" ${s.luminosity==='Class G (Yellow)'?'selected':''}>Class G</option>
-                                        <option value="Class M (Red Dwarf)" ${s.luminosity==='Class M (Red Dwarf)'?'selected':''}>Class M</option>
-                                        <option value="Class O (Blue Giant)" ${s.luminosity==='Class O (Blue Giant)'?'selected':''}>Class O</option>
-                                        <option value="Black Hole" ${s.luminosity==='Black Hole'?'selected':''}>Black Hole</option>
-                                    </select>
+                let isScanned = globalExploredCache.includes(s.id) || dmOverride;
+
+                if (!isScanned) {
+                    let shipsInRange = globalShipMarkersCache.filter(m => Math.hypot(m.x - s.x, m.y - s.y) < 40 && (currentUserRole === 'dm' || m.owner_id === currentUserId));
+                    let scanBtn = shipsInRange.length > 0 
+                        ? `<button class="btn-reveal" onclick="window.executeSectorScan('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%; border-color:#ffaa00; color:#ffaa00;">📡 EXECUTE DEEP SCAN (6 HOURS)</button>`
+                        : `<div style="font-size:9px; color:#ff6b6b; margin-top:6px; text-align:center; padding:4px; border:1px solid #ff3333;">⚠️ NO ALLIED VESSEL IN ORBIT</div>`;
+                    
+                    content.innerHTML = `
+                        <div style="font-size: 11px;">
+                            <strong style="color: #6b826a; font-size: 13px;">❓ Unknown Signal</strong><br>
+                            <span style="color: #6b826a;">Class:</span> Unverified<br>
+                            <span style="color: #6b826a;">Status:</span> <span style="color:#ffaa00;">Fog of War Active</span><br>
+                            <p style="font-size:9px; color:#d4c5a9; margin:6px 0;">Vessel proximity required to run telemetry algorithms and pierce signal jamming.</p>
+                            ${scanBtn}
+                            <div style="display:flex; gap:6px;">${lockBtn} ${bookmarkBtn}</div>
+                        </div>
+                    `;
+                } else {
+                    let multiTag = s.multiType !== 'Single' ? ` | <span style="color: #ffaa00;">${s.multiType} System</span>` : '';
+                    let dmEditorBox = '';
+                    if (currentUserRole === 'dm' && s.isCustom) {
+                        dmEditorBox = `
+                            <div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
+                                <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER STAR EDITOR</span>
+                                <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Name:</label>
+                                <input type="text" id="edit-star-name" value="${s.name}" style="font-size:10px; margin:2px 0;">
+                                <label style="font-size:9px; color:#6b826a; display:block;">Faction Claim / Ownership:</label>
+                                <input type="text" id="edit-star-ownership" value="${s.ownership || 'Unclaimed'}" style="font-size:10px; margin:2px 0;">
+                                <div style="display:flex; gap:6px;">
+                                    <div style="flex:1;">
+                                        <label style="font-size:9px; color:#6b826a;">Class:</label>
+                                        <select id="edit-star-luminosity" style="font-size:9px; margin:2px 0;">
+                                            <option value="Class G (Yellow)" ${s.luminosity==='Class G (Yellow)'?'selected':''}>Class G</option>
+                                            <option value="Class M (Red Dwarf)" ${s.luminosity==='Class M (Red Dwarf)'?'selected':''}>Class M</option>
+                                            <option value="Class O (Blue Giant)" ${s.luminosity==='Class O (Blue Giant)'?'selected':''}>Class O</option>
+                                            <option value="Black Hole" ${s.luminosity==='Black Hole'?'selected':''}>Black Hole</option>
+                                        </select>
+                                    </div>
+                                    <div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Industry Tier:</label><input type="number" id="edit-star-tier" value="${s.industry_tier || 0}" style="font-size:10px; margin:2px 0;"></div>
                                 </div>
-                                <div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Industry Tier:</label><input type="number" id="edit-star-tier" value="${s.industry_tier || 0}" style="font-size:10px; margin:2px 0;"></div>
+                                <button class="btn-reveal" onclick="window.saveDMStarProperties('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">SAVE SYSTEM CHANGES</button>
+                                <button class="btn-remove" onclick="window.deleteStarSystem('${s.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DESTROY STAR SYSTEM</button>
                             </div>
-                            <button class="btn-reveal" onclick="window.saveDMStarProperties('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">SAVE SYSTEM CHANGES</button>
-                            <button class="btn-remove" onclick="window.deleteStarSystem('${s.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DESTROY STAR SYSTEM</button>
+                        `;
+                    }
+                    content.innerHTML = `
+                        <div style="font-size: 11px;">
+                            <strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br>
+                            <span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} ${multiTag}<br>
+                            <span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br>
+                            ${s.isCustom ? `<span style="color: #6b826a;">Industry Tier:</span> ${s.industry_tier || 0}<br>` : ''}
+                            <div style="display:flex; gap:6px;">${lockBtn} ${bookmarkBtn}</div>
+                            ${dmEditorBox}
                         </div>
                     `;
                 }
-                content.innerHTML = `
-                    <div style="font-size: 11px;">
-                        <strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br>
-                        <span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} ${multiTag}<br>
-                        <span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br>
-                        ${s.isCustom ? `<span style="color: #6b826a;">Industry Tier:</span> ${s.industry_tier || 0}<br>` : ''}
-                        <div style="display:flex; gap:6px;">${lockBtn} ${bookmarkBtn}</div>
-                        ${dmEditorBox}
-                    </div>
-                `;
+
             } else if (selectedTarget.type === 'ship') {
                 const m = selectedTarget.data;
                 const currentDrive = m.drive_type || 'ftl_class1';
@@ -2096,6 +2090,7 @@
             }
 
             let allSystems = globalProceduralSystemsCache.concat(globalDbSystemsCache);
+            let dmOverride = document.getElementById('dm-fow-override') && document.getElementById('dm-fow-override').checked;
 
             if (hyperlanesVisible) {
                 ctx.strokeStyle = 'rgba(0, 229, 163, 0.2)'; ctx.lineWidth = 1.5 / camera.zoom;
@@ -2103,8 +2098,16 @@
                 for (let i = 0; i < allSystems.length; i += 3) {
                     let s1 = allSystems[i];
                     if (Math.abs(s1.x - cx) > hw + 300 || Math.abs(s1.y - cy) > hh + 300) continue;
+                    
                     for (let j = i + 1; j < i + 3 && j < allSystems.length; j++) {
-                        let s2 = allSystems[j]; let dx = s2.x - s1.x, dy = s2.y - s1.y;
+                        let s2 = allSystems[j]; 
+                        
+                        // FOG OF WAR: Only draw lane if at least ONE connected system is scanned
+                        let s1Scanned = globalExploredCache.includes(s1.id) || dmOverride;
+                        let s2Scanned = globalExploredCache.includes(s2.id) || dmOverride;
+                        if (!s1Scanned && !s2Scanned) continue;
+
+                        let dx = s2.x - s1.x, dy = s2.y - s1.y;
                         if (Math.sqrt(dx*dx + dy*dy) < 900) { ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); }
                     }
                 }
@@ -2118,44 +2121,56 @@
                 let cullRadius = s.type === 'Nebula' ? s.size : 150;
                 if (!isFocused && (Math.abs(s.x - cx) > hw + cullRadius || Math.abs(s.y - cy) > hh + cullRadius)) continue;
 
+                let isScanned = globalExploredCache.includes(s.id) || dmOverride;
+                let displayColor = isScanned ? s.color : '#1a2e23';
+
                 ctx.globalAlpha = sysOpacity;
                 if (s.type === 'Nebula') {
                     let grd = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.size);
-                    grd.addColorStop(0, s.color + '33'); grd.addColorStop(1, s.color + '00');
+                    grd.addColorStop(0, displayColor + '33'); grd.addColorStop(1, displayColor + '00');
                     ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill();
-                } else if (s.type === 'Black Hole') {
+                } else if (s.type === 'Black Hole' && isScanned) {
                     ctx.strokeStyle = `rgba(255, 100, 50, ${0.6 * sysOpacity})`; ctx.lineWidth = 2 / camera.zoom;
                     ctx.beginPath(); ctx.ellipse(s.x, s.y, s.size * 1.8, s.size * 0.6, time * 0.001, 0, Math.PI * 2); ctx.stroke();
                     ctx.fillStyle = '#000000'; ctx.shadowColor = `rgba(100, 50, 255, ${0.8 * sysOpacity})`; ctx.shadowBlur = 15;
                     ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
                 } else {
-                    ctx.fillStyle = s.color; ctx.shadowColor = s.color; ctx.shadowBlur = 8;
+                    ctx.fillStyle = displayColor; ctx.shadowColor = displayColor; ctx.shadowBlur = isScanned ? 8 : 2;
                     ctx.beginPath(); ctx.arc(s.x, s.y, s.size / (s.isCustom ? camera.zoom : 1), 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
                 }
                 ctx.globalAlpha = 1.0;
 
                 if (camera.zoom > 0.15 && camera.zoom <= SYSTEM_ZOOM_THRESHOLD && s.type !== 'Nebula') {
-                    ctx.fillStyle = s.isCustom ? `rgba(0, 229, 163, ${sysOpacity})` : `rgba(107, 130, 106, ${sysOpacity})`;
+                    ctx.fillStyle = isScanned ? (s.isCustom ? `rgba(0, 229, 163, ${sysOpacity})` : `rgba(107, 130, 106, ${sysOpacity})`) : `rgba(60, 78, 54, ${sysOpacity})`;
                     ctx.font = `${Math.max(10, 12 / camera.zoom)}px Courier New`;
-                    ctx.fillText(s.name, s.x + 10, s.y + 4);
+                    ctx.fillText(isScanned ? s.name : 'Unknown Signal', s.x + 10, s.y + 4);
                 }
 
                 if (camera.zoom > SYSTEM_ZOOM_THRESHOLD && s.type !== 'Nebula' && (isFocused || (!focusSystemId && sysOpacity > 0))) {
                     let deepZoomFade = Math.min(1.0, (camera.zoom - SYSTEM_ZOOM_THRESHOLD) / 1.0);
                     if (!isFocused && focusSystemId) deepZoomFade = 0; else if (!isFocused) deepZoomFade *= sysOpacity;
+                    
                     if (deepZoomFade > 0) {
-                        for(let b of getSystemBodies(s)) {
-                            let angle = b.baseAngle + (time * b.speed); let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
-                            ctx.beginPath(); ctx.arc(s.x, s.y, b.radius, 0, Math.PI*2);
-                            ctx.strokeStyle = `rgba(0, 229, 163, ${deepZoomFade * (b.isStar ? 0.05 : 0.15)})`; ctx.lineWidth = 1/camera.zoom; ctx.stroke();
-                            
-                            if (b.isStar) {
-                                ctx.shadowColor = b.color; ctx.shadowBlur = 12; ctx.fillStyle = b.color; ctx.globalAlpha = deepZoomFade;
-                                ctx.beginPath(); ctx.arc(bx, by, b.size, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; ctx.globalAlpha = 1.0;
-                            } else {
-                                ctx.fillStyle = b.color; ctx.globalAlpha = deepZoomFade;
-                                ctx.beginPath(); ctx.arc(bx, by, b.size, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1.0;
+                        if (isScanned) {
+                            for(let b of getSystemBodies(s)) {
+                                let angle = b.baseAngle + (time * b.speed); let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
+                                ctx.beginPath(); ctx.arc(s.x, s.y, b.radius, 0, Math.PI*2);
+                                ctx.strokeStyle = `rgba(0, 229, 163, ${deepZoomFade * (b.isStar ? 0.05 : 0.15)})`; ctx.lineWidth = 1/camera.zoom; ctx.stroke();
+                                
+                                if (b.isStar) {
+                                    ctx.shadowColor = b.color; ctx.shadowBlur = 12; ctx.fillStyle = b.color; ctx.globalAlpha = deepZoomFade;
+                                    ctx.beginPath(); ctx.arc(bx, by, b.size, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0; ctx.globalAlpha = 1.0;
+                                } else {
+                                    ctx.fillStyle = b.color; ctx.globalAlpha = deepZoomFade;
+                                    ctx.beginPath(); ctx.arc(bx, by, b.size, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1.0;
+                                }
                             }
+                        } else {
+                            // FOG OF WAR: Draw a jamming interference ring instead of planets
+                            ctx.strokeStyle = `rgba(255, 170, 0, ${deepZoomFade * 0.3})`;
+                            ctx.setLineDash([4, 8]); ctx.lineWidth = 2/camera.zoom;
+                            ctx.beginPath(); ctx.arc(s.x, s.y, 60, 0, Math.PI*2); ctx.stroke();
+                            ctx.setLineDash([]);
                         }
                     }
                 }
