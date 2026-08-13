@@ -475,6 +475,33 @@
         }
     };
 
+    /* DM Panel Subtab & Collapse Handlers */
+    window.switchDmTab = function(subtab) {
+        playUIBeep();
+        document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.dm-subpanel').forEach(p => p.style.display = 'none');
+        if(subtab === 'spawn') {
+            document.getElementById('dm-tab-btn-spawn').classList.add('active');
+            document.getElementById('dm-panel-spawn').style.display = 'block';
+        } else if(subtab === 'maint') {
+            document.getElementById('dm-tab-btn-maint').classList.add('active');
+            document.getElementById('dm-panel-maint').style.display = 'block';
+        }
+    };
+
+    window.toggleDmPanelCollapse = function() {
+        playUIBeep();
+        const body = document.getElementById('dm-tools-body');
+        const btn = document.getElementById('dm-collapse-btn');
+        if(body.style.display === 'none') {
+            body.style.display = 'block';
+            btn.innerText = '[-]';
+        } else {
+            body.style.display = 'none';
+            btn.innerText = '[+]';
+        }
+    };
+
     function makePanelDraggable(panelId, handleId, storageKey) {
         const panel = document.getElementById(panelId);
         const handle = document.getElementById(handleId);
@@ -1450,25 +1477,6 @@
             window.loadGalaxyData();
         };
 
-        window.clearSelectedTarget = function() {
-            selectedTarget = null;
-            jumpPlottingActive = false;
-            activeJumpShip = null;
-            jumpTargetPoint = null;
-            if(window.renderHUDTelemetry) window.renderHUDTelemetry();
-        };
-
-        window.wipeGalaxySlate = async function() {
-            if (currentUserRole !== 'dm') return;
-            if (!confirm("Wipe all custom stars and ships?")) return;
-            try {
-                const { error: e1 } = await db.from('star_systems').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-                const { error: e2 } = await db.from('ship_markers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-                if (e1 || e2) { alert("Wipe failed: " + (e1?.message || e2?.message)); } 
-                else { window.clearSelectedTarget(); window.loadGalaxyData(); alert("Galaxy slate wiped successfully."); }
-            } catch (e) { console.error("Wipe failed", e); }
-        };
-
         function screenToWorld(sx, sy) { 
             const rect = canvas.getBoundingClientRect(); 
             const cssWidth = container.clientWidth;
@@ -1821,7 +1829,7 @@
 
         window.renderHUDTelemetry = function() {
             const content = document.getElementById('hud-content');
-            if (selectedTarget && !selectedTarget.data) selectedTarget = null; // Safety clear
+            if (selectedTarget && !selectedTarget.data) selectedTarget = null;
 
             if (activeHudTab === 'bookmarks') {
                 let html = '<div style="font-size:11px;"><h4 style="margin:0 0 8px 0; color:#00e5a3;">Saved Bookmarks</h4>';
@@ -2032,7 +2040,7 @@
 
             let allSystems = globalProceduralSystemsCache.concat(globalDbSystemsCache);
 
-            if (hyperlanesVisible && camera.zoom < 2.0) {
+            if (hyperlanesVisible) {
                 ctx.strokeStyle = 'rgba(0, 229, 163, 0.15)'; ctx.lineWidth = 1 / camera.zoom;
                 ctx.setLineDash([4, 12]); ctx.beginPath();
                 for (let i = 0; i < allSystems.length; i += 3) {
