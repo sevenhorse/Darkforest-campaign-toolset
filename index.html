@@ -233,14 +233,25 @@
                     </div>
                 </div>
 
-                <!-- OVERSEER CODEX TAB -->
+                <!-- OVERSEER CODEX TAB (EXPANDED) -->
                 <div id="term-panel-codex" class="term-panel-content">
-                    <h3 style="border-bottom: 1px solid #ff3333; padding-bottom: 6px; color: #ff6b6b;">📖 Overseer Codex (Private Lore & Factions)</h3>
-                    <div class="codex-subtabs" style="margin-top: 12px;">
-                        <button class="codex-subtab-btn active" id="codex-subtab-factions" onclick="window.switchCodexSubtab('factions')">🛡️ Factions & Powers</button>
-                        <button class="codex-subtab-btn" id="codex-subtab-lore" onclick="window.switchCodexSubtab('lore')">🌌 Sector Lore & Secrets</button>
-                        <button class="codex-subtab-btn" id="codex-subtab-npcs" onclick="window.switchCodexSubtab('npcs')">👤 Key NPCs & Contacts</button>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ff3333; padding-bottom: 6px;">
+                        <h3 style="margin:0; color: #ff6b6b;">📖 Overseer Codex & Campaign Archive</h3>
+                        <span style="font-size:10px; color:#6b826a;">Cloud Database Synced</span>
                     </div>
+
+                    <div class="codex-subtabs" style="margin-top: 12px;">
+                        <button class="codex-subtab-btn active" id="codex-subtab-factions" onclick="window.switchCodexSubtab('factions')">🛡️ Factions</button>
+                        <button class="codex-subtab-btn" id="codex-subtab-lore" onclick="window.switchCodexSubtab('lore')">🌌 Lore</button>
+                        <button class="codex-subtab-btn" id="codex-subtab-npcs" onclick="window.switchCodexSubtab('npcs')">👤 NPCs</button>
+                        <button class="codex-subtab-btn" id="codex-subtab-rumors" onclick="window.switchCodexSubtab('rumors')">🗣️ Rumors</button>
+                        <button class="codex-subtab-btn" id="codex-subtab-intel" onclick="window.switchCodexSubtab('intel')">🗃️ Intel Ledger</button>
+                        <button class="codex-subtab-btn" id="codex-subtab-documents" onclick="window.switchCodexSubtab('documents')">📄 Documents</button>
+                    </div>
+
+                    <!-- Hidden input for file reading -->
+                    <input type="file" id="codex-doc-import" accept=".txt,.md,.json" style="display:none;" onchange="window.importCodexDocument(event)">
+
                     <div id="codex-content-container" style="max-height: 60vh; overflow-y: auto; padding-right: 5px;"></div>
                 </div>
 
@@ -295,6 +306,8 @@
                 <button id="measuring-tape-toggle-btn" onclick="window.toggleMeasuringTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">📏 MEASURE</button>
                 <!-- TACTICAL PING TOGGLE BUTTON -->
                 <button id="ping-tool-toggle-btn" onclick="window.togglePingMode()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">📍 PING</button>
+                <!-- HYPERLANE TOGGLE BUTTON -->
+                <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #00e5a3; font-size: 10px;" title="Toggle hyperlane trade routes">⚡ LANES</button>
                 <!-- IN-UNIVERSE CALENDAR TICKER -->
                 <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 10px; border-radius: 2px; font-size: 11px; color: #00e5a3; cursor: pointer;" onclick="window.toggleCalendarControls()" title="Click to inspect/control timeline">
                     📅 <span id="clock-ticker-text">YR 2800.01.01 // 00:00</span>
