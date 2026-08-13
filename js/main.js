@@ -18,7 +18,7 @@
     let campaignObjectivesList = [];
     let chatLogsList = [];
     let editingNoteId = null;
-    let editingCodexId = null; // Track active Codex entry being edited
+    let editingCodexId = null; 
 
     // Database mapped Codex
     let globalCodexData = { factions: [], lore: [], npcs: [], rumors: [], intel: [], documents: [] };
@@ -191,6 +191,9 @@
         const badge = document.getElementById('user-role');
         badge.innerText = `Role: ${data.role}`;
         
+        const codexNavBtn = document.getElementById('term-tab-btn-codex');
+        const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
+        
         if (data.role === 'dm') {
             badge.classList.add('role-dm'); badge.innerText = 'OVERSEER (DM)';
             document.getElementById('dm-tools').style.display = 'block';
@@ -198,6 +201,9 @@
             document.getElementById('dm-scratchpad-toggle-btn').style.display = 'inline-block';
             const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
             if (savedScratch && document.getElementById('dm-scratchpad-input')) document.getElementById('dm-scratchpad-input').value = savedScratch;
+        } else {
+            if (codexNavBtn) codexNavBtn.style.display = 'none';
+            if (scratchpadBtn) scratchpadBtn.style.display = 'none';
         }
 
         initPresenceChannel(data);
@@ -630,11 +636,11 @@
 
 
     /* ==========================================================================
-       OVERSEER CLOUD CODEX ENGINE (EXPANDED OPTION 1 WITH EDIT & MANUALLY ADD DOCS)
+       OVERSEER CLOUD CODEX ENGINE (WITH FULLSCREEN READER)
        ========================================================================== */
     
     window.switchCodexSubtab = function(subtab) {
-        editingCodexId = null; // Reset edit state when changing subtabs
+        editingCodexId = null; 
         activeCodexSubtab = subtab;
         document.querySelectorAll('.codex-subtab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(`codex-subtab-${subtab}`).classList.add('active');
@@ -863,7 +869,8 @@
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <strong style="color:#a2c4f5; font-size:12px;">📄 ${d.title}</strong>
                                 <div style="display:flex; gap:6px;">
-                                    <button class="layer-edit" onclick="window.toggleDocumentView('${d.id}')" style="font-size:9px; padding:2px 6px;">Read / Close</button>
+                                    <button class="layer-edit" onclick="window.openFullscreenDoc('${d.id}')" style="font-size:9px; padding:2px 6px;" title="Read Fullscreen">[⛶] Fullscreen</button>
+                                    <button class="layer-edit" onclick="window.toggleDocumentView('${d.id}')" style="font-size:9px; padding:2px 6px;">Inline</button>
                                     ${isDM ? `
                                     <button class="layer-edit" onclick="window.editCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
                                     <button class="layer-del" onclick="window.deleteCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
@@ -890,6 +897,22 @@
 
         container.innerHTML = html;
     }
+
+    /* FULLSCREEN READER FUNCTIONS */
+    window.openFullscreenDoc = function(id) {
+        playUIBeep();
+        let doc = (globalCodexData['documents'] || []).find(x => x.id === id);
+        if(!doc) return;
+        document.getElementById('fs-doc-title').innerText = "📄 " + doc.title;
+        document.getElementById('fs-doc-content').innerText = doc.description;
+        document.getElementById('fullscreen-doc-overlay').style.display = 'flex';
+    };
+
+    window.closeFullscreenDoc = function() {
+        playUIBeep();
+        document.getElementById('fullscreen-doc-overlay').style.display = 'none';
+        document.getElementById('fs-doc-content').innerText = ''; 
+    };
 
     window.toggleDocumentView = function(id) {
         const docBody = document.getElementById('doc-body-' + id);
@@ -1277,7 +1300,6 @@
 
         const SYSTEM_ZOOM_THRESHOLD = 1.5;
 
-        // Retina High-DPI Display Scaling
         function resize() {
             const dpr = window.devicePixelRatio || 1;
             const cssWidth = container.clientWidth;
