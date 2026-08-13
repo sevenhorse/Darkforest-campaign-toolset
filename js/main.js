@@ -19,8 +19,19 @@
     let chatLogsList = [];
     let editingNoteId = null;
 
-    let bookmarkedTargets = JSON.parse(localStorage.getItem('odyssey_bookmarks') || '[]');
-    let recentTargets = JSON.parse(localStorage.getItem('odyssey_recents') || '[]');
+    // Self-healing LocalStorage parsing to prevent canvas lockups
+    let bookmarkedTargets = [];
+    try { 
+        bookmarkedTargets = JSON.parse(localStorage.getItem('odyssey_bookmarks') || '[]'); 
+        if(!Array.isArray(bookmarkedTargets)) bookmarkedTargets = [];
+    } catch(e) { bookmarkedTargets = []; }
+
+    let recentTargets = [];
+    try { 
+        recentTargets = JSON.parse(localStorage.getItem('odyssey_recents') || '[]'); 
+        if(!Array.isArray(recentTargets)) recentTargets = [];
+    } catch(e) { recentTargets = []; }
+
     let activeHudTab = 'telemetry';
     let globalProceduralSystemsCache = [];
     let globalShipMarkersCache = [];
@@ -28,7 +39,7 @@
 
     let activeCargoSubtab = 'perishables';
     let activeCodexSubtab = 'factions';
-    let hyperlanesVisible = true; // Odyssey Feature Expansion
+    let hyperlanesVisible = true; 
 
     let dmCodexData = JSON.parse(localStorage.getItem('odyssey_dm_codex') || JSON.stringify({
         factions: [
@@ -44,6 +55,25 @@
             { name: "Broker Xylar", affiliation: "Independent Smuggler", location: "Sector 1012 Outpost", notes: "Knows rumors regarding ancient artifacts." }
         ]
     }));
+
+    /* ==========================================================================
+       1.5 WEB AUDIO API UI BEEPS
+       ========================================================================== */
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playUIBeep() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // High pitch start
+        osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.1); // Quick drop
+        gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime); // Low volume
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.1);
+    }
 
     /* ==========================================================================
        2. ACTIVE TOOL & MAP INTERACTION STATE
@@ -221,7 +251,7 @@
         const badge = document.getElementById('user-role');
         badge.innerText = `Role: ${data.role}`;
         
-        const codexNavBtn = document.getElementById('nav-codex-btn');
+        const codexNavBtn = document.getElementById('term-tab-btn-codex');
         const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
         
         if (data.role === 'dm') {
@@ -229,7 +259,7 @@
             badge.innerText = 'OVERSEER (DM)';
             document.getElementById('dm-tools').style.display = 'block';
             document.getElementById('dm-time-controls-box').style.display = 'block';
-            if (codexNavBtn) codexNavBtn.style.display = 'inline-block';
+            if (codexNavBtn) codexNavBtn.style.display = 'flex';
             if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
             
             // Load saved DM scratchpad
@@ -252,6 +282,16 @@
         loadChatLogs();
     }
 
+    function updateTerminalBadges() {
+        const bNotes = document.getElementById('badge-notes');
+        const bCombat = document.getElementById('badge-combat');
+        const bRoster = document.getElementById('badge-roster');
+        
+        if (bNotes) bNotes.innerText = (playerNotesList.length + campaignObjectivesList.filter(o => !o.completed).length) || '0';
+        if (bCombat) bCombat.innerText = combatantsList.length || '0';
+        if (bRoster) bRoster.innerText = allProfiles.length || '0';
+    }
+
     async function loadAllProfiles() {
         const { data: profData } = await db.from('profiles').select('*');
         const { data: charData } = await db.from('characters').select('*');
@@ -267,22 +307,23 @@
             });
             if (document.getElementById('character-terminal').style.display === 'block') { renderCharacterTerminalData(); }
             populateCommsRecipients();
+            updateTerminalBadges();
         }
     }
 
     async function loadPlayerNotes() {
         const { data } = await db.from('player_notes').select('*').order('created_at', { ascending: false });
-        if (data) { playerNotesList = data; renderTerminalNotes(); }
+        if (data) { playerNotesList = data; renderTerminalNotes(); updateTerminalBadges(); }
     }
 
     async function loadCombatTracker() {
         const { data } = await db.from('combat_tracker').select('*').order('initiative', { ascending: false });
-        if (data) { combatantsList = data; renderCombatTracker(); }
+        if (data) { combatantsList = data; renderCombatTracker(); updateTerminalBadges(); }
     }
 
     async function loadCampaignObjectives() {
         const { data } = await db.from('campaign_objectives').select('*').order('created_at', { ascending: false });
-        if (data) { campaignObjectivesList = data; renderCampaignObjectives(); }
+        if (data) { campaignObjectivesList = data; renderCampaignObjectives(); updateTerminalBadges(); }
     }
     
     async function loadChatLogs() {
@@ -363,8 +404,21 @@
     }
     renderSkillInputs();
 
+    window.toggleSidebar = function() {
+        const sidebar = document.getElementById('term-sidebar');
+        const icon = document.getElementById('sidebar-toggle-icon');
+        sidebar.classList.toggle('collapsed');
+        if (sidebar.classList.contains('collapsed')) {
+            icon.innerText = '▶';
+        } else {
+            icon.innerText = '◀ COLLAPSE SIDEBAR';
+        }
+        playUIBeep();
+    };
+
     window.switchTermTab = function(tabName) {
-        document.querySelectorAll('.term-tab-btn').forEach(b => b.classList.remove('active'));
+        playUIBeep();
+        document.querySelectorAll('.term-tab-btn-vert').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.term-panel-content').forEach(p => p.classList.remove('active'));
         document.getElementById(`term-tab-btn-${tabName}`).classList.add('active');
         document.getElementById(`term-panel-${tabName}`).classList.add('active');
@@ -424,13 +478,15 @@
         const panel = document.getElementById(panelId);
         const handle = document.getElementById(handleId);
         if (!panel || !handle) return;
-        const savedPos = localStorage.getItem(storageKey);
-        if (savedPos) {
-            try {
+        
+        try {
+            const savedPos = localStorage.getItem(storageKey);
+            if (savedPos) {
                 const { left, top } = JSON.parse(savedPos);
                 panel.style.left = left; panel.style.top = top; panel.style.right = 'auto';
-            } catch(e) {}
-        }
+            }
+        } catch(e) { console.warn("Failed to load panel state for", panelId); }
+
         let isDragging = false, startX, startY, initialLeft, initialTop;
         handle.addEventListener('mousedown', (e) => {
             if (['INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -447,7 +503,10 @@
                 panel.style.left = `${newLeft}px`; panel.style.top = `${newTop}px`;
             };
             const onMouseUp = () => {
-                if (isDragging) { isDragging = false; localStorage.setItem(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); }
+                if (isDragging) { 
+                    isDragging = false; 
+                    try { localStorage.setItem(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); } catch(e){}
+                }
                 window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
             };
             window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
@@ -1125,14 +1184,18 @@
     window.wipeGalaxySlate = async function() {
         if (currentUserRole !== 'dm') return;
         if (!confirm("Wipe all custom stars and ships?")) return;
-        const { error: e1 } = await db.from('star_systems').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        const { error: e2 } = await db.from('ship_markers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        if (e1 || e2) {
-            alert("Wipe failed: " + (e1?.message || e2?.message));
-        } else {
-            selectedTarget = null;
-            loadGalaxyData();
-            alert("Galaxy slate wiped successfully.");
+        try {
+            const { error: e1 } = await db.from('star_systems').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            const { error: e2 } = await db.from('ship_markers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            if (e1 || e2) {
+                alert("Wipe failed: " + (e1?.message || e2?.message));
+            } else {
+                window.clearSelectedTarget();
+                loadGalaxyData();
+                alert("Galaxy slate wiped successfully.");
+            }
+        } catch (e) {
+            console.error("Wipe failed", e);
         }
     };
 
@@ -1226,7 +1289,7 @@
 
     let generatedSystems = {};
     function getSystemBodies(system) {
-        if(system.type === 'Nebula') return []; 
+        if(!system || system.type === 'Nebula') return []; 
         if(generatedSystems[system.id]) return generatedSystems[system.id];
         
         let seed = stringToHash(system.id.toString()); 
@@ -1291,7 +1354,7 @@
             const cssHeight = container.clientHeight;
             canvas.width = cssWidth * dpr;
             canvas.height = cssHeight * dpr;
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // reset transform before scaling
+            ctx.setTransform(1, 0, 0, 1, 0, 0); 
             ctx.scale(dpr, dpr);
         }
         window.addEventListener('resize', resize); 
@@ -1367,7 +1430,6 @@
 
         let dbStarSystems = [];
         let shipMarkers = [];
-        let selectedTarget = null;
         let draggedMarker = null;
         let draggedStar = null; 
 
@@ -1415,6 +1477,14 @@
             const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1';
             await db.from('ship_markers').insert({ owner_id: currentUserId, name: document.getElementById('dm-tool-name').value || 'Task Force Black', drive_type: driveType, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color: document.getElementById('dm-tool-color').value, cargo_inventory: {} });
             loadGalaxyData();
+        };
+
+        window.clearSelectedTarget = function() {
+            selectedTarget = null;
+            jumpPlottingActive = false;
+            activeJumpShip = null;
+            jumpTargetPoint = null;
+            renderHUDTelemetry();
         };
 
         function screenToWorld(sx, sy) { 
@@ -1659,8 +1729,9 @@
             }
             if (e.key === 'Escape') {
                 if (measuringTapeActive) window.toggleMeasuringTool();
-                if (pingModeActive) window.togglePingMode();
-                if (jumpPlottingActive) window.cancelJumpPlotting();
+                else if (pingModeActive) window.togglePingMode();
+                else if (jumpPlottingActive) window.cancelJumpPlotting();
+                else window.clearSelectedTarget();
             }
         });
 
@@ -1759,7 +1830,7 @@
             } else {
                 bookmarkedTargets.push({ type: selectedTarget.type, data: selectedTarget.data });
             }
-            localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
+            try { localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); } catch(e){}
             renderHUDTelemetry();
         };
 
@@ -1774,7 +1845,7 @@
 
         window.jumpToBookmark = function(index) {
             let b = bookmarkedTargets[index];
-            if (!b) return;
+            if (!b || !b.data) return;
             selectedTarget = b;
             window.lockCameraOnSelected();
             renderHUDTelemetry();
@@ -1782,13 +1853,14 @@
 
         window.jumpToRecent = function(index) {
             let r = recentTargets[index];
-            if (!r) return;
+            if (!r || !r.data) return;
             selectedTarget = r;
             window.lockCameraOnSelected();
             renderHUDTelemetry();
         };
 
         window.switchHudTab = function(tab) {
+            playUIBeep();
             activeHudTab = tab;
             document.querySelectorAll('.hud-tab-btn').forEach(b => b.classList.remove('active'));
             if (tab === 'telemetry') document.getElementById('tab-btn-details').classList.add('active');
@@ -1810,7 +1882,7 @@
         };
 
         window.saveDMBodyProperties = function(id) {
-            if (currentUserRole !== 'dm' || !selectedTarget || selectedTarget.type !== 'body') return;
+            if (currentUserRole !== 'dm' || !selectedTarget || selectedTarget.type !== 'body' || !selectedTarget.data) return;
             let b = selectedTarget.data;
             
             b.name = document.getElementById('edit-body-name').value;
@@ -1823,14 +1895,15 @@
             alert("Celestial body properties synchronized to tactical display.");
         };
 
-        /* Add to recents helper */
+        /* Add to recents helper - with safety checks */
         function selectTargetAndPushRecent(target) {
+            if (!target || !target.data) return;
             selectedTarget = target;
-            let existsIndex = recentTargets.findIndex(r => r.data.id === target.data.id);
+            let existsIndex = recentTargets.findIndex(r => r.data && r.data.id === target.data.id);
             if (existsIndex >= 0) recentTargets.splice(existsIndex, 1);
             recentTargets.unshift(target);
             if (recentTargets.length > 20) recentTargets.pop();
-            localStorage.setItem('odyssey_recents', JSON.stringify(recentTargets));
+            try { localStorage.setItem('odyssey_recents', JSON.stringify(recentTargets)); } catch(e){}
             renderHUDTelemetry();
         }
 
@@ -1870,12 +1943,18 @@
         function renderHUDTelemetry() {
             const content = document.getElementById('hud-content');
             
+            // Self-healing state block for corrupt selection data
+            if (selectedTarget && !selectedTarget.data) {
+                selectedTarget = null;
+            }
+
             if (activeHudTab === 'bookmarks') {
                 let html = '<div style="font-size:11px;"><h4 style="margin:0 0 8px 0; color:#00e5a3;">Saved Bookmarks</h4>';
-                if (bookmarkedTargets.length === 0) {
+                if (!bookmarkedTargets || bookmarkedTargets.length === 0) {
                     html += '<span style="color:#6b826a; font-size:10px;">No saved bookmarks. Click bookmark on any target telemetry.</span>';
                 } else {
                     bookmarkedTargets.forEach((b, idx) => {
+                        if(!b.data) return;
                         html += `
                             <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:4px;">
                                 <div><strong style="color:#00e5a3;">${b.data.name}</strong><br><span style="font-size:9px; color:#6b826a;">Type: ${b.type}</span></div>
@@ -1894,10 +1973,11 @@
 
             if (activeHudTab === 'recents') {
                 let html = '<div style="font-size:11px;"><h4 style="margin:0 0 8px 0; color:#00e5a3;">Recent Navigation Targets</h4>';
-                if (recentTargets.length === 0) {
+                if (!recentTargets || recentTargets.length === 0) {
                     html += '<span style="color:#6b826a; font-size:10px;">No recent targets inspected.</span>';
                 } else {
                     recentTargets.forEach((r, idx) => {
+                        if(!r.data) return;
                         html += `
                             <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:4px;">
                                 <div><strong style="color:#00e5a3;">${r.data.name}</strong><br><span style="font-size:9px; color:#6b826a;">Type: ${r.type}</span></div>
@@ -1911,9 +1991,9 @@
                 return;
             }
 
-            if (!selectedTarget) { content.innerHTML = `<p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p>`; return; }
+            if (!selectedTarget || !selectedTarget.data) { content.innerHTML = `<p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p>`; return; }
             
-            let isBookmarked = bookmarkedTargets.some(b => b.data.id === selectedTarget.data.id);
+            let isBookmarked = bookmarkedTargets.some(b => b.data && b.data.id === selectedTarget.data.id);
             let bookmarkBtn = `<button class="btn-reveal" onclick="window.toggleBookmarkSelected()" style="font-size:9px; padding:4px; margin-top:4px;">${isBookmarked ? '★ BOOKMARKED' : '☆ BOOKMARK'}</button>`;
             let lockBtn = `<button class="btn-reveal" onclick="window.lockCameraOnSelected()" style="font-size:9px; padding:4px; margin-top:4px;">🎯 LOCK VIEW (F)</button>`;
 
@@ -2148,9 +2228,9 @@
             const cy = -camera.y / camera.zoom;
 
             let focusSystemId = null;
-            if (selectedTarget) {
+            if (selectedTarget && selectedTarget.data) {
                 if (selectedTarget.type === 'star') focusSystemId = selectedTarget.data.id;
-                if (selectedTarget.type === 'body') focusSystemId = selectedTarget.data.parentSystem.id;
+                if (selectedTarget.type === 'body' && selectedTarget.data.parentSystem) focusSystemId = selectedTarget.data.parentSystem.id;
             }
 
             let macroOpacity = 1.0;
@@ -2181,7 +2261,6 @@
                 for (let i = 0; i < allSystems.length; i += 3) {
                     let s1 = allSystems[i];
                     if (Math.abs(s1.x - cx) > hw + 300 || Math.abs(s1.y - cy) > hh + 300) continue;
-                    // Connect to next systems within range
                     for (let j = i + 1; j < i + 3 && j < allSystems.length; j++) {
                         let s2 = allSystems[j];
                         let dx = s2.x - s1.x, dy = s2.y - s1.y;
@@ -2365,7 +2444,7 @@
             if (selectedTarget && selectedTarget.data) {
                 let obj = selectedTarget.data;
                 let ox = obj.x, oy = obj.y;
-                if (selectedTarget.type === 'body') {
+                if (selectedTarget.type === 'body' && obj.parentSystem) {
                     let angle = obj.baseAngle + (time * obj.speed);
                     ox = obj.parentSystem.x + Math.cos(angle) * obj.radius;
                     oy = obj.parentSystem.y + Math.sin(angle) * obj.radius;
