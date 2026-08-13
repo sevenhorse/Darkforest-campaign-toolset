@@ -18,6 +18,7 @@
     let campaignObjectivesList = [];
     let chatLogsList = [];
     let editingNoteId = null;
+    let editingCodexId = null; // Track active Codex entry being edited
 
     // Database mapped Codex
     let globalCodexData = { factions: [], lore: [], npcs: [], rumors: [], intel: [], documents: [] };
@@ -207,7 +208,7 @@
         loadCombatTracker();
         loadCampaignObjectives();
         loadChatLogs();
-        window.loadCodexData(); // Initialize new Cloud Codex
+        window.loadCodexData(); 
     }
 
     function updateTerminalBadges() {
@@ -271,29 +272,7 @@
             });
             if (document.getElementById('character-terminal').style.display === 'block') { renderCodexDeck(); }
         }
-        migrateLegacyCodex();
     };
-
-    async function migrateLegacyCodex() {
-        const legacy = localStorage.getItem('odyssey_dm_codex');
-        if (legacy && currentUserRole === 'dm') {
-            try {
-                const parsed = JSON.parse(legacy);
-                for (let cat of ['factions', 'lore', 'npcs']) {
-                    if (parsed[cat]) {
-                        for (let item of parsed[cat]) {
-                            let title = item.name || item.title;
-                            let desc = item.notes || item.desc || '';
-                            let meta = { status: item.status, location: item.location, affiliation: item.affiliation };
-                            await db.from('campaign_codex').insert({ category: cat, title, description: desc, meta_data: meta });
-                        }
-                    }
-                }
-                localStorage.removeItem('odyssey_dm_codex');
-                window.loadCodexData();
-            } catch(e) { console.error("Codex migration failed:", e); }
-        }
-    }
 
     function initPresenceChannel(userProfile) {
         presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
@@ -446,8 +425,6 @@
 
     window.resetUiLayout = function() { Object.keys(localStorage).forEach(k => { if (k.startsWith('odyssey_')) localStorage.removeItem(k); }); location.reload(); };
 
-    /* Cargo Hub & Arsenal [Kept exactly as before for brevity and safety] */
-    // ...
     function sanitizeCargo(inv) {
         if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
             return {
@@ -653,14 +630,57 @@
 
 
     /* ==========================================================================
-       OVERSEER CLOUD CODEX ENGINE (EXPANDED OPTION 1)
+       OVERSEER CLOUD CODEX ENGINE (EXPANDED OPTION 1 WITH EDIT & MANUALLY ADD DOCS)
        ========================================================================== */
     
     window.switchCodexSubtab = function(subtab) {
+        editingCodexId = null; // Reset edit state when changing subtabs
         activeCodexSubtab = subtab;
         document.querySelectorAll('.codex-subtab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(`codex-subtab-${subtab}`).classList.add('active');
         renderCodexDeck();
+    };
+
+    window.editCodexEntry = function(id) {
+        let item = null;
+        Object.keys(globalCodexData).forEach(cat => {
+            let found = globalCodexData[cat].find(x => x.id === id);
+            if (found) item = found;
+        });
+        if (!item) return;
+
+        editingCodexId = id;
+        let meta = item.meta_data || {};
+
+        if (activeCodexSubtab === 'factions') {
+            document.getElementById('new-fac-name').value = item.title || '';
+            document.getElementById('new-fac-status').value = meta.status || '';
+            document.getElementById('new-fac-notes').value = item.description || '';
+            document.getElementById('btn-codex-submit').innerText = "UPDATE FACTION RECORD";
+        } else if (activeCodexSubtab === 'lore') {
+            document.getElementById('new-lore-title').value = item.title || '';
+            document.getElementById('new-lore-desc').value = item.description || '';
+            document.getElementById('btn-codex-submit').innerText = "UPDATE LORE RECORD";
+        } else if (activeCodexSubtab === 'npcs') {
+            document.getElementById('new-npc-name').value = item.title || '';
+            document.getElementById('new-npc-loc').value = meta.location || '';
+            document.getElementById('new-npc-aff').value = meta.affiliation || '';
+            document.getElementById('new-npc-notes').value = item.description || '';
+            document.getElementById('btn-codex-submit').innerText = "UPDATE NPC RECORD";
+        } else if (activeCodexSubtab === 'rumors') {
+            document.getElementById('new-rumor-source').value = item.title || '';
+            document.getElementById('new-rumor-desc').value = item.description || '';
+            document.getElementById('btn-codex-submit').innerText = "UPDATE RUMOR RECORD";
+        } else if (activeCodexSubtab === 'intel') {
+            document.getElementById('new-intel-subject').value = item.title || '';
+            document.getElementById('new-intel-status').value = meta.status || 'Verified';
+            document.getElementById('new-intel-desc').value = item.description || '';
+            document.getElementById('btn-codex-submit').innerText = "UPDATE INTEL RECORD";
+        } else if (activeCodexSubtab === 'documents') {
+            document.getElementById('new-doc-title').value = item.title || '';
+            document.getElementById('new-doc-content').value = item.description || '';
+            document.getElementById('btn-codex-submit').innerText = "UPDATE DOCUMENT";
+        }
     };
 
     function renderCodexDeck() {
@@ -682,7 +702,12 @@
                             <span style="font-size:10px; color:#00e5a3;">Status: ${meta.status || 'Unknown'}</span>
                         </div>
                         <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${f.description}</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${f.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        ${isDM ? `
+                        <div style="display:flex; gap:4px; margin-top:6px;">
+                            <button class="layer-edit" onclick="window.editCodexEntry('${f.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
+                            <button class="layer-del" onclick="window.deleteCodexEntry('${f.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
+                        </div>
+                        ` : ''}
                     </div>
                 `;
             });
@@ -692,7 +717,7 @@
                         <input type="text" id="new-fac-name" placeholder="Faction Name..." style="font-size:10px; margin:2px 0;">
                         <input type="text" id="new-fac-status" placeholder="Status / Hostility..." style="font-size:10px; margin:2px 0;">
                         <textarea id="new-fac-notes" rows="2" placeholder="Faction notes..." style="font-size:10px; margin:2px 0;"></textarea>
-                        <button class="btn-remove" onclick="window.addCodexEntry('factions')" style="font-size:10px; margin-top:4px;">+ ADD FACTION</button>
+                        <button class="btn-remove" id="btn-codex-submit" onclick="window.addCodexEntry('factions')" style="font-size:10px; margin-top:4px;">+ SAVE FACTION</button>
                     </div>
                 `;
             }
@@ -704,7 +729,12 @@
                     <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
                         <strong style="color:#ff6b6b; font-size:12px;">${l.title}</strong>
                         <p style="margin:4px 0; font-size:11px; color:#d4c5a9; white-space:pre-wrap;">${l.description}</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${l.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        ${isDM ? `
+                        <div style="display:flex; gap:4px; margin-top:6px;">
+                            <button class="layer-edit" onclick="window.editCodexEntry('${l.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
+                            <button class="layer-del" onclick="window.deleteCodexEntry('${l.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
+                        </div>
+                        ` : ''}
                     </div>
                 `;
             });
@@ -713,7 +743,7 @@
                     <div style="background:#040605; padding:8px; border:1px solid #ff3333; margin-top:10px;">
                         <input type="text" id="new-lore-title" placeholder="Lore Title..." style="font-size:10px; margin:2px 0;">
                         <textarea id="new-lore-desc" rows="2" placeholder="Secret lore details..." style="font-size:10px; margin:2px 0;"></textarea>
-                        <button class="btn-remove" onclick="window.addCodexEntry('lore')" style="font-size:10px; margin-top:4px;">+ ADD LORE ENTRY</button>
+                        <button class="btn-remove" id="btn-codex-submit" onclick="window.addCodexEntry('lore')" style="font-size:10px; margin-top:4px;">+ SAVE LORE ENTRY</button>
                     </div>
                 `;
             }
@@ -730,7 +760,12 @@
                         </div>
                         <p style="margin:2px 0; font-size:10px; color:#6b826a;">Affiliation: ${meta.affiliation || 'None'}</p>
                         <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${n.description}</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${n.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        ${isDM ? `
+                        <div style="display:flex; gap:4px; margin-top:6px;">
+                            <button class="layer-edit" onclick="window.editCodexEntry('${n.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
+                            <button class="layer-del" onclick="window.deleteCodexEntry('${n.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
+                        </div>
+                        ` : ''}
                     </div>
                 `;
             });
@@ -743,7 +778,7 @@
                         </div>
                         <input type="text" id="new-npc-aff" placeholder="Affiliation..." style="font-size:10px; margin:2px 0;">
                         <textarea id="new-npc-notes" rows="2" placeholder="Notes..." style="font-size:10px; margin:2px 0;"></textarea>
-                        <button class="btn-remove" onclick="window.addCodexEntry('npcs')" style="font-size:10px; margin-top:4px;">+ ADD NPC</button>
+                        <button class="btn-remove" id="btn-codex-submit" onclick="window.addCodexEntry('npcs')" style="font-size:10px; margin-top:4px;">+ SAVE NPC</button>
                     </div>
                 `;
             }
@@ -755,7 +790,12 @@
                     <div class="note-card" style="border-color:${isDM ? '#ffaa00' : '#3c4e36'}; border-left: 3px solid #ffaa00;">
                         <strong style="color:#ffaa00; font-size:12px;">Source: ${r.title}</strong>
                         <p style="margin:4px 0; font-size:11px; color:#d4c5a9; font-style:italic;">"${r.description}"</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${r.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        ${isDM ? `
+                        <div style="display:flex; gap:4px; margin-top:6px;">
+                            <button class="layer-edit" onclick="window.editCodexEntry('${r.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
+                            <button class="layer-del" onclick="window.deleteCodexEntry('${r.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
+                        </div>
+                        ` : ''}
                     </div>
                 `;
             });
@@ -764,7 +804,7 @@
                     <div style="background:#040605; padding:8px; border:1px solid #ffaa00; margin-top:10px;">
                         <input type="text" id="new-rumor-source" placeholder="Rumor Source (e.g. Smuggler at Station 9)..." style="font-size:10px; margin:2px 0;">
                         <textarea id="new-rumor-desc" rows="2" placeholder="The rumor itself..." style="font-size:10px; margin:2px 0;"></textarea>
-                        <button class="btn-deploy" style="background:#332200; border-color:#ffaa00; color:#ffaa00;" onclick="window.addCodexEntry('rumors')">+ ADD RUMOR</button>
+                        <button class="btn-deploy" id="btn-codex-submit" style="background:#332200; border-color:#ffaa00; color:#ffaa00;" onclick="window.addCodexEntry('rumors')">+ SAVE RUMOR</button>
                     </div>
                 `;
             }
@@ -781,7 +821,12 @@
                             <span style="font-size:10px; color:${statusColor}; border:1px solid ${statusColor}; padding:1px 4px; border-radius:2px;">${meta.status || 'Pending'}</span>
                         </div>
                         <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${i.description}</p>
-                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${i.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                        ${isDM ? `
+                        <div style="display:flex; gap:4px; margin-top:6px;">
+                            <button class="layer-edit" onclick="window.editCodexEntry('${i.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
+                            <button class="layer-del" onclick="window.deleteCodexEntry('${i.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
+                        </div>
+                        ` : ''}
                     </div>
                 `;
             });
@@ -797,7 +842,7 @@
                             </select>
                         </div>
                         <textarea id="new-intel-desc" rows="2" placeholder="Intel details..." style="font-size:10px; margin:2px 0;"></textarea>
-                        <button class="btn-deploy" style="background:#002233; border-color:#00e1ff; color:#00e1ff;" onclick="window.addCodexEntry('intel')">+ LOG INTEL</button>
+                        <button class="btn-deploy" id="btn-codex-submit" style="background:#002233; border-color:#00e1ff; color:#00e1ff;" onclick="window.addCodexEntry('intel')">+ SAVE INTEL</button>
                     </div>
                 `;
             }
@@ -806,11 +851,11 @@
             html += `
                 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-bottom:8px;">
                     <h4 style="color:#d4c5a9; margin:0;">Campaign Document Archive</h4>
-                    ${isDM ? `<button class="layer-edit" onclick="document.getElementById('codex-doc-import').click()" style="padding:4px 10px; font-size:9px;">[+] IMPORT .TXT / .MD FILE</button>` : ''}
+                    ${isDM ? `<button class="layer-edit" onclick="document.getElementById('codex-doc-import').click()" style="padding:4px 10px; font-size:9px;">[+] UPLOAD .TXT / .MD FILE</button>` : ''}
                 </div>
             `;
             if (items.length === 0) {
-                html += `<span style="font-size:10px; color:#6b826a;">No documents uploaded to mainframe yet.</span>`;
+                html += `<span style="font-size:10px; color:#6b826a; display:block; margin-bottom:10px;">No documents uploaded to mainframe yet.</span>`;
             } else {
                 items.forEach((d) => {
                     html += `
@@ -819,13 +864,27 @@
                                 <strong style="color:#a2c4f5; font-size:12px;">📄 ${d.title}</strong>
                                 <div style="display:flex; gap:6px;">
                                     <button class="layer-edit" onclick="window.toggleDocumentView('${d.id}')" style="font-size:9px; padding:2px 6px;">Read / Close</button>
-                                    ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
+                                    ${isDM ? `
+                                    <button class="layer-edit" onclick="window.editCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
+                                    <button class="layer-del" onclick="window.deleteCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
+                                    ` : ''}
                                 </div>
                             </div>
                             <div id="doc-body-${d.id}" style="display:none; margin-top:8px; padding:10px; background:#030403; border:1px solid #3c4e36; font-size:11px; line-height:1.4; color:#d4c5a9; white-space:pre-wrap; max-height:400px; overflow-y:auto;">${d.description}</div>
                         </div>
                     `;
                 });
+            }
+
+            if (isDM) {
+                html += `
+                    <div style="background:#040605; padding:8px; border:1px solid #a2c4f5; margin-top:10px;">
+                        <span style="font-size:10px; color:#a2c4f5; font-weight:bold; display:block; margin-bottom:4px;">+ MANUALLY CREATE DOCUMENT</span>
+                        <input type="text" id="new-doc-title" placeholder="Document Title / Subject..." style="font-size:10px; margin:2px 0;">
+                        <textarea id="new-doc-content" rows="4" placeholder="Type or paste document text here..." style="font-size:10px; margin:2px 0;"></textarea>
+                        <button class="btn-deploy" id="btn-codex-submit" style="background:#101a2e; border-color:#a2c4f5; color:#a2c4f5;" onclick="window.addCodexEntry('documents')">+ SAVE DOCUMENT</button>
+                    </div>
+                `;
             }
         }
 
@@ -842,29 +901,40 @@
         let title = '', desc = '', meta = {};
         
         if (category === 'factions') {
-            title = document.getElementById('new-fac-name').value;
-            meta.status = document.getElementById('new-fac-status').value;
-            desc = document.getElementById('new-fac-notes').value;
+            title = document.getElementById('new-fac-name')?.value || '';
+            meta.status = document.getElementById('new-fac-status')?.value || '';
+            desc = document.getElementById('new-fac-notes')?.value || '';
         } else if (category === 'lore') {
-            title = document.getElementById('new-lore-title').value;
-            desc = document.getElementById('new-lore-desc').value;
+            title = document.getElementById('new-lore-title')?.value || '';
+            desc = document.getElementById('new-lore-desc')?.value || '';
         } else if (category === 'npcs') {
-            title = document.getElementById('new-npc-name').value;
-            meta.location = document.getElementById('new-npc-loc').value;
-            meta.affiliation = document.getElementById('new-npc-aff').value;
-            desc = document.getElementById('new-npc-notes').value;
+            title = document.getElementById('new-npc-name')?.value || '';
+            meta.location = document.getElementById('new-npc-loc')?.value || '';
+            meta.affiliation = document.getElementById('new-npc-aff')?.value || '';
+            desc = document.getElementById('new-npc-notes')?.value || '';
         } else if (category === 'rumors') {
-            title = document.getElementById('new-rumor-source').value;
-            desc = document.getElementById('new-rumor-desc').value;
+            title = document.getElementById('new-rumor-source')?.value || '';
+            desc = document.getElementById('new-rumor-desc')?.value || '';
         } else if (category === 'intel') {
-            title = document.getElementById('new-intel-subject').value;
-            meta.status = document.getElementById('new-intel-status').value;
-            desc = document.getElementById('new-intel-desc').value;
+            title = document.getElementById('new-intel-subject')?.value || '';
+            meta.status = document.getElementById('new-intel-status')?.value || '';
+            desc = document.getElementById('new-intel-desc')?.value || '';
+        } else if (category === 'documents') {
+            title = document.getElementById('new-doc-title')?.value || '';
+            desc = document.getElementById('new-doc-content')?.value || '';
+            meta.type = 'text/plain';
         }
 
-        if (!title) { alert("A title/name is required."); return; }
-        await db.from('campaign_codex').insert({ category, title, description: desc, meta_data: meta });
-        window.loadCodexData(); // Force immediate local refresh
+        if (!title.trim()) { alert("A title/source/name is required."); return; }
+
+        if (editingCodexId) {
+            await db.from('campaign_codex').update({ title, description: desc, meta_data: meta }).eq('id', editingCodexId);
+            editingCodexId = null;
+        } else {
+            await db.from('campaign_codex').insert({ category, title, description: desc, meta_data: meta });
+        }
+
+        window.loadCodexData(); 
     };
 
     window.deleteCodexEntry = async function(id) {
@@ -888,7 +958,7 @@
                 meta_data: { type: file.type || 'text/plain' } 
             });
             alert(`Document '${file.name}' successfully archived to the Cloud Codex.`);
-            document.getElementById('codex-doc-import').value = ''; // Reset input
+            document.getElementById('codex-doc-import').value = ''; 
             window.loadCodexData();
         };
         reader.readAsText(file);
