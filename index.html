@@ -26,240 +26,258 @@
         </div>
     </div>
 
-    <!-- 2. FULL SCREEN CHARACTER & SHIP TERMINAL -->
+    <!-- 2. FULL SCREEN CHARACTER & SHIP TERMINAL (MASS EFFECT LAYOUT) -->
     <div id="character-terminal">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3c4e36; padding-bottom: 12px; margin-bottom: 15px;">
             <div>
-                <h2 style="margin: 0; font-size: 20px; color: #00e5a3;">Kids on Bikes Variant // Command Terminal</h2>
+                <h2 style="margin: 0; font-size: 20px; color: #00e5a3;">Intrepid Horizon // Command Terminal</h2>
                 <span style="font-size: 11px; color: #00e5a3;">● LIVE CLOUD SYNC ACTIVE</span>
             </div>
             <button onclick="window.toggleCharacterTerminal()" style="width: auto; padding: 8px 20px; background: #3d0c0c; border-color: #ff3333; color: #ffaaaa;">✕ RETURN TO MAP</button>
         </div>
 
-        <div class="term-tabs">
-            <button class="term-tab-btn active" id="term-tab-btn-stats" onclick="window.switchTermTab('stats')">📋 Dossier & Stats</button>
-            <button class="term-tab-btn" id="term-tab-btn-combat" onclick="window.switchTermTab('combat')">⚔️ Combat & Arsenal</button>
-            <button class="term-tab-btn" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')">📦 Ship Cargo & Manifest</button>
-            <button class="term-tab-btn" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff3333; color:#ff6b6b;">📖 Overseer Codex</button>
-            <button class="term-tab-btn" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')">📜 Notes & Objectives</button>
-            <button class="term-tab-btn" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')">👥 Crew Roster</button>
-        </div>
+        <div class="term-layout">
+            <!-- LEFT VERTICAL SIDEBAR -->
+            <div class="term-sidebar" id="term-sidebar">
+                <button onclick="window.toggleSidebar()" style="text-align: left; padding: 6px; font-size: 10px; border: none; background: transparent; color: #6b826a; cursor:pointer;">
+                    <span id="sidebar-toggle-icon">◀ COLLAPSE SIDEBAR</span>
+                </button>
 
-        <div id="term-panel-stats" class="term-panel-content active">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div>
-                    <div class="sheet-section">
-                        <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Command Credentials</h4>
-                        <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
-                            <img id="my-terminal-avatar-preview" src="https://via.placeholder.com/60" class="avatar-img" onerror="this.src='https://via.placeholder.com/60'">
-                            <div style="flex-grow: 1;">
-                                <label style="font-size: 10px; color: #6b826a;">Display Handle:</label>
-                                <input type="text" id="term-username" placeholder="Handle...">
+                <button class="term-tab-btn-vert active" id="term-tab-btn-stats" onclick="window.switchTermTab('stats')">
+                    <span class="tab-text">📋 Dossier & Stats</span>
+                </button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-combat" onclick="window.switchTermTab('combat')">
+                    <span class="tab-text">⚔️ Arsenal</span> <span class="tab-badge" id="badge-combat">0</span>
+                </button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')">
+                    <span class="tab-text">📦 Manifest</span>
+                </button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')">
+                    <span class="tab-text">📜 Intel & Ops</span> <span class="tab-badge" id="badge-notes">0</span>
+                </button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')">
+                    <span class="tab-text">👥 Crew Roster</span> <span class="tab-badge" id="badge-roster">0</span>
+                </button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#3d0c0c; color:#ff6b6b;">
+                    <span class="tab-text">📖 DM Codex</span>
+                </button>
+            </div>
+
+            <!-- RIGHT CONTENT AREA -->
+            <div class="term-content-area" id="term-content-area">
+                
+                <div id="term-panel-stats" class="term-panel-content active">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div>
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Command Credentials</h4>
+                                <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                                    <img id="my-terminal-avatar-preview" src="https://via.placeholder.com/60" class="avatar-img" onerror="this.src='https://via.placeholder.com/60'">
+                                    <div style="flex-grow: 1;">
+                                        <label style="font-size: 10px; color: #6b826a;">Display Handle:</label>
+                                        <input type="text" id="term-username" placeholder="Handle...">
+                                    </div>
+                                </div>
+                                <div id="avatar-dropzone" style="margin-top: 10px; border: 2px dashed #3c4e36; padding: 10px; text-align: center; background: #040605; border-radius: 2px; cursor: pointer; transition: border-color 0.2s;">
+                                    <p id="dropzone-label" style="margin: 0; font-size: 10px; color: #6b826a;">
+                                        📁 Drag & drop profile image here, or <span style="color:#00e5a3; text-decoration:underline;">browse files</span>
+                                    </p>
+                                    <input type="file" id="avatar-file-input" accept="image/*" style="display: none;">
+                                </div>
+                                <input type="hidden" id="term-avatar">
+                            </div>
+
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 1: Core Stats & Trackers</h4>
+                                <label style="font-size: 10px; color: #6b826a;">Character Name:</label>
+                                <input type="text" id="term-sheet-name">
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;">
+                                    <div><label style="font-size: 9px; color: #6b826a;">Charisma:</label><select id="stat-charisma"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Intelligence:</label><select id="stat-intelligence"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Strength:</label><select id="stat-strength"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                </div>
+
+                                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                                    <div style="flex: 1;"><label style="font-size: 10px; color: #ff6b6b;">Vitality (0-10):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
+                                    <div style="flex: 1;"><label style="font-size: 10px; color: #ffaa00;">Stress (0-20):</label><input type="number" id="term-stress" min="0" max="20" value="0"></div>
+                                    <div style="flex: 1;"><label style="font-size: 10px; color: #00e5a3;">Adversity (+/-):</label><input type="number" id="term-adversity" value="0"></div>
+                                </div>
+                            </div>
+
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 3: Specialties & Perks</h4>
+                                <textarea id="term-specialties" rows="4" placeholder="Record character specialties, strengths, and background perks..."></textarea>
                             </div>
                         </div>
-                        <div id="avatar-dropzone" style="margin-top: 10px; border: 2px dashed #3c4e36; padding: 10px; text-align: center; background: #040605; border-radius: 2px; cursor: pointer; transition: border-color 0.2s;">
-                            <p id="dropzone-label" style="margin: 0; font-size: 10px; color: #6b826a;">
-                                📁 Drag & drop profile image here, or <span style="color:#00e5a3; text-decoration:underline;">browse files</span>
-                            </p>
-                            <input type="file" id="avatar-file-input" accept="image/*" style="display: none;">
-                        </div>
-                        <input type="hidden" id="term-avatar">
-                    </div>
 
-                    <div class="sheet-section">
-                        <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 1: Core Stats & Trackers</h4>
-                        <label style="font-size: 10px; color: #6b826a;">Character Name:</label>
-                        <input type="text" id="term-sheet-name">
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;">
-                            <div><label style="font-size: 9px; color: #6b826a;">Charisma:</label><select id="stat-charisma"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Intelligence:</label><select id="stat-intelligence"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Strength:</label><select id="stat-strength"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                        </div>
-
-                        <div style="display: flex; gap: 10px; margin-top: 10px;">
-                            <div style="flex: 1;"><label style="font-size: 10px; color: #ff6b6b;">Vitality (0-10):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
-                            <div style="flex: 1;"><label style="font-size: 10px; color: #ffaa00;">Stress (0-20):</label><input type="number" id="term-stress" min="0" max="20" value="0"></div>
-                            <div style="flex: 1;"><label style="font-size: 10px; color: #00e5a3;">Adversity (+/-):</label><input type="number" id="term-adversity" value="0"></div>
-                        </div>
-                    </div>
-
-                    <div class="sheet-section">
-                        <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 3: Specialties & Perks</h4>
-                        <textarea id="term-specialties" rows="4" placeholder="Record character specialties, strengths, and background perks..."></textarea>
-                    </div>
-                </div>
-
-                <div>
-                    <div class="sheet-section">
-                        <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 2: Skill Proficiencies (-100 to +100)</h4>
-                        <div class="skill-grid" id="skills-input-container" style="margin-top: 8px;"></div>
-                    </div>
-
-                    <div class="sheet-section">
-                        <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 4: Gear, Inventory & Assets</h4>
-                        <label style="font-size: 9px; color: #6b826a;">Tactical Gear & Inventory:</label>
-                        <textarea id="term-assets" rows="3" placeholder="Weapons, tools, armor, items..."></textarea>
-                        <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display:block;">Credits, Real Estate & Liquid Assets:</label>
-                        <textarea id="term-history" rows="2" placeholder="Credits, property, ship shares..."></textarea>
-                    </div>
-
-                    <div class="sheet-section">
-                        <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 5: Body Augmentations</h4>
-                        <div class="augment-grid" style="margin-top: 6px;">
-                            <div><label style="font-size: 9px; color: #6b826a;">Head / Neural:</label><input type="text" id="aug-head" placeholder="None" style="margin:2px 0;"></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Torso / Internal:</label><input type="text" id="aug-torso" placeholder="None" style="margin:2px 0;"></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Left Arm:</label><input type="text" id="aug-larm" placeholder="None" style="margin:2px 0;"></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Right Arm:</label><input type="text" id="aug-rarm" placeholder="None" style="margin:2px 0;"></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Left Leg:</label><input type="text" id="aug-lleg" placeholder="None" style="margin:2px 0;"></div>
-                            <div><label style="font-size: 9px; color: #6b826a;">Right Leg:</label><input type="text" id="aug-rleg" placeholder="None" style="margin:2px 0;"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <button class="btn-reveal" onclick="window.saveTerminalProfile()" style="margin-top: 10px; width: 100%;">SAVE DOSSIER & STATS</button>
-        </div>
-
-        <div id="term-panel-combat" class="term-panel-content">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div class="sheet-section">
-                    <div style="border-bottom: 1px solid #3c4e36; padding-bottom: 8px; margin-bottom: 12px;">
-                        <h4 style="margin:0 0 6px 0;">Active Arsenal & Powers</h4>
-                        <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:4px; border-radius:2px;">
-                            <div style="display:flex; gap:6px; margin-bottom:6px;">
-                                <input type="text" id="new-wpn-name" placeholder="Weapon / Power Name" style="flex:2; margin:0;">
-                                <input type="text" id="new-wpn-dice" placeholder="e.g. d20, 2d6" style="flex:1; margin:0; text-align:center;">
-                                <input type="text" id="new-wpn-mod" placeholder="Mod (+5)" style="flex:1; margin:0; text-align:center;">
+                        <div>
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 2: Skill Proficiencies (-100 to +100)</h4>
+                                <div class="skill-grid" id="skills-input-container" style="margin-top: 8px;"></div>
                             </div>
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;">
-                                    <input type="checkbox" id="new-wpn-explodes" checked style="margin:0;"> Exploding Dice 💥
-                                </label>
-                                <button class="btn-reveal" onclick="window.addArsenalItem()" style="width:auto; padding:4px 12px; margin:0; font-size:10px;">+ ADD TO ARSENAL</button>
+
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 4: Gear, Inventory & Assets</h4>
+                                <label style="font-size: 9px; color: #6b826a;">Tactical Gear & Inventory:</label>
+                                <textarea id="term-assets" rows="3" placeholder="Weapons, tools, armor, items..."></textarea>
+                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display:block;">Credits, Real Estate & Liquid Assets:</label>
+                                <textarea id="term-history" rows="2" placeholder="Credits, property, ship shares..."></textarea>
+                            </div>
+
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 5: Body Augmentations</h4>
+                                <div class="augment-grid" style="margin-top: 6px;">
+                                    <div><label style="font-size: 9px; color: #6b826a;">Head / Neural:</label><input type="text" id="aug-head" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Torso / Internal:</label><input type="text" id="aug-torso" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Left Arm:</label><input type="text" id="aug-larm" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Right Arm:</label><input type="text" id="aug-rarm" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Left Leg:</label><input type="text" id="aug-lleg" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label style="font-size: 9px; color: #6b826a;">Right Leg:</label><input type="text" id="aug-rleg" placeholder="None" style="margin:2px 0;"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <div id="arsenal-list-container" style="max-height: 350px; overflow-y: auto;"></div>
+                    <button class="btn-reveal" onclick="window.saveTerminalProfile()" style="margin-top: 10px; width: 100%;">SAVE DOSSIER & STATS</button>
                 </div>
 
-                <div>
-                    <div class="sheet-section" style="border-color:#00e5a3; background:rgba(0,229,163,0.05);">
-                        <h4 style="color:#00e5a3; margin:0;">🎲 Multi-Stat & Skill Pool Roller</h4>
-                        <div id="dice-roller-stats" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 8px 0;"></div>
-                        <div id="dice-roller-skills" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-height: 110px; overflow-y: auto; margin-bottom: 8px;"></div>
-                        <input type="number" id="roll-extra-mod" value="0" style="margin:2px 0;" placeholder="Extra Mod">
-                        <button class="btn-reveal" onclick="window.executeDicePoolRoll()" style="width:100%; font-size:12px;">🎲 ROLL COMBINED POOL</button>
-                        <div id="dice-roll-result-box" style="margin-top: 12px; display:none; color:#00e5a3; background:#030403; padding:8px; border:1px solid #00e5a3;"></div>
-                    </div>
-                    <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.15);">
-                        <h4 style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px;">⚔️ Combat Initiative Tracker</h4>
-                        <div id="terminal-combat-body"></div>
-                    </div>
-                </div>
-            </div>
-            <button class="btn-reveal" onclick="window.saveTerminalProfile()" style="margin-top: 15px; width: 100%;">SAVE COMBAT DATA</button>
-        </div>
-
-        <!-- FULL-SCREEN CARGO & MANIFEST TAB -->
-        <div id="term-panel-cargo" class="term-panel-content">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
-                <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
-                    <label style="font-size: 11px; color: #00e5a3; font-weight: bold;">SELECTED VESSEL:</label>
-                    <select id="cargo-vessel-select" onchange="window.renderTerminalCargoDeck()" style="width: 280px; margin: 0; font-size: 11px; background: #0a1410; color: #00e5a3;"></select>
-                </div>
-                <button class="btn-reveal" onclick="window.broadcastTerminalCargoManifest()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">📡 BROADCAST MANIFEST TO COMMS</button>
-            </div>
-
-            <div class="cargo-subtabs">
-                <button class="cargo-subtab-btn active" id="cargo-subtab-perishables" onclick="window.switchCargoSubtab('perishables')">🍏 Perishables (Food, Medical, Life Support)</button>
-                <button class="cargo-subtab-btn" id="cargo-subtab-expendables" onclick="window.switchCargoSubtab('expendables')">⚙️ Expendables (Ammo, Materials, Parts, Fuel)</button>
-                <button class="cargo-subtab-btn" id="cargo-subtab-misc" onclick="window.switchCargoSubtab('misc')">📦 Miscellaneous (Personnel, Passengers, Gear)</button>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
-                <!-- CARGO LIST MATRIX -->
-                <div class="sheet-section">
-                    <h4 id="cargo-category-title" style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3;">Manifest Matrix</h4>
-                    <div id="terminal-cargo-items-container" style="max-height: 52vh; overflow-y: auto; padding-right: 5px;"></div>
-                </div>
-
-                <!-- ADD NEW CARGO ITEM FORM -->
-                <div class="sheet-section" style="border-color: #00e5a3; background: rgba(0, 229, 163, 0.03);">
-                    <h4 style="border-bottom: 1px solid #00e5a3; padding-bottom: 4px; color: #00e5a3;">+ Add Cargo Entry</h4>
-                    
-                    <label style="font-size: 10px; color: #6b826a;">Target Category:</label>
-                    <select id="new-cargo-category" style="font-size:10px; margin:2px 0;">
-                        <option value="perishables">🍏 Perishables</option>
-                        <option value="expendables">⚙️ Expendables</option>
-                        <option value="misc">📦 Miscellaneous</option>
-                    </select>
-
-                    <label style="font-size: 10px; color: #6b826a; margin-top: 6px; display:block;">Item Name / Designation:</label>
-                    <input type="text" id="new-cargo-name" placeholder="e.g. MedKits, 120mm Shells, Fuel" style="font-size:11px; margin:2px 0;">
-
-                    <div style="display: flex; gap: 8px; margin-top: 6px;">
-                        <div style="flex:1;">
-                            <label style="font-size: 10px; color: #6b826a;">Quantity:</label>
-                            <input type="number" id="new-cargo-qty" value="1" min="0" style="font-size:11px; margin:2px 0;">
+                <div id="term-panel-combat" class="term-panel-content">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="sheet-section">
+                            <div style="border-bottom: 1px solid #3c4e36; padding-bottom: 8px; margin-bottom: 12px;">
+                                <h4 style="margin:0 0 6px 0;">Active Arsenal & Powers</h4>
+                                <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:4px; border-radius:2px;">
+                                    <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                        <input type="text" id="new-wpn-name" placeholder="Weapon / Power Name" style="flex:2; margin:0;">
+                                        <input type="text" id="new-wpn-dice" placeholder="e.g. d20, 2d6" style="flex:1; margin:0; text-align:center;">
+                                        <input type="text" id="new-wpn-mod" placeholder="Mod (+5)" style="flex:1; margin:0; text-align:center;">
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                        <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                            <input type="checkbox" id="new-wpn-explodes" checked style="margin:0;"> Exploding Dice 💥
+                                        </label>
+                                        <button class="btn-reveal" onclick="window.addArsenalItem()" style="width:auto; padding:4px 12px; margin:0; font-size:10px;">+ ADD TO ARSENAL</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="arsenal-list-container" style="max-height: 350px; overflow-y: auto;"></div>
                         </div>
-                        <div style="flex:1;">
-                            <label style="font-size: 10px; color: #6b826a;">Unit Type:</label>
-                            <input type="text" id="new-cargo-unit" placeholder="crates, rounds, tons..." style="font-size:11px; margin:2px 0;">
+
+                        <div>
+                            <div class="sheet-section" style="border-color:#00e5a3; background:rgba(0,229,163,0.05);">
+                                <h4 style="color:#00e5a3; margin:0;">🎲 Multi-Stat & Skill Pool Roller</h4>
+                                <div id="dice-roller-stats" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 8px 0;"></div>
+                                <div id="dice-roller-skills" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-height: 110px; overflow-y: auto; margin-bottom: 8px;"></div>
+                                <input type="number" id="roll-extra-mod" value="0" style="margin:2px 0;" placeholder="Extra Mod">
+                                <button class="btn-reveal" onclick="window.executeDicePoolRoll()" style="width:100%; font-size:12px;">🎲 ROLL COMBINED POOL</button>
+                                <div id="dice-roll-result-box" style="margin-top: 12px; display:none; color:#00e5a3; background:#030403; padding:8px; border:1px solid #00e5a3;"></div>
+                            </div>
+                            <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.15);">
+                                <h4 style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px;">⚔️ Combat Initiative Tracker</h4>
+                                <div id="terminal-combat-body"></div>
+                            </div>
                         </div>
                     </div>
-
-                    <button class="btn-reveal" onclick="window.addNewCargoEntry()" style="margin-top: 12px; font-size:11px;">+ STORE IN HOLD</button>
+                    <button class="btn-reveal" onclick="window.saveTerminalProfile()" style="margin-top: 15px; width: 100%;">SAVE COMBAT DATA</button>
                 </div>
-            </div>
-        </div>
 
-        <!-- OVERSEER CODEX TAB -->
-        <div id="term-panel-codex" class="term-panel-content">
-            <h3 style="border-bottom: 1px solid #ff3333; padding-bottom: 6px; color: #ff6b6b;">📖 Overseer Codex (Private Lore & Factions)</h3>
-            
-            <div class="codex-subtabs" style="margin-top: 12px;">
-                <button class="codex-subtab-btn active" id="codex-subtab-factions" onclick="window.switchCodexSubtab('factions')">🛡️ Factions & Powers</button>
-                <button class="codex-subtab-btn" id="codex-subtab-lore" onclick="window.switchCodexSubtab('lore')">🌌 Sector Lore & Secrets</button>
-                <button class="codex-subtab-btn" id="codex-subtab-npcs" onclick="window.switchCodexSubtab('npcs')">👤 Key NPCs & Contacts</button>
-            </div>
-
-            <div id="codex-content-container" style="max-height: 60vh; overflow-y: auto; padding-right: 5px;"></div>
-        </div>
-
-        <div id="term-panel-notes" class="term-panel-content">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div class="sheet-section">
-                    <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3;">Campaign Objectives</h4>
-                    <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:10px;">
-                        <input type="text" id="new-obj-title" placeholder="Objective Title..." style="font-size:11px; margin:2px 0;">
-                        <textarea id="new-obj-desc" rows="2" placeholder="Objective details..." style="font-size:10px; margin:2px 0;"></textarea>
-                        <button class="btn-reveal" onclick="window.addCampaignObjective()" style="font-size:10px; margin-top:4px;">+ ADD OBJECTIVE</button>
+                <!-- FULL-SCREEN CARGO & MANIFEST TAB -->
+                <div id="term-panel-cargo" class="term-panel-content">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
+                        <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
+                            <label style="font-size: 11px; color: #00e5a3; font-weight: bold;">SELECTED VESSEL:</label>
+                            <select id="cargo-vessel-select" onchange="window.renderTerminalCargoDeck()" style="width: 280px; margin: 0; font-size: 11px; background: #0a1410; color: #00e5a3;"></select>
+                        </div>
+                        <button class="btn-reveal" onclick="window.broadcastTerminalCargoManifest()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">📡 BROADCAST MANIFEST TO COMMS</button>
                     </div>
-                    <div id="objectives-list-container" style="max-height: 320px; overflow-y: auto;"></div>
-                </div>
 
-                <div class="sheet-section">
-                    <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Personal & Shared Intel Notes</h4>
-                    <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:10px;">
-                        <input type="text" id="term-note-title" placeholder="Note Title..." style="font-size:11px; margin:2px 0;">
-                        <textarea id="term-note-content" rows="3" placeholder="Notes..." style="font-size:10px; margin:2px 0;"></textarea>
-                        <select id="term-note-scope" style="font-size:10px; margin:2px 0;">
-                            <option value="private">🔒 Private Only</option>
-                            <option value="all">🌐 Shared with All Players</option>
-                        </select>
-                        <button class="btn-reveal" id="btn-create-note" onclick="window.createOrUpdateNote()" style="font-size:10px; margin-top:4px;">+ CREATE NOTE</button>
+                    <div class="cargo-subtabs">
+                        <button class="cargo-subtab-btn active" id="cargo-subtab-perishables" onclick="window.switchCargoSubtab('perishables')">🍏 Perishables (Food, Medical, Life Support)</button>
+                        <button class="cargo-subtab-btn" id="cargo-subtab-expendables" onclick="window.switchCargoSubtab('expendables')">⚙️ Expendables (Ammo, Materials, Parts, Fuel)</button>
+                        <button class="cargo-subtab-btn" id="cargo-subtab-misc" onclick="window.switchCargoSubtab('misc')">📦 Miscellaneous (Personnel, Passengers, Gear)</button>
                     </div>
-                    <div id="term-notes-list-container" style="max-height: 250px; overflow-y: auto;"></div>
-                </div>
-            </div>
-        </div>
 
-        <div id="term-panel-roster" class="term-panel-content">
-            <h3 style="border-bottom: 1px solid #3c4e36; padding-bottom: 6px; margin-bottom: 12px;">Active Task Force Roster</h3>
-            <div id="crew-roster-container" style="display: flex; flex-direction: column; gap: 12px; max-height: 70vh; overflow-y: auto;"></div>
+                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
+                        <div class="sheet-section">
+                            <h4 id="cargo-category-title" style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3;">Manifest Matrix</h4>
+                            <div id="terminal-cargo-items-container" style="max-height: 52vh; overflow-y: auto; padding-right: 5px;"></div>
+                        </div>
+
+                        <div class="sheet-section" style="border-color: #00e5a3; background: rgba(0, 229, 163, 0.03);">
+                            <h4 style="border-bottom: 1px solid #00e5a3; padding-bottom: 4px; color: #00e5a3;">+ Add Cargo Entry</h4>
+                            <label style="font-size: 10px; color: #6b826a;">Target Category:</label>
+                            <select id="new-cargo-category" style="font-size:10px; margin:2px 0;">
+                                <option value="perishables">🍏 Perishables</option>
+                                <option value="expendables">⚙️ Expendables</option>
+                                <option value="misc">📦 Miscellaneous</option>
+                            </select>
+
+                            <label style="font-size: 10px; color: #6b826a; margin-top: 6px; display:block;">Item Name / Designation:</label>
+                            <input type="text" id="new-cargo-name" placeholder="e.g. MedKits, 120mm Shells, Fuel" style="font-size:11px; margin:2px 0;">
+
+                            <div style="display: flex; gap: 8px; margin-top: 6px;">
+                                <div style="flex:1;">
+                                    <label style="font-size: 10px; color: #6b826a;">Quantity:</label>
+                                    <input type="number" id="new-cargo-qty" value="1" min="0" style="font-size:11px; margin:2px 0;">
+                                </div>
+                                <div style="flex:1;">
+                                    <label style="font-size: 10px; color: #6b826a;">Unit Type:</label>
+                                    <input type="text" id="new-cargo-unit" placeholder="crates, rounds, tons..." style="font-size:11px; margin:2px 0;">
+                                </div>
+                            </div>
+                            <button class="btn-reveal" onclick="window.addNewCargoEntry()" style="margin-top: 12px; font-size:11px;">+ STORE IN HOLD</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OVERSEER CODEX TAB -->
+                <div id="term-panel-codex" class="term-panel-content">
+                    <h3 style="border-bottom: 1px solid #ff3333; padding-bottom: 6px; color: #ff6b6b;">📖 Overseer Codex (Private Lore & Factions)</h3>
+                    <div class="codex-subtabs" style="margin-top: 12px;">
+                        <button class="codex-subtab-btn active" id="codex-subtab-factions" onclick="window.switchCodexSubtab('factions')">🛡️ Factions & Powers</button>
+                        <button class="codex-subtab-btn" id="codex-subtab-lore" onclick="window.switchCodexSubtab('lore')">🌌 Sector Lore & Secrets</button>
+                        <button class="codex-subtab-btn" id="codex-subtab-npcs" onclick="window.switchCodexSubtab('npcs')">👤 Key NPCs & Contacts</button>
+                    </div>
+                    <div id="codex-content-container" style="max-height: 60vh; overflow-y: auto; padding-right: 5px;"></div>
+                </div>
+
+                <div id="term-panel-notes" class="term-panel-content">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="sheet-section">
+                            <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3;">Campaign Objectives</h4>
+                            <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:10px;">
+                                <input type="text" id="new-obj-title" placeholder="Objective Title..." style="font-size:11px; margin:2px 0;">
+                                <textarea id="new-obj-desc" rows="2" placeholder="Objective details..." style="font-size:10px; margin:2px 0;"></textarea>
+                                <button class="btn-reveal" onclick="window.addCampaignObjective()" style="font-size:10px; margin-top:4px;">+ ADD OBJECTIVE</button>
+                            </div>
+                            <div id="objectives-list-container" style="max-height: 320px; overflow-y: auto;"></div>
+                        </div>
+
+                        <div class="sheet-section">
+                            <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Personal & Shared Intel Notes</h4>
+                            <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:10px;">
+                                <input type="text" id="term-note-title" placeholder="Note Title..." style="font-size:11px; margin:2px 0;">
+                                <textarea id="term-note-content" rows="3" placeholder="Notes..." style="font-size:10px; margin:2px 0;"></textarea>
+                                <select id="term-note-scope" style="font-size:10px; margin:2px 0;">
+                                    <option value="private">🔒 Private Only</option>
+                                    <option value="all">🌐 Shared with All Players</option>
+                                </select>
+                                <button class="btn-reveal" id="btn-create-note" onclick="window.createOrUpdateNote()" style="font-size:10px; margin-top:4px;">+ CREATE NOTE</button>
+                            </div>
+                            <div id="term-notes-list-container" style="max-height: 250px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="term-panel-roster" class="term-panel-content">
+                    <h3 style="border-bottom: 1px solid #3c4e36; padding-bottom: 6px; margin-bottom: 12px;">Active Task Force Roster</h3>
+                    <div id="crew-roster-container" style="display: flex; flex-direction: column; gap: 12px; max-height: 70vh; overflow-y: auto;"></div>
+                </div>
+
+            </div> <!-- END RIGHT CONTENT AREA -->
         </div>
     </div>
 
@@ -439,7 +457,7 @@
                         <button class="hud-tab-btn" id="tab-btn-bookmarks" onclick="window.switchHudTab('bookmarks')">BOOKMARKS</button>
                         <button class="hud-tab-btn" id="tab-btn-recents" onclick="window.switchHudTab('recents')">RECENTS</button>
                     </div>
-                    <span style="font-size: 10px; color: #6b826a; margin-left: 6px;">⋮⋮</span>
+                    <button onclick="window.clearSelectedTarget()" class="layer-del" style="margin-left:8px; font-size:9px; padding:4px;" title="Deselect Target">[ESC] CLEAR</button>
                 </div>
                 <div id="hud-content">
                     <p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p>
