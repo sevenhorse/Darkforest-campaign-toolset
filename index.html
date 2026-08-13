@@ -292,6 +292,17 @@
         </div>
     </div>
 
+    <!-- FULL SCREEN DOCUMENT VIEWER OVERLAY -->
+    <div id="fullscreen-doc-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,3,0.98); z-index:2000; box-sizing:border-box; padding:40px; border:4px solid #a2c4f5; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #a2c4f5; padding-bottom:15px; margin-bottom:20px;">
+            <h2 id="fs-doc-title" style="margin:0; font-size:24px; color:#a2c4f5;">Document Title</h2>
+            <button onclick="window.closeFullscreenDoc()" style="width:auto; padding:8px 20px; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa; font-size:14px;">✕ CLOSE ARCHIVE</button>
+        </div>
+        <div style="flex-grow:1; overflow-y:auto; display:flex; justify-content:center;">
+            <div id="fs-doc-content" style="max-width:850px; width:100%; font-size:16px; line-height:1.7; color:#d4c5a9; white-space:pre-wrap; padding-bottom:40px; font-family: 'Courier New', monospace;"></div>
+        </div>
+    </div>
+
     <!-- 3. MAIN APP CONTAINER -->
     <div id="app-container">
         <div id="top-bar">
@@ -420,7 +431,7 @@
                 <div id="combat-tracker-body"></div>
             </div>
 
-            <!-- DM OPERATIONS PANEL (EXPANDED 4-TAB ARCHITECTURE) -->
+            <!-- DM OPERATIONS PANEL -->
             <div id="dm-tools" class="panel">
                 <div id="dm-tools-header" class="panel-header-drag">
                     <h4 style="margin:0;">DM Operations</h4>
