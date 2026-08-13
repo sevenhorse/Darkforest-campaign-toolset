@@ -233,7 +233,7 @@
                     </div>
                 </div>
 
-                <!-- OVERSEER CODEX TAB -->
+                <!-- OVERSEER CODEX TAB (EXPANDED) -->
                 <div id="term-panel-codex" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ff3333; padding-bottom: 6px;">
                         <h3 style="margin:0; color: #ff6b6b;">📖 Campaign Codex & Archive</h3>
@@ -515,7 +515,15 @@
 
                     <!-- MAINTENANCE TAB -->
                     <div id="dm-panel-maint" class="dm-subpanel" style="display:none;">
-                        <h4 style="margin-top: 5px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color:#ff6b6b;">Emergency Operations</h4>
+                        <h4 style="margin-top: 5px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color:#ff6b6b;">Map Overrides</h4>
+                        <div style="background:#040605; padding:8px; border:1px solid #ffaa00; margin-bottom:10px; border-radius:2px;">
+                            <label style="font-size:10px; color:#ffaa00; display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:bold;">
+                                <input type="checkbox" id="dm-fow-override" onchange="window.renderHUDTelemetry()" style="margin:0;"> 👁️ OVERSEER OMNISCIENCE
+                            </label>
+                            <p style="font-size:9px; color:#d4c5a9; margin:4px 0 0 0;">Bypasses the Fog of War. Allows DM to see all planet contents and star names without requiring a ship scan.</p>
+                        </div>
+
+                        <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color:#ff6b6b;">Emergency Operations</h4>
                         <p style="font-size:9px; color:#6b826a;">Destructive actions. Use with caution.</p>
                         <button class="btn-wipe" onclick="window.wipeGalaxySlate()">⚠️ WIPE GALAXY SLATE</button>
                     </div>
