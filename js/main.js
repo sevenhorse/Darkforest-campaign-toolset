@@ -28,6 +28,7 @@
 
     let activeCargoSubtab = 'perishables';
     let activeCodexSubtab = 'factions';
+    let hyperlanesVisible = true; // Odyssey Feature Expansion
 
     let dmCodexData = JSON.parse(localStorage.getItem('odyssey_dm_codex') || JSON.stringify({
         factions: [
@@ -221,14 +222,24 @@
         badge.innerText = `Role: ${data.role}`;
         
         const codexNavBtn = document.getElementById('nav-codex-btn');
+        const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
+        
         if (data.role === 'dm') {
             badge.classList.add('role-dm');
             badge.innerText = 'OVERSEER (DM)';
             document.getElementById('dm-tools').style.display = 'block';
             document.getElementById('dm-time-controls-box').style.display = 'block';
             if (codexNavBtn) codexNavBtn.style.display = 'inline-block';
+            if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
+            
+            // Load saved DM scratchpad
+            const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
+            if (savedScratch && document.getElementById('dm-scratchpad-input')) {
+                document.getElementById('dm-scratchpad-input').value = savedScratch;
+            }
         } else {
             if (codexNavBtn) codexNavBtn.style.display = 'none';
+            if (scratchpadBtn) scratchpadBtn.style.display = 'none';
         }
 
         initPresenceChannel(data);
@@ -276,7 +287,13 @@
     
     async function loadChatLogs() {
         const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: true }).limit(50);
-        if (data) { chatLogsList = data; renderChatFeed(); }
+        if (data) { 
+            chatLogsList = data; 
+            if (chatLogsList.length === 0) {
+                chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked. Communication channels active.', message_type: 'text' }];
+            }
+            renderChatFeed(); 
+        }
     }
 
     function initPresenceChannel(userProfile) {
@@ -382,6 +399,27 @@
         if (panel.style.display === 'block') { populateCommsRecipients(); loadChatLogs(); }
     };
 
+    window.toggleDmScratchpad = function() {
+        if (currentUserRole !== 'dm') return;
+        const panel = document.getElementById('dm-scratchpad-panel');
+        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+    };
+
+    window.saveDmScratchpad = function() {
+        if (currentUserRole !== 'dm') return;
+        const val = document.getElementById('dm-scratchpad-input').value;
+        localStorage.setItem('odyssey_dm_scratchpad', val);
+    };
+
+    window.toggleHyperlanes = function() {
+        hyperlanesVisible = !hyperlanesVisible;
+        const btn = document.getElementById('hyperlane-toggle-btn');
+        if (btn) {
+            btn.style.borderColor = hyperlanesVisible ? '#3c4e36' : '#00e5a3';
+            btn.style.color = hyperlanesVisible ? '#6b826a' : '#00e5a3';
+        }
+    };
+
     function makePanelDraggable(panelId, handleId, storageKey) {
         const panel = document.getElementById(panelId);
         const handle = document.getElementById(handleId);
@@ -421,6 +459,7 @@
     makePanelDraggable('dm-tools', 'dm-tools-header', 'odyssey_dm_pos');
     makePanelDraggable('comms-array-panel', 'comms-array-header', 'odyssey_comms_pos');
     makePanelDraggable('calendar-control-panel', 'calendar-control-header', 'odyssey_calendar_pos');
+    makePanelDraggable('dm-scratchpad-panel', 'dm-scratchpad-header', 'odyssey_scratchpad_pos');
 
     window.resetUiLayout = function() {
         Object.keys(localStorage).forEach(k => {
@@ -1124,12 +1163,13 @@
             const isDM = !!log.recipient_id;
             let headerColor = isDM ? '#c778dd' : '#00e5a3';
             let prefix = isDM ? '🔒 [PRIVATE]' : '🌐';
+            if (log.sender_id === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
             if (log.message_type === 'roll') { headerColor = '#ff6b6b'; prefix = '🎲 [ROLL]'; }
             let contentHTML = log.content;
             if (log.message_type === 'roll' && log.roll_data) { contentHTML = `<strong style="font-size:12px;">${log.content}</strong><br><span style="font-size:9px; color:#6b826a;">${log.roll_data.breakdown}</span>`; }
             html += `
                 <div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;">
-                    <div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${senderName}</strong></div>
+                    <div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.sender_id === 'system' ? 'SYSTEM' : senderName}</strong></div>
                     <div style="font-size: 11px; color: #d4c5a9;">${contentHTML}</div>
                 </div>
             `;
@@ -1244,8 +1284,18 @@
         const container = document.getElementById('canvas-container');
         const SYSTEM_ZOOM_THRESHOLD = 1.5;
 
-        function resize() { canvas.width = container.clientWidth; canvas.height = container.clientHeight; }
-        window.addEventListener('resize', resize); resize();
+        // High-DPI / Retina Display Scaling
+        function resize() {
+            const dpr = window.devicePixelRatio || 1;
+            const cssWidth = container.clientWidth;
+            const cssHeight = container.clientHeight;
+            canvas.width = cssWidth * dpr;
+            canvas.height = cssHeight * dpr;
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // reset transform before scaling
+            ctx.scale(dpr, dpr);
+        }
+        window.addEventListener('resize', resize); 
+        resize();
 
         let camera = { x: 0, y: 0, zoom: 0.2, isDragging: false, startX: 0, startY: 0 };
         
@@ -1367,7 +1417,15 @@
             loadGalaxyData();
         };
 
-        function screenToWorld(sx, sy) { const rect = canvas.getBoundingClientRect(); return { x: (sx - rect.left - canvas.width / 2 - camera.x) / camera.zoom, y: (sy - rect.top - canvas.height / 2 - camera.y) / camera.zoom }; }
+        function screenToWorld(sx, sy) { 
+            const rect = canvas.getBoundingClientRect(); 
+            const cssWidth = container.clientWidth;
+            const cssHeight = container.clientHeight;
+            return { 
+                x: (sx - rect.left - cssWidth / 2 - camera.x) / camera.zoom, 
+                y: (sy - rect.top - cssHeight / 2 - camera.y) / camera.zoom 
+            }; 
+        }
 
         function getTouchPos(e) {
             if (e.touches && e.touches.length > 0) return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
@@ -1378,7 +1436,7 @@
         /* Unified Input Core Handler for Map Interaction */
         function handleCanvasPointerDown(e) {
             if (e.target && e.target.closest && e.target.closest('.panel')) return; 
-            if (e.button !== undefined && e.button !== 0) return; // Only left click for mouse
+            if (e.button !== undefined && e.button !== 0) return;
 
             const worldPos = screenToWorld(e.clientX, e.clientY);
             
@@ -1559,9 +1617,10 @@
             if (e.target.closest('.panel')) return;
             e.preventDefault();
 
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left - canvas.width / 2;
-            const mouseY = e.clientY - rect.top - canvas.height / 2;
+            const cssWidth = container.clientWidth;
+            const cssHeight = container.clientHeight;
+            const mouseX = e.clientX - container.getBoundingClientRect().left - cssWidth / 2;
+            const mouseY = e.clientY - container.getBoundingClientRect().top - cssHeight / 2;
 
             const worldX = (mouseX - camera.x) / camera.zoom;
             const worldY = (mouseY - camera.y) / camera.zoom;
@@ -1640,7 +1699,7 @@
             let driveKey = activeJumpShip.drive_type || 'ftl_class1';
             selectedDriveSpeed = driveSpeeds[driveKey] ? driveSpeeds[driveKey].speed : 250;
 
-            window.updateToolButtonStyles();
+            if(typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
             renderHUDTelemetry();
         };
 
@@ -1763,6 +1822,49 @@
             renderHUDTelemetry();
             alert("Celestial body properties synchronized to tactical display.");
         };
+
+        /* Add to recents helper */
+        function selectTargetAndPushRecent(target) {
+            selectedTarget = target;
+            let existsIndex = recentTargets.findIndex(r => r.data.id === target.data.id);
+            if (existsIndex >= 0) recentTargets.splice(existsIndex, 1);
+            recentTargets.unshift(target);
+            if (recentTargets.length > 20) recentTargets.pop();
+            localStorage.setItem('odyssey_recents', JSON.stringify(recentTargets));
+            renderHUDTelemetry();
+        }
+
+        /* Tool toggles */
+        window.toggleMeasuringTool = function() {
+            measuringTapeActive = !measuringTapeActive;
+            if(!measuringTapeActive) { measureStartPoint = null; measureEndPoint = null; }
+            pingModeActive = false; jumpPlottingActive = false;
+            window.updateToolButtonStyles();
+        };
+
+        window.togglePingMode = function() {
+            pingModeActive = !pingModeActive;
+            measuringTapeActive = false; jumpPlottingActive = false;
+            window.updateToolButtonStyles();
+        };
+
+        window.updateToolButtonStyles = function() {
+            const mBtn = document.getElementById('measuring-tape-toggle-btn');
+            const pBtn = document.getElementById('ping-tool-toggle-btn');
+            if(mBtn) { mBtn.style.borderColor = measuringTapeActive ? '#00e5a3' : '#3c4e36'; mBtn.style.color = measuringTapeActive ? '#00e5a3' : '#6b826a'; }
+            if(pBtn) { pBtn.style.borderColor = pingModeActive ? '#00e5a3' : '#3c4e36'; pBtn.style.color = pingModeActive ? '#00e5a3' : '#6b826a'; }
+        };
+
+        function triggerTacticalPing(x, y) {
+            if (!realtimeChannel) return;
+            realtimeChannel.send({
+                type: 'broadcast', event: 'tactical_ping',
+                payload: { x, y, username: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3' }
+            });
+            activePings.push({ x, y, color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3', user: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', startTime: Date.now() });
+            if(pingModeActive) window.togglePingMode();
+        }
+
 
         /* HUD Telemetry Renderer */
         function renderHUDTelemetry() {
@@ -2029,12 +2131,21 @@
 
         /* Canvas Main Render Loop */
         function render() {
-            ctx.fillStyle = '#010201'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.save(); ctx.translate(canvas.width / 2 + camera.x, canvas.height / 2 + camera.y); ctx.scale(camera.zoom, camera.zoom);
+            const cssWidth = container.clientWidth;
+            const cssHeight = container.clientHeight;
+
+            ctx.fillStyle = '#010201'; 
+            ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+            ctx.save(); 
+            ctx.translate(cssWidth / 2 + camera.x, cssHeight / 2 + camera.y); 
+            ctx.scale(camera.zoom, camera.zoom);
 
             const time = Date.now();
-            const hw = canvas.width / (2 * camera.zoom); const hh = canvas.height / (2 * camera.zoom);
-            const cx = -camera.x / camera.zoom; const cy = -camera.y / camera.zoom;
+            const hw = cssWidth / (2 * camera.zoom); 
+            const hh = cssHeight / (2 * camera.zoom);
+            const cx = -camera.x / camera.zoom; 
+            const cy = -camera.y / camera.zoom;
 
             let focusSystemId = null;
             if (selectedTarget) {
@@ -2060,6 +2171,29 @@
             }
 
             let allSystems = proceduralSystems.concat(dbStarSystems);
+
+            // Odyssey Feature Expansion: Render Hyperlane Trade Routes between nearby systems
+            if (hyperlanesVisible && camera.zoom < 2.0) {
+                ctx.strokeStyle = 'rgba(0, 229, 163, 0.12)';
+                ctx.lineWidth = 1 / camera.zoom;
+                ctx.setLineDash([4, 12]);
+                ctx.beginPath();
+                for (let i = 0; i < allSystems.length; i += 3) {
+                    let s1 = allSystems[i];
+                    if (Math.abs(s1.x - cx) > hw + 300 || Math.abs(s1.y - cy) > hh + 300) continue;
+                    // Connect to next systems within range
+                    for (let j = i + 1; j < i + 3 && j < allSystems.length; j++) {
+                        let s2 = allSystems[j];
+                        let dx = s2.x - s1.x, dy = s2.y - s1.y;
+                        if (Math.sqrt(dx*dx + dy*dy) < 800) {
+                            ctx.moveTo(s1.x, s1.y);
+                            ctx.lineTo(s2.x, s2.y);
+                        }
+                    }
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
 
             for (let s of allSystems) {
                 let isFocused = (s.id === focusSystemId);
