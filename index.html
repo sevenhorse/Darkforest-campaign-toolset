@@ -40,7 +40,7 @@
             <button class="term-tab-btn active" id="term-tab-btn-stats" onclick="window.switchTermTab('stats')">📋 Dossier & Stats</button>
             <button class="term-tab-btn" id="term-tab-btn-combat" onclick="window.switchTermTab('combat')">⚔️ Combat & Arsenal</button>
             <button class="term-tab-btn" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')">📦 Ship Cargo & Manifest</button>
-            <button class="term-tab-btn" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff3333; color:#ff6b6b; display:none;" id="nav-codex-btn">📖 Overseer Codex</button>
+            <button class="term-tab-btn" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff3333; color:#ff6b6b;">📖 Overseer Codex</button>
             <button class="term-tab-btn" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')">📜 Notes & Objectives</button>
             <button class="term-tab-btn" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')">👥 Crew Roster</button>
         </div>
@@ -216,7 +216,7 @@
             </div>
         </div>
 
-        <!-- OVERSEER CODEX TAB (Viewable by All, Editable by DM) -->
+        <!-- OVERSEER CODEX TAB -->
         <div id="term-panel-codex" class="term-panel-content">
             <h3 style="border-bottom: 1px solid #ff3333; padding-bottom: 6px; color: #ff6b6b;">📖 Overseer Codex (Private Lore & Factions)</h3>
             
@@ -277,6 +277,8 @@
                 <button id="measuring-tape-toggle-btn" onclick="window.toggleMeasuringTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">📏 MEASURE</button>
                 <!-- TACTICAL PING TOGGLE BUTTON -->
                 <button id="ping-tool-toggle-btn" onclick="window.togglePingMode()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">📍 PING</button>
+                <!-- HYPERLANE TOGGLE BUTTON -->
+                <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;" title="Toggle hyperlane trade routes">⚡ LANES</button>
                 <!-- IN-UNIVERSE CALENDAR TICKER -->
                 <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 10px; border-radius: 2px; font-size: 11px; color: #00e5a3; cursor: pointer;" onclick="window.toggleCalendarControls()" title="Click to inspect/control timeline">
                     📅 <span id="clock-ticker-text">YR 2800.01.01 // 00:00</span>
@@ -289,6 +291,7 @@
                 <button onclick="window.openFullCargoTerminal()" style="width: auto; margin: 0 8px 0 0; padding: 5px 12px; background: #040605; border-color: #00e1ff; color: #00e1ff;">📦 CARGO</button>
                 <button onclick="window.toggleCommsArray()" style="width: auto; margin: 0 8px 0 0; padding: 5px 12px; background: #040605; border-color: #00e1ff; color: #00e1ff;">📡 COMMS</button>
                 <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0 8px 0 0; padding: 5px 12px; background: #040605; border-color: #ff6b6b; color: #ff6b6b;">⚔️ COMBAT</button>
+                <button id="dm-scratchpad-toggle-btn" onclick="window.toggleDmScratchpad()" style="width: auto; margin: 0 8px 0 0; padding: 5px 12px; background: #040605; border-color: #ff3333; color: #ff6b6b; display:none;">📝 SCRATCHPAD</button>
                 <button onclick="window.resetUiLayout()" style="width: auto; margin: 0 12px 0 0; padding: 5px 10px; background: #040605; border-color: #3c4e36; color: #6b826a;">RESET UI</button>
                 <span id="user-role" class="role-badge">Authenticating...</span>
                 <button onclick="window.handleLogout()" style="width: auto; margin: 0 0 0 12px; padding: 5px 12px;">Disconnect</button>
@@ -300,6 +303,17 @@
                 <canvas id="galaxyCanvas"></canvas>
             </div>
             
+            <!-- DM SCRATCHPAD PANEL -->
+            <div id="dm-scratchpad-panel" class="panel">
+                <div id="dm-scratchpad-header" class="panel-header-drag">
+                    <h4 style="margin:0; color:#ff6b6b;">📝 Overseer Scratchpad</h4>
+                    <span style="font-size: 10px; color: #6b826a;">⋮⋮ DRAG</span>
+                </div>
+                <p style="font-size: 9px; color: #6b826a; margin: 0 0 6px 0;">Private session notes saved locally.</p>
+                <textarea id="dm-scratchpad-input" rows="8" placeholder="Quick encounter notes, secret rolls, plot hooks..." style="font-size: 11px; resize: vertical;" oninput="window.saveDmScratchpad()"></textarea>
+                <button onclick="window.toggleDmScratchpad()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 6px; float: right;">CLOSE</button>
+            </div>
+
             <!-- DM TIME CONTROL PANEL -->
             <div id="calendar-control-panel" class="panel">
                 <div id="calendar-control-header" class="panel-header-drag">
