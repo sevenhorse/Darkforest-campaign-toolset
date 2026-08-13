@@ -194,15 +194,18 @@
         const codexNavBtn = document.getElementById('term-tab-btn-codex');
         const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
         
+        // Codex is now visible to everyone, no matter the role.
+        if (codexNavBtn) codexNavBtn.style.display = 'flex';
+        
         if (data.role === 'dm') {
             badge.classList.add('role-dm'); badge.innerText = 'OVERSEER (DM)';
             document.getElementById('dm-tools').style.display = 'block';
             document.getElementById('dm-time-controls-box').style.display = 'block';
-            document.getElementById('dm-scratchpad-toggle-btn').style.display = 'inline-block';
+            if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
+            
             const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
             if (savedScratch && document.getElementById('dm-scratchpad-input')) document.getElementById('dm-scratchpad-input').value = savedScratch;
         } else {
-            if (codexNavBtn) codexNavBtn.style.display = 'none';
             if (scratchpadBtn) scratchpadBtn.style.display = 'none';
         }
 
@@ -636,7 +639,7 @@
 
 
     /* ==========================================================================
-       OVERSEER CLOUD CODEX ENGINE (WITH FULLSCREEN READER)
+       OVERSEER CLOUD CODEX ENGINE (UNIVERSAL FULLSCREEN & PLAYER READ-ONLY)
        ========================================================================== */
     
     window.switchCodexSubtab = function(subtab) {
@@ -703,13 +706,16 @@
                 let meta = f.meta_data || {};
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
-                        <div style="display:flex; justify-content:space-between;">
-                            <strong style="color:#ff6b6b;">${f.title}</strong>
-                            <span style="font-size:10px; color:#00e5a3;">Status: ${meta.status || 'Unknown'}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <strong style="color:#ff6b6b;">${f.title}</strong><br>
+                                <span style="font-size:10px; color:#00e5a3;">Status: ${meta.status || 'Unknown'}</span>
+                            </div>
+                            <button class="layer-edit" onclick="window.openFullscreenDoc('${f.id}')" style="font-size:9px; padding:4px 8px;" title="Read Fullscreen">[⛶] Fullscreen</button>
                         </div>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${f.description}</p>
+                        <p style="margin:6px 0 0 0; font-size:11px; color:#d4c5a9;">${f.description}</p>
                         ${isDM ? `
-                        <div style="display:flex; gap:4px; margin-top:6px;">
+                        <div style="display:flex; gap:4px; margin-top:8px; border-top:1px dashed #3c4e36; padding-top:6px;">
                             <button class="layer-edit" onclick="window.editCodexEntry('${f.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
                             <button class="layer-del" onclick="window.deleteCodexEntry('${f.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
                         </div>
@@ -733,10 +739,13 @@
             items.forEach((l) => {
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
-                        <strong style="color:#ff6b6b; font-size:12px;">${l.title}</strong>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9; white-space:pre-wrap;">${l.description}</p>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong style="color:#ff6b6b; font-size:12px;">${l.title}</strong>
+                            <button class="layer-edit" onclick="window.openFullscreenDoc('${l.id}')" style="font-size:9px; padding:4px 8px;" title="Read Fullscreen">[⛶] Fullscreen</button>
+                        </div>
+                        <p style="margin:6px 0 0 0; font-size:11px; color:#d4c5a9; white-space:pre-wrap;">${l.description}</p>
                         ${isDM ? `
-                        <div style="display:flex; gap:4px; margin-top:6px;">
+                        <div style="display:flex; gap:4px; margin-top:8px; border-top:1px dashed #3c4e36; padding-top:6px;">
                             <button class="layer-edit" onclick="window.editCodexEntry('${l.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
                             <button class="layer-del" onclick="window.deleteCodexEntry('${l.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
                         </div>
@@ -760,14 +769,17 @@
                 let meta = n.meta_data || {};
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
-                        <div style="display:flex; justify-content:space-between;">
-                            <strong style="color:#ff6b6b;">${n.title}</strong>
-                            <span style="font-size:10px; color:#00e1ff;">Loc: ${meta.location || 'Unknown'}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <strong style="color:#ff6b6b;">${n.title}</strong><br>
+                                <span style="font-size:10px; color:#00e1ff;">Loc: ${meta.location || 'Unknown'}</span>
+                            </div>
+                            <button class="layer-edit" onclick="window.openFullscreenDoc('${n.id}')" style="font-size:9px; padding:4px 8px;" title="Read Fullscreen">[⛶] Fullscreen</button>
                         </div>
-                        <p style="margin:2px 0; font-size:10px; color:#6b826a;">Affiliation: ${meta.affiliation || 'None'}</p>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${n.description}</p>
+                        <p style="margin:4px 0 2px 0; font-size:10px; color:#6b826a;">Affiliation: ${meta.affiliation || 'None'}</p>
+                        <p style="margin:4px 0 0 0; font-size:11px; color:#d4c5a9;">${n.description}</p>
                         ${isDM ? `
-                        <div style="display:flex; gap:4px; margin-top:6px;">
+                        <div style="display:flex; gap:4px; margin-top:8px; border-top:1px dashed #3c4e36; padding-top:6px;">
                             <button class="layer-edit" onclick="window.editCodexEntry('${n.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
                             <button class="layer-del" onclick="window.deleteCodexEntry('${n.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
                         </div>
@@ -794,10 +806,13 @@
             items.forEach((r) => {
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#ffaa00' : '#3c4e36'}; border-left: 3px solid #ffaa00;">
-                        <strong style="color:#ffaa00; font-size:12px;">Source: ${r.title}</strong>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9; font-style:italic;">"${r.description}"</p>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong style="color:#ffaa00; font-size:12px;">Source: ${r.title}</strong>
+                            <button class="layer-edit" onclick="window.openFullscreenDoc('${r.id}')" style="font-size:9px; padding:4px 8px; color:#ffaa00; border-color:#ffaa00;" title="Read Fullscreen">[⛶] Fullscreen</button>
+                        </div>
+                        <p style="margin:6px 0 0 0; font-size:11px; color:#d4c5a9; font-style:italic;">"${r.description}"</p>
                         ${isDM ? `
-                        <div style="display:flex; gap:4px; margin-top:6px;">
+                        <div style="display:flex; gap:4px; margin-top:8px; border-top:1px dashed #3c4e36; padding-top:6px;">
                             <button class="layer-edit" onclick="window.editCodexEntry('${r.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
                             <button class="layer-del" onclick="window.deleteCodexEntry('${r.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
                         </div>
@@ -822,13 +837,16 @@
                 let statusColor = meta.status === 'Verified' ? '#00e5a3' : '#ffaa00';
                 html += `
                     <div class="note-card" style="border-color:${isDM ? '#00e1ff' : '#3c4e36'};">
-                        <div style="display:flex; justify-content:space-between;">
-                            <strong style="color:#00e1ff;">Subject: ${i.title}</strong>
-                            <span style="font-size:10px; color:${statusColor}; border:1px solid ${statusColor}; padding:1px 4px; border-radius:2px;">${meta.status || 'Pending'}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <strong style="color:#00e1ff;">Subject: ${i.title}</strong><br>
+                                <span style="font-size:10px; color:${statusColor}; border:1px solid ${statusColor}; padding:1px 4px; border-radius:2px; display:inline-block; margin-top:4px;">${meta.status || 'Pending'}</span>
+                            </div>
+                            <button class="layer-edit" onclick="window.openFullscreenDoc('${i.id}')" style="font-size:9px; padding:4px 8px; color:#00e1ff; border-color:#00e1ff;" title="Read Fullscreen">[⛶] Fullscreen</button>
                         </div>
-                        <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${i.description}</p>
+                        <p style="margin:8px 0 0 0; font-size:11px; color:#d4c5a9;">${i.description}</p>
                         ${isDM ? `
-                        <div style="display:flex; gap:4px; margin-top:6px;">
+                        <div style="display:flex; gap:4px; margin-top:8px; border-top:1px dashed #3c4e36; padding-top:6px;">
                             <button class="layer-edit" onclick="window.editCodexEntry('${i.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
                             <button class="layer-del" onclick="window.deleteCodexEntry('${i.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
                         </div>
@@ -871,13 +889,15 @@
                                 <div style="display:flex; gap:6px;">
                                     <button class="layer-edit" onclick="window.openFullscreenDoc('${d.id}')" style="font-size:9px; padding:2px 6px;" title="Read Fullscreen">[⛶] Fullscreen</button>
                                     <button class="layer-edit" onclick="window.toggleDocumentView('${d.id}')" style="font-size:9px; padding:2px 6px;">Inline</button>
-                                    ${isDM ? `
-                                    <button class="layer-edit" onclick="window.editCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
-                                    <button class="layer-del" onclick="window.deleteCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
-                                    ` : ''}
                                 </div>
                             </div>
                             <div id="doc-body-${d.id}" style="display:none; margin-top:8px; padding:10px; background:#030403; border:1px solid #3c4e36; font-size:11px; line-height:1.4; color:#d4c5a9; white-space:pre-wrap; max-height:400px; overflow-y:auto;">${d.description}</div>
+                            ${isDM ? `
+                            <div style="display:flex; gap:4px; margin-top:8px; border-top:1px dashed #3c4e36; padding-top:6px;">
+                                <button class="layer-edit" onclick="window.editCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Edit</button>
+                                <button class="layer-del" onclick="window.deleteCodexEntry('${d.id}')" style="font-size:9px; padding:2px 6px;">Delete</button>
+                            </div>
+                            ` : ''}
                         </div>
                     `;
                 });
@@ -898,13 +918,35 @@
         container.innerHTML = html;
     }
 
-    /* FULLSCREEN READER FUNCTIONS */
+    /* UNIVERSAL FULLSCREEN READER */
     window.openFullscreenDoc = function(id) {
         playUIBeep();
-        let doc = (globalCodexData['documents'] || []).find(x => x.id === id);
+        let doc = null;
+        for (let cat in globalCodexData) {
+            let found = globalCodexData[cat].find(x => x.id === id);
+            if (found) { doc = found; break; }
+        }
         if(!doc) return;
-        document.getElementById('fs-doc-title').innerText = "📄 " + doc.title;
-        document.getElementById('fs-doc-content').innerText = doc.description;
+
+        let titleStr = "📖 " + doc.title;
+        if(doc.category === 'documents') titleStr = "📄 " + doc.title;
+        if(doc.category === 'factions') titleStr = "🛡️ " + doc.title;
+        if(doc.category === 'npcs') titleStr = "👤 " + doc.title;
+        if(doc.category === 'rumors') titleStr = "🗣️ " + doc.title;
+        if(doc.category === 'intel') titleStr = "🗃️ " + doc.title;
+
+        document.getElementById('fs-doc-title').innerText = titleStr;
+        
+        let metaHtml = "";
+        if (doc.meta_data && Object.keys(doc.meta_data).length > 0) {
+            let meta = doc.meta_data;
+            if (meta.status) metaHtml += `Status: ${meta.status}\n`;
+            if (meta.location) metaHtml += `Location: ${meta.location}\n`;
+            if (meta.affiliation) metaHtml += `Affiliation: ${meta.affiliation}\n`;
+            if (metaHtml.length > 0) metaHtml = "--- METADATA ---\n" + metaHtml + "----------------\n\n";
+        }
+
+        document.getElementById('fs-doc-content').innerText = metaHtml + doc.description;
         document.getElementById('fullscreen-doc-overlay').style.display = 'flex';
     };
 
