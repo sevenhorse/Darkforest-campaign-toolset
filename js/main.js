@@ -35,6 +35,8 @@
     let globalProceduralSystemsCache = [];
     let globalShipMarkersCache = [];
     let globalDbSystemsCache = [];
+    let globalPlanetaryModifiersCache = {}; // NEW: Holds DM economy & planet overrides
+    
     let selectedTarget = null;
     let camera = { x: 0, y: 0, zoom: 0.2, isDragging: false, startX: 0, startY: 0 };
 
@@ -469,10 +471,16 @@
         playUIBeep();
         hyperlanesVisible = !hyperlanesVisible;
         const btn = document.getElementById('dm-lane-toggle-btn');
+        const topBtn = document.getElementById('hyperlane-toggle-btn');
+        
         if (btn) {
             btn.innerText = hyperlanesVisible ? '⚡ TOGGLE LANES (ON)' : '⚡ TOGGLE LANES (OFF)';
             btn.style.borderColor = hyperlanesVisible ? '#00e5a3' : '#ff3333';
             btn.style.color = hyperlanesVisible ? '#00e5a3' : '#ffaaaa';
+        }
+        if (topBtn) {
+            topBtn.style.borderColor = hyperlanesVisible ? '#3c4e36' : '#00e5a3';
+            topBtn.style.color = hyperlanesVisible ? '#00e5a3' : '#6b826a';
         }
     };
 
@@ -1344,6 +1352,20 @@
                 parentSystem: system
             });
         }
+
+        // Apply any saved DM Planetary Overrides (Industry, Wealth, custom names, etc.)
+        bodies.forEach(b => {
+            let ov = globalPlanetaryModifiersCache[b.id];
+            if (ov) {
+                if (ov.custom_name) b.name = ov.custom_name;
+                if (ov.custom_type) b.type = ov.custom_type;
+                if (ov.custom_gravity) b.gravity = ov.custom_gravity;
+                if (ov.custom_atmosphere) b.atmosphere = ov.custom_atmosphere;
+                if (ov.custom_resources) b.resources = ov.custom_resources;
+                b.modifiers = ov; // Attach deep economy stats for the HUD
+            }
+        });
+
         generatedSystems[system.id] = bodies;
         return bodies;
     }
@@ -1445,6 +1467,12 @@
             if (markerData) {
                 globalShipMarkersCache = markerData.map(m => ({ ...m, cargo_inventory: sanitizeCargo(m.cargo_inventory) }));
             }
+            const { data: pmData } = await db.from('planetary_modifiers').select('*');
+            if (pmData) {
+                globalPlanetaryModifiersCache = {};
+                pmData.forEach(pm => globalPlanetaryModifiersCache[pm.body_id] = pm);
+            }
+            if(window.renderHUDTelemetry) window.renderHUDTelemetry();
         };
         window.loadGalaxyData();
 
@@ -1454,6 +1482,7 @@
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'star_systems' }, () => { window.loadGalaxyData(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'ship_markers' }, () => { window.loadGalaxyData(); })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'planetary_modifiers' }, () => { window.loadGalaxyData(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'combat_tracker' }, () => { loadCombatTracker(); })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_objectives' }, () => { loadCampaignObjectives(); })
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_logs' }, () => { loadChatLogs(); })
@@ -1794,15 +1823,35 @@
             alert("Stellar system parameters updated."); window.loadGalaxyData();
         };
 
-        window.saveDMBodyProperties = function(id) {
+        window.saveDMBodyProperties = async function(id) {
             if (currentUserRole !== 'dm' || !selectedTarget || selectedTarget.type !== 'body' || !selectedTarget.data) return;
             let b = selectedTarget.data;
-            b.name = document.getElementById('edit-body-name').value;
-            b.type = document.getElementById('edit-body-type').value;
-            b.gravity = document.getElementById('edit-body-gravity').value;
-            b.atmosphere = document.getElementById('edit-body-atmosphere').value;
-            b.resources = document.getElementById('edit-body-resources').value;
-            if(window.renderHUDTelemetry) window.renderHUDTelemetry(); alert("Celestial body properties synchronized.");
+            
+            const payload = {
+                body_id: id,
+                custom_name: document.getElementById('edit-body-name').value,
+                custom_type: document.getElementById('edit-body-type').value,
+                custom_gravity: document.getElementById('edit-body-gravity').value,
+                custom_atmosphere: document.getElementById('edit-body-atmosphere').value,
+                custom_resources: document.getElementById('edit-body-resources').value,
+                industry: document.getElementById('edit-mod-ind').value,
+                control: document.getElementById('edit-mod-con').value,
+                defenses: document.getElementById('edit-mod-def').value,
+                wealth: document.getElementById('edit-mod-wea').value,
+                tech_level: document.getElementById('edit-mod-tec').value,
+                infrastructure: document.getElementById('edit-mod-inf').value,
+                resource_rating: document.getElementById('edit-mod-res').value
+            };
+
+            await db.from('planetary_modifiers').upsert(payload, { onConflict: 'body_id' });
+            
+            // Invalidate local procedural cache for this system so it redraws with the new stats instantly
+            if (b.parentSystem && b.parentSystem.id) {
+                delete generatedSystems[b.parentSystem.id];
+            }
+
+            window.loadGalaxyData();
+            alert("Planetary scans and colony metrics synchronized.");
         };
 
         function selectTargetAndPushRecent(target) {
@@ -1967,7 +2016,11 @@
                     </div>
                 `;
             } else if (selectedTarget.type === 'body') {
-                const p = selectedTarget.data; const icon = p.isStar ? '⭐' : '🪐'; let dmBodyEditorBox = '';
+                const p = selectedTarget.data; 
+                const icon = p.isStar ? '⭐' : '🪐'; 
+                let dmBodyEditorBox = '';
+                let mods = p.modifiers || {};
+
                 if (currentUserRole === 'dm') {
                     dmBodyEditorBox = `
                         <div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
@@ -1980,16 +2033,48 @@
                             </div>
                             <label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;">
                             <label style="font-size:9px; color:#6b826a; display:block;">Scan Data / Resources:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea>
-                            <button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY PLANETARY SCANS</button>
+                            
+                            <span style="font-size:9px; color:#00e1ff; font-weight:bold; display:block; margin-top:8px; border-bottom:1px solid #3c4e36; padding-bottom:2px;">COLONY METRICS</span>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px; margin-top:4px;">
+                                <div><label style="font-size:9px; color:#6b826a;">Industry:</label><input type="text" id="edit-mod-ind" value="${mods.industry || ''}" style="font-size:9px; margin:0; padding:4px;"></div>
+                                <div><label style="font-size:9px; color:#6b826a;">Control:</label><input type="text" id="edit-mod-con" value="${mods.control || ''}" style="font-size:9px; margin:0; padding:4px;"></div>
+                                <div><label style="font-size:9px; color:#6b826a;">Defenses:</label><input type="text" id="edit-mod-def" value="${mods.defenses || ''}" style="font-size:9px; margin:0; padding:4px;"></div>
+                                <div><label style="font-size:9px; color:#6b826a;">Wealth:</label><input type="text" id="edit-mod-wea" value="${mods.wealth || ''}" style="font-size:9px; margin:0; padding:4px;"></div>
+                                <div><label style="font-size:9px; color:#6b826a;">Tech Lvl:</label><input type="text" id="edit-mod-tec" value="${mods.tech_level || ''}" style="font-size:9px; margin:0; padding:4px;"></div>
+                                <div><label style="font-size:9px; color:#6b826a;">Infrastruct:</label><input type="text" id="edit-mod-inf" value="${mods.infrastructure || ''}" style="font-size:9px; margin:0; padding:4px;"></div>
+                            </div>
+                            <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Resource Rating:</label><input type="text" id="edit-mod-res" value="${mods.resource_rating || ''}" style="font-size:9px; margin:0; padding:4px;">
+
+                            <button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:8px; width:100%;">SAVE PLANETARY DATA</button>
                         </div>
                     `;
                 }
+
+                let metricsHtml = '';
+                if (Object.keys(mods).length > 0) {
+                    metricsHtml = `
+                        <div style="margin-top:6px; padding:6px; background:#030403; border:1px solid #3c4e36; border-radius:2px;">
+                            <strong style="color:#00e1ff; font-size:10px;">📊 COLONY METRICS</strong>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; font-size:9px; color:#d4c5a9; gap:4px; margin-top:4px;">
+                                <span><span style="color:#6b826a;">IND:</span> ${mods.industry || 'None'}</span>
+                                <span><span style="color:#6b826a;">CON:</span> ${mods.control || 'Unclaimed'}</span>
+                                <span><span style="color:#6b826a;">DEF:</span> ${mods.defenses || 'None'}</span>
+                                <span><span style="color:#6b826a;">WEA:</span> ${mods.wealth || 'Poor'}</span>
+                                <span><span style="color:#6b826a;">TEC:</span> ${mods.tech_level || '0'}</span>
+                                <span><span style="color:#6b826a;">INF:</span> ${mods.infrastructure || 'None'}</span>
+                            </div>
+                            <div style="font-size:9px; color:#d4c5a9; margin-top:4px;"><span style="color:#6b826a;">RES RATING:</span> ${mods.resource_rating || 'Untested'}</div>
+                        </div>
+                    `;
+                }
+
                 content.innerHTML = `
                     <div style="font-size: 11px;">
                         <strong style="color: ${p.color}; font-size: 13px;">${icon} ${p.name}</strong><br>
                         <span style="color: #6b826a;">System:</span> ${p.parentSystem.name}<br>
                         <span style="color: #6b826a;">Class:</span> ${p.type} | <span style="color: #6b826a;">Grav:</span> ${p.gravity}<br>
-                        <span style="color: #00e5a3; font-weight:bold; margin-top:4px; display:block;">Scans:</span> <span style="color: #d4c5a9;">${p.resources}</span>
+                        <span style="color: #00e5a3; font-weight:bold; margin-top:4px; display:block;">Scans:</span> <span style="color: #d4c5a9; white-space:pre-wrap;">${p.resources}</span>
+                        ${metricsHtml}
                         <div style="display:flex; gap:6px;">${lockBtn} ${bookmarkBtn}</div>
                         ${dmBodyEditorBox}
                     </div>
