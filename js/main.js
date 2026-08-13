@@ -468,10 +468,11 @@
     window.toggleHyperlanes = function() {
         playUIBeep();
         hyperlanesVisible = !hyperlanesVisible;
-        const btn = document.getElementById('hyperlane-toggle-btn');
+        const btn = document.getElementById('dm-lane-toggle-btn');
         if (btn) {
-            btn.style.borderColor = hyperlanesVisible ? '#3c4e36' : '#00e5a3';
-            btn.style.color = hyperlanesVisible ? '#00e5a3' : '#6b826a';
+            btn.innerText = hyperlanesVisible ? '⚡ TOGGLE LANES (ON)' : '⚡ TOGGLE LANES (OFF)';
+            btn.style.borderColor = hyperlanesVisible ? '#00e5a3' : '#ff3333';
+            btn.style.color = hyperlanesVisible ? '#00e5a3' : '#ffaaaa';
         }
     };
 
@@ -480,13 +481,9 @@
         playUIBeep();
         document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.dm-subpanel').forEach(p => p.style.display = 'none');
-        if(subtab === 'spawn') {
-            document.getElementById('dm-tab-btn-spawn').classList.add('active');
-            document.getElementById('dm-panel-spawn').style.display = 'block';
-        } else if(subtab === 'maint') {
-            document.getElementById('dm-tab-btn-maint').classList.add('active');
-            document.getElementById('dm-panel-maint').style.display = 'block';
-        }
+        
+        document.getElementById(`dm-tab-btn-${subtab}`).classList.add('active');
+        document.getElementById(`dm-panel-${subtab}`).style.display = 'block';
     };
 
     window.toggleDmPanelCollapse = function() {
@@ -1464,17 +1461,34 @@
 
         window.spawnStarSystemAtCenter = async function() {
             if (currentUserRole !== 'dm') return;
-            const name = document.getElementById('dm-tool-name').value || 'New System';
-            const luminosity = document.getElementById('dm-tool-luminosity').value;
-            const color = document.getElementById('dm-tool-color').value;
-            await db.from('star_systems').insert({ name, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, size: 5.0, color, luminosity, ownership: 'Unclaimed', control: 'Uncontested', industry_tier: 1 });
+            const name = document.getElementById('dm-star-name').value || 'Sol Prime';
+            const luminosity = document.getElementById('dm-star-luminosity').value;
+            const industry_tier = parseInt(document.getElementById('dm-star-tier').value) || 1;
+            const ownership = document.getElementById('dm-star-ownership').value || 'Unclaimed';
+            const color = document.getElementById('dm-star-color').value || '#ffe9c4';
+
+            await db.from('star_systems').insert({ name, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, size: 5.0, color, luminosity, ownership, control: 'Uncontested', industry_tier });
             window.loadGalaxyData();
+            alert(`Star system '${name}' deployed successfully.`);
         };
 
         window.spawnTokenAtCenter = async function() {
-            const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1';
-            await db.from('ship_markers').insert({ owner_id: currentUserId, name: document.getElementById('dm-tool-name').value || 'Task Force Black', drive_type: driveType, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color: document.getElementById('dm-tool-color').value, cargo_inventory: {} });
+            if (currentUserRole !== 'dm') return;
+            const name = document.getElementById('dm-ship-name').value || 'Task Force Black';
+            const drive_type = document.getElementById('dm-ship-drivetype').value || 'ftl_class1';
+            const color = document.getElementById('dm-ship-color').value || '#00e1ff';
+
+            await db.from('ship_markers').insert({ owner_id: currentUserId, name, drive_type, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color, cargo_inventory: {} });
             window.loadGalaxyData();
+            alert(`Vessel token '${name}' deployed successfully.`);
+        };
+
+        window.clearSelectedTarget = function() {
+            selectedTarget = null;
+            jumpPlottingActive = false;
+            activeJumpShip = null;
+            jumpTargetPoint = null;
+            if(window.renderHUDTelemetry) window.renderHUDTelemetry();
         };
 
         function screenToWorld(sx, sy) { 
@@ -2041,14 +2055,14 @@
             let allSystems = globalProceduralSystemsCache.concat(globalDbSystemsCache);
 
             if (hyperlanesVisible) {
-                ctx.strokeStyle = 'rgba(0, 229, 163, 0.15)'; ctx.lineWidth = 1 / camera.zoom;
+                ctx.strokeStyle = 'rgba(0, 229, 163, 0.2)'; ctx.lineWidth = 1.5 / camera.zoom;
                 ctx.setLineDash([4, 12]); ctx.beginPath();
                 for (let i = 0; i < allSystems.length; i += 3) {
                     let s1 = allSystems[i];
                     if (Math.abs(s1.x - cx) > hw + 300 || Math.abs(s1.y - cy) > hh + 300) continue;
                     for (let j = i + 1; j < i + 3 && j < allSystems.length; j++) {
                         let s2 = allSystems[j]; let dx = s2.x - s1.x, dy = s2.y - s1.y;
-                        if (Math.sqrt(dx*dx + dy*dy) < 800) { ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); }
+                        if (Math.sqrt(dx*dx + dy*dy) < 900) { ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); }
                     }
                 }
                 ctx.stroke(); ctx.setLineDash([]);
