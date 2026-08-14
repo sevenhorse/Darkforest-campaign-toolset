@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <!-- Link to external stylesheet -->
     <link rel="stylesheet" href="style.css">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -26,7 +25,7 @@
         </div>
     </div>
 
-    <!-- 2. FULL SCREEN CHARACTER & SHIP TERMINAL (MASS EFFECT LAYOUT) -->
+    <!-- 2. FULL SCREEN CHARACTER & SHIP TERMINAL -->
     <div id="character-terminal">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3c4e36; padding-bottom: 12px; margin-bottom: 15px;">
             <div>
@@ -72,7 +71,7 @@
                             <div class="sheet-section">
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Command Credentials</h4>
                                 <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
-                                    <img id="my-terminal-avatar-preview" src="https://via.placeholder.com/60" class="avatar-img" onerror="this.src='https://via.placeholder.com/60'">
+                                    <img id="my-terminal-avatar-preview" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><rect width='60' height='60' fill='%23040605'/><text x='50%25' y='50%25' fill='%2300e5a3' font-size='20' font-family='monospace' text-anchor='middle' dominant-baseline='middle'>?</text></svg>" class="avatar-img">
                                     <div style="flex-grow: 1;">
                                         <label style="font-size: 10px; color: #6b826a;">Display Handle:</label>
                                         <input type="text" id="term-username" placeholder="Handle...">
