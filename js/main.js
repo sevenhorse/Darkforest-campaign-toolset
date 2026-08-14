@@ -1,23 +1,22 @@
 /**
- * INTREPID HORIZON // GALAXY MAP ENGINE
- * Core Architecture: Render loop, Fog of War, and Territory Drawing
+ * INTREPID HORIZON // CORE ARCHITECTURE
+ * Modules: Map Engine, Territory Editor, Vessel Diagnostics & Combat Calc
  */
 
-// Defensive Cloud Init (Mock config, assumes live keys injected by deployment pipeline)
+// Defensive Cloud Init (Assumes injected keys)
 const supabaseUrl = 'https://YOUR_SUPABASE_PROJECT.supabase.co';
 const supabaseKey = 'YOUR_ANON_KEY';
 const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
 // Global State Machine
 const EngineState = {
-    isDM: true, // Tied to authentication profile
+    isDM: true,
     dmOmniscience: true,
     factions: [],
     territories: [],
     stars: [],
-    scans: [], // Array of coordinates {x, y, radius: 40} representing deep scans
+    scans: [], // {x, y, radius: 40}
     
-    // Territory Drawing State
     drawing: {
         active: false,
         vertices: [],
@@ -26,7 +25,12 @@ const EngineState = {
         selectedColor: '#00e5ff'
     },
 
-    // Camera & Canvas
+    // NEW: Vessel Configuration State
+    vessel: {
+        weapons: [],
+        combatLog: []
+    },
+
     ctx: null,
     width: 0,
     height: 0,
@@ -34,7 +38,7 @@ const EngineState = {
 };
 
 // ==========================================
-// INITIALIZATION & SUPABASE SYNC
+// INITIALIZATION & TAB ROUTING
 // ==========================================
 async function initEngine() {
     const canvas = document.getElementById('galaxy-canvas');
@@ -43,24 +47,42 @@ async function initEngine() {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     
+    bindNavigation();
     bindUIEvents();
     bindCanvasEvents(canvas);
 
-    // Defensive data loading
     try {
         await Promise.all([
             loadFactions(),
             loadTerritories(),
             loadStars(),
-            loadScans()
+            loadScans(),
+            loadVesselData() // NEW
         ]);
         console.log("Intrepid Horizon: Systems Online.");
     } catch (error) {
         console.error("Cloud Sync Failure. Utilizing local cache fallback.", error);
     }
 
-    // Start 60fps render loop
     requestAnimationFrame(renderLoop);
+}
+
+function bindNavigation() {
+    document.querySelectorAll('.nav-tabs li').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            // Remove active states
+            document.querySelectorAll('.nav-tabs li').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+            
+            // Set new active states
+            e.target.classList.add('active');
+            const targetId = e.target.dataset.target;
+            document.getElementById(targetId).classList.add('active');
+            
+            // Re-render canvas if switching back to map
+            if (targetId === 'galaxy-map-view') resizeCanvas();
+        });
+    });
 }
 
 function resizeCanvas() {
@@ -72,27 +94,21 @@ function resizeCanvas() {
 }
 
 // ==========================================
-// DATA RETRIEVAL (Mocks for Structure)
+// DATA RETRIEVAL (Mocks)
 // ==========================================
 async function loadFactions() {
-    // In production: const { data } = await supabase.from('factions').select('*');
     EngineState.factions = [
         { id: 'f1', name: 'United Earth Directorate' },
         { id: 'f2', name: 'Trisolaran Vanguard' },
         { id: 'f3', name: 'Bobiverse Fleet' }
     ];
-    
     const select = document.getElementById('faction-select');
     select.innerHTML = EngineState.factions.map(f => `<option value="${f.id}">${f.name}</option>`).join('');
 }
 
-async function loadTerritories() {
-    // In production: const { data } = await supabase.from('territories').select('*');
-    EngineState.territories = []; // Empty for now, populated by drawing
-}
+async function loadTerritories() { EngineState.territories = []; }
 
 async function loadStars() {
-    // Generate mock stars for procedural engine
     for (let i = 0; i < 500; i++) {
         EngineState.stars.push({
             x: (Math.random() - 0.5) * 2000,
@@ -103,51 +119,41 @@ async function loadStars() {
 }
 
 async function loadScans() {
-    // Mocking past deep scans made by players
     EngineState.scans = [
-        { x: 0, y: 0, radius: 400 }, // Starting sector
-        { x: 300, y: -200, radius: 400 } // Explored sector
+        { x: 0, y: 0, radius: 400 },
+        { x: 300, y: -200, radius: 400 }
     ];
 }
 
 // ==========================================
-// DRAWING MECHANICS & UI BINDS
+// MAP DRAWING MECHANICS & EVENTS
 // ==========================================
 function bindUIEvents() {
-    document.getElementById('dm-omniscience-toggle').addEventListener('change', (e) => {
-        EngineState.dmOmniscience = e.target.checked;
-    });
-
+    document.getElementById('dm-omniscience-toggle').addEventListener('change', (e) => EngineState.dmOmniscience = e.target.checked);
     document.getElementById('btn-draw-territory').addEventListener('click', startDrawing);
     document.getElementById('btn-save-territory').addEventListener('click', saveTerritory);
     document.getElementById('btn-cancel-territory').addEventListener('click', cancelDrawing);
+    document.getElementById('faction-select').addEventListener('change', (e) => EngineState.drawing.selectedFaction = e.target.value);
+    document.getElementById('territory-color').addEventListener('input', (e) => EngineState.drawing.selectedColor = e.target.value);
     
-    document.getElementById('faction-select').addEventListener('change', (e) => {
-        EngineState.drawing.selectedFaction = e.target.value;
-    });
-    
-    document.getElementById('territory-color').addEventListener('input', (e) => {
-        EngineState.drawing.selectedColor = e.target.value;
-    });
+    // NEW: Vessel Diagnostics Binding
+    document.getElementById('btn-mount-weapon').addEventListener('click', mountWeapon);
 }
 
 function bindCanvasEvents(canvas) {
     canvas.addEventListener('mousemove', (e) => {
         const rect = canvas.getBoundingClientRect();
-        // Adjust for camera in full engine, simplified here
         EngineState.drawing.mousePos = {
             x: e.clientX - rect.left - EngineState.width / 2,
             y: e.clientY - rect.top - EngineState.height / 2
         };
     });
 
-    canvas.addEventListener('click', (e) => {
+    canvas.addEventListener('click', () => {
         if (!EngineState.drawing.active) return;
-        
         const pos = EngineState.drawing.mousePos;
         const startNode = EngineState.drawing.vertices[0];
         
-        // Node snapping to close shape (20px tolerance)
         if (startNode && Math.hypot(pos.x - startNode.x, pos.y - startNode.y) < 20 && EngineState.drawing.vertices.length > 2) {
             finishDrawing();
         } else {
@@ -183,23 +189,15 @@ async function saveTerritory() {
     const factionId = document.getElementById('faction-select').value;
     if (!factionId) return alert("Select a Faction to assign this territory to.");
     
-    const payload = {
-        faction_id: factionId,
-        color: EngineState.drawing.selectedColor,
-        vertices: EngineState.drawing.vertices
-    };
+    const payload = { faction_id: factionId, color: EngineState.drawing.selectedColor, vertices: EngineState.drawing.vertices };
 
     try {
-        // Defensive Cloud Insert
         if (supabase?.auth) {
             const { error } = await supabase.from('territories').insert([payload]);
             if (error) throw error;
         }
-        
-        // Update local state immediately
         EngineState.territories.push(payload);
         cancelDrawing();
-        
     } catch (err) {
         console.error("Cloud Save Failed:", err);
         alert("Failed to sync to Cloud Codex. Try again.");
@@ -207,20 +205,122 @@ async function saveTerritory() {
 }
 
 // ==========================================
-// RENDER ENGINE & FOG OF WAR LOGIC
+// NEW: VESSEL DIAGNOSTICS & WEAPON SYSTEMS
+// ==========================================
+async function loadVesselData() {
+    // Seed initial weapon for demonstration
+    EngineState.vessel.weapons = [
+        { id: 'w_' + Date.now(), name: 'Twin-Linked Railgun', dice: 8, exploding: true }
+    ];
+    updateVesselUI();
+}
+
+function mountWeapon() {
+    const nameInput = document.getElementById('new-weapon-name');
+    const diceSelect = document.getElementById('new-weapon-dice');
+    const explodeToggle = document.getElementById('new-weapon-explode');
+
+    if (!nameInput.value.trim()) return alert("Enter a weapon system designation.");
+
+    const newWeapon = {
+        id: 'w_' + Date.now(),
+        name: nameInput.value.trim(),
+        dice: parseInt(diceSelect.value),
+        exploding: explodeToggle.checked
+    };
+
+    EngineState.vessel.weapons.push(newWeapon);
+    
+    // Clear form
+    nameInput.value = '';
+    diceSelect.value = '4';
+    
+    updateVesselUI();
+    
+    // In production: Sync to Supabase here
+}
+
+function rollWeaponDice(weaponId) {
+    const weapon = EngineState.vessel.weapons.find(w => w.id === weaponId);
+    if (!weapon) return;
+
+    let rolls = [];
+    let explosions = 0;
+    
+    // Initial Roll
+    let currentRoll = Math.floor(Math.random() * weapon.dice) + 1;
+    rolls.push(currentRoll);
+    let totalDamage = currentRoll;
+
+    // Exploding Dice Logic (Kids on Bikes framework)
+    while (weapon.exploding && currentRoll === weapon.dice) {
+        explosions++;
+        currentRoll = Math.floor(Math.random() * weapon.dice) + 1;
+        rolls.push(currentRoll);
+        totalDamage += currentRoll;
+    }
+
+    logCombatAction(weapon, rolls, totalDamage, explosions);
+}
+
+function logCombatAction(weapon, rolls, total, explosions) {
+    const timestamp = new Date().toLocaleTimeString([], { hour12: false });
+    const explosionStr = explosions > 0 ? `<span class="explosion-text"> (${explosions}x Exploded!)</span>` : '';
+    
+    const entryHTML = `
+        <div class="combat-entry">
+            <div class="timestamp">[${timestamp}] System Fired: ${weapon.name}</div>
+            <div class="roll-data">Base: d${weapon.dice} | Rolls: [${rolls.join('] + [')}]${explosionStr}</div>
+            <div class="total">Output Yield: ${total}</div>
+        </div>
+    `;
+
+    EngineState.vessel.combatLog.unshift(entryHTML); // Add to top
+    
+    // Keep log tidy
+    if (EngineState.vessel.combatLog.length > 20) {
+        EngineState.vessel.combatLog.pop();
+    }
+
+    updateCombatLogUI();
+}
+
+function updateVesselUI() {
+    const list = document.getElementById('weapon-list');
+    list.innerHTML = EngineState.vessel.weapons.map(w => `
+        <div class="weapon-card">
+            <h4>${w.name}</h4>
+            <div class="weapon-stats">
+                <span>Output: <span class="stat-badge">d${w.dice}</span></span>
+                <span>Protocol: <span class="stat-badge" style="color: ${w.exploding ? 'var(--accent-orange)' : 'var(--text-dim)'}">${w.exploding ? 'EXPLODING' : 'STATIC'}</span></span>
+            </div>
+            <button class="btn-roll" onclick="rollWeaponDice('${w.id}')">Execute Firing Sequence</button>
+        </div>
+    `).join('');
+}
+
+function updateCombatLogUI() {
+    document.getElementById('combat-log').innerHTML = EngineState.vessel.combatLog.join('');
+}
+
+// ==========================================
+// RENDER ENGINE (Map Canvas)
 // ==========================================
 function renderLoop() {
+    // Only render canvas if the map view is active to save resources
+    if (!document.getElementById('galaxy-map-view').classList.contains('active')) {
+        requestAnimationFrame(renderLoop);
+        return;
+    }
+
     const ctx = EngineState.ctx;
     
-    // Clear Canvas
     ctx.fillStyle = '#07090f';
     ctx.fillRect(0, 0, EngineState.width, EngineState.height);
     
     ctx.save();
-    // Center camera
     ctx.translate(EngineState.width / 2, EngineState.height / 2);
 
-    // 1. Render Stars
     ctx.fillStyle = '#ffffff';
     EngineState.stars.forEach(star => {
         ctx.beginPath();
@@ -228,15 +328,12 @@ function renderLoop() {
         ctx.fill();
     });
 
-    // 2. Render Territories (The Core Request)
     EngineState.territories.forEach(renderTerritory);
 
-    // 3. Render Active Drawing
     if (EngineState.drawing.vertices.length > 0) {
         renderActiveDrawing();
     }
 
-    // 4. Render Fog of War (Player View)
     if (!EngineState.dmOmniscience) {
         renderFogOfWar();
     }
@@ -250,11 +347,7 @@ function renderTerritory(territory) {
     const ctx = EngineState.ctx;
     
     ctx.beginPath();
-    
     territory.vertices.forEach((v, index) => {
-        // --- DYNAMIC NODE SNAPPING LOGIC ---
-        // If DM is viewing, show true coords.
-        // If Player is viewing, pull unknown coords toward nearest scanned area.
         let renderX = v.x;
         let renderY = v.y;
 
@@ -267,14 +360,10 @@ function renderTerritory(territory) {
         if (index === 0) ctx.moveTo(renderX, renderY);
         else ctx.lineTo(renderX, renderY);
     });
-    
     ctx.closePath();
     
-    // Styling based on faction color
-    // Use defensive parsing to inject alpha channel for fill
-    ctx.fillStyle = `${territory.color}33`; // 20% opacity hex
+    ctx.fillStyle = `${territory.color}33`; 
     ctx.fill();
-    
     ctx.lineWidth = 2;
     ctx.strokeStyle = territory.color;
     ctx.stroke();
@@ -287,26 +376,18 @@ function renderActiveDrawing() {
 
     ctx.beginPath();
     ctx.moveTo(vertices[0].x, vertices[0].y);
-    
-    for (let i = 1; i < vertices.length; i++) {
-        ctx.lineTo(vertices[i].x, vertices[i].y);
-    }
-    
-    if (EngineState.drawing.active && pos) {
-        ctx.lineTo(pos.x, pos.y);
-    }
+    for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
+    if (EngineState.drawing.active && pos) ctx.lineTo(pos.x, pos.y);
     
     ctx.strokeStyle = EngineState.drawing.selectedColor;
     ctx.lineWidth = 2;
-    ctx.setLineDash([5, 5]); // Dashed line for active drawing
+    ctx.setLineDash([5, 5]);
     ctx.stroke();
     ctx.setLineDash([]);
     
-    // Draw Nodes
     ctx.fillStyle = '#ffffff';
     vertices.forEach((v, i) => {
         ctx.beginPath();
-        // Highlight start node to indicate closing the shape
         const radius = (i === 0 && vertices.length > 2) ? 8 : 4;
         if (i === 0 && vertices.length > 2) ctx.fillStyle = '#ff7300';
         ctx.arc(v.x, v.y, radius, 0, Math.PI * 2);
@@ -316,7 +397,6 @@ function renderActiveDrawing() {
 }
 
 function calculateFowSnap(x, y) {
-    // Checks if the vertex falls within ANY deep scan ping.
     let isRevealed = false;
     let closestScan = null;
     let minDistance = Infinity;
@@ -333,8 +413,6 @@ function calculateFowSnap(x, y) {
 
     if (isRevealed) return { x, y };
 
-    // If hidden, calculate vector to pull vertex to the perimeter of the closest scan
-    // This creates the dynamic "snapping" outward as players push their ships further.
     if (closestScan) {
         const angle = Math.atan2(y - closestScan.y, x - closestScan.x);
         return {
@@ -342,17 +420,13 @@ function calculateFowSnap(x, y) {
             y: closestScan.y + Math.sin(angle) * closestScan.radius
         };
     }
-    
-    return { x, y }; // Fallback
+    return { x, y };
 }
 
 function renderFogOfWar() {
     const ctx = EngineState.ctx;
-    
-    // Create a dark overlay that we "punch holes" into using destination-out composite
     ctx.fillStyle = 'rgba(7, 9, 15, 0.95)';
     ctx.fillRect(-EngineState.width, -EngineState.height, EngineState.width * 2, EngineState.height * 2);
-    
     ctx.globalCompositeOperation = 'destination-out';
     
     EngineState.scans.forEach(scan => {
@@ -365,7 +439,6 @@ function renderFogOfWar() {
         ctx.arc(scan.x, scan.y, scan.radius, 0, Math.PI * 2);
         ctx.fill();
     });
-    
     ctx.globalCompositeOperation = 'source-over';
 }
 
