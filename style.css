@@ -6,6 +6,7 @@
     --accent-orange: #ff7300;
     --accent-red: #ff2a2a;
     --accent-green: #00ff66;
+    --accent-yellow: #ffb000;
     --text-main: #e0e6ed;
     --text-dim: #738598;
     --font-heading: 'Trebuchet MS', 'Lucida Sans Unicode', sans-serif;
@@ -75,10 +76,7 @@ body.theme-mass-effect {
     transition: all 0.2s ease;
 }
 
-.nav-tabs li:hover {
-    background-color: rgba(0, 168, 255, 0.1);
-}
-
+.nav-tabs li:hover { background-color: rgba(0, 168, 255, 0.1); }
 .nav-tabs li.active {
     border-left-color: var(--accent-orange);
     background-color: rgba(255, 115, 0, 0.1);
@@ -90,17 +88,18 @@ body.theme-mass-effect {
     border-top: 1px solid rgba(0, 168, 255, 0.3);
 }
 
-/* Main Workspace & Canvas */
+/* Main Workspace & Views */
 #workspace {
     flex-grow: 1;
     position: relative;
     background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4Bg5z4sAAAAABJRU5ErkJggg==') repeat;
 }
 
+/* FIX: Handled visibility entirely via .active instead of hard !important classes */
 .view-container {
     width: 100%;
     height: 100%;
-    display: none;
+    display: none; 
 }
 
 .view-container.active {
@@ -153,6 +152,7 @@ body.theme-mass-effect {
     display: flex;
     flex-direction: column;
     gap: 5px;
+    flex: 1;
 }
 
 .input-group label {
@@ -167,7 +167,7 @@ body.theme-mass-effect {
     gap: 10px;
 }
 
-select, input[type="color"], input[type="text"] {
+select, input[type="color"], input[type="text"], input[type="number"] {
     background: rgba(0, 0, 0, 0.5);
     border: 1px solid var(--text-dim);
     color: var(--text-main);
@@ -175,13 +175,13 @@ select, input[type="color"], input[type="text"] {
     border-radius: 3px;
     outline: none;
     font-family: var(--font-body);
+    width: 100%;
 }
 
 input[type="color"] {
     height: 35px;
-    width: 100%;
-    cursor: pointer;
     padding: 2px;
+    cursor: pointer;
 }
 
 /* Toggle Switch */
@@ -191,9 +191,7 @@ input[type="color"] {
     width: 40px;
     height: 20px;
 }
-
 .toggle-switch input { opacity: 0; width: 0; height: 0; }
-
 .slider {
     position: absolute;
     cursor: pointer;
@@ -202,19 +200,15 @@ input[type="color"] {
     transition: .4s;
     border-radius: 20px;
 }
-
 .slider:before {
     position: absolute;
     content: "";
-    height: 16px;
-    width: 16px;
-    left: 2px;
-    bottom: 2px;
+    height: 16px; width: 16px;
+    left: 2px; bottom: 2px;
     background-color: white;
     transition: .4s;
     border-radius: 50%;
 }
-
 input:checked + .slider { background-color: var(--border-neon); }
 input:checked + .slider:before { transform: translateX(20px); }
 
@@ -232,31 +226,16 @@ button {
     width: 100%;
     margin-bottom: 5px;
 }
-
 button:hover { background: rgba(0, 168, 255, 0.3); }
 
-.button-group {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    margin-top: 10px;
-}
-
+.button-group { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
 .btn-primary { border-color: var(--border-neon); color: var(--border-neon); }
 .btn-success { border-color: var(--accent-green); color: var(--accent-green); background: rgba(0, 255, 102, 0.1); }
 .btn-success:hover { background: rgba(0, 255, 102, 0.3); }
 .btn-danger { border-color: var(--accent-red); color: var(--accent-red); background: rgba(255, 42, 42, 0.1); }
 .btn-danger:hover { background: rgba(255, 42, 42, 0.3); }
 
-#drawing-instructions {
-    margin-top: 10px;
-    font-size: 0.8rem;
-    color: var(--accent-orange);
-    text-align: center;
-    font-style: italic;
-}
-
-/* NEW: Vessel Diagnostics Terminal Layout */
+/* Terminal Layouts (Diagnostics & Battler) */
 .terminal-layout {
     display: grid;
     grid-template-columns: 320px 1fr 350px;
@@ -285,104 +264,151 @@ button:hover { background: rgba(0, 168, 255, 0.3); }
     letter-spacing: 1px;
 }
 
-/* Weapon Grid & Cards */
-.weapon-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+/* Ship Battler Tracker Cards */
+.tracker-list {
+    display: flex;
+    flex-direction: column;
     gap: 15px;
 }
 
+.combatant-card {
+    border: 1px solid var(--text-dim);
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    border-left: 4px solid var(--border-neon);
+    transition: transform 0.2s;
+}
+
+.combatant-card .header {
+    background: rgba(0, 168, 255, 0.1);
+    padding: 10px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(0, 168, 255, 0.2);
+}
+
+.combatant-card .header h4 {
+    color: var(--text-main);
+    font-family: var(--font-heading);
+    font-size: 1.2rem;
+    text-transform: uppercase;
+}
+
+.combatant-card .init-badge {
+    background: var(--border-neon);
+    color: var(--bg-dark);
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 1.1rem;
+}
+
+.combatant-card .body {
+    padding: 15px;
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+
+.health-metrics {
+    display: flex;
+    gap: 15px;
+    flex-grow: 1;
+}
+
+.metric {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    background: rgba(255,255,255,0.05);
+    padding: 5px;
+    border-radius: 3px;
+}
+
+.metric span {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: bold;
+}
+
+.metric .val {
+    font-size: 1.3rem;
+    font-family: monospace;
+}
+
+.metric.shields { border-bottom: 2px solid var(--border-neon); color: var(--border-neon); }
+.metric.armor { border-bottom: 2px solid var(--accent-yellow); color: var(--accent-yellow); }
+.metric.hull { border-bottom: 2px solid var(--accent-red); color: var(--accent-red); }
+
+.damage-controls {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.damage-controls input {
+    width: 60px;
+    text-align: center;
+    font-size: 1rem;
+    padding: 5px;
+}
+
+/* Standby Roster List */
+.roster-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.roster-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid var(--text-dim);
+    padding: 10px;
+}
+.roster-item .name { font-weight: bold; color: var(--text-main); }
+.roster-item button { width: auto; margin: 0; padding: 4px 8px; }
+
+/* Weapon Grid & Cards (Diagnostics) */
+.weapon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
 .weapon-card {
     border: 1px solid var(--text-dim);
     padding: 15px;
     background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: flex; flex-direction: column; gap: 10px;
     border-left: 3px solid var(--accent-orange);
-    transition: border-color 0.2s;
 }
+.weapon-card h4 { color: var(--text-main); text-transform: uppercase; font-family: var(--font-heading); font-size: 1.1rem; }
+.weapon-stats { font-size: 0.85rem; color: var(--text-dim); display: flex; justify-content: space-between; }
+.stat-badge { background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: var(--border-neon); font-weight: bold; }
+.btn-roll { margin-top: 10px; background: rgba(255, 115, 0, 0.1); border-color: var(--accent-orange); color: var(--accent-orange); }
+.btn-roll:hover { background: rgba(255, 115, 0, 0.3); }
 
-.weapon-card:hover {
-    border-left-color: var(--border-neon);
-    border-color: rgba(0, 168, 255, 0.5);
-}
-
-.weapon-card h4 {
-    color: var(--text-main);
-    text-transform: uppercase;
-    font-family: var(--font-heading);
-    font-size: 1.1rem;
-}
-
-.weapon-stats {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    display: flex;
-    justify-content: space-between;
-}
-
-.stat-badge {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 2px 6px;
-    border-radius: 3px;
-    color: var(--border-neon);
-    font-weight: bold;
-}
-
-.btn-roll {
-    margin-top: 10px;
-    background: rgba(255, 115, 0, 0.1);
-    border-color: var(--accent-orange);
-    color: var(--accent-orange);
-}
-
-.btn-roll:hover {
-    background: rgba(255, 115, 0, 0.3);
-}
-
-/* Combat Log */
-.log-container {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
+/* Shared Combat Log */
+.log-container { display: flex; flex-direction: column; gap: 10px; }
 .combat-entry {
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(0, 168, 255, 0.2);
     padding: 12px;
-    font-family: monospace;
-    font-size: 0.9rem;
+    font-family: monospace; font-size: 0.9rem;
     border-left: 3px solid var(--accent-green);
     animation: fadeIn 0.3s ease-out;
 }
-
-.combat-entry .timestamp {
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    margin-bottom: 5px;
-}
-
-.combat-entry .roll-data {
-    color: var(--text-main);
-    margin-bottom: 5px;
-}
-
-.combat-entry .explosion-text {
-    color: var(--accent-orange);
-    font-weight: bold;
-}
-
+.combat-entry .timestamp { color: var(--text-dim); font-size: 0.8rem; margin-bottom: 5px; }
+.combat-entry .roll-data { color: var(--text-main); margin-bottom: 5px; }
+.combat-entry .explosion-text { color: var(--accent-orange); font-weight: bold; }
 .combat-entry .total {
-    color: var(--accent-green);
-    font-size: 1.2rem;
-    font-weight: bold;
-    text-align: right;
-    border-top: 1px dashed rgba(0, 255, 102, 0.3);
-    padding-top: 5px;
-    margin-top: 5px;
+    color: var(--accent-green); font-size: 1.2rem; font-weight: bold;
+    text-align: right; border-top: 1px dashed rgba(0, 255, 102, 0.3);
+    padding-top: 5px; margin-top: 5px;
 }
+.combat-entry.damage-event { border-left-color: var(--accent-red); }
+.combat-entry.damage-event .total { color: var(--accent-red); border-top-color: rgba(255, 42, 42, 0.3); }
 
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(-5px); }
