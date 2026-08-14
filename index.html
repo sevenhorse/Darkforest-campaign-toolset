@@ -531,7 +531,7 @@
                 <div id="combat-tracker-body"></div>
             </div>
 
-            <!-- OVERHAULED: DM OPERATIONS (MAP EDITOR) PANEL WITH SUB-TABS -->
+            <!-- RESTORED: DM OPERATIONS (MAP EDITOR) PANEL WITH SEPARATE SUB-TABS -->
             <div id="dm-tools" class="panel">
                 <div id="dm-tools-header" class="panel-header-drag">
                     <h4 style="margin:0;">DM Operations (Map Editor)</h4>
@@ -545,8 +545,8 @@
                     <button class="hud-tab-btn" id="dm-subtab-btn-maint" onclick="window.switchDmSubtab('maint')">⚙️ MAINT</button>
                 </div>
 
-                <!-- SUB-TAB 1: SPAWNING -->
-                <div id="dm-panel-spawn" class="term-panel-content active">
+                <!-- SUB-TAB 1: SPAWN SYSTEMS & FLEETS -->
+                <div id="dm-panel-spawn" class="dm-subpanel active">
                     <p style="font-size: 9px; color: #00e5a3; margin-top:0;">Tip: Drag and drop custom stars or ships directly on map.</p>
                     <label style="font-size: 10px; color: #6b826a;">New Asset / Star / Fleet Name:</label>
                     <input type="text" id="dm-tool-name" value="Sol Prime">
@@ -576,28 +576,26 @@
                         </select>
                     </div>
                     
-                    <button class="btn-deploy" onclick="window.spawnStarSystemAtCenter()">⭐ SPAWN STAR SYSTEM</button>
-                    <button class="btn-deploy" onclick="window.spawnTokenAtCenter()">🚀 SPAWN FLEET TOKEN</button>
+                    <button class="btn-deploy" onclick="window.spawnStarSystemAtCenter()">SPAWN STAR SYSTEM</button>
+                    <button class="btn-deploy" onclick="window.spawnTokenAtCenter()">SPAWN FLEET TOKEN</button>
                 </div>
 
-                <!-- SUB-TAB 2: MAP & TERRITORY TOOLS -->
-                <div id="dm-panel-map" class="term-panel-content">
-                    <p style="font-size: 9px; color: #6b826a; margin-top:0;">Sector Cartography & Territorial Sovereignty Controls.</p>
-                    
+                <!-- SUB-TAB 2: MAP TOOLS & BORDERS -->
+                <div id="dm-panel-map" class="dm-subpanel">
+                    <p style="font-size: 9px; color: #6b826a; margin-top:0;">Cartography & Sovereignty Controls.</p>
                     <button class="btn-reveal" onclick="window.toggleTerritoryTool()" style="margin-top: 4px;">🗺️ OPEN TERRITORY PLOTTER</button>
-                    <button class="btn-reveal" onclick="window.toggleHyperlanes()" style="margin-top: 6px;">⚡ TOGGLE HYPERLANE TRADE ROUTES</button>
+                    <button class="btn-reveal" onclick="window.toggleHyperlanes()" style="margin-top: 6px;">⚡ TOGGLE HYPERLANE ROUTES</button>
                     <button class="btn-reveal" onclick="window.toggleMeasuringTool()" style="margin-top: 6px;">📏 ACTIVATE TACTICAL RULER</button>
                 </div>
 
-                <!-- SUB-TAB 3: MAINTENANCE & SLATE WIPING -->
-                <div id="dm-panel-maint" class="term-panel-content">
+                <!-- SUB-TAB 3: MAINTENANCE & EMERGENCY -->
+                <div id="dm-panel-maint" class="dm-subpanel">
                     <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Emergency Maintenance & Data Sanitization.</p>
-                    
                     <button class="btn-remove" onclick="window.resetTimeline()">⏳ RESET IN-UNIVERSE TIMELINE</button>
                     <button class="btn-remove" onclick="window.resetUiLayout()" style="margin-top: 6px;">🖥️ RESET LOCAL UI POSITIONS</button>
                     
                     <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #ff3333;">Critical Emergency Wipe</h4>
-                    <button class="btn-wipe" onclick="window.wipeGalaxySlate()">⚠️ WIPE GALAXY SLATE</button>
+                    <button class="btn-wipe" onclick="window.wipeGalaxySlate()">WIPE GALAXY SLATE</button>
                 </div>
             </div>
 
