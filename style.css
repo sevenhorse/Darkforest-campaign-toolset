@@ -94,6 +94,7 @@ body.theme-mass-effect {
 #workspace {
     flex-grow: 1;
     position: relative;
+    background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4Bg5z4sAAAAABJRU5ErkJggg==') repeat;
 }
 
 .view-container {
@@ -146,6 +147,7 @@ body.theme-mass-effect {
     padding-bottom: 5px;
 }
 
+/* Forms & Inputs */
 .input-group {
     margin-bottom: 12px;
     display: flex;
@@ -159,20 +161,62 @@ body.theme-mass-effect {
     text-transform: uppercase;
 }
 
-select, input[type="color"] {
+.row-align {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+
+select, input[type="color"], input[type="text"] {
     background: rgba(0, 0, 0, 0.5);
     border: 1px solid var(--text-dim);
     color: var(--text-main);
-    padding: 6px;
+    padding: 8px;
     border-radius: 3px;
     outline: none;
+    font-family: var(--font-body);
 }
 
 input[type="color"] {
     height: 35px;
     width: 100%;
     cursor: pointer;
+    padding: 2px;
 }
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 20px;
+}
+
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: var(--text-dim);
+    transition: .4s;
+    border-radius: 20px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider { background-color: var(--border-neon); }
+input:checked + .slider:before { transform: translateX(20px); }
 
 /* Buttons */
 button {
@@ -189,9 +233,7 @@ button {
     margin-bottom: 5px;
 }
 
-button:hover {
-    background: rgba(0, 168, 255, 0.3);
-}
+button:hover { background: rgba(0, 168, 255, 0.3); }
 
 .button-group {
     display: flex;
@@ -201,8 +243,10 @@ button:hover {
 }
 
 .btn-primary { border-color: var(--border-neon); color: var(--border-neon); }
-.btn-success { border-color: var(--accent-green); color: var(--accent-green); }
-.btn-danger { border-color: var(--accent-red); color: var(--accent-red); }
+.btn-success { border-color: var(--accent-green); color: var(--accent-green); background: rgba(0, 255, 102, 0.1); }
+.btn-success:hover { background: rgba(0, 255, 102, 0.3); }
+.btn-danger { border-color: var(--accent-red); color: var(--accent-red); background: rgba(255, 42, 42, 0.1); }
+.btn-danger:hover { background: rgba(255, 42, 42, 0.3); }
 
 #drawing-instructions {
     margin-top: 10px;
@@ -210,6 +254,139 @@ button:hover {
     color: var(--accent-orange);
     text-align: center;
     font-style: italic;
+}
+
+/* NEW: Vessel Diagnostics Terminal Layout */
+.terminal-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr 350px;
+    gap: 20px;
+    height: 100%;
+    padding: 20px;
+    background: radial-gradient(circle at center, var(--bg-dark) 0%, #030408 100%);
+}
+
+.terminal-sidebar, .terminal-main, .terminal-log {
+    background: rgba(10, 15, 25, 0.85);
+    border: 1px solid rgba(0, 168, 255, 0.4);
+    border-radius: 4px;
+    padding: 20px;
+    overflow-y: auto;
+    box-shadow: inset 0 0 20px rgba(0, 168, 255, 0.05);
+}
+
+.terminal-layout h3 {
+    font-family: var(--font-heading);
+    color: var(--border-neon);
+    text-transform: uppercase;
+    border-bottom: 1px solid rgba(0, 168, 255, 0.3);
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+    letter-spacing: 1px;
+}
+
+/* Weapon Grid & Cards */
+.weapon-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 15px;
+}
+
+.weapon-card {
+    border: 1px solid var(--text-dim);
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-left: 3px solid var(--accent-orange);
+    transition: border-color 0.2s;
+}
+
+.weapon-card:hover {
+    border-left-color: var(--border-neon);
+    border-color: rgba(0, 168, 255, 0.5);
+}
+
+.weapon-card h4 {
+    color: var(--text-main);
+    text-transform: uppercase;
+    font-family: var(--font-heading);
+    font-size: 1.1rem;
+}
+
+.weapon-stats {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+}
+
+.stat-badge {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--border-neon);
+    font-weight: bold;
+}
+
+.btn-roll {
+    margin-top: 10px;
+    background: rgba(255, 115, 0, 0.1);
+    border-color: var(--accent-orange);
+    color: var(--accent-orange);
+}
+
+.btn-roll:hover {
+    background: rgba(255, 115, 0, 0.3);
+}
+
+/* Combat Log */
+.log-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.combat-entry {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(0, 168, 255, 0.2);
+    padding: 12px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    border-left: 3px solid var(--accent-green);
+    animation: fadeIn 0.3s ease-out;
+}
+
+.combat-entry .timestamp {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    margin-bottom: 5px;
+}
+
+.combat-entry .roll-data {
+    color: var(--text-main);
+    margin-bottom: 5px;
+}
+
+.combat-entry .explosion-text {
+    color: var(--accent-orange);
+    font-weight: bold;
+}
+
+.combat-entry .total {
+    color: var(--accent-green);
+    font-size: 1.2rem;
+    font-weight: bold;
+    text-align: right;
+    border-top: 1px dashed rgba(0, 255, 102, 0.3);
+    padding-top: 5px;
+    margin-top: 5px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Utility Classes */
