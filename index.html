@@ -19,6 +19,7 @@
         
         <ul class="nav-tabs">
             <li class="active" data-target="galaxy-map-view">Galaxy Map Engine</li>
+            <li data-target="vessel-diagnostics-view">Vessel Diagnostics</li>
             <li data-target="chronology-view">Chronology Engine</li>
             <li data-target="arsenal-view">Character & Arsenal</li>
             <li data-target="fleet-view">Fleet Manifests</li>
@@ -49,7 +50,7 @@
                     <button id="tool-deep-scan">Execute Deep Scan (-6hrs)</button>
                 </div>
 
-                <!-- NEW: Territory Editor Panel -->
+                <!-- Territory Editor Panel -->
                 <div class="territory-editor collapsible-panel dm-only">
                     <h3>Territory Borders</h3>
                     <div class="input-group">
@@ -75,6 +76,55 @@
 
             <!-- Canvas Engine -->
             <canvas id="galaxy-canvas"></canvas>
+        </div>
+
+        <!-- NEW: Vessel Diagnostics View -->
+        <div id="vessel-diagnostics-view" class="view-container hidden">
+            <div class="terminal-layout">
+                <!-- Sidebar: System Mounting -->
+                <div class="terminal-sidebar">
+                    <h3>System Architecture</h3>
+                    <div class="input-group">
+                        <label>Weapon Name</label>
+                        <input type="text" id="new-weapon-name" placeholder="e.g. Kinetic Mass Driver">
+                    </div>
+                    <div class="input-group">
+                        <label>Dice Tier</label>
+                        <select id="new-weapon-dice">
+                            <option value="4">d4</option>
+                            <option value="6">d6</option>
+                            <option value="8">d8</option>
+                            <option value="10">d10</option>
+                            <option value="12">d12</option>
+                            <option value="20">d20</option>
+                        </select>
+                    </div>
+                    <div class="input-group row-align">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="new-weapon-explode" checked>
+                            <span class="slider"></span>
+                        </label>
+                        <span>Exploding Dice Protocol</span>
+                    </div>
+                    <button id="btn-mount-weapon" class="btn-success" style="margin-top: 15px;">Mount Weapon System</button>
+                </div>
+                
+                <!-- Main: Active Armaments -->
+                <div class="terminal-main">
+                    <h3>Active Armaments</h3>
+                    <div id="weapon-list" class="weapon-grid">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+                
+                <!-- Log: Combat Tracker -->
+                <div class="terminal-log">
+                    <h3>Tactical Combat Log</h3>
+                    <div id="combat-log" class="log-container">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Other Views (Stubbed for Architecture) -->
