@@ -1,7 +1,7 @@
 body { 
     margin: 0; background-color: #030406; color: #d4c5a9; 
     font-family: 'Courier New', Courier, Consolas, monospace; 
-    overflow: hidden; height: 100vh;
+    overflow: hidden; height: 100vh; width: 100vw;
 }
 
 /* --- TACTICAL CRT & BSG STYLING --- */
@@ -13,8 +13,8 @@ body {
 
 .panel {
     background: rgba(8, 12, 16, 0.95); border: 1px solid #3c4e36;
-    border-radius: 2px; padding: 18px; box-shadow: 0 0 15px rgba(0, 229, 163, 0.05), inset 0 0 8px rgba(0,0,0,0.8);
-    text-align: left; position: absolute; z-index: 10;
+    border-radius: 2px; padding: 16px; box-shadow: 0 0 15px rgba(0, 229, 163, 0.05), inset 0 0 8px rgba(0,0,0,0.8);
+    text-align: left; position: absolute; z-index: 10; box-sizing: border-box;
 }
 
 .panel-header-drag {
@@ -53,36 +53,44 @@ button:hover { background: #00e5a3; color: #030406; border-color: #ffffff; box-s
 
 .error-msg { color: #ff3333; font-size: 12px; margin-top: 10px; display: none; }
 
-#app-container { display: none; width: 100%; height: 100vh; position: absolute; top: 0; left: 0; flex-direction: column; }
+#app-container { 
+    display: none; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; 
+    flex-direction: column; overflow: hidden; 
+}
+
 #top-bar { 
     background: #060907; border-bottom: 2px solid #3c4e36; 
-    padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; 
-    z-index: 20; height: 50px; box-sizing: border-box;
+    padding: 0 15px; display: flex; justify-content: space-between; align-items: center; 
+    z-index: 20; height: 50px; min-height: 50px; box-sizing: border-box;
+    overflow-x: auto; overflow-y: hidden; white-space: nowrap; gap: 15px;
 }
+
 .role-badge { 
     background: #0a1410; padding: 4px 10px; border-radius: 2px; border: 1px solid #3c4e36;
     font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #00e5a3;
+    white-space: nowrap;
 }
 .role-dm { background: #3d0c0c; color: #ff6b6b; border-color: #ff3333; }
 
 #canvas-wrapper {
-    position: relative; flex-grow: 1; overflow: hidden;
+    position: relative; flex-grow: 1; width: 100%; height: calc(100vh - 50px); overflow: hidden;
     box-shadow: inset 0 0 80px rgba(0, 229, 163, 0.05);
 }
-#canvas-container { width: 100%; height: 100%; position: relative; background: #010201; cursor: grab; }
+#canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: #010201; cursor: grab; }
 #canvas-container:active { cursor: grabbing; }
 canvas { display: block; width: 100%; height: 100%; }
 
-#hud-overlay { top: 20px; left: 20px; width: 360px; max-height: 82vh; overflow-y: auto; }
-#combat-tracker-panel { top: 20px; right: 20px; width: 340px; max-height: 45vh; overflow-y: auto; display: none; }
-#dm-tools { top: 380px; right: 20px; width: 360px; display: none; max-height: 62vh; overflow-y: auto; }
-#comms-array-panel { top: 60px; right: 380px; width: 320px; display: none; }
-#calendar-control-panel { top: 120px; right: 20px; width: 320px; display: none; z-index: 15; }
-#dm-scratchpad-panel { top: 380px; left: 20px; width: 320px; display: none; z-index: 15; }
-#territory-control-panel { top: 60px; left: 400px; width: 340px; display: none; z-index: 18; }
+/* --- DRAGGABLE PANELS DEFAULT POSITIONS --- */
+#hud-overlay { top: 20px; left: 20px; width: 340px; max-height: 80vh; overflow-y: auto; }
+#combat-tracker-panel { top: 20px; right: 20px; width: 320px; max-height: 45vh; overflow-y: auto; display: none; }
+#dm-tools { top: 340px; right: 20px; width: 340px; display: none; max-height: 55vh; overflow-y: auto; }
+#comms-array-panel { top: 20px; right: 360px; width: 320px; display: none; }
+#calendar-control-panel { top: 80px; right: 20px; width: 320px; display: none; z-index: 15; }
+#dm-scratchpad-panel { top: 340px; left: 20px; width: 320px; display: none; z-index: 15; }
+#territory-control-panel { top: 20px; left: 380px; width: 340px; display: none; z-index: 18; }
 
 #bottom-right-presence {
-    position: fixed; bottom: 20px; right: 20px; z-index: 25; width: 280px; max-height: 180px; overflow-y: auto;
+    position: fixed; bottom: 20px; right: 20px; z-index: 25; width: 260px; max-height: 160px; overflow-y: auto;
 }
 
 /* MASS EFFECT VERTICAL TERMINAL LAYOUT */
@@ -126,12 +134,9 @@ canvas { display: block; width: 100%; height: 100%; }
 .term-tab-btn-vert.active .tab-badge { background: #00e5a3; }
 #term-tab-btn-codex.active .tab-badge { background: #ff3333; }
 
-.cargo-subtabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #3c4e36; padding-bottom: 6px; }
-.cargo-subtab-btn { background: #040605; border: 1px solid #3c4e36; color: #6b826a; padding: 6px 12px; font-size: 10px; cursor: pointer; text-transform: uppercase; }
+.cargo-subtabs, .codex-subtabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #3c4e36; padding-bottom: 6px; }
+.cargo-subtab-btn, .codex-subtab-btn { background: #040605; border: 1px solid #3c4e36; color: #6b826a; padding: 6px 12px; font-size: 10px; cursor: pointer; text-transform: uppercase; }
 .cargo-subtab-btn.active { background: #0a261a; border-color: #00e5a3; color: #00e5a3; font-weight: bold; }
-
-.codex-subtabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #3c4e36; padding-bottom: 6px; }
-.codex-subtab-btn { background: #040605; border: 1px solid #3c4e36; color: #6b826a; padding: 6px 12px; font-size: 10px; cursor: pointer; text-transform: uppercase; }
 .codex-subtab-btn.active { background: #3d0c0c; border-color: #ff3333; color: #ff6b6b; font-weight: bold; }
 
 .term-panel-content { display: none; animation: fadeIn 0.3s; }
@@ -139,11 +144,11 @@ canvas { display: block; width: 100%; height: 100%; }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-.sync-indicator { font-size: 10px; color: #00e5a3; text-transform: uppercase; letter-spacing: 1px; margin-left: 10px; }
+.sync-indicator { font-size: 10px; color: #00e5a3; text-transform: uppercase; letter-spacing: 1px; margin-left: 5px; }
 
 .btn-reveal { background: #0a261a; border-color: #00e5a3; color: #00e5a3; }
 .btn-reveal:hover { background: #00e5a3; color: #030406; }
-.btn-deploy { background: #1a1a2e; border-color: #4a7ab5; color: #a2c4f5; margin-top: 10px;}
+.btn-deploy { background: #1a1a2e; border-color: #4a7ab5; color: #a2c4f5; margin-top: 10px; }
 .btn-deploy:hover { background: #4a7ab5; color: #030406; }
 .btn-remove { background: #3d0c0c; border-color: #ff3333; color: #ffaaaa; margin-top: 10px; }
 .btn-remove:hover { background: #ff3333; color: #030406; }
@@ -179,5 +184,5 @@ canvas { display: block; width: 100%; height: 100%; }
 }
 .search-result-item:hover { background: #0a1410; color: #00e5a3; }
 
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: #3c4e36; border-radius: 3px; }
