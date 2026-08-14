@@ -19,6 +19,7 @@
         
         <ul class="nav-tabs">
             <li class="active" data-target="galaxy-map-view">Galaxy Map Engine</li>
+            <li data-target="ship-battler-view">Tactical Ship Battler</li>
             <li data-target="vessel-diagnostics-view">Vessel Diagnostics</li>
             <li data-target="chronology-view">Chronology Engine</li>
             <li data-target="arsenal-view">Character & Arsenal</li>
@@ -40,8 +41,6 @@
     <main id="workspace">
         <!-- Map View -->
         <div id="galaxy-map-view" class="view-container active">
-            
-            <!-- Map Overlay UI -->
             <div class="map-overlay-ui">
                 <div class="tactical-tools collapsible-panel">
                     <h3>Tactical Tools</h3>
@@ -50,7 +49,6 @@
                     <button id="tool-deep-scan">Execute Deep Scan (-6hrs)</button>
                 </div>
 
-                <!-- Territory Editor Panel -->
                 <div class="territory-editor collapsible-panel dm-only">
                     <h3>Territory Borders</h3>
                     <div class="input-group">
@@ -59,29 +57,87 @@
                             <option value="" disabled selected>Loading Factions...</option>
                         </select>
                     </div>
-                    
                     <div class="input-group">
                         <label for="territory-color">Border & Fill Color:</label>
                         <input type="color" id="territory-color" value="#00e5ff">
                     </div>
-
                     <div class="button-group">
                         <button id="btn-draw-territory" class="btn-primary">Draw Polygon</button>
                         <button id="btn-save-territory" class="btn-success hidden">Save Territory</button>
                         <button id="btn-cancel-territory" class="btn-danger hidden">Cancel</button>
                     </div>
-                    <p id="drawing-instructions" class="hidden">Click map to drop vertices. Click starting node to close shape.</p>
+                    <p id="drawing-instructions" class="hidden">Click map to drop vertices. Click start node to close shape.</p>
                 </div>
             </div>
-
-            <!-- Canvas Engine -->
             <canvas id="galaxy-canvas"></canvas>
         </div>
 
-        <!-- NEW: Vessel Diagnostics View -->
-        <div id="vessel-diagnostics-view" class="view-container hidden">
+        <!-- NEW: Tactical Ship Battler -->
+        <div id="ship-battler-view" class="view-container">
             <div class="terminal-layout">
-                <!-- Sidebar: System Mounting -->
+                <!-- Sidebar: Unit Spawner & Standby Roster -->
+                <div class="terminal-sidebar">
+                    <h3>Deploy Combatant</h3>
+                    <div class="input-group">
+                        <label>Unit Callsign / Class</label>
+                        <input type="text" id="battler-name" placeholder="e.g. Pirate Frigate">
+                    </div>
+                    <div class="input-group">
+                        <label>Pilot Modifier (Init Bonus)</label>
+                        <input type="number" id="battler-mod" value="0">
+                    </div>
+                    
+                    <div class="health-inputs" style="display: flex; gap: 10px;">
+                        <div class="input-group">
+                            <label style="color: #00a8ff;">Shields</label>
+                            <input type="number" id="battler-shields" value="50">
+                        </div>
+                        <div class="input-group">
+                            <label style="color: #ffb000;">Armor</label>
+                            <input type="number" id="battler-armor" value="50">
+                        </div>
+                        <div class="input-group">
+                            <label style="color: #ff2a2a;">Hull</label>
+                            <input type="number" id="battler-hull" value="100">
+                        </div>
+                    </div>
+
+                    <div class="input-group row-align" style="margin-top: 10px;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="battler-save-template">
+                            <span class="slider"></span>
+                        </label>
+                        <span>Save to Standby Roster</span>
+                    </div>
+                    <button id="btn-deploy-unit" class="btn-success" style="margin-top: 10px;">Roll Init & Deploy</button>
+
+                    <h3 style="margin-top: 30px;">Standby Roster</h3>
+                    <div id="standby-roster" class="roster-list">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+                
+                <!-- Main: Initiative Tracker -->
+                <div class="terminal-main">
+                    <h3>Initiative Tracker</h3>
+                    <div id="initiative-tracker" class="tracker-list">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+                
+                <!-- Log: Shared Combat Log -->
+                <div class="terminal-log">
+                    <h3>Tactical Combat Log</h3>
+                    <div id="battler-combat-log" class="log-container">
+                        <!-- Syncs with Vessel Diagnostics Log via JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vessel Diagnostics View -->
+        <div id="vessel-diagnostics-view" class="view-container">
+            <div class="terminal-layout">
                 <div class="terminal-sidebar">
                     <h3>System Architecture</h3>
                     <div class="input-group">
@@ -109,29 +165,23 @@
                     <button id="btn-mount-weapon" class="btn-success" style="margin-top: 15px;">Mount Weapon System</button>
                 </div>
                 
-                <!-- Main: Active Armaments -->
                 <div class="terminal-main">
                     <h3>Active Armaments</h3>
-                    <div id="weapon-list" class="weapon-grid">
-                        <!-- Populated dynamically via JS -->
-                    </div>
+                    <div id="weapon-list" class="weapon-grid"></div>
                 </div>
                 
-                <!-- Log: Combat Tracker -->
                 <div class="terminal-log">
                     <h3>Tactical Combat Log</h3>
-                    <div id="combat-log" class="log-container">
-                        <!-- Populated dynamically via JS -->
-                    </div>
+                    <div id="vessel-combat-log" class="log-container"></div>
                 </div>
             </div>
         </div>
         
         <!-- Other Views (Stubbed for Architecture) -->
-        <div id="chronology-view" class="view-container hidden"><h2>Chronology Engine</h2></div>
-        <div id="arsenal-view" class="view-container hidden"><h2>Terminal Loading...</h2></div>
-        <div id="fleet-view" class="view-container hidden"><h2>Manifest Active</h2></div>
-        <div id="codex-view" class="view-container hidden"><h2>Archive Accessible</h2></div>
+        <div id="chronology-view" class="view-container"><h2>Chronology Engine</h2></div>
+        <div id="arsenal-view" class="view-container"><h2>Terminal Loading...</h2></div>
+        <div id="fleet-view" class="view-container"><h2>Manifest Active</h2></div>
+        <div id="codex-view" class="view-container"><h2>Archive Accessible</h2></div>
     </main>
 
     <script src="js/main.js"></script>
