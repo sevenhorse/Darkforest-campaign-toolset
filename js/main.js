@@ -14,7 +14,7 @@ try {
         console.warn("Intrepid Horizon: Cloud CDN unreachable. Defaulting to Local Memory Mode.");
     }
 } catch (err) {
-    console.error("Intrepid Horizon: Cloud initialization bypassed to prevent soft-lock.", err);
+    console.error("Intrepid Horizon: Cloud initialization bypassed.", err);
 }
 
 // Global State Machine
@@ -22,7 +22,7 @@ const EngineState = {
     isDM: true,
     dmOmniscience: true,
     factions: [], territories: [], stars: [],
-    scans: [ { x: 300, y: -200, radius: 400 } ], // Mock starting scan
+    scans: [ { x: 300, y: -200, radius: 400 } ], 
     
     drawing: { active: false, vertices: [], mousePos: null, selectedFaction: null, selectedColor: '#00e5ff' },
     vessel: { weapons: [] },
@@ -72,7 +72,10 @@ function bindNavigation() {
             const targetId = clickedTab.dataset.target;
             document.getElementById(targetId).classList.add('active');
             
-            if (targetId === 'galaxy-map-view') resizeCanvas();
+            if (targetId === 'galaxy-map-view') {
+                // Waits for CSS to render the block before measuring for canvas resize
+                requestAnimationFrame(() => resizeCanvas());
+            }
         });
     });
 }
@@ -81,10 +84,11 @@ function resizeCanvas() {
     const canvas = document.getElementById('galaxy-canvas');
     if (!canvas) return;
     
-    // Absolute bounds fallback prevents 0px CSS height collapse
     const rect = canvas.parentElement.getBoundingClientRect();
-    canvas.width = rect.width || window.innerWidth - 300; 
-    canvas.height = rect.height || window.innerHeight;
+    if (rect.width === 0 || rect.height === 0) return; // Prevent 0-collapse if tab is hidden
+    
+    canvas.width = rect.width; 
+    canvas.height = rect.height;
     
     EngineState.width = canvas.width;
     EngineState.height = canvas.height;
@@ -111,17 +115,12 @@ function bindUIEvents() {
     // Map Toggles
     document.getElementById('dm-omniscience-toggle').addEventListener('change', (e) => EngineState.dmOmniscience = e.target.checked);
     
-    // Tactical Tools (Now fully wired up to prove JS is alive)
-    document.getElementById('tool-measure').addEventListener('click', () => {
-        alert("Tactical Ruler: Slated for upcoming hyperlane deployment.");
-    });
-    document.getElementById('tool-ping').addEventListener('click', () => {
-        alert("Broadcast Ping: Sector-wide comms online. Feature pending.");
-    });
+    // Tactical Tools (Now fully responsive)
+    document.getElementById('tool-measure').addEventListener('click', () => { alert("Tactical Ruler online. Plotting tools pending."); });
+    document.getElementById('tool-ping').addEventListener('click', () => { alert("Broadcast Ping: Comms active."); });
     document.getElementById('tool-deep-scan').addEventListener('click', () => {
-        // Drops a real scan into the Fog of War array at the center!
         EngineState.scans.push({ x: 0, y: 0, radius: 600 });
-        alert("Deep Scan Executed. Clock advanced 6 hours. Fog of War pushed back.");
+        alert("Deep Scan Executed. Map cleared around (0,0).");
     });
 
     // Territory Editor
@@ -164,7 +163,7 @@ function deployCombatant(templateData = null) {
     }
 
     const initiative = Math.floor(Math.random() * 20) + 1 + data.mod;
-    const combatant = { id: 'c_' + Date.now(), name: data.name, initiative, shields: data.shields, armor: data.armor, hull: data.hull };
+    const combatant = { id: 'c_' + Date.now() + Math.floor(Math.random()*100), name: data.name, initiative, shields: data.shields, armor: data.armor, hull: data.hull };
     EngineState.battler.combatants.push(combatant);
     sortAndRenderTracker();
     logCombatAction(`Deployed [${combatant.name}]`, `Init Roll: d20 + Mod(${data.mod})`, initiative, 'event');
@@ -291,11 +290,21 @@ function bindCanvasEvents(canvas) {
         const rect = canvas.getBoundingClientRect();
         EngineState.drawing.mousePos = { x: e.clientX - rect.left - EngineState.width / 2, y: e.clientY - rect.top - EngineState.height / 2 };
     });
-    canvas.addEventListener('click', () => {
+    
+    canvas.addEventListener('click', (e) => {
         if (!EngineState.drawing.active) return;
-        const pos = EngineState.drawing.mousePos; const startNode = EngineState.drawing.vertices[0];
-        if (startNode && Math.hypot(pos.x - startNode.x, pos.y - startNode.y) < 20 && EngineState.drawing.vertices.length > 2) { finishDrawing(); } 
-        else { EngineState.drawing.vertices.push({ x: pos.x, y: pos.y }); }
+        
+        // Instant coordinate calculation prevents null-click crash
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left - EngineState.width / 2;
+        const clickY = e.clientY - rect.top - EngineState.height / 2;
+        
+        const startNode = EngineState.drawing.vertices[0];
+        if (startNode && Math.hypot(clickX - startNode.x, clickY - startNode.y) < 20 && EngineState.drawing.vertices.length > 2) { 
+            finishDrawing(); 
+        } else { 
+            EngineState.drawing.vertices.push({ x: clickX, y: clickY }); 
+        }
     });
 }
 function startDrawing() { EngineState.drawing.active = true; EngineState.drawing.vertices = []; document.getElementById('btn-draw-territory').classList.add('hidden'); document.getElementById('btn-cancel-territory').classList.remove('hidden'); document.getElementById('drawing-instructions').classList.remove('hidden'); }
@@ -345,6 +354,7 @@ function renderTerritory(territory) {
     ctx.fillStyle = `${territory.color}33`; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = territory.color; ctx.stroke();
 }
+
 function renderActiveDrawing() {
     const ctx = EngineState.ctx; const vertices = EngineState.drawing.vertices; const pos = EngineState.drawing.mousePos;
     ctx.beginPath(); ctx.moveTo(vertices[0].x, vertices[0].y);
@@ -359,6 +369,7 @@ function renderActiveDrawing() {
         ctx.arc(v.x, v.y, radius, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#ffffff';
     });
 }
+
 function calculateFowSnap(x, y) {
     let isRevealed = false; let closestScan = null; let minDistance = Infinity;
     EngineState.scans.forEach(scan => {
@@ -373,6 +384,7 @@ function calculateFowSnap(x, y) {
     }
     return { x, y };
 }
+
 function renderFogOfWar() {
     const ctx = EngineState.ctx;
     ctx.fillStyle = 'rgba(7, 9, 15, 0.95)';
@@ -386,4 +398,11 @@ function renderFogOfWar() {
     ctx.globalCompositeOperation = 'source-over';
 }
 
-window.onload = initEngine;
+// Global scope mapping for inline HTML handlers
+window.deployFromTemplate = deployFromTemplate;
+window.applyDamage = applyDamage;
+window.removeCombatant = removeCombatant;
+window.rollWeaponDice = rollWeaponDice;
+
+// Boot instantly on HTML parse completion
+document.addEventListener('DOMContentLoaded', initEngine);
