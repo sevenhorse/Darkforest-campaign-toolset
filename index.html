@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Intrepid Horizon // Overseer Terminal</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Supabase CDN -->
+    <!-- Supabase CDN (Safe Load) -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="theme-mass-effect">
@@ -44,9 +44,9 @@
             <div class="map-overlay-ui">
                 <div class="tactical-tools collapsible-panel">
                     <h3>Tactical Tools</h3>
-                    <button id="tool-measure">Ruler</button>
+                    <button id="tool-measure">Ruler / Vector Plot</button>
                     <button id="tool-ping">Broadcast Ping</button>
-                    <button id="tool-deep-scan">Execute Deep Scan (-6hrs)</button>
+                    <button id="tool-deep-scan" class="btn-success">Execute Deep Scan (-6hrs)</button>
                 </div>
 
                 <div class="territory-editor collapsible-panel dm-only">
@@ -69,13 +69,16 @@
                     <p id="drawing-instructions" class="hidden">Click map to drop vertices. Click start node to close shape.</p>
                 </div>
             </div>
-            <canvas id="galaxy-canvas"></canvas>
+            
+            <!-- Canvas Container -->
+            <div id="canvas-wrapper">
+                <canvas id="galaxy-canvas"></canvas>
+            </div>
         </div>
 
-        <!-- NEW: Tactical Ship Battler -->
+        <!-- Tactical Ship Battler -->
         <div id="ship-battler-view" class="view-container">
             <div class="terminal-layout">
-                <!-- Sidebar: Unit Spawner & Standby Roster -->
                 <div class="terminal-sidebar">
                     <h3>Deploy Combatant</h3>
                     <div class="input-group">
@@ -112,25 +115,17 @@
                     <button id="btn-deploy-unit" class="btn-success" style="margin-top: 10px;">Roll Init & Deploy</button>
 
                     <h3 style="margin-top: 30px;">Standby Roster</h3>
-                    <div id="standby-roster" class="roster-list">
-                        <!-- Populated dynamically via JS -->
-                    </div>
+                    <div id="standby-roster" class="roster-list"></div>
                 </div>
                 
-                <!-- Main: Initiative Tracker -->
                 <div class="terminal-main">
                     <h3>Initiative Tracker</h3>
-                    <div id="initiative-tracker" class="tracker-list">
-                        <!-- Populated dynamically via JS -->
-                    </div>
+                    <div id="initiative-tracker" class="tracker-list"></div>
                 </div>
                 
-                <!-- Log: Shared Combat Log -->
                 <div class="terminal-log">
                     <h3>Tactical Combat Log</h3>
-                    <div id="battler-combat-log" class="log-container">
-                        <!-- Syncs with Vessel Diagnostics Log via JS -->
-                    </div>
+                    <div id="battler-combat-log" class="log-container"></div>
                 </div>
             </div>
         </div>
@@ -177,7 +172,7 @@
             </div>
         </div>
         
-        <!-- Other Views (Stubbed for Architecture) -->
+        <!-- Other Views (Stubbed) -->
         <div id="chronology-view" class="view-container"><h2>Chronology Engine</h2></div>
         <div id="arsenal-view" class="view-container"><h2>Terminal Loading...</h2></div>
         <div id="fleet-view" class="view-container"><h2>Manifest Active</h2></div>
