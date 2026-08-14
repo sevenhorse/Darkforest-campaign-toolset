@@ -287,9 +287,9 @@
                                 <div id="codex-entries-matrix" style="flex-grow: 1; overflow-y: auto; padding-right: 6px;"></div>
                             </div>
 
-                            <!-- DM Entry Creator / Document Attachment (DM Only) -->
+                            <!-- DM Entry Creator & Document Attachment / Editor (DM Only) -->
                             <div id="codex-dm-creator-panel" style="display: none; background: rgba(10, 15, 20, 0.8); border: 1px solid #ff6b6b; padding: 12px; border-radius: 2px; overflow-y: auto; max-height: 58vh;">
-                                <h4 style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px; margin-bottom:8px;">+ New Codex Entry</h4>
+                                <h4 id="codex-creator-heading" style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px; margin-bottom:8px;">+ New Codex Entry</h4>
                                 
                                 <label style="font-size: 9px; color: #6b826a;">Category:</label>
                                 <select id="new-codex-category" style="font-size: 10px; margin: 2px 0;">
@@ -308,16 +308,25 @@
                                 <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary:</label>
                                 <textarea id="new-codex-content" rows="4" placeholder="Full briefing or narrative text..." style="font-size: 10px; margin: 2px 0;"></textarea>
 
-                                <label style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Attach Document / Image / Log File:</label>
+                                <label style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Document / Log File Attachment:</label>
+                                <div id="codex-current-doc-wrapper" style="display: none; margin-bottom: 6px;">
+                                    <div class="attached-doc-tag">
+                                        <span id="codex-current-doc-name">📎 attached-file.txt</span>
+                                        <button onclick="window.removeCodexAttachmentFromForm()" style="width:auto; margin:0; padding:1px 5px; font-size:9px; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">✕ REMOVE</button>
+                                    </div>
+                                </div>
                                 <div id="codex-file-dropzone" style="border: 1px dashed #ff6b6b; padding: 8px; text-align: center; background: #040605; cursor: pointer; border-radius: 2px; margin-top: 2px;">
-                                    <p id="codex-file-label" style="margin: 0; font-size: 9px; color: #6b826a;">Click to attach .txt, .md, .pdf, or image</p>
+                                    <p id="codex-file-label" style="margin: 0; font-size: 9px; color: #6b826a;">Click to upload / replace .txt, .md, .pdf, or image</p>
                                     <input type="file" id="codex-file-input" accept=".txt,.md,.pdf,image/*" style="display: none;">
                                 </div>
                                 <input type="hidden" id="new-codex-doc-name">
                                 <input type="hidden" id="new-codex-doc-data">
                                 <input type="hidden" id="new-codex-doc-type">
 
-                                <button class="btn-remove" onclick="window.saveNewCodexEntry()" style="font-size: 10px; margin-top: 10px; width: 100%;">+ PUBLISH TO CLOUD CODEX</button>
+                                <div style="display: flex; gap: 6px; margin-top: 10px;">
+                                    <button id="btn-save-codex-entry" class="btn-remove" onclick="window.saveNewCodexEntry()" style="flex: 2; font-size: 10px; margin: 0;">+ PUBLISH TO CODEX</button>
+                                    <button id="btn-cancel-codex-edit" class="btn-reveal" onclick="window.cancelCodexEdit()" style="flex: 1; font-size: 10px; margin: 0; display: none;">✕ CANCEL</button>
+                                </div>
                             </div>
                         </div>
                     </div>
