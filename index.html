@@ -25,7 +25,25 @@
         </div>
     </div>
 
-    <!-- 2. FULL SCREEN CHARACTER & SHIP TERMINAL -->
+    <!-- 2. FULLSCREEN CODEX READER MODAL (EXPAND VIEW) -->
+    <div id="codex-fullscreen-reader">
+        <div class="reader-header">
+            <div>
+                <span id="reader-category-badge" style="font-size: 11px; color: #00e5a3; text-transform: uppercase; font-weight: bold; border: 1px solid #00e5a3; padding: 2px 8px; border-radius: 2px;">LORE DATABASE</span>
+                <h1 id="reader-title" style="margin: 8px 0 4px 0; color: #00e5a3; font-size: 24px; letter-spacing: 2px;">ENTRY TITLE</h1>
+                <div id="reader-subtitle" style="font-size: 12px; color: #6b826a;">SUBTITLE & METADATA</div>
+            </div>
+            <button onclick="window.closeCodexFullscreen()" style="width: auto; padding: 8px 24px; background: #3d0c0c; border-color: #ff3333; color: #ffaaaa; font-size: 12px;">✕ CLOSE READER (ESC)</button>
+        </div>
+
+        <div id="reader-doc-action-bar" style="margin-bottom: 20px; display: none;"></div>
+
+        <div class="reader-body" id="reader-body-content">
+            <!-- Full narrative text rendered dynamically -->
+        </div>
+    </div>
+
+    <!-- 3. FULL SCREEN CHARACTER & SHIP TERMINAL -->
     <div id="character-terminal">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3c4e36; padding-bottom: 12px; margin-bottom: 15px;">
             <div>
@@ -57,8 +75,8 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')">
                     <span class="tab-text">Crew Roster</span> <span class="tab-badge" id="badge-roster">0</span>
                 </button>
-                <button class="term-tab-btn-vert" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#3d0c0c; color:#ff6b6b;">
-                    <span class="tab-text">DM Codex</span>
+                <button class="term-tab-btn-vert" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff6b6b; color:#ff6b6b;">
+                    <span class="tab-text">Cloud Codex</span>
                 </button>
             </div>
 
@@ -232,15 +250,77 @@
                     </div>
                 </div>
 
-                <!-- OVERSEER CODEX TAB -->
+                <!-- OVERSEER CODEX TAB (MASS EFFECT STYLE DECK) -->
                 <div id="term-panel-codex" class="term-panel-content">
-                    <h3 style="border-bottom: 1px solid #ff3333; padding-bottom: 6px; color: #ff6b6b;">Overseer Codex (Private Lore & Factions)</h3>
-                    <div class="codex-subtabs" style="margin-top: 12px;">
-                        <button class="codex-subtab-btn active" id="codex-subtab-factions" onclick="window.switchCodexSubtab('factions')">Factions & Powers</button>
-                        <button class="codex-subtab-btn" id="codex-subtab-lore" onclick="window.switchCodexSubtab('lore')">Sector Lore & Secrets</button>
-                        <button class="codex-subtab-btn" id="codex-subtab-npcs" onclick="window.switchCodexSubtab('npcs')">Key NPCs & Contacts</button>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ff6b6b; padding-bottom: 8px; margin-bottom: 15px;">
+                        <div>
+                            <h3 style="margin:0; color:#ff6b6b;">Cloud Codex // Galactic Intel</h3>
+                            <span id="codex-permission-indicator" style="font-size: 10px; color: #6b826a;">Read-Only Clearance</span>
+                        </div>
+                        <div style="width: 250px;">
+                            <input type="text" id="codex-search-input" placeholder="🔍 Search Codex..." oninput="window.filterCodexEntries(this.value)" style="margin:0; padding:5px 8px; font-size:10px;">
+                        </div>
                     </div>
-                    <div id="codex-content-container" style="max-height: 60vh; overflow-y: auto; padding-right: 5px;"></div>
+
+                    <div class="codex-me-deck">
+                        <!-- LEFT MASS EFFECT SUB-NAV RAIL -->
+                        <div class="codex-me-rail">
+                            <button class="codex-me-btn active" id="codex-rail-factions" onclick="window.switchCodexCategory('factions')">
+                                🛡️ Factions
+                            </button>
+                            <button class="codex-me-btn" id="codex-rail-lore" onclick="window.switchCodexCategory('lore')">
+                                🌌 Sector Lore
+                            </button>
+                            <button class="codex-me-btn" id="codex-rail-npcs" onclick="window.switchCodexCategory('npcs')">
+                                👤 Key NPCs
+                            </button>
+                            <button class="codex-me-btn" id="codex-rail-docs" onclick="window.switchCodexCategory('docs')">
+                                📄 Documents
+                            </button>
+                        </div>
+
+                        <!-- RIGHT CODEX MATRIX AREA -->
+                        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; overflow: hidden; height: 100%;">
+                            <!-- Entries Matrix (All Users) -->
+                            <div style="display: flex; flex-direction: column; overflow: hidden;">
+                                <h4 id="codex-deck-title" style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3; margin-bottom: 10px;">Factions & Powers</h4>
+                                <div id="codex-entries-matrix" style="flex-grow: 1; overflow-y: auto; padding-right: 6px;"></div>
+                            </div>
+
+                            <!-- DM Entry Creator / Document Attachment (DM Only) -->
+                            <div id="codex-dm-creator-panel" style="display: none; background: rgba(10, 15, 20, 0.8); border: 1px solid #ff6b6b; padding: 12px; border-radius: 2px; overflow-y: auto; max-height: 58vh;">
+                                <h4 style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px; margin-bottom:8px;">+ New Codex Entry</h4>
+                                
+                                <label style="font-size: 9px; color: #6b826a;">Category:</label>
+                                <select id="new-codex-category" style="font-size: 10px; margin: 2px 0;">
+                                    <option value="factions">🛡️ Factions & Powers</option>
+                                    <option value="lore">🌌 Sector Lore & Intel</option>
+                                    <option value="npcs">👤 Key NPCs & Contacts</option>
+                                    <option value="docs">📄 Tactical Documents & Logs</option>
+                                </select>
+
+                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Title / Designation:</label>
+                                <input type="text" id="new-codex-title" placeholder="Entry Title..." style="font-size: 10px; margin: 2px 0;">
+
+                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Subtitle / Metadata (Status, Affiliation, Loc):</label>
+                                <input type="text" id="new-codex-subtitle" placeholder="e.g. Allied / Flagship / Outer Rim" style="font-size: 10px; margin: 2px 0;">
+
+                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary:</label>
+                                <textarea id="new-codex-content" rows="4" placeholder="Full briefing or narrative text..." style="font-size: 10px; margin: 2px 0;"></textarea>
+
+                                <label style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Attach Document / Image / Log File:</label>
+                                <div id="codex-file-dropzone" style="border: 1px dashed #ff6b6b; padding: 8px; text-align: center; background: #040605; cursor: pointer; border-radius: 2px; margin-top: 2px;">
+                                    <p id="codex-file-label" style="margin: 0; font-size: 9px; color: #6b826a;">Click to attach .txt, .md, .pdf, or image</p>
+                                    <input type="file" id="codex-file-input" accept=".txt,.md,.pdf,image/*" style="display: none;">
+                                </div>
+                                <input type="hidden" id="new-codex-doc-name">
+                                <input type="hidden" id="new-codex-doc-data">
+                                <input type="hidden" id="new-codex-doc-type">
+
+                                <button class="btn-remove" onclick="window.saveNewCodexEntry()" style="font-size: 10px; margin-top: 10px; width: 100%;">+ PUBLISH TO CLOUD CODEX</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="term-panel-notes" class="term-panel-content">
@@ -280,25 +360,19 @@
         </div>
     </div>
 
-    <!-- 3. MAIN APP CONTAINER -->
+    <!-- 4. MAIN APP CONTAINER -->
     <div id="app-container">
         <div id="top-bar">
             <div style="display: flex; align-items: center; gap: 10px;">
                 <h3 style="margin: 0; color: #00e5a3; font-size: 14px; white-space: nowrap;">INTREPID HORIZON // DRADIS</h3>
-                <!-- TERMINAL SEARCH BAR -->
                 <div style="position: relative; width: 160px;">
                     <input type="text" id="global-terminal-search" placeholder="Search Systems..." oninput="window.handleGlobalSearchInput(this.value)" style="margin:0; padding:4px 8px; font-size:10px;">
                     <div id="search-results-dropdown"></div>
                 </div>
-                <!-- MEASURING TAPE TOGGLE BUTTON -->
                 <button id="measuring-tape-toggle-btn" onclick="window.toggleMeasuringTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">MEASURE</button>
-                <!-- TACTICAL PING TOGGLE BUTTON -->
                 <button id="ping-tool-toggle-btn" onclick="window.togglePingMode()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">PING</button>
-                <!-- HYPERLANE TOGGLE BUTTON -->
                 <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;" title="Toggle hyperlane trade routes">LANES</button>
-                <!-- DM TERRITORY DRAWING BUTTON -->
                 <button id="territory-tool-toggle-btn" onclick="window.toggleTerritoryTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px; display: none;">TERRITORIES</button>
-                <!-- IN-UNIVERSE CALENDAR TICKER -->
                 <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 8px; border-radius: 2px; font-size: 10px; color: #00e5a3; cursor: pointer; white-space: nowrap;" onclick="window.toggleCalendarControls()" title="Click to inspect/control timeline">
                     <span id="clock-ticker-text">YR 2800.01.01 // 00:00</span>
                 </div>
@@ -308,6 +382,7 @@
             <div style="display: flex; align-items: center; gap: 6px;">
                 <button onclick="window.toggleCharacterTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e5a3; color: #00e5a3; font-size: 10px;">DOSSIER</button>
                 <button onclick="window.openFullCargoTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e1ff; color: #00e1ff; font-size: 10px;">CARGO</button>
+                <button onclick="window.openFullCodexTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">CODEX</button>
                 <button onclick="window.toggleCommsArray()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e1ff; color: #00e1ff; font-size: 10px;">COMMS</button>
                 <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">COMBAT</button>
                 <button id="dm-scratchpad-toggle-btn" onclick="window.toggleDmScratchpad()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff3333; color: #ff6b6b; font-size: 10px; display:none;">SCRATCHPAD</button>
@@ -328,10 +403,10 @@
                     <h4 style="margin:0; color:#00e5a3;">Overseer Territory Control</h4>
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
-                <p style="font-size: 9px; color: #6b826a; margin: 0 0 6px 0;">Drop vertices onto the map. Click vertex 1 to close shape.</p>
+                <p style="font-size: 9px; color: #6b826a; margin: 0 0 6px 0;">Click map to place nodes. Click node 1 to snap & close shape.</p>
                 
                 <label style="font-size: 10px; color: #6b826a;">Territory Name:</label>
-                <input type="text" id="territory-name-input" placeholder="e.g. Syndicate Demilitarized Zone" style="font-size: 11px; margin: 2px 0;">
+                <input type="text" id="territory-name-input" placeholder="e.g. Outer Rim DMZ" style="font-size: 11px; margin: 2px 0;">
                 
                 <div style="display: flex; gap: 8px; margin-top: 4px; align-items: center;">
                     <div style="flex: 2;">
@@ -345,8 +420,9 @@
                 </div>
 
                 <div style="display: flex; gap: 6px; margin-top: 8px;">
-                    <button id="btn-start-territory-draw" class="btn-reveal" onclick="window.startDrawingTerritory()" style="flex:1; font-size:10px; margin:0;">DRAW POLYGON</button>
-                    <button id="btn-cancel-territory-draw" class="btn-remove" onclick="window.cancelDrawingTerritory()" style="flex:1; font-size:10px; margin:0; display:none;">CANCEL</button>
+                    <button id="btn-start-territory-draw" class="btn-reveal" onclick="window.startDrawingTerritory()" style="flex:1; font-size:10px; margin:0;">✏️ DRAW POLYGON</button>
+                    <button id="btn-finish-territory-draw" class="btn-reveal" onclick="window.finishActiveTerritory()" style="flex:1; font-size:10px; margin:0; display:none;">✓ CLOSE & SAVE</button>
+                    <button id="btn-cancel-territory-draw" class="btn-remove" onclick="window.cancelDrawingTerritory()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
                 </div>
                 <div id="territory-drawing-status" style="font-size: 10px; color: #ffaa00; margin-top: 6px; display: none;">Drawing Active: Click map to place nodes...</div>
 
