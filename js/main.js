@@ -25,26 +25,13 @@ let activeHudTab = 'telemetry';
 let globalProceduralSystemsCache = [];
 let globalShipMarkersCache = [];
 let globalDbSystemsCache = [];
-let globalTerritoriesCache = []; // SURGICAL ADDITION: Territory state
+let globalTerritoriesCache = [];
+let globalCodexEntriesCache = []; // Realtime cloud codex cache
 
 let activeCargoSubtab = 'perishables';
-let activeCodexSubtab = 'factions';
+let activeCodexCategory = 'factions';
+let codexSearchFilter = '';
 let hyperlanesVisible = true;
-
-let dmCodexData = JSON.parse(localStorage.getItem('odyssey_dm_codex') || JSON.stringify({
-    factions: [
-        { name: "Task Force Black", status: "Allied / Player Faction", notes: "Autonomous deep-space exploration and containment fleet." },
-        { name: "The Syndicate", status: "Hostile / Smugglers", notes: "Operating in outer rim sectors. Controlling illicit black-market trade hubs." }
-    ],
-    lore: [
-        { title: "The Dark Forest Anomaly", desc: "Unexplained subspace static emanating from Sector 1042. Communications drop instantly upon entry." },
-        { title: "Project Odyssey-1000", desc: "Initiative to map 1,000 star systems and establish secure relays across uncharted space." }
-    ],
-    npcs: [
-        { name: "Commander Vane", affiliation: "Task Force Black", location: "Flagship", notes: "Primary mission commander." },
-        { name: "Broker Xylar", affiliation: "Independent Smuggler", location: "Sector 1012 Outpost", notes: "Knows rumors regarding ancient artifacts." }
-    ]
-}));
 
 /* ==========================================================================
    2. ACTIVE TOOL & MAP INTERACTION STATE
@@ -61,7 +48,6 @@ let activeJumpShip = null;
 let jumpTargetPoint = null;
 let selectedDriveSpeed = 250;
 
-// SURGICAL ADDITION: Territory Drawing State
 let territoryToolActive = false;
 let territoryDrawActive = false;
 let activeTerritoryVertices = [];
@@ -227,27 +213,30 @@ async function fetchUserProfile(user) {
     const badge = document.getElementById('user-role');
     badge.innerText = `Role: ${data.role}`;
     
-    const codexNavBtn = document.getElementById('nav-codex-btn');
     const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
     const territoryBtn = document.getElementById('territory-tool-toggle-btn');
+    const codexCreatorPanel = document.getElementById('codex-dm-creator-panel');
+    const codexPerms = document.getElementById('codex-permission-indicator');
     
     if (data.role === 'dm') {
         badge.classList.add('role-dm');
         badge.innerText = 'OVERSEER (DM)';
         document.getElementById('dm-tools').style.display = 'block';
         document.getElementById('dm-time-controls-box').style.display = 'block';
-        if (codexNavBtn) codexNavBtn.style.display = 'inline-block';
         if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
         if (territoryBtn) territoryBtn.style.display = 'inline-block';
+        if (codexCreatorPanel) codexCreatorPanel.style.display = 'block';
+        if (codexPerms) { codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE ACCESS'; codexPerms.style.color = '#ff6b6b'; }
         
         const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
         if (savedScratch && document.getElementById('dm-scratchpad-input')) {
             document.getElementById('dm-scratchpad-input').value = savedScratch;
         }
     } else {
-        if (codexNavBtn) codexNavBtn.style.display = 'none';
         if (scratchpadBtn) scratchpadBtn.style.display = 'none';
         if (territoryBtn) territoryBtn.style.display = 'none';
+        if (codexCreatorPanel) codexCreatorPanel.style.display = 'none';
+        if (codexPerms) { codexPerms.innerText = '● SECURITY CLEARANCE: LEVEL 2 // VIEW ONLY'; codexPerms.style.color = '#6b826a'; }
     }
 
     initPresenceChannel(data);
@@ -258,7 +247,8 @@ async function fetchUserProfile(user) {
     loadCombatTracker();
     loadCampaignObjectives();
     loadChatLogs();
-    loadTerritories(); // SURGICAL ADDITION
+    loadTerritories();
+    loadCodexEntries();
 }
 
 async function loadAllProfiles() {
@@ -305,14 +295,211 @@ async function loadChatLogs() {
     }
 }
 
-// SURGICAL ADDITION: Territory DB Loader
 async function loadTerritories() {
-    const { data, error } = await db.from('territories').select('*').order('created_at', { ascending: true });
+    const { data } = await db.from('territories').select('*').order('created_at', { ascending: true });
     if (data) {
         globalTerritoriesCache = data;
         renderTerritoryList();
     }
 }
+
+/* ==========================================================================
+   5. CLOUD CODEX ENGINE & DOCUMENT UPLOADER
+   ========================================================================== */
+async function loadCodexEntries() {
+    const { data, error } = await db.from('codex_entries').select('*').order('created_at', { ascending: false });
+    if (data && data.length > 0) {
+        globalCodexEntriesCache = data;
+    } else {
+        // Fallback default seeds if database table is initially blank
+        globalCodexEntriesCache = [
+            { id: 'cdx-1', category: 'factions', title: 'Task Force Black', subtitle: 'Allied Command', content: 'Autonomous deep-space exploration and containment fleet operating outside regular jurisdiction.' },
+            { id: 'cdx-2', category: 'factions', title: 'The Syndicate', subtitle: 'Hostile / Outer Rim', content: 'Loose cartel of rogue captains, smugglers, and black-market station masters.' },
+            { id: 'cdx-3', category: 'lore', title: 'The Dark Forest Anomaly', subtitle: 'Sector 1042', content: 'Unexplained subspace static emanating from Sector 1042. Quantum communications drop instantly upon entry.' },
+            { id: 'cdx-4', category: 'npcs', title: 'Commander Vane', subtitle: 'Task Force Black Flagship', content: 'Primary mission commander. Veteran of the First Contact Boundary skirmishes.' }
+        ];
+    }
+    renderCodexMatrix();
+    populateTerritoryFactionSelect();
+}
+
+window.switchCodexCategory = function(cat) {
+    activeCodexCategory = cat;
+    document.querySelectorAll('.codex-me-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.getElementById(`codex-rail-${cat}`);
+    if (btn) btn.classList.add('active');
+
+    const titles = {
+        factions: '🛡️ Factions & Registered Powers',
+        lore: '🌌 Sector Lore & Classified Intel',
+        npcs: '👤 Key NPCs & Tactical Contacts',
+        docs: '📄 Tactical Documents & Field Logs'
+    };
+    const header = document.getElementById('codex-deck-title');
+    if (header) header.innerText = titles[cat] || 'Codex Archive';
+
+    renderCodexMatrix();
+};
+
+window.filterCodexEntries = function(val) {
+    codexSearchFilter = (val || '').toLowerCase().trim();
+    renderCodexMatrix();
+};
+
+function renderCodexMatrix() {
+    const container = document.getElementById('codex-entries-matrix');
+    if (!container) return;
+
+    let entries = globalCodexEntriesCache.filter(e => e.category === activeCodexCategory);
+    if (codexSearchFilter) {
+        entries = entries.filter(e => 
+            (e.title && e.title.toLowerCase().includes(codexSearchFilter)) ||
+            (e.subtitle && e.subtitle.toLowerCase().includes(codexSearchFilter)) ||
+            (e.content && e.content.toLowerCase().includes(codexSearchFilter))
+        );
+    }
+
+    if (entries.length === 0) {
+        container.innerHTML = `<span style="font-size:11px; color:#6b826a;">No records located under this classification.</span>`;
+        return;
+    }
+
+    let isDM = (currentUserRole === 'dm');
+    let html = '';
+
+    entries.forEach(e => {
+        let docHtml = '';
+        if (e.doc_data && e.doc_name) {
+            docHtml = `
+                <div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">
+                    📎 ATTACHMENT: ${e.doc_name} (${(e.doc_type || 'FILE').toUpperCase()})
+                </div>
+            `;
+        }
+
+        html += `
+            <div class="codex-entry-card category-${e.category}">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <strong style="color:#00e5a3; font-size:13px; letter-spacing:1px;">${e.title}</strong>
+                        <div style="font-size:10px; color:#6b826a; margin-top:2px;">${e.subtitle || 'General Record'}</div>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <button class="layer-edit" onclick="window.openCodexFullscreen('${e.id}')" style="font-size:9px; padding:3px 8px;">⛶ FULLSCREEN</button>
+                        ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${e.id}')" style="font-size:9px; padding:3px 6px;">✕</button>` : ''}
+                    </div>
+                </div>
+                <p style="margin:8px 0 4px 0; font-size:11px; color:#d4c5a9; line-height:1.5; max-height:80px; overflow:hidden; text-overflow:ellipsis;">
+                    ${e.content || ''}
+                </p>
+                ${docHtml}
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+window.saveNewCodexEntry = async function() {
+    if (currentUserRole !== 'dm') return;
+    const cat = document.getElementById('new-codex-category').value;
+    const title = document.getElementById('new-codex-title').value.trim();
+    const subtitle = document.getElementById('new-codex-subtitle').value.trim();
+    const content = document.getElementById('new-codex-content').value.trim();
+    const docName = document.getElementById('new-codex-doc-name').value;
+    const docData = document.getElementById('new-codex-doc-data').value;
+    const docType = document.getElementById('new-codex-doc-type').value;
+
+    if (!title) { alert("Please enter an entry title."); return; }
+
+    const payload = {
+        category: cat,
+        title: title,
+        subtitle: subtitle,
+        content: content,
+        doc_name: docName || null,
+        doc_data: docData || null,
+        doc_type: docType || null,
+        created_by: currentUserId
+    };
+
+    const { error } = await db.from('codex_entries').insert(payload);
+    if (error) {
+        alert("Failed to publish to Cloud Codex: " + error.message);
+    } else {
+        document.getElementById('new-codex-title').value = '';
+        document.getElementById('new-codex-subtitle').value = '';
+        document.getElementById('new-codex-content').value = '';
+        document.getElementById('new-codex-doc-name').value = '';
+        document.getElementById('new-codex-doc-data').value = '';
+        document.getElementById('new-codex-doc-type').value = '';
+        document.getElementById('codex-file-label').innerText = 'Click to attach .txt, .md, .pdf, or image';
+
+        window.switchCodexCategory(cat);
+        loadCodexEntries();
+
+        await db.from('chat_logs').insert({
+            sender_id: currentUserId,
+            content: `📖 [CODEX UPDATED] Overseer filed archive: '${title}' under [${cat.toUpperCase()}].`,
+            message_type: 'text'
+        });
+    }
+};
+
+window.deleteCodexEntry = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!confirm("Permanently erase this record from the Cloud Codex?")) return;
+    await db.from('codex_entries').delete().eq('id', id);
+    loadCodexEntries();
+};
+
+window.openCodexFullscreen = function(id) {
+    const entry = globalCodexEntriesCache.find(e => e.id === id);
+    if (!entry) return;
+
+    const modal = document.getElementById('codex-fullscreen-reader');
+    document.getElementById('reader-category-badge').innerText = (entry.category || 'LORE').toUpperCase();
+    document.getElementById('reader-title').innerText = entry.title;
+    document.getElementById('reader-subtitle').innerText = entry.subtitle || 'UNCLASSIFIED RECORD';
+    document.getElementById('reader-body-content').innerText = entry.content || 'No narrative content recorded.';
+
+    const actionBar = document.getElementById('reader-doc-action-bar');
+    if (entry.doc_data && entry.doc_name) {
+        actionBar.style.display = 'block';
+        actionBar.innerHTML = `
+            <button class="btn-reveal" onclick="window.openCodexAttachment('${entry.id}')" style="width:auto; font-size:11px; padding:6px 16px;">
+                📥 OPEN / DOWNLOAD ATTACHED DOCUMENT (${entry.doc_name})
+            </button>
+        `;
+    } else {
+        actionBar.style.display = 'none';
+    }
+
+    modal.style.display = 'block';
+};
+
+window.closeCodexFullscreen = function() {
+    document.getElementById('codex-fullscreen-reader').style.display = 'none';
+};
+
+window.openCodexAttachment = function(id) {
+    const entry = globalCodexEntriesCache.find(e => e.id === id);
+    if (!entry || !entry.doc_data) return;
+
+    if (entry.doc_type === 'image' || entry.doc_type === 'pdf') {
+        const win = window.open();
+        win.document.write(`<iframe src="${entry.doc_data}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`);
+    } else {
+        // Plain text or markdown
+        const blob = new Blob([entry.doc_data], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = entry.doc_name || 'document.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+};
 
 function initPresenceChannel(userProfile) {
     presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
@@ -342,7 +529,7 @@ window.handleLogout = async function() {
 };
 
 /* ==========================================================================
-   5. TERMINAL & UI CONTROLLERS
+   6. TERMINAL & UI CONTROLLERS
    ========================================================================== */
 const skillList = [
     "Athletics", "Stealth", "Survival", "Ballistic Weapons", 
@@ -382,28 +569,37 @@ function renderSkillInputs() {
 renderSkillInputs();
 
 window.switchTermTab = function(tabName) {
-    document.querySelectorAll('.term-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.term-tab-btn-vert').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.term-panel-content').forEach(p => p.classList.remove('active'));
-    document.getElementById(`term-tab-btn-${tabName}`).classList.add('active');
-    document.getElementById(`term-panel-${tabName}`).classList.add('active');
+    const activeBtn = document.getElementById(`term-tab-btn-${tabName}`);
+    if (activeBtn) activeBtn.classList.add('active');
+    const activePanel = document.getElementById(`term-panel-${tabName}`);
+    if (activePanel) activePanel.classList.add('active');
+
     if (tabName === 'cargo') {
         populateCargoVesselSelect();
         renderTerminalCargoDeck();
     } else if (tabName === 'codex') {
-        renderCodexDeck();
+        window.switchCodexCategory(activeCodexCategory);
     }
 };
 
 window.toggleCharacterTerminal = function() {
     const term = document.getElementById('character-terminal');
     term.style.display = term.style.display === 'block' ? 'none' : 'block';
-    if (term.style.display === 'block') { loadAllProfiles(); loadCampaignObjectives(); loadPlayerNotes(); }
+    if (term.style.display === 'block') { loadAllProfiles(); loadCampaignObjectives(); loadPlayerNotes(); loadCodexEntries(); }
 };
 
 window.openFullCargoTerminal = function() {
     const term = document.getElementById('character-terminal');
     term.style.display = 'block';
     window.switchTermTab('cargo');
+};
+
+window.openFullCodexTerminal = function() {
+    const term = document.getElementById('character-terminal');
+    term.style.display = 'block';
+    window.switchTermTab('codex');
 };
 
 window.toggleCombatTracker = function() {
@@ -438,7 +634,7 @@ window.toggleHyperlanes = function() {
     }
 };
 
-// SURGICAL ADDITION: Territory Panel Toggle
+// OVERHAULED: Territory Panel & Drawing Operations
 window.toggleTerritoryTool = function() {
     if (currentUserRole !== 'dm') return;
     const panel = document.getElementById('territory-control-panel');
@@ -453,8 +649,11 @@ function populateTerritoryFactionSelect() {
     const select = document.getElementById('territory-faction-select');
     if (!select) return;
     let html = '<option value="Independent / Neutral">Independent / Neutral</option>';
-    dmCodexData.factions.forEach(f => {
-        html += `<option value="${f.name}">${f.name}</option>`;
+    
+    // Grab faction entries from the live codex cache
+    const factions = globalCodexEntriesCache.filter(e => e.category === 'factions');
+    factions.forEach(f => {
+        html += `<option value="${f.title}">${f.title}</option>`;
     });
     select.innerHTML = html;
 }
@@ -464,6 +663,7 @@ window.startDrawingTerritory = function() {
     territoryDrawActive = true;
     activeTerritoryVertices = [];
     document.getElementById('btn-start-territory-draw').style.display = 'none';
+    document.getElementById('btn-finish-territory-draw').style.display = 'block';
     document.getElementById('btn-cancel-territory-draw').style.display = 'block';
     document.getElementById('territory-drawing-status').style.display = 'block';
     document.getElementById('territory-drawing-status').innerText = 'Drawing Active: Click map to place nodes...';
@@ -473,11 +673,12 @@ window.cancelDrawingTerritory = function() {
     territoryDrawActive = false;
     activeTerritoryVertices = [];
     document.getElementById('btn-start-territory-draw').style.display = 'block';
+    document.getElementById('btn-finish-territory-draw').style.display = 'none';
     document.getElementById('btn-cancel-territory-draw').style.display = 'none';
     document.getElementById('territory-drawing-status').style.display = 'none';
 };
 
-async function finishActiveTerritory() {
+window.finishActiveTerritory = async function() {
     if (activeTerritoryVertices.length < 3) {
         alert("A territory polygon requires at least 3 vertices.");
         return;
@@ -510,7 +711,7 @@ async function finishActiveTerritory() {
             message_type: 'text'
         });
     }
-}
+};
 
 function renderTerritoryList() {
     const container = document.getElementById('territory-list-container');
@@ -521,7 +722,7 @@ function renderTerritoryList() {
             <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:2px; border-left:3px solid ${t.color};">
                 <div>
                     <strong style="color:${t.color}; font-size:11px;">${t.name}</strong>
-                    <div style="font-size:9px; color:#6b826a;">Faction: ${t.faction_name || 'Neutral'} (${t.vertices.length} Nodes)</div>
+                    <div style="font-size:9px; color:#6b826a;">Faction: ${t.faction_name || 'Neutral'} (${(t.vertices || []).length} Nodes)</div>
                 </div>
                 <button class="layer-del" onclick="window.deleteTerritory('${t.id}')" style="padding:2px 6px; font-size:9px;">X</button>
             </div>
@@ -577,7 +778,7 @@ makePanelDraggable('dm-tools', 'dm-tools-header', 'odyssey_dm_pos');
 makePanelDraggable('comms-array-panel', 'comms-array-header', 'odyssey_comms_pos');
 makePanelDraggable('calendar-control-panel', 'calendar-control-header', 'odyssey_calendar_pos');
 makePanelDraggable('dm-scratchpad-panel', 'dm-scratchpad-header', 'odyssey_scratchpad_pos');
-makePanelDraggable('territory-control-panel', 'territory-control-header', 'odyssey_territory_pos'); // SURGICAL ADDITION
+makePanelDraggable('territory-control-panel', 'territory-control-header', 'odyssey_territory_pos');
 
 window.resetUiLayout = function() {
     Object.keys(localStorage).forEach(k => {
@@ -748,7 +949,7 @@ function renderCharacterTerminalData() {
     
     safeSet('term-username', myProfile.username || currentUserEmail.split('@')[0]);
     safeSet('term-avatar', myProfile.avatar_url || '');
-    if(document.getElementById('my-terminal-avatar-preview')) document.getElementById('my-terminal-avatar-preview').src = myProfile.avatar_url || 'https://via.placeholder.com/60';
+    if(document.getElementById('my-terminal-avatar-preview')) document.getElementById('my-terminal-avatar-preview').src = myProfile.avatar_url || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><rect width='60' height='60' fill='%23040605'/><text x='50%25' y='50%25' fill='%2300e5a3' font-size='20' font-family='monospace' text-anchor='middle' dominant-baseline='middle'>?</text></svg>";
     safeSet('term-sheet-name', char.name || '');
     safeSet('stat-charisma', char.stat_charisma || 'd6'); safeSet('stat-dexterity', char.stat_dexterity || 'd8');
     safeSet('stat-intelligence', char.stat_intelligence || 'd10'); safeSet('stat-strength', char.stat_strength || 'd8');
@@ -777,7 +978,7 @@ function renderCharacterTerminalData() {
             const pChar = p.character || {};
             html += `
                 <div class="note-card" style="display:flex; gap:12px; align-items:flex-start;">
-                    <img src="${p.avatar_url || 'https://via.placeholder.com/60'}" class="avatar-img" onerror="this.src='https://via.placeholder.com/60'">
+                    <img src="${p.avatar_url || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><rect width='60' height='60' fill='%23040605'/><text x='50%25' y='50%25' fill='%2300e5a3' font-size='20' font-family='monospace' text-anchor='middle' dominant-baseline='middle'>?</text></svg>"}" class="avatar-img">
                     <div style="flex-grow:1;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <strong style="color:#00e5a3; font-size:12px;">${p.username || 'Commander'} ${p.role === 'dm' ? '[DM]' : ''}</strong>
@@ -965,130 +1166,6 @@ window.broadcastTerminalCargoManifest = async function() {
         message_type: 'text'
     });
     alert("Full cargo manifest broadcasted to Secure Comms!");
-};
-
-/* Overseer Codex */
-window.switchCodexSubtab = function(subtab) {
-    activeCodexSubtab = subtab;
-    document.querySelectorAll('.codex-subtab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById(`codex-subtab-${subtab}`).classList.add('active');
-    renderCodexDeck();
-};
-
-function renderCodexDeck() {
-    const container = document.getElementById('codex-content-container');
-    if (!container) return;
-
-    let isDM = (currentUserRole === 'dm');
-    let html = '';
-
-    if (activeCodexSubtab === 'factions') {
-        html += `<h4 style="color:#ff6b6b; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Registered Factions & Powers</h4>`;
-        dmCodexData.factions.forEach((f, idx) => {
-            html += `
-                <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
-                    <div style="display:flex; justify-content:space-between;">
-                        <strong style="color:#ff6b6b;">${f.name}</strong>
-                        <span style="font-size:10px; color:#00e5a3;">Status: ${f.status}</span>
-                    </div>
-                    <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${f.notes}</p>
-                    ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('factions', ${idx})" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
-                </div>
-            `;
-        });
-        if (isDM) {
-            html += `
-                <div style="background:#040605; padding:8px; border:1px solid #ff3333; margin-top:10px;">
-                    <input type="text" id="new-fac-name" placeholder="Faction Name..." style="font-size:10px; margin:2px 0;">
-                    <input type="text" id="new-fac-status" placeholder="Status / Hostility..." style="font-size:10px; margin:2px 0;">
-                    <textarea id="new-fac-notes" rows="2" placeholder="Faction notes..." style="font-size:10px; margin:2px 0;"></textarea>
-                    <button class="btn-remove" onclick="window.addCodexEntry('factions')" style="font-size:10px; margin-top:4px;">+ ADD FACTION</button>
-                </div>
-            `;
-        }
-    } else if (activeCodexSubtab === 'lore') {
-        html += `<h4 style="color:#ff6b6b; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Sector Lore & Secrets</h4>`;
-        dmCodexData.lore.forEach((l, idx) => {
-            html += `
-                <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
-                    <strong style="color:#ff6b6b; font-size:12px;">${l.title}</strong>
-                    <p style="margin:4px 0; font-size:11px; color:#d4c5a9; white-space:pre-wrap;">${l.desc}</p>
-                    ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('lore', ${idx})" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
-                </div>
-            `;
-        });
-        if (isDM) {
-            html += `
-                <div style="background:#040605; padding:8px; border:1px solid #ff3333; margin-top:10px;">
-                    <input type="text" id="new-lore-title" placeholder="Lore Title..." style="font-size:10px; margin:2px 0;">
-                    <textarea id="new-lore-desc" rows="2" placeholder="Secret lore details..." style="font-size:10px; margin:2px 0;"></textarea>
-                    <button class="btn-remove" onclick="window.addCodexEntry('lore')" style="font-size:10px; margin-top:4px;">+ ADD LORE ENTRY</button>
-                </div>
-            `;
-        }
-    } else if (activeCodexSubtab === 'npcs') {
-        html += `<h4 style="color:#ff6b6b; border-bottom:1px solid #3c4e36; padding-bottom:4px;">Key NPCs & Contacts</h4>`;
-        dmCodexData.npcs.forEach((n, idx) => {
-            html += `
-                <div class="note-card" style="border-color:${isDM ? '#ff3333' : '#3c4e36'};">
-                    <div style="display:flex; justify-content:space-between;">
-                        <strong style="color:#ff6b6b;">${n.name}</strong>
-                        <span style="font-size:10px; color:#00e1ff;">Loc: ${n.location}</span>
-                    </div>
-                    <p style="margin:2px 0; font-size:10px; color:#6b826a;">Affiliation: ${n.affiliation}</p>
-                    <p style="margin:4px 0; font-size:11px; color:#d4c5a9;">${n.notes}</p>
-                    ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('npcs', ${idx})" style="font-size:9px; padding:2px 6px;">Delete</button>` : ''}
-                </div>
-            `;
-        });
-        if (isDM) {
-            html += `
-                <div style="background:#040605; padding:8px; border:1px solid #ff3333; margin-top:10px;">
-                    <div style="display:flex; gap:6px;">
-                        <input type="text" id="new-npc-name" placeholder="NPC Name..." style="font-size:10px; margin:2px 0; flex:1;">
-                        <input type="text" id="new-npc-loc" placeholder="Location..." style="font-size:10px; margin:2px 0; flex:1;">
-                    </div>
-                    <input type="text" id="new-npc-aff" placeholder="Affiliation..." style="font-size:10px; margin:2px 0;">
-                    <textarea id="new-npc-notes" rows="2" placeholder="Notes..." style="font-size:10px; margin:2px 0;"></textarea>
-                    <button class="btn-remove" onclick="window.addCodexEntry('npcs')" style="font-size:10px; margin-top:4px;">+ ADD NPC</button>
-                </div>
-            `;
-        }
-    }
-    container.innerHTML = html;
-}
-
-window.addCodexEntry = function(category) {
-    if (currentUserRole !== 'dm') return;
-    if (category === 'factions') {
-        let name = document.getElementById('new-fac-name').value;
-        let status = document.getElementById('new-fac-status').value;
-        let notes = document.getElementById('new-fac-notes').value;
-        if (!name) return;
-        dmCodexData.factions.push({ name, status, notes });
-    } else if (category === 'lore') {
-        let title = document.getElementById('new-lore-title').value;
-        let desc = document.getElementById('new-lore-desc').value;
-        if (!title) return;
-        dmCodexData.lore.push({ title, desc });
-    } else if (category === 'npcs') {
-        let name = document.getElementById('new-npc-name').value;
-        let location = document.getElementById('new-npc-loc').value;
-        let affiliation = document.getElementById('new-npc-aff').value;
-        let notes = document.getElementById('new-npc-notes').value;
-        if (!name) return;
-        dmCodexData.npcs.push({ name, location, affiliation, notes });
-    }
-    localStorage.setItem('odyssey_dm_codex', JSON.stringify(dmCodexData));
-    renderCodexDeck();
-};
-
-window.deleteCodexEntry = function(category, idx) {
-    if (currentUserRole !== 'dm') return;
-    if (!confirm("Delete this codex entry?")) return;
-    dmCodexData[category].splice(idx, 1);
-    localStorage.setItem('odyssey_dm_codex', JSON.stringify(dmCodexData));
-    renderCodexDeck();
 };
 
 /* Objectives & Notes */
@@ -1310,7 +1387,7 @@ function populateCommsRecipients() {
 }
 
 /* ==========================================================================
-   6. PROCEDURAL GENERATION & GALAXY MAP ENGINE
+   7. PROCEDURAL GENERATION & GALAXY MAP ENGINE
    ========================================================================== */
 function stringToHash(str) { let hash = 0; for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; } return Math.abs(hash); }
 
@@ -1404,7 +1481,6 @@ function initGalaxyEngine() {
     const container = document.getElementById('canvas-container');
     const SYSTEM_ZOOM_THRESHOLD = 1.5;
 
-    // High-DPI / Retina Display Scaling
     function resize() {
         const dpr = window.devicePixelRatio || 1;
         const cssWidth = container.clientWidth;
@@ -1517,7 +1593,8 @@ function initGalaxyEngine() {
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'star_systems' }, () => { loadGalaxyData(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ship_markers' }, () => { loadGalaxyData(); })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'territories' }, () => { loadTerritories(); }) // SURGICAL ADDITION
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'territories' }, () => { loadTerritories(); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'codex_entries' }, () => { loadCodexEntries(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'combat_tracker' }, () => { loadCombatTracker(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_objectives' }, () => { loadCampaignObjectives(); })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_logs' }, () => { loadChatLogs(); })
@@ -1554,29 +1631,27 @@ function initGalaxyEngine() {
         return { clientX: e.clientX, clientY: e.clientY };
     }
 
-    /* Unified Input Core Handler for Map Interaction */
     function handleCanvasPointerDown(e) {
         if (e.target && e.target.closest && e.target.closest('.panel')) return; 
         if (e.button !== undefined && e.button !== 0) return;
 
         const worldPos = screenToWorld(e.clientX, e.clientY);
         
-        // SURGICAL ADDITION: Territory Drawing Click Interception
+        // INTERCEPT: Territory Drawing Logic & Vertex Snapping
         if (territoryDrawActive) {
             const startNode = activeTerritoryVertices[0];
-            const snapDist = 25 / camera.zoom;
+            const snapDist = 30 / camera.zoom;
             
-            // Check if clicking near node 0 to close shape
             if (startNode && activeTerritoryVertices.length >= 3) {
                 const distToStart = Math.hypot(worldPos.x - startNode.x, worldPos.y - startNode.y);
                 if (distToStart < snapDist) {
-                    finishActiveTerritory();
+                    window.finishActiveTerritory();
                     return;
                 }
             }
             
             activeTerritoryVertices.push({ x: worldPos.x, y: worldPos.y });
-            document.getElementById('territory-drawing-status').innerText = `Nodes Dropped: ${activeTerritoryVertices.length} (Click initial node to close shape)`;
+            document.getElementById('territory-drawing-status').innerText = `Nodes Placed: ${activeTerritoryVertices.length} (Click initial node or button to save)`;
             return;
         }
 
@@ -1683,7 +1758,6 @@ function initGalaxyEngine() {
         camera.startY = e.clientY;
     }
 
-    /* Mouse Event Listeners */
     container.addEventListener('mousedown', handleCanvasPointerDown);
 
     window.addEventListener('mousemove', (e) => {
@@ -1709,11 +1783,9 @@ function initGalaxyEngine() {
         camera.isDragging = false;
     });
 
-    /* Touch Event Listeners */
     container.addEventListener('touchstart', (e) => {
         if (e.target && e.target.closest && e.target.closest('.panel')) return;
         const pos = getTouchPos(e);
-        
         const syntheticEvent = {
             clientX: pos.clientX,
             clientY: pos.clientY,
@@ -1722,7 +1794,6 @@ function initGalaxyEngine() {
             target: e.target,
             closest: (selector) => e.target.closest ? e.target.closest(selector) : null
         };
-        
         handleCanvasPointerDown(syntheticEvent);
     }, { passive: false });
 
@@ -1798,6 +1869,10 @@ function initGalaxyEngine() {
             }
         }
         if (e.key === 'Escape') {
+            if (document.getElementById('codex-fullscreen-reader').style.display === 'block') {
+                window.closeCodexFullscreen();
+                return;
+            }
             if (measuringTapeActive) window.toggleMeasuringTool();
             if (pingModeActive) window.togglePingMode();
             if (jumpPlottingActive) window.cancelJumpPlotting();
@@ -2012,7 +2087,6 @@ function initGalaxyEngine() {
         if(pingModeActive) window.togglePingMode();
     }
 
-    /* HUD Telemetry Renderer */
     function renderHUDTelemetry() {
         const content = document.getElementById('hud-content');
         
@@ -2340,7 +2414,7 @@ function initGalaxyEngine() {
             ctx.setLineDash([]);
         }
 
-        // SURGICAL ADDITION: Render Saved Territories (Under Stars & Tokens)
+        // RENDER SAVED TERRITORIES (Layered beneath stars & tokens)
         globalTerritoriesCache.forEach(t => {
             if (!t.vertices || t.vertices.length < 3) return;
             
@@ -2352,8 +2426,8 @@ function initGalaxyEngine() {
             }
             ctx.closePath();
 
-            // Polygon glow fill
-            ctx.fillStyle = t.color + '22'; // ~13% opacity fill
+            // Tactical glowing polygon fill
+            ctx.fillStyle = t.color + '22';
             ctx.fill();
 
             ctx.strokeStyle = t.color;
@@ -2363,8 +2437,8 @@ function initGalaxyEngine() {
             ctx.stroke();
             ctx.shadowBlur = 0;
 
-            // Territory Label at Centroid
-            if (camera.zoom > 0.05) {
+            // Centroid territory label
+            if (camera.zoom > 0.04) {
                 let avgX = t.vertices.reduce((sum, v) => sum + v.x, 0) / t.vertices.length;
                 let avgY = t.vertices.reduce((sum, v) => sum + v.y, 0) / t.vertices.length;
                 ctx.fillStyle = t.color;
@@ -2380,10 +2454,11 @@ function initGalaxyEngine() {
             ctx.restore();
         });
 
-        // SURGICAL ADDITION: Render Territory Drawing In-Progress
+        // RENDER TERRITORY DRAWING IN-PROGRESS (With Node 0 magnetic snap reticle)
         if (territoryDrawActive && activeTerritoryVertices.length > 0) {
             ctx.save();
-            ctx.strokeStyle = document.getElementById('territory-color-input')?.value || '#00e5a3';
+            const drawColor = document.getElementById('territory-color-input')?.value || '#00e5a3';
+            ctx.strokeStyle = drawColor;
             ctx.lineWidth = 2 / camera.zoom;
             ctx.setLineDash([6, 6]);
 
@@ -2398,7 +2473,7 @@ function initGalaxyEngine() {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Draw vertex nodes
+            // Render vertices
             activeTerritoryVertices.forEach((v, idx) => {
                 ctx.fillStyle = idx === 0 ? '#ffaa00' : '#ffffff';
                 ctx.beginPath();
@@ -2406,16 +2481,20 @@ function initGalaxyEngine() {
                 ctx.fill();
             });
 
-            // Pulse vertex 0 if hovering close for snapping
+            // Magnetic snap reticle on Vertex 0
             if (activeTerritoryVertices.length >= 3 && window._lastMouseWorldX !== undefined) {
                 let distToStart = Math.hypot(window._lastMouseWorldX - activeTerritoryVertices[0].x, window._lastMouseWorldY - activeTerritoryVertices[0].y);
-                if (distToStart < 25 / camera.zoom) {
-                    let pulse = (10 + Math.sin(time * 0.01) * 4) / camera.zoom;
+                if (distToStart < 30 / camera.zoom) {
+                    let pulse = (12 + Math.sin(time * 0.012) * 5) / camera.zoom;
                     ctx.strokeStyle = '#ffaa00';
                     ctx.lineWidth = 2 / camera.zoom;
                     ctx.beginPath();
                     ctx.arc(activeTerritoryVertices[0].x, activeTerritoryVertices[0].y, pulse, 0, Math.PI * 2);
                     ctx.stroke();
+
+                    ctx.fillStyle = '#ffaa00';
+                    ctx.font = `${Math.max(9, 11 / camera.zoom)}px Courier New`;
+                    ctx.fillText('CLICK TO CLOSE SHAPE', activeTerritoryVertices[0].x + (15 / camera.zoom), activeTerritoryVertices[0].y - (10 / camera.zoom));
                 }
             }
             ctx.restore();
@@ -2593,7 +2672,7 @@ function initGalaxyEngine() {
             ctx.restore();
         }
 
-        // Selection Reticle
+        // Target Selection Reticle
         if (selectedTarget && selectedTarget.data) {
             let obj = selectedTarget.data;
             let ox = obj.x, oy = obj.y;
@@ -2617,30 +2696,30 @@ function initGalaxyEngine() {
 }
 
 /* ==========================================================================
-   7. INITIALIZATION & UTILITIES
+   8. INITIALIZATION & FILE PROCESSORS
    ========================================================================== */
-function initAvatarUploadHandlers() {
-    const dropzone = document.getElementById('avatar-dropzone');
-    const fileInput = document.getElementById('avatar-file-input');
+function initFileHandlers() {
+    // 1. Avatar Upload
+    const avatarDropzone = document.getElementById('avatar-dropzone');
+    const avatarInput = document.getElementById('avatar-file-input');
     const avatarPreview = document.getElementById('my-terminal-avatar-preview');
     const hiddenAvatarInput = document.getElementById('term-avatar');
 
-    if (!dropzone || !fileInput) return;
+    if (avatarDropzone && avatarInput) {
+        avatarDropzone.addEventListener('click', () => avatarInput.click());
+        avatarDropzone.addEventListener('dragover', (e) => { e.preventDefault(); avatarDropzone.style.borderColor = '#00e5a3'; });
+        avatarDropzone.addEventListener('dragleave', () => { avatarDropzone.style.borderColor = '#3c4e36'; });
+        avatarDropzone.addEventListener('drop', (e) => {
+            e.preventDefault(); avatarDropzone.style.borderColor = '#3c4e36';
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) processAvatarFile(e.dataTransfer.files[0]);
+        });
+        avatarInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) processAvatarFile(e.target.files[0]);
+        });
+    }
 
-    dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.style.borderColor = '#00e5a3'; });
-    dropzone.addEventListener('dragleave', () => { dropzone.style.borderColor = '#3c4e36'; });
-    dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.style.borderColor = '#3c4e36';
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) { processImageFile(e.dataTransfer.files[0]); }
-    });
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files && e.target.files[0]) { processImageFile(e.target.files[0]); }
-    });
-
-    function processImageFile(file) {
-        if (!file.type.startsWith('image/')) { alert('Please select a valid image file.'); return; }
+    function processAvatarFile(file) {
+        if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
         const reader = new FileReader();
         reader.onload = function (event) {
             const img = new Image();
@@ -2662,6 +2741,53 @@ function initAvatarUploadHandlers() {
         };
         reader.readAsDataURL(file);
     }
+
+    // 2. Codex Document Attachment Uploader
+    const codexDropzone = document.getElementById('codex-file-dropzone');
+    const codexFileInput = document.getElementById('codex-file-input');
+
+    if (codexDropzone && codexFileInput) {
+        codexDropzone.addEventListener('click', () => codexFileInput.click());
+        codexDropzone.addEventListener('dragover', (e) => { e.preventDefault(); codexDropzone.style.borderColor = '#00e5a3'; });
+        codexDropzone.addEventListener('dragleave', () => { codexDropzone.style.borderColor = '#ff6b6b'; });
+        codexDropzone.addEventListener('drop', (e) => {
+            e.preventDefault(); codexDropzone.style.borderColor = '#ff6b6b';
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) processCodexDoc(e.dataTransfer.files[0]);
+        });
+        codexFileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) processCodexDoc(e.target.files[0]);
+        });
+    }
+
+    function processCodexDoc(file) {
+        const isImage = file.type.startsWith('image/');
+        const isPDF = file.type === 'application/pdf';
+        const docNameInput = document.getElementById('new-codex-doc-name');
+        const docDataInput = document.getElementById('new-codex-doc-data');
+        const docTypeInput = document.getElementById('new-codex-doc-type');
+        const label = document.getElementById('codex-file-label');
+
+        docNameInput.value = file.name;
+
+        if (isImage || isPDF) {
+            docTypeInput.value = isImage ? 'image' : 'pdf';
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                docDataInput.value = e.target.result;
+                label.innerText = `✓ Attached ${docTypeInput.value.toUpperCase()}: ${file.name}`;
+            };
+            reader.readAsDataURL(file);
+        } else {
+            // Text or Markdown
+            docTypeInput.value = 'text';
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                docDataInput.value = e.target.result;
+                label.innerText = `✓ Attached Document: ${file.name}`;
+            };
+            reader.readAsText(file);
+        }
+    }
 }
 
-document.addEventListener('DOMContentLoaded', initAvatarUploadHandlers);
+document.addEventListener('DOMContentLoaded', initFileHandlers);
