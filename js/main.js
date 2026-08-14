@@ -28,7 +28,7 @@ let globalDbSystemsCache = [];
 let globalTerritoriesCache = [];
 let globalCodexEntriesCache = [];
 
-let editingCodexId = null; // Active edit state tracker
+let editingCodexId = null;
 let activeCargoSubtab = 'perishables';
 let activeCodexCategory = 'factions';
 let codexSearchFilter = '';
@@ -401,7 +401,6 @@ function renderCodexMatrix() {
     container.innerHTML = html;
 }
 
-// INITIATE EDIT MODE
 window.editCodexEntry = function(id) {
     if (currentUserRole !== 'dm') return;
     const entry = globalCodexEntriesCache.find(e => e.id === id);
@@ -431,7 +430,6 @@ window.editCodexEntry = function(id) {
     document.getElementById('btn-cancel-codex-edit').style.display = "block";
 };
 
-// CANCEL EDIT MODE
 window.cancelCodexEdit = function() {
     editingCodexId = null;
     document.getElementById('codex-creator-heading').innerText = "+ New Codex Entry";
@@ -448,7 +446,6 @@ window.cancelCodexEdit = function() {
     document.getElementById('btn-cancel-codex-edit').style.display = "none";
 };
 
-// REMOVE ATTACHMENT FROM FORM
 window.removeCodexAttachmentFromForm = function() {
     document.getElementById('new-codex-doc-name').value = '';
     document.getElementById('new-codex-doc-data').value = '';
@@ -457,7 +454,6 @@ window.removeCodexAttachmentFromForm = function() {
     document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
 };
 
-// SAVE (CREATE OR UPDATE)
 window.saveNewCodexEntry = async function() {
     if (currentUserRole !== 'dm') return;
     const cat = document.getElementById('new-codex-category').value;
@@ -482,7 +478,6 @@ window.saveNewCodexEntry = async function() {
     };
 
     if (editingCodexId) {
-        // UPDATE EXISTING ENTRY
         const { error } = await db.from('codex_entries').update(payload).eq('id', editingCodexId);
         if (error) {
             alert("Failed to update Codex entry: " + error.message);
@@ -497,7 +492,6 @@ window.saveNewCodexEntry = async function() {
             });
         }
     } else {
-        // INSERT NEW ENTRY
         const { error } = await db.from('codex_entries').insert(payload);
         if (error) {
             alert("Failed to publish to Cloud Codex: " + error.message);
@@ -650,6 +644,18 @@ window.switchTermTab = function(tabName) {
     } else if (tabName === 'codex') {
         window.switchCodexCategory(activeCodexCategory);
     }
+};
+
+// DM OPERATIONS (MAP EDITOR) SUB-TAB SWITCHER
+window.switchDmSubtab = function(subtab) {
+    document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#dm-tools .term-panel-content').forEach(p => p.classList.remove('active'));
+    
+    const btn = document.getElementById(`dm-subtab-btn-${subtab}`);
+    if (btn) btn.classList.add('active');
+    
+    const panel = document.getElementById(`dm-panel-${subtab}`);
+    if (panel) panel.classList.add('active');
 };
 
 window.toggleCharacterTerminal = function() {
