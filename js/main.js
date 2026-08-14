@@ -26,8 +26,9 @@ let globalProceduralSystemsCache = [];
 let globalShipMarkersCache = [];
 let globalDbSystemsCache = [];
 let globalTerritoriesCache = [];
-let globalCodexEntriesCache = []; // Realtime cloud codex cache
+let globalCodexEntriesCache = [];
 
+let editingCodexId = null; // Active edit state tracker
 let activeCargoSubtab = 'perishables';
 let activeCodexCategory = 'factions';
 let codexSearchFilter = '';
@@ -226,7 +227,7 @@ async function fetchUserProfile(user) {
         if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
         if (territoryBtn) territoryBtn.style.display = 'inline-block';
         if (codexCreatorPanel) codexCreatorPanel.style.display = 'block';
-        if (codexPerms) { codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE ACCESS'; codexPerms.style.color = '#ff6b6b'; }
+        if (codexPerms) { codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE & EDIT ACCESS'; codexPerms.style.color = '#ff6b6b'; }
         
         const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
         if (savedScratch && document.getElementById('dm-scratchpad-input')) {
@@ -304,14 +305,13 @@ async function loadTerritories() {
 }
 
 /* ==========================================================================
-   5. CLOUD CODEX ENGINE & DOCUMENT UPLOADER
+   5. CLOUD CODEX ENGINE & DOCUMENT UPLOADER / EDITOR
    ========================================================================== */
 async function loadCodexEntries() {
-    const { data, error } = await db.from('codex_entries').select('*').order('created_at', { ascending: false });
+    const { data } = await db.from('codex_entries').select('*').order('created_at', { ascending: false });
     if (data && data.length > 0) {
         globalCodexEntriesCache = data;
     } else {
-        // Fallback default seeds if database table is initially blank
         globalCodexEntriesCache = [
             { id: 'cdx-1', category: 'factions', title: 'Task Force Black', subtitle: 'Allied Command', content: 'Autonomous deep-space exploration and containment fleet operating outside regular jurisdiction.' },
             { id: 'cdx-2', category: 'factions', title: 'The Syndicate', subtitle: 'Hostile / Outer Rim', content: 'Loose cartel of rogue captains, smugglers, and black-market station masters.' },
@@ -386,6 +386,7 @@ function renderCodexMatrix() {
                     </div>
                     <div style="display:flex; gap:6px; align-items:center;">
                         <button class="layer-edit" onclick="window.openCodexFullscreen('${e.id}')" style="font-size:9px; padding:3px 8px;">⛶ FULLSCREEN</button>
+                        ${isDM ? `<button class="layer-edit" onclick="window.editCodexEntry('${e.id}')" style="font-size:9px; padding:3px 8px; color:#ffaa00; border-color:#ffaa00;">✎ EDIT</button>` : ''}
                         ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${e.id}')" style="font-size:9px; padding:3px 6px;">✕</button>` : ''}
                     </div>
                 </div>
@@ -400,6 +401,63 @@ function renderCodexMatrix() {
     container.innerHTML = html;
 }
 
+// INITIATE EDIT MODE
+window.editCodexEntry = function(id) {
+    if (currentUserRole !== 'dm') return;
+    const entry = globalCodexEntriesCache.find(e => e.id === id);
+    if (!entry) return;
+
+    editingCodexId = id;
+    document.getElementById('codex-creator-heading').innerText = `✎ Editing: ${entry.title}`;
+    document.getElementById('new-codex-category').value = entry.category || 'lore';
+    document.getElementById('new-codex-title').value = entry.title || '';
+    document.getElementById('new-codex-subtitle').value = entry.subtitle || '';
+    document.getElementById('new-codex-content').value = entry.content || '';
+    
+    document.getElementById('new-codex-doc-name').value = entry.doc_name || '';
+    document.getElementById('new-codex-doc-data').value = entry.doc_data || '';
+    document.getElementById('new-codex-doc-type').value = entry.doc_type || '';
+
+    const currentDocWrapper = document.getElementById('codex-current-doc-wrapper');
+    const currentDocName = document.getElementById('codex-current-doc-name');
+    if (entry.doc_name && entry.doc_data) {
+        currentDocWrapper.style.display = 'block';
+        currentDocName.innerText = `📎 ${entry.doc_name} (${(entry.doc_type || 'file').toUpperCase()})`;
+    } else {
+        currentDocWrapper.style.display = 'none';
+    }
+
+    document.getElementById('btn-save-codex-entry').innerText = "✓ UPDATE CODEX ENTRY";
+    document.getElementById('btn-cancel-codex-edit').style.display = "block";
+};
+
+// CANCEL EDIT MODE
+window.cancelCodexEdit = function() {
+    editingCodexId = null;
+    document.getElementById('codex-creator-heading').innerText = "+ New Codex Entry";
+    document.getElementById('new-codex-title').value = '';
+    document.getElementById('new-codex-subtitle').value = '';
+    document.getElementById('new-codex-content').value = '';
+    document.getElementById('new-codex-doc-name').value = '';
+    document.getElementById('new-codex-doc-data').value = '';
+    document.getElementById('new-codex-doc-type').value = '';
+    document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
+    document.getElementById('codex-current-doc-wrapper').style.display = 'none';
+
+    document.getElementById('btn-save-codex-entry').innerText = "+ PUBLISH TO CODEX";
+    document.getElementById('btn-cancel-codex-edit').style.display = "none";
+};
+
+// REMOVE ATTACHMENT FROM FORM
+window.removeCodexAttachmentFromForm = function() {
+    document.getElementById('new-codex-doc-name').value = '';
+    document.getElementById('new-codex-doc-data').value = '';
+    document.getElementById('new-codex-doc-type').value = '';
+    document.getElementById('codex-current-doc-wrapper').style.display = 'none';
+    document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
+};
+
+// SAVE (CREATE OR UPDATE)
 window.saveNewCodexEntry = async function() {
     if (currentUserRole !== 'dm') return;
     const cat = document.getElementById('new-codex-category').value;
@@ -423,26 +481,36 @@ window.saveNewCodexEntry = async function() {
         created_by: currentUserId
     };
 
-    const { error } = await db.from('codex_entries').insert(payload);
-    if (error) {
-        alert("Failed to publish to Cloud Codex: " + error.message);
+    if (editingCodexId) {
+        // UPDATE EXISTING ENTRY
+        const { error } = await db.from('codex_entries').update(payload).eq('id', editingCodexId);
+        if (error) {
+            alert("Failed to update Codex entry: " + error.message);
+        } else {
+            window.cancelCodexEdit();
+            window.switchCodexCategory(cat);
+            loadCodexEntries();
+            await db.from('chat_logs').insert({
+                sender_id: currentUserId,
+                content: `📖 [CODEX REVISED] Overseer modified archive: '${title}' under [${cat.toUpperCase()}].`,
+                message_type: 'text'
+            });
+        }
     } else {
-        document.getElementById('new-codex-title').value = '';
-        document.getElementById('new-codex-subtitle').value = '';
-        document.getElementById('new-codex-content').value = '';
-        document.getElementById('new-codex-doc-name').value = '';
-        document.getElementById('new-codex-doc-data').value = '';
-        document.getElementById('new-codex-doc-type').value = '';
-        document.getElementById('codex-file-label').innerText = 'Click to attach .txt, .md, .pdf, or image';
-
-        window.switchCodexCategory(cat);
-        loadCodexEntries();
-
-        await db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `📖 [CODEX UPDATED] Overseer filed archive: '${title}' under [${cat.toUpperCase()}].`,
-            message_type: 'text'
-        });
+        // INSERT NEW ENTRY
+        const { error } = await db.from('codex_entries').insert(payload);
+        if (error) {
+            alert("Failed to publish to Cloud Codex: " + error.message);
+        } else {
+            window.cancelCodexEdit();
+            window.switchCodexCategory(cat);
+            loadCodexEntries();
+            await db.from('chat_logs').insert({
+                sender_id: currentUserId,
+                content: `📖 [CODEX PUBLISHED] Overseer filed archive: '${title}' under [${cat.toUpperCase()}].`,
+                message_type: 'text'
+            });
+        }
     }
 };
 
@@ -450,6 +518,7 @@ window.deleteCodexEntry = async function(id) {
     if (currentUserRole !== 'dm') return;
     if (!confirm("Permanently erase this record from the Cloud Codex?")) return;
     await db.from('codex_entries').delete().eq('id', id);
+    if (editingCodexId === id) window.cancelCodexEdit();
     loadCodexEntries();
 };
 
@@ -490,7 +559,6 @@ window.openCodexAttachment = function(id) {
         const win = window.open();
         win.document.write(`<iframe src="${entry.doc_data}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`);
     } else {
-        // Plain text or markdown
         const blob = new Blob([entry.doc_data], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -634,7 +702,6 @@ window.toggleHyperlanes = function() {
     }
 };
 
-// OVERHAULED: Territory Panel & Drawing Operations
 window.toggleTerritoryTool = function() {
     if (currentUserRole !== 'dm') return;
     const panel = document.getElementById('territory-control-panel');
@@ -649,8 +716,6 @@ function populateTerritoryFactionSelect() {
     const select = document.getElementById('territory-faction-select');
     if (!select) return;
     let html = '<option value="Independent / Neutral">Independent / Neutral</option>';
-    
-    // Grab faction entries from the live codex cache
     const factions = globalCodexEntriesCache.filter(e => e.category === 'factions');
     factions.forEach(f => {
         html += `<option value="${f.title}">${f.title}</option>`;
@@ -2414,7 +2479,7 @@ function initGalaxyEngine() {
             ctx.setLineDash([]);
         }
 
-        // RENDER SAVED TERRITORIES (Layered beneath stars & tokens)
+        // RENDER SAVED TERRITORIES
         globalTerritoriesCache.forEach(t => {
             if (!t.vertices || t.vertices.length < 3) return;
             
@@ -2426,7 +2491,6 @@ function initGalaxyEngine() {
             }
             ctx.closePath();
 
-            // Tactical glowing polygon fill
             ctx.fillStyle = t.color + '22';
             ctx.fill();
 
@@ -2437,7 +2501,6 @@ function initGalaxyEngine() {
             ctx.stroke();
             ctx.shadowBlur = 0;
 
-            // Centroid territory label
             if (camera.zoom > 0.04) {
                 let avgX = t.vertices.reduce((sum, v) => sum + v.x, 0) / t.vertices.length;
                 let avgY = t.vertices.reduce((sum, v) => sum + v.y, 0) / t.vertices.length;
@@ -2454,7 +2517,7 @@ function initGalaxyEngine() {
             ctx.restore();
         });
 
-        // RENDER TERRITORY DRAWING IN-PROGRESS (With Node 0 magnetic snap reticle)
+        // RENDER TERRITORY DRAWING IN-PROGRESS
         if (territoryDrawActive && activeTerritoryVertices.length > 0) {
             ctx.save();
             const drawColor = document.getElementById('territory-color-input')?.value || '#00e5a3';
@@ -2473,7 +2536,6 @@ function initGalaxyEngine() {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Render vertices
             activeTerritoryVertices.forEach((v, idx) => {
                 ctx.fillStyle = idx === 0 ? '#ffaa00' : '#ffffff';
                 ctx.beginPath();
@@ -2481,7 +2543,6 @@ function initGalaxyEngine() {
                 ctx.fill();
             });
 
-            // Magnetic snap reticle on Vertex 0
             if (activeTerritoryVertices.length >= 3 && window._lastMouseWorldX !== undefined) {
                 let distToStart = Math.hypot(window._lastMouseWorldX - activeTerritoryVertices[0].x, window._lastMouseWorldY - activeTerritoryVertices[0].y);
                 if (distToStart < 30 / camera.zoom) {
@@ -2766,6 +2827,8 @@ function initFileHandlers() {
         const docDataInput = document.getElementById('new-codex-doc-data');
         const docTypeInput = document.getElementById('new-codex-doc-type');
         const label = document.getElementById('codex-file-label');
+        const currentDocWrapper = document.getElementById('codex-current-doc-wrapper');
+        const currentDocName = document.getElementById('codex-current-doc-name');
 
         docNameInput.value = file.name;
 
@@ -2774,16 +2837,19 @@ function initFileHandlers() {
             const reader = new FileReader();
             reader.onload = (e) => {
                 docDataInput.value = e.target.result;
-                label.innerText = `✓ Attached ${docTypeInput.value.toUpperCase()}: ${file.name}`;
+                label.innerText = `✓ Loaded ${docTypeInput.value.toUpperCase()}: ${file.name}`;
+                currentDocWrapper.style.display = 'block';
+                currentDocName.innerText = `📎 ${file.name} (${docTypeInput.value.toUpperCase()})`;
             };
             reader.readAsDataURL(file);
         } else {
-            // Text or Markdown
             docTypeInput.value = 'text';
             const reader = new FileReader();
             reader.onload = (e) => {
                 docDataInput.value = e.target.result;
-                label.innerText = `✓ Attached Document: ${file.name}`;
+                label.innerText = `✓ Loaded Document: ${file.name}`;
+                currentDocWrapper.style.display = 'block';
+                currentDocName.innerText = `📎 ${file.name} (TEXT/MD)`;
             };
             reader.readAsText(file);
         }
