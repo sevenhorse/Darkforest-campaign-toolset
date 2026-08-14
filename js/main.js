@@ -646,10 +646,10 @@ window.switchTermTab = function(tabName) {
     }
 };
 
-// DM OPERATIONS (MAP EDITOR) SUB-TAB SWITCHER
+// FIXED: DM Operations Sub-Tab Switcher targeting .dm-subpanel
 window.switchDmSubtab = function(subtab) {
     document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('#dm-tools .term-panel-content').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('#dm-tools .dm-subpanel').forEach(p => p.classList.remove('active'));
     
     const btn = document.getElementById(`dm-subtab-btn-${subtab}`);
     if (btn) btn.classList.add('active');
@@ -1647,7 +1647,7 @@ function initGalaxyEngine() {
         const { data: markerData } = await db.from('ship_markers').select('*');
         if (markerData) {
             shipMarkers = markerData.map(m => ({ ...m, cargo_inventory: sanitizeCargo(m.cargo_inventory) }));
-            globalShipMarkersCache = shipMarkers;
+            globalShipMarkersCache = markerData;
         }
     }
     loadGalaxyData();
@@ -1965,8 +1965,11 @@ function initGalaxyEngine() {
         camera.y = -targetY * camera.zoom;
     };
 
+    // FIXED: Robust Clear Selected Target handler
     window.clearSelectedTarget = function() {
         selectedTarget = null;
+        if (jumpPlottingActive) window.cancelJumpPlotting();
+        if (measuringTapeActive) window.toggleMeasuringTool();
         renderHUDTelemetry();
     };
 
