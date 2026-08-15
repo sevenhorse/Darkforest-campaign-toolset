@@ -18,8 +18,10 @@
                 Task Force Black Command Crew Login Required
             </p>
             
-            <input type="email" id="email" placeholder="Access Email" required>
-            <input type="password" id="password" placeholder="Passcode" required>
+            <label for="email" style="display:none;">Email</label>
+            <input type="email" id="email" placeholder="Access Email" required autocomplete="email">
+            <label for="password" style="display:none;">Password</label>
+            <input type="password" id="password" placeholder="Passcode" required autocomplete="current-password">
             <button onclick="window.handleLogin()">INITIALIZE TACTICAL LINK</button>
             <div id="error-message" class="error-msg"></div>
         </div>
@@ -94,7 +96,7 @@
                                 <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
                                     <img id="my-terminal-avatar-preview" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><rect width='60' height='60' fill='%23040605'/><text x='50%25' y='50%25' fill='%2300e5a3' font-size='20' font-family='monospace' text-anchor='middle' dominant-baseline='middle'>?</text></svg>" class="avatar-img">
                                     <div style="flex-grow: 1;">
-                                        <label style="font-size: 10px; color: #6b826a;">Display Handle:</label>
+                                        <label for="term-username" style="font-size: 10px; color: #6b826a;">Display Handle:</label>
                                         <input type="text" id="term-username" placeholder="Handle...">
                                     </div>
                                 </div>
@@ -102,6 +104,7 @@
                                     <p id="dropzone-label" style="margin: 0; font-size: 10px; color: #6b826a;">
                                         Drag & drop profile image here, or <span style="color:#00e5a3; text-decoration:underline;">browse files</span>
                                     </p>
+                                    <label for="avatar-file-input" style="display:none;">Avatar File</label>
                                     <input type="file" id="avatar-file-input" accept="image/*" style="display: none;">
                                 </div>
                                 <input type="hidden" id="term-avatar">
@@ -109,27 +112,28 @@
 
                             <div class="sheet-section">
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 1: Core Stats & Trackers</h4>
-                                <label style="font-size: 10px; color: #6b826a;">Character Name:</label>
+                                <label for="term-sheet-name" style="font-size: 10px; color: #6b826a;">Character Name:</label>
                                 <input type="text" id="term-sheet-name">
 
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;">
-                                    <div><label style="font-size: 9px; color: #6b826a;">Charisma:</label><select id="stat-charisma"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Intelligence:</label><select id="stat-intelligence"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Strength:</label><select id="stat-strength"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-charisma" style="font-size: 9px; color: #6b826a;">Charisma:</label><select id="stat-charisma"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-dexterity" style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-intelligence" style="font-size: 9px; color: #6b826a;">Intelligence:</label><select id="stat-intelligence"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-strength" style="font-size: 9px; color: #6b826a;">Strength:</label><select id="stat-strength"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-toughness" style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-willpower" style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                 </div>
 
                                 <div style="display: flex; gap: 10px; margin-top: 10px;">
-                                    <div style="flex: 1;"><label style="font-size: 10px; color: #ff6b6b;">Vitality (0-10):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
-                                    <div style="flex: 1;"><label style="font-size: 10px; color: #ffaa00;">Stress (0-20):</label><input type="number" id="term-stress" min="0" max="20" value="0"></div>
-                                    <div style="flex: 1;"><label style="font-size: 10px; color: #00e5a3;">Adversity (+/-):</label><input type="number" id="term-adversity" value="0"></div>
+                                    <div style="flex: 1;"><label for="term-vitality" style="font-size: 10px; color: #ff6b6b;">Vitality (0-10):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
+                                    <div style="flex: 1;"><label for="term-stress" style="font-size: 10px; color: #ffaa00;">Stress (0-20):</label><input type="number" id="term-stress" min="0" max="20" value="0"></div>
+                                    <div style="flex: 1;"><label for="term-adversity" style="font-size: 10px; color: #00e5a3;">Adversity (+/-):</label><input type="number" id="term-adversity" value="0"></div>
                                 </div>
                             </div>
 
                             <div class="sheet-section">
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 3: Specialties & Perks</h4>
+                                <label for="term-specialties" style="display:none;">Specialties</label>
                                 <textarea id="term-specialties" rows="4" placeholder="Record character specialties, strengths, and background perks..."></textarea>
                             </div>
                         </div>
@@ -142,21 +146,21 @@
 
                             <div class="sheet-section">
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 4: Gear, Inventory & Assets</h4>
-                                <label style="font-size: 9px; color: #6b826a;">Tactical Gear & Inventory:</label>
+                                <label for="term-assets" style="font-size: 9px; color: #6b826a;">Tactical Gear & Inventory:</label>
                                 <textarea id="term-assets" rows="3" placeholder="Weapons, tools, armor, items..."></textarea>
-                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display:block;">Credits, Real Estate & Liquid Assets:</label>
+                                <label for="term-history" style="font-size: 9px; color: #6b826a; margin-top: 4px; display:block;">Credits, Real Estate & Liquid Assets:</label>
                                 <textarea id="term-history" rows="2" placeholder="Credits, property, ship shares..."></textarea>
                             </div>
 
                             <div class="sheet-section">
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 5: Body Augmentations</h4>
                                 <div class="augment-grid" style="margin-top: 6px;">
-                                    <div><label style="font-size: 9px; color: #6b826a;">Head / Neural:</label><input type="text" id="aug-head" placeholder="None" style="margin:2px 0;"></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Torso / Internal:</label><input type="text" id="aug-torso" placeholder="None" style="margin:2px 0;"></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Left Arm:</label><input type="text" id="aug-larm" placeholder="None" style="margin:2px 0;"></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Right Arm:</label><input type="text" id="aug-rarm" placeholder="None" style="margin:2px 0;"></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Left Leg:</label><input type="text" id="aug-lleg" placeholder="None" style="margin:2px 0;"></div>
-                                    <div><label style="font-size: 9px; color: #6b826a;">Right Leg:</label><input type="text" id="aug-rleg" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-head" style="font-size: 9px; color: #6b826a;">Head / Neural:</label><input type="text" id="aug-head" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-torso" style="font-size: 9px; color: #6b826a;">Torso / Internal:</label><input type="text" id="aug-torso" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-larm" style="font-size: 9px; color: #6b826a;">Left Arm:</label><input type="text" id="aug-larm" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-rarm" style="font-size: 9px; color: #6b826a;">Right Arm:</label><input type="text" id="aug-rarm" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-lleg" style="font-size: 9px; color: #6b826a;">Left Leg:</label><input type="text" id="aug-lleg" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-rleg" style="font-size: 9px; color: #6b826a;">Right Leg:</label><input type="text" id="aug-rleg" placeholder="None" style="margin:2px 0;"></div>
                                 </div>
                             </div>
                         </div>
@@ -171,12 +175,15 @@
                                 <h4 style="margin:0 0 6px 0;">Active Arsenal & Powers</h4>
                                 <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:4px; border-radius:2px;">
                                     <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                        <label for="new-wpn-name" style="display:none;">Weapon Name</label>
                                         <input type="text" id="new-wpn-name" placeholder="Weapon / Power Name" style="flex:2; margin:0;">
+                                        <label for="new-wpn-dice" style="display:none;">Dice</label>
                                         <input type="text" id="new-wpn-dice" placeholder="e.g. d20, 2d6" style="flex:1; margin:0; text-align:center;">
+                                        <label for="new-wpn-mod" style="display:none;">Mod</label>
                                         <input type="text" id="new-wpn-mod" placeholder="Mod (+5)" style="flex:1; margin:0; text-align:center;">
                                     </div>
                                     <div style="display:flex; justify-content:space-between; align-items:center;">
-                                        <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                        <label for="new-wpn-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;">
                                             <input type="checkbox" id="new-wpn-explodes" checked style="margin:0;"> Exploding Dice
                                         </label>
                                         <button class="btn-reveal" onclick="window.addArsenalItem()" style="width:auto; padding:4px 12px; margin:0; font-size:10px;">+ ADD TO ARSENAL</button>
@@ -191,6 +198,7 @@
                                 <h4 style="color:#00e5a3; margin:0;">Multi-Stat & Skill Pool Roller</h4>
                                 <div id="dice-roller-stats" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 8px 0;"></div>
                                 <div id="dice-roller-skills" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-height: 110px; overflow-y: auto; margin-bottom: 8px;"></div>
+                                <label for="roll-extra-mod" style="display:none;">Extra Mod</label>
                                 <input type="number" id="roll-extra-mod" value="0" style="margin:2px 0;" placeholder="Extra Mod">
                                 <button class="btn-reveal" onclick="window.executeDicePoolRoll()" style="width:100%; font-size:12px;">ROLL COMBINED POOL</button>
                                 <div id="dice-roll-result-box" style="margin-top: 12px; display:none; color:#00e5a3; background:#030403; padding:8px; border:1px solid #00e5a3;"></div>
@@ -208,7 +216,7 @@
                 <div id="term-panel-cargo" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
-                            <label style="font-size: 11px; color: #00e5a3; font-weight: bold;">SELECTED VESSEL:</label>
+                            <label for="cargo-vessel-select" style="font-size: 11px; color: #00e5a3; font-weight: bold;">SELECTED VESSEL:</label>
                             <select id="cargo-vessel-select" onchange="window.renderTerminalCargoDeck()" style="width: 280px; margin: 0; font-size: 11px; background: #0a1410; color: #00e5a3;"></select>
                         </div>
                         <button class="btn-reveal" onclick="window.broadcastTerminalCargoManifest()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">BROADCAST MANIFEST TO COMMS</button>
@@ -228,23 +236,23 @@
 
                         <div class="sheet-section" style="border-color: #00e5a3; background: rgba(0, 229, 163, 0.03);">
                             <h4 style="border-bottom: 1px solid #00e5a3; padding-bottom: 4px; color: #00e5a3;">+ Add Cargo Entry</h4>
-                            <label style="font-size: 10px; color: #6b826a;">Target Category:</label>
+                            <label for="new-cargo-category" style="font-size: 10px; color: #6b826a;">Target Category:</label>
                             <select id="new-cargo-category" style="font-size:10px; margin:2px 0;">
                                 <option value="perishables">Perishables</option>
                                 <option value="expendables">Expendables</option>
                                 <option value="misc">Miscellaneous</option>
                             </select>
 
-                            <label style="font-size: 10px; color: #6b826a; margin-top: 6px; display:block;">Item Name / Designation:</label>
+                            <label for="new-cargo-name" style="font-size: 10px; color: #6b826a; margin-top: 6px; display:block;">Item Name / Designation:</label>
                             <input type="text" id="new-cargo-name" placeholder="e.g. MedKits, 120mm Shells, Fuel" style="font-size:11px; margin:2px 0;">
 
                             <div style="display: flex; gap: 8px; margin-top: 6px;">
                                 <div style="flex:1;">
-                                    <label style="font-size: 10px; color: #6b826a;">Quantity:</label>
+                                    <label for="new-cargo-qty" style="font-size: 10px; color: #6b826a;">Quantity:</label>
                                     <input type="number" id="new-cargo-qty" value="1" min="0" style="font-size:11px; margin:2px 0;">
                                 </div>
                                 <div style="flex:1;">
-                                    <label style="font-size: 10px; color: #6b826a;">Unit Type:</label>
+                                    <label for="new-cargo-unit" style="font-size: 10px; color: #6b826a;">Unit Type:</label>
                                     <input type="text" id="new-cargo-unit" placeholder="crates, rounds, tons..." style="font-size:11px; margin:2px 0;">
                                 </div>
                             </div>
@@ -257,7 +265,7 @@
                 <div id="term-panel-vessel" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
-                            <label style="font-size: 11px; color: #00e5a3; font-weight: bold;">DIAGNOSTIC TARGET:</label>
+                            <label for="vessel-deck-select" style="font-size: 11px; color: #00e5a3; font-weight: bold;">DIAGNOSTIC TARGET:</label>
                             <select id="vessel-deck-select" onchange="window.renderVesselDeck()" style="width: 280px; margin: 0; font-size: 11px; background: #0a1410; color: #00e5a3;"></select>
                         </div>
                         <button class="btn-reveal" onclick="window.broadcastVesselStatus()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">BROADCAST STATUS TO COMMS</button>
@@ -284,9 +292,10 @@
                                     <div id="vessel-decks-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px;"></div>
                                     
                                     <div style="background:#030403; padding:8px; border:1px solid #00e1ff; border-radius:2px;">
-                                        <label style="font-size: 9px; color: #00e1ff;">Construct New Deck / Subsystem:</label>
+                                        <label for="new-deck-name" style="font-size: 9px; color: #00e1ff;">Construct New Deck / Subsystem:</label>
                                         <div style="display:flex; gap:6px; margin-bottom:6px;">
                                             <input type="text" id="new-deck-name" placeholder="e.g. Engineering, Bridge..." style="flex:2; margin:0; border-color:#00e1ff;">
+                                            <label for="new-deck-hp" style="display:none;">Deck HP</label>
                                             <input type="number" id="new-deck-hp" placeholder="Max HP" value="50" style="flex:1; margin:0; text-align:center; border-color:#00e1ff;">
                                         </div>
                                         <button class="btn-reveal" onclick="window.addShipDeck()" style="width:100%; font-size:10px; margin:0; padding: 4px 12px; border-color:#00e1ff; color:#00e1ff;">+ BUILD DECK</button>
@@ -300,17 +309,20 @@
                                 <div id="vessel-weapons-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 10px;"></div>
                                 
                                 <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
-                                    <label style="font-size: 9px; color: #ffaaaa;">Mount New Weapon System:</label>
+                                    <label for="new-ship-wpn-loc" style="font-size: 9px; color: #ffaaaa;">Mount New Weapon System:</label>
                                     <div style="display:flex; gap:6px; margin-bottom:6px;">
                                         <input type="text" id="new-ship-wpn-loc" placeholder="Mount (e.g. Dorsal)" style="flex:1.5; margin:0; border-color:#ff3333;">
+                                        <label for="new-ship-wpn-name" style="display:none;">Name</label>
                                         <input type="text" id="new-ship-wpn-name" placeholder="Battery Name" style="flex:2; margin:0; border-color:#ff3333;">
                                     </div>
                                     <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                        <label for="new-ship-wpn-dice" style="display:none;">Dice</label>
                                         <input type="text" id="new-ship-wpn-dice" placeholder="d20" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+                                        <label for="new-ship-wpn-mod" style="display:none;">Mod</label>
                                         <input type="text" id="new-ship-wpn-mod" placeholder="+Mod" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
                                     </div>
                                     <div style="display:flex; justify-content:space-between; align-items:center;">
-                                        <label style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                        <label for="new-ship-wpn-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
                                             <input type="checkbox" id="new-ship-wpn-explodes" checked style="margin:0;"> Exploding Dice
                                         </label>
                                         <button class="btn-remove" onclick="window.addShipWeapon()" style="width:auto; font-size:10px; margin:0; padding: 4px 12px;">+ INSTALL HARDPOINT</button>
@@ -327,12 +339,12 @@
                             <div>
                                 <div class="sheet-section" style="border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
                                     <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Commission Squadron</h4>
-                                    <label style="font-size: 9px; color: #6b826a;">Squadron Callsign:</label>
+                                    <label for="new-squadron-name" style="font-size: 9px; color: #6b826a;">Squadron Callsign:</label>
                                     <input type="text" id="new-squadron-name" placeholder="e.g. Red Squadron" style="font-size: 10px; margin: 2px 0;">
                                     
                                     <div style="display:flex; gap:6px; margin-top:4px;">
                                         <div style="flex:2;">
-                                            <label style="font-size: 9px; color: #6b826a;">Chassis Type:</label>
+                                            <label for="new-squadron-type" style="font-size: 9px; color: #6b826a;">Chassis Type:</label>
                                             <select id="new-squadron-type" style="font-size: 10px; margin: 2px 0; background: #0a1410; color: #00e1ff; border: 1px solid #00e1ff;">
                                                 <option value="raven">Raven Gen 2 MkIV (Fighter)</option>
                                                 <option value="hawk">Hawk Medium Bomber</option>
@@ -340,7 +352,7 @@
                                             </select>
                                         </div>
                                         <div style="flex:1;">
-                                            <label style="font-size: 9px; color: #6b826a;">Unit Count:</label>
+                                            <label for="new-squadron-size" style="font-size: 9px; color: #6b826a;">Unit Count:</label>
                                             <input type="number" id="new-squadron-size" value="4" min="1" style="font-size: 10px; margin: 2px 0; text-align: center;">
                                         </div>
                                     </div>
@@ -375,6 +387,7 @@
                             <span id="codex-permission-indicator" style="font-size: 10px; color: #6b826a;">Read-Only Clearance</span>
                         </div>
                         <div style="width: 250px;">
+                            <label for="codex-search-input" style="display:none;">Search Codex</label>
                             <input type="text" id="codex-search-input" placeholder="🔍 Search Codex..." oninput="window.filterCodexEntries(this.value)" style="margin:0; padding:5px 8px; font-size:10px;">
                         </div>
                     </div>
@@ -408,7 +421,7 @@
                             <div id="codex-dm-creator-panel" style="display: none; background: rgba(10, 15, 20, 0.8); border: 1px solid #ff6b6b; padding: 12px; border-radius: 2px; overflow-y: auto; max-height: 58vh;">
                                 <h4 id="codex-creator-heading" style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px; margin-bottom:8px;">+ New Codex Entry</h4>
                                 
-                                <label style="font-size: 9px; color: #6b826a;">Category:</label>
+                                <label for="new-codex-category" style="font-size: 9px; color: #6b826a;">Category:</label>
                                 <select id="new-codex-category" style="font-size: 10px; margin: 2px 0;">
                                     <option value="factions">🛡️ Factions & Powers</option>
                                     <option value="lore">🌌 Sector Lore & Intel</option>
@@ -416,16 +429,16 @@
                                     <option value="docs">📄 Tactical Documents & Logs</option>
                                 </select>
 
-                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Title / Designation:</label>
+                                <label for="new-codex-title" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Title / Designation:</label>
                                 <input type="text" id="new-codex-title" placeholder="Entry Title..." style="font-size: 10px; margin: 2px 0;">
 
-                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Subtitle / Metadata (Status, Affiliation, Loc):</label>
+                                <label for="new-codex-subtitle" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Subtitle / Metadata (Status, Affiliation, Loc):</label>
                                 <input type="text" id="new-codex-subtitle" placeholder="e.g. Allied / Flagship / Outer Rim" style="font-size: 10px; margin: 2px 0;">
 
-                                <label style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary:</label>
+                                <label for="new-codex-content" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary:</label>
                                 <textarea id="new-codex-content" rows="4" placeholder="Full briefing or narrative text..." style="font-size: 10px; margin: 2px 0;"></textarea>
 
-                                <label style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Document / Log File Attachment:</label>
+                                <label for="codex-file-input" style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Document / Log File Attachment:</label>
                                 <div id="codex-current-doc-wrapper" style="display: none; margin-bottom: 6px;">
                                     <div class="attached-doc-tag">
                                         <span id="codex-current-doc-name">📎 attached-file.txt</span>
@@ -454,7 +467,9 @@
                         <div class="sheet-section">
                             <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3;">Campaign Objectives</h4>
                             <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:10px;">
+                                <label for="new-obj-title" style="display:none;">Title</label>
                                 <input type="text" id="new-obj-title" placeholder="Objective Title..." style="font-size:11px; margin:2px 0;">
+                                <label for="new-obj-desc" style="display:none;">Desc</label>
                                 <textarea id="new-obj-desc" rows="2" placeholder="Objective details..." style="font-size:10px; margin:2px 0;"></textarea>
                                 <button class="btn-reveal" onclick="window.addCampaignObjective()" style="font-size:10px; margin-top:4px;">+ ADD OBJECTIVE</button>
                             </div>
@@ -464,8 +479,11 @@
                         <div class="sheet-section">
                             <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Personal & Shared Intel Notes</h4>
                             <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:10px;">
+                                <label for="term-note-title" style="display:none;">Title</label>
                                 <input type="text" id="term-note-title" placeholder="Note Title..." style="font-size:11px; margin:2px 0;">
+                                <label for="term-note-content" style="display:none;">Content</label>
                                 <textarea id="term-note-content" rows="3" placeholder="Notes..." style="font-size:10px; margin:2px 0;"></textarea>
+                                <label for="term-note-scope" style="display:none;">Scope</label>
                                 <select id="term-note-scope" style="font-size:10px; margin:2px 0;">
                                     <option value="private">Private Only</option>
                                     <option value="all">Shared with All Players</option>
@@ -492,6 +510,7 @@
             <div style="display: flex; align-items: center; gap: 10px;">
                 <h3 style="margin: 0; color: #00e5a3; font-size: 14px; white-space: nowrap;">INTREPID HORIZON // DRADIS</h3>
                 <div style="position: relative; width: 160px;">
+                    <label for="global-terminal-search" style="display:none;">Search</label>
                     <input type="text" id="global-terminal-search" placeholder="Search Systems..." oninput="window.handleGlobalSearchInput(this.value)" style="margin:0; padding:4px 8px; font-size:10px;">
                     <div id="search-results-dropdown"></div>
                 </div>
@@ -531,16 +550,16 @@
                 </div>
                 <p style="font-size: 9px; color: #6b826a; margin: 0 0 6px 0;">Click map to place nodes. Click node 1 to snap & close shape.</p>
                 
-                <label style="font-size: 10px; color: #6b826a;">Territory Name:</label>
+                <label for="territory-name-input" style="font-size: 10px; color: #6b826a;">Territory Name:</label>
                 <input type="text" id="territory-name-input" placeholder="e.g. Outer Rim DMZ" style="font-size: 11px; margin: 2px 0;">
                 
                 <div style="display: flex; gap: 8px; margin-top: 4px; align-items: center;">
                     <div style="flex: 2;">
-                        <label style="font-size: 10px; color: #6b826a;">Faction Assignment:</label>
+                        <label for="territory-faction-select" style="font-size: 10px; color: #6b826a;">Faction Assignment:</label>
                         <select id="territory-faction-select" style="font-size: 10px; margin: 2px 0; background: #0a1410;"></select>
                     </div>
                     <div style="flex: 1; text-align: center;">
-                        <label style="font-size: 10px; color: #6b826a;">Border Color:</label>
+                        <label for="territory-color-input" style="font-size: 10px; color: #6b826a;">Border Color:</label>
                         <input type="color" id="territory-color-input" value="#00e5a3" style="margin: 2px auto; display: block;">
                     </div>
                 </div>
@@ -567,6 +586,7 @@
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
                 <p style="font-size: 9px; color: #6b826a; margin: 0 0 6px 0;">Private session notes saved locally.</p>
+                <label for="dm-scratchpad-input" style="display:none;">Notes</label>
                 <textarea id="dm-scratchpad-input" rows="8" placeholder="Quick encounter notes, secret rolls, plot hooks..." style="font-size: 11px; resize: vertical;" oninput="window.saveDmScratchpad()"></textarea>
                 <button onclick="window.toggleDmScratchpad()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 6px; float: right;">CLOSE</button>
             </div>
@@ -598,10 +618,10 @@
                     <div style="background: #040605; border: 1px solid #3c4e36; padding: 6px; margin-top: 6px; border-radius: 2px;">
                         <label style="font-size: 9px; color: #6b826a; display:block; margin-bottom:2px;">Manual Set (Year / Month / Day / Hour):</label>
                         <div style="display: flex; gap: 4px;">
-                            <input type="number" id="set-yr" placeholder="YYYY" style="margin:0; font-size:10px; padding:4px; text-align:center;">
-                            <input type="number" id="set-mo" placeholder="MM" min="1" max="12" style="margin:0; font-size:10px; padding:4px; text-align:center;">
-                            <input type="number" id="set-da" placeholder="DD" min="1" max="30" style="margin:0; font-size:10px; padding:4px; text-align:center;">
-                            <input type="number" id="set-hr" placeholder="HH" min="0" max="23" style="margin:0; font-size:10px; padding:4px; text-align:center;">
+                            <label for="set-yr" style="display:none;">Year</label><input type="number" id="set-yr" placeholder="YYYY" style="margin:0; font-size:10px; padding:4px; text-align:center;">
+                            <label for="set-mo" style="display:none;">Month</label><input type="number" id="set-mo" placeholder="MM" min="1" max="12" style="margin:0; font-size:10px; padding:4px; text-align:center;">
+                            <label for="set-da" style="display:none;">Day</label><input type="number" id="set-da" placeholder="DD" min="1" max="30" style="margin:0; font-size:10px; padding:4px; text-align:center;">
+                            <label for="set-hr" style="display:none;">Hour</label><input type="number" id="set-hr" placeholder="HH" min="0" max="23" style="margin:0; font-size:10px; padding:4px; text-align:center;">
                         </div>
                         <button class="btn-reveal" onclick="window.applyManualTime()" style="font-size:9px; padding:6px; margin-top:4px; width:100%;">APPLY EXACT DATE</button>
                     </div>
@@ -623,11 +643,13 @@
                 </div>
                 <div id="comms-chat-feed" style="height: 250px; overflow-y: auto; background: #030403; border: 1px solid #3c4e36; padding: 8px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
                 <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                    <label for="comms-recipient" style="display:none;">Recipient</label>
                     <select id="comms-recipient" style="flex: 1; margin: 0; font-size: 10px; padding: 4px; background: #0a1410;">
                         <option value="global">Global Broadcast</option>
                     </select>
                 </div>
                 <div style="display: flex; gap: 6px;">
+                    <label for="comms-message-input" style="display:none;">Message</label>
                     <input type="text" id="comms-message-input" placeholder="Transmit message..." style="flex: 2; margin: 0; padding: 6px;" onkeypress="if(event.key === 'Enter') window.sendChatMessage()">
                     <button class="btn-reveal" onclick="window.sendChatMessage()" style="flex: 1; margin: 0; padding: 6px; font-size: 10px;">SEND</button>
                 </div>
@@ -648,7 +670,7 @@
                 <div id="combat-tracker-body"></div>
             </div>
 
-            <!-- RESTORED: DM OPERATIONS (MAP EDITOR) PANEL WITH SEPARATE SUB-TABS -->
+            <!-- DM OPERATIONS (MAP EDITOR) PANEL WITH SEPARATE SUB-TABS -->
             <div id="dm-tools" class="panel">
                 <div id="dm-tools-header" class="panel-header-drag">
                     <h4 style="margin:0;">DM Operations (Map Editor)</h4>
@@ -665,11 +687,11 @@
                 <!-- SUB-TAB 1: SPAWN SYSTEMS & FLEETS -->
                 <div id="dm-panel-spawn" class="dm-subpanel active">
                     <p style="font-size: 9px; color: #00e5a3; margin-top:0;">Tip: Drag and drop custom stars or ships directly on map.</p>
-                    <label style="font-size: 10px; color: #6b826a;">New Asset / Star / Fleet Name:</label>
+                    <label for="dm-tool-name" style="font-size: 10px; color: #6b826a;">New Asset / Star / Fleet Name:</label>
                     <input type="text" id="dm-tool-name" value="Sol Prime">
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-                        <label style="font-size: 10px; color: #6b826a;">Stellar Classification:</label>
+                        <label for="dm-tool-luminosity" style="font-size: 10px; color: #6b826a;">Stellar Classification:</label>
                         <select id="dm-tool-luminosity" style="width: 140px; font-size: 10px;">
                             <option value="Class G (Yellow)">Class G (Yellow)</option>
                             <option value="Class M (Red Dwarf)">Class M (Red Dwarf)</option>
@@ -680,12 +702,12 @@
                     </div>
 
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-                        <label style="font-size: 10px; color: #6b826a;">Color Designation:</label>
+                        <label for="dm-tool-color" style="font-size: 10px; color: #6b826a;">Color Designation:</label>
                         <input type="color" id="dm-tool-color" value="#ffe9c4">
                     </div>
 
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-                        <label style="font-size: 10px; color: #6b826a;">Engine Drive System:</label>
+                        <label for="dm-tool-drivetype" style="font-size: 10px; color: #6b826a;">Engine Drive System:</label>
                         <select id="dm-tool-drivetype" style="width: 150px; font-size: 10px; background:#0a1410;">
                             <option value="ftl_class1">Class 1 Warp Drive</option>
                             <option value="ftl_class2">Class 2 Hyperdrive</option>
@@ -744,7 +766,7 @@
         </div>
     </div>
 
- <!-- MAIN JAVASCRIPT LINKS -->
+    <!-- MAIN JAVASCRIPT LINKS -->
     <script src="js/db.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/combat.js"></script>
