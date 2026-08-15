@@ -32,12 +32,39 @@ window.updateCalendarDisplay = function() {
     if (modalClock) modalClock.innerText = timeStr;
 };
 
+// NEW: Global observer that listens for time crossing 24h boundaries to reset Daily Economy loops
+window.processTimeAdvancement = async function(oldHours, newHours) {
+    let daysPassed = Math.floor(newHours / 24) - Math.floor(oldHours / 24);
+    if (daysPassed > 0 && typeof globalShipMarkersCache !== 'undefined') {
+        let anyUpdated = false;
+        for (let vessel of globalShipMarkersCache) {
+            let cargo = vessel.cargo_inventory || {};
+            if (cargo.synth_capacity !== 10) {
+                cargo.synth_capacity = 10;
+                await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+                anyUpdated = true;
+            }
+        }
+        if (anyUpdated) {
+            await db.from('chat_logs').insert({
+                sender_id: 'system',
+                content: `✨ [DAILY RESET] 24-hour cycle completed. All Elder E-M Synthesizers recharged to 10/10 capacity.`,
+                message_type: 'text'
+            });
+            if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+        }
+    }
+};
+
 window.initCalendarEngine = function() {
     window.updateCalendarDisplay();
-    window.timeFlowInterval = setInterval(() => {
+    window.timeFlowInterval = setInterval(async () => {
         if (window.timeFlowActive) { 
+            let oldTime = window.universeTimeHours;
             window.universeTimeHours += 1; 
+            localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
             window.updateCalendarDisplay(); 
+            await window.processTimeAdvancement(oldTime, window.universeTimeHours);
         }
     }, 4000);
 };
@@ -48,7 +75,7 @@ window.toggleCalendarControls = function() {
     window.updateCalendarDisplay();
 };
 
-window.adjustTime = function(amount, unit) {
+window.adjustTime = async function(amount, unit) {
     if (currentUserRole !== 'dm') return;
     let multiplier = 1;
     if (unit === 'hours') multiplier = 1;
@@ -56,14 +83,18 @@ window.adjustTime = function(amount, unit) {
     if (unit === 'months') multiplier = 24 * 30;
     if (unit === 'years') multiplier = 24 * 30 * 12;
 
+    let oldTime = window.universeTimeHours;
     window.universeTimeHours += amount * multiplier;
     if (window.universeTimeHours < 0) window.universeTimeHours = 0;
+    
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
     window.broadcastTimeSync();
+    
+    await window.processTimeAdvancement(oldTime, window.universeTimeHours);
 };
 
-window.applyManualTime = function() {
+window.applyManualTime = async function() {
     if (currentUserRole !== 'dm') return;
     const yr = parseInt(document.getElementById('set-yr').value);
     const mo = parseInt(document.getElementById('set-mo').value) || 1;
@@ -75,22 +106,29 @@ window.applyManualTime = function() {
     const hoursInDay = 24; const daysInMonth = 30; const monthsInYear = 12;
     const hoursInMonth = hoursInDay * daysInMonth; const hoursInYear = hoursInMonth * monthsInYear;
 
+    let oldTime = window.universeTimeHours;
     window.universeTimeHours = (yr * hoursInYear) + ((mo - 1) * hoursInMonth) + ((da - 1) * hoursInDay) + hr;
     if (window.universeTimeHours < 0) window.universeTimeHours = 0;
 
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
     window.broadcastTimeSync();
+    
+    await window.processTimeAdvancement(oldTime, window.universeTimeHours);
     alert("Chronology manually updated.");
 };
 
-window.resetTimeline = function() {
+window.resetTimeline = async function() {
     if (currentUserRole !== 'dm') return;
     if (!confirm("Reset timeline back to YR 2800.01.01?")) return;
+    
+    let oldTime = window.universeTimeHours;
     window.universeTimeHours = 24192000;
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
     window.broadcastTimeSync();
+    
+    await window.processTimeAdvancement(oldTime, window.universeTimeHours);
 };
 
 window.toggleTimeFlow = function() {
@@ -160,195 +198,6 @@ window.resetUiLayout = function() {
     location.reload();
 };
 
-/* --- TOOL TOGGLES & MAP DRAWING --- */
-window.toggleHyperlanes = function() {
-    hyperlanesVisible = !hyperlanesVisible;
-    const btn = document.getElementById('hyperlane-toggle-btn');
-    if (btn) {
-        btn.style.borderColor = hyperlanesVisible ? '#3c4e36' : '#00e5a3';
-        btn.style.color = hyperlanesVisible ? '#6b826a' : '#00e5a3';
-    }
-};
-
-window.toggleTerritoryTool = function() {
-    if (currentUserRole !== 'dm') return;
-    const panel = document.getElementById('territory-control-panel');
-    panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-    if (panel.style.display === 'block') {
-        window.populateTerritoryFactionSelect();
-        window.renderTerritoryList();
-    }
-};
-
-window.populateTerritoryFactionSelect = function() {
-    const select = document.getElementById('territory-faction-select');
-    if (!select) return;
-    let html = '<option value="Independent / Neutral">Independent / Neutral</option>';
-    const factions = globalCodexEntriesCache.filter(e => e.category === 'factions');
-    factions.forEach(f => {
-        html += `<option value="${f.title}">${f.title}</option>`;
-    });
-    select.innerHTML = html;
-};
-
-window.startDrawingTerritory = function() {
-    if (currentUserRole !== 'dm') return;
-    territoryDrawActive = true;
-    hyperlaneDrawActive = false; jumpPlottingActive = false; measuringTapeActive = false; pingModeActive = false;
-    if(typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
-    activeTerritoryVertices = [];
-    document.getElementById('btn-start-territory-draw').style.display = 'none';
-    document.getElementById('btn-finish-territory-draw').style.display = 'block';
-    document.getElementById('btn-cancel-territory-draw').style.display = 'block';
-    document.getElementById('territory-drawing-status').style.display = 'block';
-    document.getElementById('territory-drawing-status').innerText = 'Drawing Active: Click map to place nodes...';
-};
-
-window.cancelDrawingTerritory = function() {
-    territoryDrawActive = false;
-    if(typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
-    activeTerritoryVertices = [];
-    document.getElementById('btn-start-territory-draw').style.display = 'block';
-    document.getElementById('btn-finish-territory-draw').style.display = 'none';
-    document.getElementById('btn-cancel-territory-draw').style.display = 'none';
-    document.getElementById('territory-drawing-status').style.display = 'none';
-};
-
-window.finishActiveTerritory = async function() {
-    if (activeTerritoryVertices.length < 3) {
-        alert("A territory polygon requires at least 3 vertices.");
-        return;
-    }
-    
-    const name = document.getElementById('territory-name-input').value.trim() || `Sector Territory ${globalTerritoriesCache.length + 1}`;
-    const faction = document.getElementById('territory-faction-select').value;
-    const color = document.getElementById('territory-color-input').value;
-
-    const payload = {
-        name: name,
-        faction_name: faction,
-        color: color,
-        vertices: activeTerritoryVertices,
-        is_revealed: true,
-        created_by: currentUserId
-    };
-
-    const { error } = await db.from('territories').insert(payload);
-    if (error) {
-        alert("Failed to save territory: " + error.message);
-    } else {
-        document.getElementById('territory-name-input').value = '';
-        window.cancelDrawingTerritory();
-        if (typeof loadTerritories === 'function') loadTerritories();
-        
-        await db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `🗺️ [TERRITORY ESTABLISHED] Overseer ratified borders for: '${name}' (${faction}).`,
-            message_type: 'text'
-        });
-    }
-};
-
-window.renderTerritoryList = function() {
-    const container = document.getElementById('territory-list-container');
-    if (!container) return;
-    let html = '';
-    globalTerritoriesCache.forEach((t) => {
-        html += `
-            <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:2px; border-left:3px solid ${t.color};">
-                <div>
-                    <strong style="color:${t.color}; font-size:11px;">${t.name}</strong>
-                    <div style="font-size:9px; color:#6b826a;">Faction: ${t.faction_name || 'Neutral'} (${(t.vertices || []).length} Nodes)</div>
-                </div>
-                <button class="layer-del" onclick="window.deleteTerritory('${t.id}')" style="padding:2px 6px; font-size:9px;">X</button>
-            </div>
-        `;
-    });
-    container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active territories plotted.</span>';
-};
-
-window.deleteTerritory = async function(id) {
-    if (currentUserRole !== 'dm') return;
-    if (!confirm("Permanently dissolve this territorial border?")) return;
-    await db.from('territories').delete().eq('id', id);
-    if (typeof loadTerritories === 'function') loadTerritories();
-};
-
-window.startDrawingHyperlane = function() {
-    if (currentUserRole !== 'dm') return;
-    hyperlaneDrawActive = true;
-    territoryDrawActive = false; jumpPlottingActive = false; measuringTapeActive = false; pingModeActive = false;
-    if(typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
-    activeHyperlaneNodes = [];
-    document.getElementById('btn-start-hyperlane-draw').style.display = 'none';
-    document.getElementById('btn-finish-hyperlane-draw').style.display = 'block';
-    document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block';
-    document.getElementById('hyperlane-drawing-status').style.display = 'block';
-    document.getElementById('hyperlane-drawing-status').innerText = 'Route Active: Click stars on map to link nodes...';
-};
-
-window.cancelDrawingHyperlane = function() {
-    hyperlaneDrawActive = false;
-    if(typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
-    activeHyperlaneNodes = [];
-    document.getElementById('btn-start-hyperlane-draw').style.display = 'block';
-    document.getElementById('btn-finish-hyperlane-draw').style.display = 'none';
-    document.getElementById('btn-cancel-hyperlane-draw').style.display = 'none';
-    document.getElementById('hyperlane-drawing-status').style.display = 'none';
-};
-
-window.finishActiveHyperlane = async function() {
-    if (activeHyperlaneNodes.length < 2) { alert("A trade route requires at least 2 connected nodes."); return; }
-    
-    const name = prompt("Enter a designation for this Trade Route:", `Trade Route ${globalHyperlanesCache.length + 1}`);
-    if(!name) return;
-
-    const payload = {
-        name: name,
-        color: '#00e1ff',
-        nodes: activeHyperlaneNodes,
-        created_by: currentUserId
-    };
-
-    const { error } = await db.from('hyperlanes').insert(payload);
-    if (error) {
-        alert("Failed to save trade route: " + error.message);
-    } else {
-        window.cancelDrawingHyperlane();
-        if (typeof loadHyperlanes === 'function') loadHyperlanes();
-        await db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `⚡ [LOGISTICS] Overseer established a new Trade Route: '${name}'.`,
-            message_type: 'text'
-        });
-    }
-};
-
-window.renderHyperlaneList = function() {
-    const container = document.getElementById('hyperlane-list-container');
-    if (!container) return;
-    let html = '';
-    globalHyperlanesCache.forEach((h) => {
-        html += `
-            <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:2px; border-left:3px solid ${h.color || '#00e1ff'};">
-                <div>
-                    <strong style="color:${h.color || '#00e1ff'}; font-size:11px;">${h.name}</strong>
-                    <div style="font-size:9px; color:#6b826a;">Nodes: ${(h.nodes || []).length}</div>
-                </div>
-                <button class="layer-del" onclick="window.deleteHyperlane('${h.id}')" style="padding:2px 6px; font-size:9px;">X</button>
-            </div>
-        `;
-    });
-    container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active trade routes plotted.</span>';
-};
-
-window.deleteHyperlane = async function(id) {
-    if (currentUserRole !== 'dm') return;
-    if (!confirm("Permanently sever this trade route?")) return;
-    await db.from('hyperlanes').delete().eq('id', id);
-    if (typeof loadHyperlanes === 'function') loadHyperlanes();
-};
-
 /* --- SKILLS & TERMINAL TOGGLES --- */
 const skillList = [
     "Athletics", "Stealth", "Survival", "Ballistic Weapons", 
@@ -402,7 +251,7 @@ window.switchTermTab = function(tabName) {
         if (typeof populateVesselDeckSelect === 'function') populateVesselDeckSelect();
         if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
     } else if (tabName === 'codex') {
-        if (typeof window.switchCodexCategory === 'function') window.switchCodexCategory(activeCodexCategory);
+        window.switchCodexCategory(activeCodexCategory);
     }
 };
 
