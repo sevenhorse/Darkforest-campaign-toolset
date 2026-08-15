@@ -380,7 +380,7 @@
                 </div>
                 <button id="measuring-tape-toggle-btn" onclick="window.toggleMeasuringTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">MEASURE</button>
                 <button id="ping-tool-toggle-btn" onclick="window.togglePingMode()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">PING</button>
-                <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;" title="Toggle hyperlane trade routes">LANES</button>
+                <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;" title="Toggle procedural routes">ROUTES</button>
                 <button id="territory-tool-toggle-btn" onclick="window.toggleTerritoryTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px; display: none;">TERRITORIES</button>
                 <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 8px; border-radius: 2px; font-size: 10px; color: #00e5a3; cursor: pointer; white-space: nowrap;" onclick="window.toggleCalendarControls()" title="Click to inspect/control timeline">
                     <span id="clock-ticker-text">YR 2800.01.01 // 00:00</span>
@@ -585,16 +585,19 @@
                 <div id="dm-panel-map" class="dm-subpanel">
                     <p style="font-size: 9px; color: #6b826a; margin-top:0;">Cartography & Sovereignty Controls.</p>
                     <button class="btn-reveal" onclick="window.toggleTerritoryTool()" style="margin-top: 4px;">🗺️ OPEN TERRITORY PLOTTER</button>
-                    <button class="btn-reveal" onclick="window.toggleHyperlanes()" style="margin-top: 6px;">⚡ TOGGLE HYPERLANE ROUTES</button>
                     <button class="btn-reveal" onclick="window.toggleMeasuringTool()" style="margin-top: 6px;">📏 ACTIVATE TACTICAL RULER</button>
+                    <button class="btn-reveal" onclick="window.toggleHyperlanes()" style="margin-top: 6px;">⚡ TOGGLE PROCEDURAL ROUTES</button>
                     
-                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #00e1ff;">Custom Jump Routes</h4>
+                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #00e1ff;">Trade Route Plotter</h4>
                     <div style="display: flex; gap: 6px; margin-top: 8px;">
                         <button id="btn-start-hyperlane-draw" class="btn-deploy" onclick="window.startDrawingHyperlane()" style="flex:1; font-size:10px; margin:0;">✏️ PLOT ROUTE</button>
                         <button id="btn-finish-hyperlane-draw" class="btn-deploy" onclick="window.finishActiveHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✓ SAVE ROUTE</button>
                         <button id="btn-cancel-hyperlane-draw" class="btn-remove" onclick="window.cancelDrawingHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
                     </div>
-                    <div id="hyperlane-drawing-status" style="font-size: 10px; color: #00e1ff; margin-top: 6px; display: none;">Route active: Click map to link nodes...</div>
+                    <div id="hyperlane-drawing-status" style="font-size: 10px; color: #00e1ff; margin-top: 6px; display: none;">Route Active: Click stars on map to link nodes...</div>
+                    
+                    <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Trade Routes</h4>
+                    <div id="hyperlane-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
                 </div>
 
                 <!-- SUB-TAB 3: MAINTENANCE & EMERGENCY -->
