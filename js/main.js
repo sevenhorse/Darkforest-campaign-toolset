@@ -40,7 +40,7 @@ let codexSearchFilter = '';
 let hyperlanesVisible = true;
 
 window.hoveredTarget = null;
-window.lockedTarget = null;
+window.selectedTarget = null;
 
 /* ==========================================================================
    2. STRIKE CRAFT LORE DATABASE
@@ -362,7 +362,6 @@ window.renderCharacterTerminalData = function() {
         setVal(`skill-${safeKey}`, s[safeKey] || 0);
     });
 
-    // BUG FIX: Renders personal arsenal data and updates badge count
     if (typeof window.renderArsenal === 'function') window.renderArsenal();
     
     const badgeCombat = document.getElementById('badge-combat');
@@ -731,10 +730,6 @@ window.handleLogout = async function() {
 /* ==========================================================================
    7. TERMINAL & UI CONTROLLERS
    ========================================================================== */
-/* ==========================================================================
-   js/main.js (PART 2)
-   ========================================================================== */
-
 const skillList = [
     "Athletics", "Stealth", "Survival", "Ballistic Weapons", 
     "Energy Weapons", "Explosives", "Computers", "Engineering", 
@@ -1267,7 +1262,6 @@ window.executeDicePoolRoll = async function() {
     let total = 0;
     let breakdown = [];
     
-    // Stats (Kids on Bikes system = stat dice explode on max)
     statCheckboxes.forEach(cb => {
         let statName = cb.value;
         let statKey = 'stat_' + statName.toLowerCase();
@@ -1287,7 +1281,6 @@ window.executeDicePoolRoll = async function() {
         breakdown.push(`${statName} (d${faces}: ${subRolls.join('💥')})`);
     });
 
-    // Skills (Flat numeric modifiers)
     skillCheckboxes.forEach(cb => {
         let skillName = cb.value;
         let safeKey = skillName.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -1318,6 +1311,9 @@ window.executeDicePoolRoll = async function() {
 
 /* ==========================================================================
    END ARSENAL LOGIC 
+   ========================================================================== */
+/* ==========================================================================
+   js/main.js (PART 3)
    ========================================================================== */
 
 /* --- CARGO HUB --- */
@@ -1839,6 +1835,430 @@ window.modifySquadronLoiter = async function(vesselId, idx, delta) {
     }
 };
 
+window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
+    let wpn = vessel.ship_weapons[idx];
+    
+    if (statKey === 'ammo' && wpn.ammo >= 0) wpn.ammo = Math.max(0, Math.min(wpn.max_ammo, wpn.ammo + delta));
+    if (statKey === 'cooldown') wpn.cooldown = Math.max(0, wpn.cooldown + delta);
+    if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, wpn.overheat + delta));
+    
+    const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
+    if (error) console.error("Weapon stat sync failed:", error);
+    window.renderVesselDeck();
+};
+
+window.resetShipStats = async function(vesselId) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    if (!confirm("Restore maximum health profiles and resupply all ammunition banks for this vessel?")) return;
+    
+    let payload = {
+        integrity_shields: vessel.max_shields || 400,
+        integrity_hull: vessel.max_hull || 300,
+        integrity_reactive: vessel.max_reactive || 10,
+        integrity_ablative: vessel.max_ablative || 10
+    };
+    Object.assign(vessel, payload);
+    
+    if (vessel.ship_weapons) {
+        vessel.ship_weapons.forEach(w => { 
+            if(w.ammo >= 0) w.ammo = w.max_ammo; 
+            w.cooldown = 0; 
+            w.overheat = 0; 
+        });
+        payload.ship_weapons = vessel.ship_weapons;
+    }
+    
+    await db.from('ship_markers').update(payload).eq('id', vesselId);
+    window.renderVesselDeck();
+    alert("Vessel combat stats reset to maximums.");
+};
+
+window.rollSquadronWeapon = async function(vesselId, sqIdx) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let sq = (vessel.ship_deployed || [])[sqIdx];
+    if (!sq) return;
+
+    let wpnIdx = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`).value;
+    let targetId = document.getElementById(`sq-target-${vesselId}-${sqIdx}`).value;
+    
+    let dbStats = STRIKE_CRAFT_DB[sq.type];
+    let wpn = dbStats.weapons[wpnIdx];
+    if (!wpn) return;
+
+    let volleys = sq.count;
+    if (volleys <= 0) return;
+
+    const diceRegex = /^(\d*)d(\d+)$/i;
+    const match = wpn.dice.trim().match(diceRegex);
+    if (!match) return;
+
+    let baseNumDice = parseInt(match[1]) || 1;
+    let numDice = baseNumDice * volleys;
+    let diceFaces = parseInt(match[2]);
+
+    let canExplode = wpn.explodes && diceFaces >= 2;
+
+    let total = 0;
+    let breakdown = [];
+
+    for (let i = 0; i < numDice; i++) {
+        let rollTotal = 0;
+        let subRolls = [];
+        let currentRoll;
+        do {
+            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
+            rollTotal += currentRoll;
+            subRolls.push(currentRoll);
+        } while (currentRoll === diceFaces && canExplode);
+        total += rollTotal;
+        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
+    }
+
+    const breakdownText = breakdown.join(' + ');
+
+    let targetShip = null;
+    let combatLog = ``;
+    let dmgType = wpn.dmgType || "Impact";
+    let isPiercing = dmgType === "Piercing";
+    let isHeat = dmgType === "Heat";
+
+    if (targetId) {
+        targetShip = globalShipMarkersCache.find(m => m.id === targetId);
+        if (targetShip) {
+            let tStance = targetShip.ship_stance || 'Balanced';
+            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
+            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
+            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+
+            let s_int = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
+            let h_int = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
+            let r_int = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
+            let a_int = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
+            
+            let remainingDmg = total;
+
+            let shieldDmg = Math.min(s_int, remainingDmg);
+            s_int -= shieldDmg;
+            remainingDmg -= shieldDmg;
+            if (shieldDmg > 0) combatLog += `Shields absorbed: ${shieldDmg}. `;
+
+            if (remainingDmg > 0) {
+                if (isPiercing && r_int > 0) {
+                    r_int -= 1;
+                    combatLog += `[REACTIVE ARMOR] charge expended. Hull breach negated! `;
+                    remainingDmg = 0;
+                } else if (isHeat && a_int > 0) {
+                    a_int -= 1;
+                    combatLog += `[ABLATIVE ARMOR] charge expended. Hull damage negated! `;
+                    remainingDmg = 0;
+                } else {
+                    let hullDmg = Math.min(h_int, remainingDmg);
+                    h_int -= hullDmg;
+                    remainingDmg -= hullDmg;
+                    combatLog += `Hull suffered: ${hullDmg} damage! `;
+                    if (h_int <= 0) combatLog += `**CRITICAL HULL BREACH!** `;
+                }
+            }
+
+            await db.from('ship_markers').update({
+                integrity_shields: s_int,
+                integrity_hull: h_int,
+                integrity_reactive: r_int,
+                integrity_ablative: a_int
+            }).eq('id', targetShip.id);
+
+            targetShip.integrity_shields = s_int;
+            targetShip.integrity_hull = h_int;
+            targetShip.integrity_reactive = r_int;
+            targetShip.integrity_ablative = a_int;
+        }
+    }
+
+    let targetString = targetShip ? ` at ${targetShip.name}` : ``;
+    let breakdownString = `
+        <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
+            <strong>Damage Type:</strong> ${dmgType}<br>
+            <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
+            ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
+        </div>
+    `;
+
+    await window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
+};
+
+window.rollShipWeapon = async function(vesselId, idx) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    
+    let wpn = (vessel.ship_weapons || [])[idx];
+    if (!wpn) return;
+
+    let volleyInput = document.getElementById(`wpn-volley-${vesselId}-${idx}`);
+    let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
+    let targetSelect = document.getElementById(`wpn-target-${vesselId}-${idx}`);
+    let targetId = targetSelect ? targetSelect.value : null;
+
+    if (wpn.cooldown > 0) {
+        if (!confirm(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`)) return;
+        wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
+    } 
+    
+    if (wpn.ammo === 0) {
+        alert(`[EMPTY] ${wpn.name} is out of ammunition!`); 
+        return;
+    }
+
+    if (wpn.ammo > 0) {
+        if (wpn.ammo < volleys) {
+            alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
+            return;
+        }
+        wpn.ammo -= volleys; 
+    }
+
+    const diceRegex = /^(\d*)d(\d+)$/i;
+    const match = wpn.dice.trim().match(diceRegex);
+    if (!match) { alert("Invalid dice format."); return; }
+
+    let baseNumDice = parseInt(match[1]) || 1;
+    let numDice = baseNumDice * volleys;
+    let diceFaces = parseInt(match[2]);
+    let modVal = (parseInt(wpn.modifier) || 0) * volleys;
+
+    let canExplode = wpn.explodes && diceFaces >= 2;
+
+    let total = 0;
+    let breakdown = [];
+
+    for (let i = 0; i < numDice; i++) {
+        let rollTotal = 0;
+        let subRolls = [];
+        let currentRoll;
+        do {
+            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
+            rollTotal += currentRoll;
+            subRolls.push(currentRoll);
+        } while (currentRoll === diceFaces && canExplode);
+        
+        total += rollTotal;
+        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
+    }
+
+    total += modVal;
+    
+    let stance = vessel.ship_stance || 'Balanced';
+    if (stance === 'Aggressive') { total = Math.floor(total * 1.25); breakdown.push(`[Aggressive: +25%]`); } 
+    else if (stance === 'Defensive') { total = Math.floor(total * 0.75); breakdown.push(`[Defensive: -25%]`); }
+
+    if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
+    const breakdownText = breakdown.join(' + ');
+    
+    let targetShip = null;
+    let combatLog = ``;
+    let wpnLower = wpn.name.toLowerCase();
+    let isPiercing = wpnLower.includes('pierce') || wpnLower.includes('piercing') || wpnLower.includes('rail') || wpnLower.includes('gauss');
+    let isHeat = wpnLower.includes('heat') || wpnLower.includes('plasma') || wpnLower.includes('laser') || wpnLower.includes('gamma');
+    let dmgType = isPiercing ? 'Piercing' : (isHeat ? 'Heat' : 'Impact/Ion');
+
+    if (targetId) {
+        targetShip = globalShipMarkersCache.find(m => m.id === targetId);
+        if (targetShip) {
+            let tStance = targetShip.ship_stance || 'Balanced';
+            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
+            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
+            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+
+            let s_int = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
+            let h_int = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
+            let r_int = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
+            let a_int = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
+            
+            let remainingDmg = total;
+
+            let shieldDmg = Math.min(s_int, remainingDmg);
+            s_int -= shieldDmg;
+            remainingDmg -= shieldDmg;
+            if (shieldDmg > 0) combatLog += `Shields absorbed: ${shieldDmg}. `;
+
+            if (remainingDmg > 0) {
+                if (isPiercing && r_int > 0) {
+                    r_int -= 1; combatLog += `[REACTIVE ARMOR] charge expended. Hull breach negated! `; remainingDmg = 0;
+                } else if (isHeat && a_int > 0) {
+                    a_int -= 1; combatLog += `[ABLATIVE ARMOR] charge expended. Hull damage negated! `; remainingDmg = 0;
+                } else {
+                    let hullDmg = Math.min(h_int, remainingDmg);
+                    h_int -= hullDmg; remainingDmg -= hullDmg;
+                    combatLog += `Hull suffered: ${hullDmg} damage! `;
+                    if (h_int <= 0) combatLog += `**CRITICAL HULL BREACH!** `;
+                }
+            }
+
+            await db.from('ship_markers').update({ integrity_shields: s_int, integrity_hull: h_int, integrity_reactive: r_int, integrity_ablative: a_int }).eq('id', targetShip.id);
+            targetShip.integrity_shields = s_int; targetShip.integrity_hull = h_int; targetShip.integrity_reactive = r_int; targetShip.integrity_ablative = a_int;
+        }
+    }
+
+    await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
+    window.renderVesselDeck();
+
+    let volleyTag = volleys > 1 ? ` (x${volleys} Volley)` : '';
+    let targetString = targetShip ? ` at ${targetShip.name}` : ` into the void`;
+    let breakdownString = `
+        <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
+            <strong>Damage Type:</strong> ${dmgType}<br>
+            <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
+            ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
+        </div>`;
+    await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
+};
+
+window.addShipDeck = async function() {
+    const select = document.getElementById('vessel-deck-select');
+    const name = document.getElementById('new-deck-name').value.trim();
+    let maxHp = parseInt(document.getElementById('new-deck-hp').value) || 50;
+
+    if (!select || !select.value) { alert("Select a diagnostic target vessel first."); return; }
+    if (!name) { alert("Please enter a deck or system name."); return; }
+    
+    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
+    if (!vessel) return;
+
+    let decks = vessel.ship_decks || [];
+    decks.push({ name: name, hp: maxHp, max_hp: maxHp });
+
+    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vessel.id);
+    vessel.ship_decks = decks;
+
+    document.getElementById('new-deck-name').value = '';
+    document.getElementById('new-deck-hp').value = '50';
+    window.renderVesselDeck();
+};
+
+window.modifyShipDeckHealth = async function(vesselId, idx, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let decks = vessel.ship_decks || [];
+    if (decks[idx]) {
+        let current = decks[idx].hp;
+        let max = decks[idx].max_hp;
+        decks[idx].hp = Math.max(0, Math.min(max, current + delta));
+        
+        await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+        vessel.ship_decks = decks;
+        window.renderVesselDeck();
+    }
+};
+
+window.deleteShipDeck = async function(vesselId, idx) {
+    if (!confirm("Scrap this internal deck?")) return;
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let decks = vessel.ship_decks || [];
+    decks.splice(idx, 1);
+
+    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+    vessel.ship_decks = decks;
+    window.renderVesselDeck();
+};
+
+window.modifyShipHealth = async function(vesselId, key, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let dbKey = 'integrity_' + key;
+    let maxKey = 'max_' + key;
+    
+    let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
+    let max = vessel[maxKey] || 100;
+
+    current = Math.max(0, Math.min(max, current + delta));
+    
+    let payload = {};
+    payload[dbKey] = current;
+    
+    await db.from('ship_markers').update(payload).eq('id', vesselId);
+    vessel[dbKey] = current;
+    window.renderVesselDeck();
+};
+
+window.addShipWeapon = async function() {
+    const select = document.getElementById('vessel-deck-select');
+    const loc = document.getElementById('new-ship-wpn-loc').value.trim() || 'Hull Mount';
+    const name = document.getElementById('new-ship-wpn-name').value.trim();
+    let dice = document.getElementById('new-ship-wpn-dice').value.trim().toLowerCase();
+    let mod = document.getElementById('new-ship-wpn-mod').value.trim();
+    const explodes = document.getElementById('new-ship-wpn-explodes').checked;
+    
+    let ammoInput = document.getElementById('new-ship-wpn-ammo');
+    let ammoVal = -1;
+    if (ammoInput && ammoInput.value.trim() !== '') {
+        ammoVal = parseInt(ammoInput.value);
+    }
+
+    if (!select || !select.value) { alert("Select a vessel token first."); return; }
+    if (!name) { alert("Please enter a weapon system name."); return; }
+    if (!dice) dice = '1d10';
+    if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
+    if (!mod) mod = '+0';
+
+    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
+    if (!vessel) return;
+
+    let weapons = vessel.ship_weapons || [];
+    weapons.push({ 
+        loc, name, dice, modifier: mod, explodes, 
+        ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0 
+    });
+
+    await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
+    vessel.ship_weapons = weapons;
+
+    document.getElementById('new-ship-wpn-loc').value = '';
+    document.getElementById('new-ship-wpn-name').value = '';
+    document.getElementById('new-ship-wpn-dice').value = '';
+    document.getElementById('new-ship-wpn-mod').value = '';
+    if (ammoInput) ammoInput.value = '';
+    window.renderVesselDeck();
+};
+
+window.deleteShipWeapon = async function(vesselId, idx) {
+    if (!confirm("Uninstall this weapon system?")) return;
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let weapons = vessel.ship_weapons || [];
+    weapons.splice(idx, 1);
+
+    await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vesselId);
+    vessel.ship_weapons = weapons;
+    window.renderVesselDeck();
+};
+
+window.broadcastVesselStatus = async function() {
+    const select = document.getElementById('vessel-deck-select');
+    if (!select || !select.value) return;
+    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
+    if (!vessel) return;
+
+    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
+    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
+    const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
+    const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
+
+    await db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `🛡️ [VESSEL DIAGNOSTICS] ${vessel.name} status check:<br><span style="color:#00e1ff">Shields: ${s_int}</span> | <span style="color:#ff3333">Hull: ${h_int}</span><br><span style="color:#ffaa00">Reactive Armor: ${r_int}</span> | <span style="color:#ffaa00">Ablative Armor: ${a_int}</span>`,
+        message_type: 'text'
+    });
+    alert("Vessel diagnostic broadcasted to Secure Comms!");
+};
+
 /* Objectives & Notes */
 window.addCampaignObjective = async function() {
     const title = document.getElementById('new-obj-title').value;
@@ -2242,7 +2662,6 @@ function initGalaxyEngine() {
 
     let dbStarSystems = [];
     let shipMarkers = [];
-    window.selectedTarget = null;
     let draggedMarker = null;
     let draggedStar = null; 
 
