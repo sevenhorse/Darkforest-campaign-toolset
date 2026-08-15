@@ -27,6 +27,7 @@ let globalShipMarkersCache = [];
 let globalDbSystemsCache = [];
 let globalTerritoriesCache = [];
 let globalCodexEntriesCache = [];
+let globalHyperlanesCache = [];
 
 let editingCodexId = null;
 let activeCargoSubtab = 'perishables';
@@ -55,7 +56,6 @@ let activeTerritoryVertices = [];
 
 let hyperlaneDrawActive = false;
 let activeHyperlaneNodes = [];
-let globalHyperlanesCache = [];
 
 const driveSpeeds = {
     sublight: { name: "Sublight Thrusters (0.1c)", speed: 10, label: "0.1c Sublight" },
@@ -320,7 +320,7 @@ async function loadHyperlanes() {
 // --- NEW ANOMALY DETECTION ENGINE ---
 async function checkAnomalyProximity(ship) {
     if (!ship) return;
-    const DRADIS_RANGE = 180; // Distance required to trigger reveal
+    const DRADIS_RANGE = 180;
     
     let anomalies = globalDbSystemsCache.filter(s => s.luminosity === 'Hidden Anomaly');
     
@@ -330,7 +330,6 @@ async function checkAnomalyProximity(ship) {
         let dist = Math.sqrt(dx*dx + dy*dy);
         
         if (dist < DRADIS_RANGE) {
-            // Trigger DRADIS Reveal
             await db.from('star_systems')
                 .update({ luminosity: 'Revealed Anomaly', color: '#ff3333' })
                 .eq('id', anomaly.id);
@@ -743,6 +742,57 @@ window.saveDmScratchpad = function() {
     localStorage.setItem('odyssey_dm_scratchpad', val);
 };
 
+// --- DRAG UI MANAGEMENT ---
+function makePanelDraggable(panelId, handleId, storageKey) {
+    const panel = document.getElementById(panelId);
+    const handle = document.getElementById(handleId);
+    if (!panel || !handle) return;
+    const savedPos = localStorage.getItem(storageKey);
+    if (savedPos) {
+        try {
+            const { left, top } = JSON.parse(savedPos);
+            panel.style.left = left; panel.style.top = top; panel.style.right = 'auto';
+        } catch(e) {}
+    }
+    let isDragging = false, startX, startY, initialLeft, initialTop;
+    handle.addEventListener('mousedown', (e) => {
+        if (['INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+        isDragging = true;
+        const rect = panel.getBoundingClientRect();
+        startX = e.clientX; startY = e.clientY;
+        initialLeft = rect.left; initialTop = rect.top;
+        panel.style.right = 'auto';
+        const onMouseMove = (moveEvent) => {
+            if (!isDragging) return;
+            const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
+            let newLeft = Math.max(10, Math.min(window.innerWidth - rect.width - 10, initialLeft + dx));
+            let newTop = Math.max(60, Math.min(window.innerHeight - rect.height - 10, initialTop + dy));
+            panel.style.left = `${newLeft}px`; panel.style.top = `${newTop}px`;
+        };
+        const onMouseUp = () => {
+            if (isDragging) { isDragging = false; localStorage.setItem(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); }
+            window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
+        };
+        window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
+    });
+}
+
+makePanelDraggable('hud-overlay', 'hud-overlay-header', 'odyssey_hud_pos');
+makePanelDraggable('combat-tracker-panel', 'combat-tracker-header', 'odyssey_combat_pos');
+makePanelDraggable('dm-tools', 'dm-tools-header', 'odyssey_dm_pos');
+makePanelDraggable('comms-array-panel', 'comms-array-header', 'odyssey_comms_pos');
+makePanelDraggable('calendar-control-panel', 'calendar-control-header', 'odyssey_calendar_pos');
+makePanelDraggable('dm-scratchpad-panel', 'dm-scratchpad-header', 'odyssey_scratchpad_pos');
+makePanelDraggable('territory-control-panel', 'territory-control-header', 'odyssey_territory_pos');
+
+window.resetUiLayout = function() {
+    Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('odyssey_')) localStorage.removeItem(k);
+    });
+    location.reload();
+};
+
+/* --- TOOL TOGGLES & MAP DRAWING --- */
 window.toggleHyperlanes = function() {
     hyperlanesVisible = !hyperlanesVisible;
     const btn = document.getElementById('hyperlane-toggle-btn');
@@ -856,7 +906,6 @@ window.deleteTerritory = async function(id) {
     loadTerritories();
 };
 
-// --- HYPERLANE ROUTE DRAWING LOGIC ---
 window.startDrawingHyperlane = function() {
     if (currentUserRole !== 'dm') return;
     hyperlaneDrawActive = true;
@@ -932,265 +981,7 @@ window.deleteHyperlane = async function(id) {
     loadHyperlanes();
 };
 
-function makePanelDraggable(panelId, handleId, storageKey) {
-    const panel = document.getElementById(panelId);
-    const handle = document.getElementById(handleId);
-    if (!panel || !handle) return;
-    const savedPos = localStorage.getItem(storageKey);
-    if (savedPos) {
-        try {
-            const { left, top } = JSON.parse(savedPos);
-            panel.style.left = left; panel.style.top = top; panel.style.right = 'auto';
-        } catch(e) {}
-    }
-    let isDragging = false, startX, startY, initialLeft, initialTop;
-    handle.addEventListener('mousedown', (e) => {
-        if (['INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
-        isDragging = true;
-        const rect = panel.getBoundingClientRect();
-        startX = e.clientX; startY = e.clientY;
-        initialLeft = rect.left; initialTop = rect.top;
-        panel.style.right = 'auto';
-        const onMouseMove = (moveEvent) => {
-            if (!isDragging) return;
-            const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
-            let newLeft = Math.max(10, Math.min(window.innerWidth - rect.width - 10, initialLeft + dx));
-            let newTop = Math.max(60, Math.min(window.innerHeight - rect.height - 10, initialTop + dy));
-            panel.style.left = `${newLeft}px`; panel.style.top = `${newTop}px`;
-        };
-        const onMouseUp = () => {
-            if (isDragging) { isDragging = false; localStorage.setItem(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); }
-            window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
-        };
-        window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
-    });
-}
-
-makePanelDraggable('hud-overlay', 'hud-overlay-header', 'odyssey_hud_pos');
-makePanelDraggable('combat-tracker-panel', 'combat-tracker-header', 'odyssey_combat_pos');
-makePanelDraggable('dm-tools', 'dm-tools-header', 'odyssey_dm_pos');
-makePanelDraggable('comms-array-panel', 'comms-array-header', 'odyssey_comms_pos');
-makePanelDraggable('calendar-control-panel', 'calendar-control-header', 'odyssey_calendar_pos');
-makePanelDraggable('dm-scratchpad-panel', 'dm-scratchpad-header', 'odyssey_scratchpad_pos');
-makePanelDraggable('territory-control-panel', 'territory-control-header', 'odyssey_territory_pos');
-
-window.resetUiLayout = function() {
-    Object.keys(localStorage).forEach(k => {
-        if (k.startsWith('odyssey_')) localStorage.removeItem(k);
-    });
-    location.reload();
-};
-
-function sanitizeCargo(inv) {
-    if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
-        return {
-            "perishables": [
-                { name: "Standard Rations", qty: 90, unit: "Days" },
-                { name: "Trauma MedKits", qty: 15, unit: "Crates" }
-            ],
-            "expendables": [
-                { name: "Kinetic Rounds", qty: 500, unit: "Shots" },
-                { name: "Energy Cores", qty: 200, unit: "Cells" },
-                { name: "Titanium Armor Hull Plates", qty: 50, unit: "Units" }
-            ],
-            "misc": [
-                { name: "Security Marines", qty: 6, unit: "Personnel" },
-                { name: "Unprocessed Asteroid Salvage", qty: 3, unit: "Tons" }
-            ]
-        };
-    }
-    return inv;
-}
-
-/* Arsenal & Dice Roller */
-function renderArsenalList() {
-    const container = document.getElementById('arsenal-list-container');
-    if (!container) return;
-    const myProfile = allProfiles.find(p => p.id === currentUserId) || {};
-    const arsenal = myProfile.arsenal || [];
-    
-    let html = '';
-    arsenal.forEach(w => {
-        html += `
-        <div class="arsenal-row">
-            <span style="font-size:11px; color:#00e5a3; font-weight:bold; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${w.name}</span>
-            <span style="font-size:10px; color:#d4c5a9;">${w.dice}</span>
-            <span style="font-size:10px; color:#d4c5a9;">${w.modifier}</span>
-            <span style="font-size:10px;" title="Exploding Dice">${w.explodes ? '💥' : ''}</span>
-            <div style="display:flex; gap:4px;">
-                <button class="layer-edit" onclick="window.rollWeapon('${w.id}')" style="padding:4px; flex:1;">ROLL</button>
-                <button class="layer-del" onclick="window.deleteWeapon('${w.id}')" style="padding:4px; width:22px;">X</button>
-            </div>
-        </div>
-        `;
-    });
-    container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No weapons in active arsenal.</span>';
-}
-
-window.addArsenalItem = async function() {
-    const name = document.getElementById('new-wpn-name').value.trim();
-    let dice = document.getElementById('new-wpn-dice').value.trim().toLowerCase();
-    let mod = document.getElementById('new-wpn-mod').value.trim();
-    const explodes = document.getElementById('new-wpn-explodes').checked;
-
-    if (!name) return;
-    if (!dice) dice = '1d6';
-    if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
-    if (!mod) mod = '+0';
-
-    await db.from('character_arsenal').insert({
-        profile_id: currentUserId, name: name, dice: dice, modifier: mod, explodes: explodes
-    });
-
-    document.getElementById('new-wpn-name').value = '';
-    document.getElementById('new-wpn-dice').value = '';
-    document.getElementById('new-wpn-mod').value = '';
-    loadAllProfiles();
-};
-
-window.deleteWeapon = async function(id) {
-    if (!confirm("Remove this weapon from your arsenal?")) return;
-    await db.from('character_arsenal').delete().eq('id', id);
-    loadAllProfiles();
-};
-
-window.rollWeapon = function(id) {
-    const myProfile = allProfiles.find(p => p.id === currentUserId) || {};
-    const wpn = (myProfile.arsenal || []).find(w => w.id === id);
-    if (!wpn) return;
-
-    const diceRegex = /^(\d*)d(\d+)$/i;
-    const match = wpn.dice.trim().match(diceRegex);
-    if (!match) { alert("Invalid dice format. Use formats like 'd20' or '6d20'."); return; }
-
-    let numDice = parseInt(match[1]) || 1;
-    let diceFaces = parseInt(match[2]);
-    let modVal = parseInt(wpn.modifier) || 0;
-
-    let total = 0;
-    let breakdown = [];
-
-    for (let i = 0; i < numDice; i++) {
-        let rollTotal = 0;
-        let subRolls = [];
-        let currentRoll;
-        do {
-            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
-            rollTotal += currentRoll;
-            subRolls.push(currentRoll);
-        } while (currentRoll === diceFaces && wpn.explodes);
-        
-        total += rollTotal;
-        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
-    }
-
-    total += modVal;
-    if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
-
-    const breakdownText = breakdown.join(' + ');
-    const box = document.getElementById('dice-roll-result-box');
-    
-    box.style.display = 'block';
-    box.innerHTML = `<strong>⚔️ ATTACK: ${wpn.name}</strong><br><span style="font-size:10px; color:#d4c5a9;">${breakdownText}</span><br><span style="font-size:14px; font-weight:bold; color:#00e5a3;">TOTAL RESULT: ${total}</span>`;
-    
-    window.broadcastRoll(`Attack - ${wpn.name}`, breakdownText, total);
-};
-
-window.executeDicePoolRoll = function() {
-    const statCheckboxes = document.querySelectorAll('.roll-stat-cb:checked');
-    const skillCheckboxes = document.querySelectorAll('.roll-skill-cb:checked');
-    if (statCheckboxes.length === 0 && skillCheckboxes.length === 0) { alert("Select at least one core stat or skill."); return; }
-    
-    const myProfile = allProfiles.find(p => p.id === currentUserId) || { character: {}, skills: {} };
-    const char = myProfile.character || {}; const skillsMap = myProfile.skills || {};
-    const extraMod = parseInt(document.getElementById('roll-extra-mod').value) || 0;
-
-    let breakdown = [], totalSum = 0;
-    statCheckboxes.forEach(cb => {
-        const diceType = char['stat_' + cb.value.toLowerCase()] || 'd6';
-        const maxVal = parseInt(diceType.replace('d', '')) || 6;
-        let subtotal = 0, rolls = [], currentRoll = 0;
-        do {
-            currentRoll = Math.floor(Math.random() * maxVal) + 1;
-            subtotal += currentRoll; rolls.push(currentRoll);
-        } while (currentRoll === maxVal);
-        totalSum += subtotal;
-        breakdown.push(`[${cb.value} (${diceType}): ${rolls.join(' 💥 ')} = <strong>${subtotal}</strong>]`);
-    });
-
-    skillCheckboxes.forEach(cb => {
-        const safeKey = cb.value.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const skillVal = skillsMap[safeKey] !== undefined ? skillsMap[safeKey] : 0;
-        totalSum += skillVal;
-        breakdown.push(`[${cb.value}: ${skillVal >= 0 ? '+' : ''}${skillVal}]`);
-    });
-    totalSum += extraMod;
-    if (extraMod !== 0) breakdown.push(`[Mod: ${extraMod >= 0 ? '+' : ''}${extraMod}]`);
-
-    const box = document.getElementById('dice-roll-result-box');
-    box.style.display = 'block';
-    box.innerHTML = `<strong>🎲 POOL RESULT:</strong><br><span style="font-size:10px; color:#d4c5a9;">${breakdown.join(' + ')}</span><br><span style="font-size:14px; font-weight:bold; color:#00e5a3;">TOTAL RESULT: ${totalSum}</span>`;
-    
-    window.broadcastRoll("Combined Pool", breakdown.join(' + '), totalSum);
-};
-
-function renderCharacterTerminalData() {
-    const myProfile = allProfiles.find(p => p.id === currentUserId) || { character: {}, skills: {}, arsenal: [] };
-    const char = myProfile.character || {};
-    const skillsMap = myProfile.skills || {};
-    
-    const safeSet = (id, val) => { if(document.getElementById(id)) document.getElementById(id).value = val; };
-    
-    safeSet('term-username', myProfile.username || currentUserEmail.split('@')[0]);
-    safeSet('term-avatar', myProfile.avatar_url || '');
-    if(document.getElementById('my-terminal-avatar-preview')) document.getElementById('my-terminal-avatar-preview').src = myProfile.avatar_url || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><rect width='60' height='60' fill='%23040605'/><text x='50%25' y='50%25' fill='%2300e5a3' font-size='20' font-family='monospace' text-anchor='middle' dominant-baseline='middle'>?</text></svg>";
-    safeSet('term-sheet-name', char.name || '');
-    safeSet('stat-charisma', char.stat_charisma || 'd6'); safeSet('stat-dexterity', char.stat_dexterity || 'd8');
-    safeSet('stat-intelligence', char.stat_intelligence || 'd10'); safeSet('stat-strength', char.stat_strength || 'd8');
-    safeSet('stat-toughness', char.stat_toughness || 'd6'); safeSet('stat-willpower', char.stat_willpower || 'd12');
-    safeSet('term-vitality', char.vitality || 0); safeSet('term-stress', char.stress || 0); safeSet('term-adversity', char.adversity_tokens || 0);
-    
-    skillList.forEach(skill => {
-        const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        safeSet(`skill-${safeKey}`, skillsMap[safeKey] !== undefined ? skillsMap[safeKey] : 0);
-    });
-
-    safeSet('term-specialties', char.specialties || ''); 
-    safeSet('term-assets', char.assets || '');
-    safeSet('term-history', char.history || '');
-    safeSet('aug-head', char.aug_head || '');
-    safeSet('aug-torso', char.aug_torso || ''); safeSet('aug-larm', char.aug_larm || '');
-    safeSet('aug-rarm', char.aug_rarm || ''); safeSet('aug-lleg', char.aug_lleg || '');
-    safeSet('aug-rleg', char.aug_rleg || '');
-    
-    renderArsenalList();
-
-    const rosterDiv = document.getElementById('crew-roster-container');
-    if(rosterDiv) {
-        let html = '';
-        allProfiles.forEach(p => {
-            const pChar = p.character || {};
-            html += `
-                <div class="note-card" style="display:flex; gap:12px; align-items:flex-start;">
-                    <img src="${p.avatar_url || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><rect width='60' height='60' fill='%23040605'/><text x='50%25' y='50%25' fill='%2300e5a3' font-size='20' font-family='monospace' text-anchor='middle' dominant-baseline='middle'>?</text></svg>"}" class="avatar-img">
-                    <div style="flex-grow:1;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <strong style="color:#00e5a3; font-size:12px;">${p.username || 'Commander'} ${p.role === 'dm' ? '[DM]' : ''}</strong>
-                            <span style="font-size:10px; color:#ff6b6b;">Vit: ${pChar.vitality || 0}/10 | Stress: ${pChar.stress || 0}/20</span>
-                        </div>
-                        <p style="margin:2px 0; font-size:11px; color:#d4c5a9;"><strong>${pChar.name || 'Unnamed'}</strong></p>
-                        <div style="font-size:10px; color:#6b826a; margin:2px 0;">
-                            CH: ${pChar.stat_charisma || 'd6'} | DEX: ${pChar.stat_dexterity || 'd8'} | INT: ${pChar.stat_intelligence || 'd10'} | STR: ${pChar.stat_strength || 'd8'} | TOU: ${pChar.stat_toughness || 'd6'} | WIL: ${pChar.stat_willpower || 'd12'}
-                        </div>
-                        <p style="margin:4px 0 0 0; font-size:10px; color:#d4c5a9; background:#040605; padding:6px;">${pChar.specialties || 'No specialties recorded.'}</p>
-                    </div>
-                </div>
-            `;
-        });
-        rosterDiv.innerHTML = html;
-    }
-}
-
+/* --- CHARACTER & DOSSIER SAVING --- */
 window.saveTerminalProfile = async function() {
     const safeGet = (id) => document.getElementById(id) ? document.getElementById(id).value : '';
     await db.from('profiles').update({ username: safeGet('term-username'), avatar_url: safeGet('term-avatar') }).eq('id', currentUserId);
@@ -1218,7 +1009,28 @@ window.saveTerminalProfile = async function() {
     loadAllProfiles();
 };
 
-/* Cargo Hub */
+/* --- CARGO HUB --- */
+function sanitizeCargo(inv) {
+    if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
+        return {
+            "perishables": [
+                { name: "Standard Rations", qty: 90, unit: "Days" },
+                { name: "Trauma MedKits", qty: 15, unit: "Crates" }
+            ],
+            "expendables": [
+                { name: "Kinetic Rounds", qty: 500, unit: "Shots" },
+                { name: "Energy Cores", qty: 200, unit: "Cells" },
+                { name: "Titanium Armor Hull Plates", qty: 50, unit: "Units" }
+            ],
+            "misc": [
+                { name: "Security Marines", qty: 6, unit: "Personnel" },
+                { name: "Unprocessed Asteroid Salvage", qty: 3, unit: "Tons" }
+            ]
+        };
+    }
+    return inv;
+}
+
 function populateCargoVesselSelect() {
     const select = document.getElementById('cargo-vessel-select');
     if (!select) return;
@@ -1362,7 +1174,7 @@ window.broadcastTerminalCargoManifest = async function() {
     alert("Full cargo manifest broadcasted to Secure Comms!");
 };
 
-/* --- NEW VESSEL DECK LOGIC --- */
+/* --- NEW VESSEL DECK LOGIC (INTEGRITY, DECKS, WEAPONS) --- */
 function populateVesselDeckSelect() {
     const select = document.getElementById('vessel-deck-select');
     if (!select) return;
@@ -1376,6 +1188,7 @@ function populateVesselDeckSelect() {
 window.renderVesselDeck = function() {
     const select = document.getElementById('vessel-deck-select');
     const healthContainer = document.getElementById('vessel-health-container');
+    const decksContainer = document.getElementById('vessel-decks-container');
     const weaponsContainer = document.getElementById('vessel-weapons-container');
     if (!select || !healthContainer || !weaponsContainer) return;
 
@@ -1384,11 +1197,12 @@ window.renderVesselDeck = function() {
 
     if (!vessel) {
         healthContainer.innerHTML = '<span style="font-size:11px; color:#6b826a;">Select a valid vessel token above.</span>';
+        if(decksContainer) decksContainer.innerHTML = '';
         weaponsContainer.innerHTML = '';
         return;
     }
 
-    // Setup Health/Integrity
+    // 1. Setup Main Health/Integrity Cascades
     const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 100;
     const s_max = vessel.max_shields || 100;
     const a_int = vessel.integrity_armor !== undefined ? vessel.integrity_armor : 100;
@@ -1406,7 +1220,7 @@ window.renderVesselDeck = function() {
                 <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -10)" style="width:24px; padding:2px; font-size:10px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-10</button>
                 <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -1)" style="width:24px; padding:2px; font-size:12px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-</button>
                 <div style="flex-grow:1; height:12px; background:#030403; border:1px solid #3c4e36; border-radius:2px; overflow:hidden;">
-                    <div style="width:${Math.max(0, Math.min(100, (current/max)*100))}%; height:100%; background:${color}; transition:width 0.3s;"></div>
+                    <div style="width:${Math.max(0, Math.min(100, (current/max)*100))}%; height:100%; background:${current === 0 ? '#ff3333' : color}; transition:width 0.3s;"></div>
                 </div>
                 <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 1)" style="width:24px; padding:2px; font-size:12px; margin:0;">+</button>
                 <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 10)" style="width:24px; padding:2px; font-size:10px; margin:0;">+10</button>
@@ -1419,7 +1233,38 @@ window.renderVesselDeck = function() {
         makeBar('ARMOR PLATING', a_int, a_max, '#ffaa00', 'armor') +
         makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
 
-    // Setup Weapons
+    // 2. Setup Internal Decks
+    if (decksContainer) {
+        let dHtml = '';
+        const decks = vessel.ship_decks || [];
+        if (decks.length === 0) {
+            dHtml = '<span style="font-size:10px; color:#6b826a;">No internal decks designated.</span>';
+        } else {
+            decks.forEach((d, idx) => {
+                dHtml += `
+                <div style="margin-bottom: 8px; background: #030403; padding: 6px; border: 1px solid #00e1ff; border-radius: 2px;">
+                    <div style="display:flex; justify-content:space-between; font-size:10px; color:#00e1ff; margin-bottom:2px;">
+                        <strong>${d.name}</strong>
+                        <span>${d.hp} / ${d.max_hp}</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, -5)" style="width:24px; padding:2px; font-size:10px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-5</button>
+                        <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, -1)" style="width:24px; padding:2px; font-size:12px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-</button>
+                        <div style="flex-grow:1; height:8px; background:#040605; border:1px solid #3c4e36; border-radius:2px; overflow:hidden;">
+                            <div style="width:${Math.max(0, Math.min(100, (d.hp/d.max_hp)*100))}%; height:100%; background:${d.hp === 0 ? '#ff3333' : '#00e1ff'}; transition:width 0.3s;"></div>
+                        </div>
+                        <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, 1)" style="width:24px; padding:2px; font-size:12px; margin:0;">+</button>
+                        <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, 5)" style="width:24px; padding:2px; font-size:10px; margin:0;">+5</button>
+                        <button class="layer-del" onclick="window.deleteShipDeck('${vessel.id}', ${idx})" style="padding:2px 6px; font-size:10px; margin:0; margin-left:4px;">✕</button>
+                    </div>
+                </div>
+                `;
+            });
+        }
+        decksContainer.innerHTML = dHtml;
+    }
+
+    // 3. Setup Weapons & Hardpoints
     const weapons = vessel.ship_weapons || [];
     let wHtml = '';
     if (weapons.length === 0) {
@@ -1429,7 +1274,7 @@ window.renderVesselDeck = function() {
             wHtml += `
             <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
                 <div>
-                    <strong style="color:#ff6b6b; font-size:12px;">${w.name}</strong>
+                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>
                     <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
                 </div>
                 <div style="display:flex; gap:6px;">
@@ -1443,6 +1288,59 @@ window.renderVesselDeck = function() {
     weaponsContainer.innerHTML = wHtml;
 };
 
+// Handlers for Deck Modification
+window.addShipDeck = async function() {
+    const select = document.getElementById('vessel-deck-select');
+    const name = document.getElementById('new-deck-name').value.trim();
+    let maxHp = parseInt(document.getElementById('new-deck-hp').value) || 50;
+
+    if (!select || !select.value) { alert("Select a diagnostic target vessel first."); return; }
+    if (!name) { alert("Please enter a deck or system name."); return; }
+    
+    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
+    if (!vessel) return;
+
+    let decks = vessel.ship_decks || [];
+    decks.push({ name: name, hp: maxHp, max_hp: maxHp });
+
+    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vessel.id);
+    vessel.ship_decks = decks;
+
+    document.getElementById('new-deck-name').value = '';
+    document.getElementById('new-deck-hp').value = '50';
+    window.renderVesselDeck();
+};
+
+window.modifyShipDeckHealth = async function(vesselId, idx, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let decks = vessel.ship_decks || [];
+    if (decks[idx]) {
+        let current = decks[idx].hp;
+        let max = decks[idx].max_hp;
+        decks[idx].hp = Math.max(0, Math.min(max, current + delta));
+        
+        await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+        vessel.ship_decks = decks;
+        window.renderVesselDeck();
+    }
+};
+
+window.deleteShipDeck = async function(vesselId, idx) {
+    if (!confirm("Scrap this internal deck?")) return;
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let decks = vessel.ship_decks || [];
+    decks.splice(idx, 1);
+
+    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+    vessel.ship_decks = decks;
+    window.renderVesselDeck();
+};
+
+// Handlers for Main Cascades
 window.modifyShipHealth = async function(vesselId, key, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -1463,8 +1361,10 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     window.renderVesselDeck();
 };
 
+// Handlers for Mounted Hardpoints
 window.addShipWeapon = async function() {
     const select = document.getElementById('vessel-deck-select');
+    const loc = document.getElementById('new-ship-wpn-loc').value.trim() || 'Hull Mount';
     const name = document.getElementById('new-ship-wpn-name').value.trim();
     let dice = document.getElementById('new-ship-wpn-dice').value.trim().toLowerCase();
     let mod = document.getElementById('new-ship-wpn-mod').value.trim();
@@ -1480,11 +1380,12 @@ window.addShipWeapon = async function() {
     if (!vessel) return;
 
     let weapons = vessel.ship_weapons || [];
-    weapons.push({ name, dice, modifier: mod, explodes });
+    weapons.push({ loc, name, dice, modifier: mod, explodes });
 
     await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
     vessel.ship_weapons = weapons;
 
+    document.getElementById('new-ship-wpn-loc').value = '';
     document.getElementById('new-ship-wpn-name').value = '';
     document.getElementById('new-ship-wpn-dice').value = '';
     document.getElementById('new-ship-wpn-mod').value = '';
@@ -1541,8 +1442,7 @@ window.rollShipWeapon = function(vesselId, idx) {
 
     const breakdownText = breakdown.join(' + ');
     
-    // Broadcast the roll directly
-    window.broadcastRoll(`[${vessel.name}] FIRING: ${wpn.name}`, breakdownText, total);
+    window.broadcastRoll(`[${vessel.name}] FIRING [${wpn.loc || 'Mount'}]: ${wpn.name}`, breakdownText, total);
 };
 
 window.broadcastVesselStatus = async function() {
@@ -1740,7 +1640,7 @@ window.sendChatMessage = async function() {
 };
 
 window.broadcastRoll = async function(title, breakdownText, totalSum) {
-    await db.from('chat_logs').insert({ sender_id: currentUserId, content: `Rolled [${title}]: ${totalSum}`, message_type: 'roll', recipient_id: null, roll_data: { breakdown: breakdownText } });
+    await db.from('chat_logs').insert({ sender_id: currentUserId, content: `Rolled ${title}: ${totalSum}`, message_type: 'roll', recipient_id: null, roll_data: { breakdown: breakdownText } });
     loadChatLogs();
 };
 
@@ -1970,7 +1870,7 @@ function initGalaxyEngine() {
         }
         const { data: markerData } = await db.from('ship_markers').select('*');
         if (markerData) {
-            shipMarkers = markerData.map(m => ({ ...m, cargo_inventory: sanitizeCargo(m.cargo_inventory), ship_weapons: m.ship_weapons || [] }));
+            shipMarkers = markerData.map(m => ({ ...m, cargo_inventory: sanitizeCargo(m.cargo_inventory), ship_weapons: m.ship_weapons || [], ship_decks: m.ship_decks || [] }));
             globalShipMarkersCache = shipMarkers;
             
             const vesselDeckPanel = document.getElementById('term-panel-vessel');
@@ -2012,7 +1912,7 @@ function initGalaxyEngine() {
 
     window.spawnTokenAtCenter = async function() {
         const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1';
-        await db.from('ship_markers').insert({ owner_id: currentUserId, name: document.getElementById('dm-tool-name').value || 'Task Force Black', drive_type: driveType, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color: document.getElementById('dm-tool-color').value, cargo_inventory: {}, ship_weapons: [] });
+        await db.from('ship_markers').insert({ owner_id: currentUserId, name: document.getElementById('dm-tool-name').value || 'Task Force Black', drive_type: driveType, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color: document.getElementById('dm-tool-color').value, cargo_inventory: {}, ship_weapons: [], ship_decks: [] });
         loadGalaxyData();
     };
 
