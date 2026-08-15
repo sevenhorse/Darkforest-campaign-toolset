@@ -69,7 +69,6 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')">
                     <span class="tab-text">Manifest</span>
                 </button>
-                <!-- NEW VESSEL DECK BUTTON -->
                 <button class="term-tab-btn-vert" id="term-tab-btn-vessel" onclick="window.switchTermTab('vessel')">
                     <span class="tab-text">Vessel Deck</span>
                 </button>
@@ -265,23 +264,40 @@
                     </div>
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                        <!-- Integrity Cascade -->
-                        <div class="sheet-section">
-                            <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Integrity Diagnostics</h4>
-                            <div id="vessel-health-container">
-                                <!-- Rendered via JS -->
+                        <!-- Column 1: Integrity & Decks -->
+                        <div>
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Integrity Cascades</h4>
+                                <div id="vessel-health-container"></div>
+                            </div>
+
+                            <div class="sheet-section" style="margin-top: 20px; border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
+                                <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Internal Decks & Systems</h4>
+                                <div id="vessel-decks-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px;"></div>
+                                
+                                <div style="background:#030403; padding:8px; border:1px solid #00e1ff; border-radius:2px;">
+                                    <label style="font-size: 9px; color: #00e1ff;">Construct New Deck / Subsystem:</label>
+                                    <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                        <input type="text" id="new-deck-name" placeholder="e.g. Engineering, Bridge..." style="flex:2; margin:0; border-color:#00e1ff;">
+                                        <input type="number" id="new-deck-hp" placeholder="Max HP" value="50" style="flex:1; margin:0; text-align:center; border-color:#00e1ff;">
+                                    </div>
+                                    <button class="btn-reveal" onclick="window.addShipDeck()" style="width:100%; font-size:10px; margin:0; padding: 4px 12px; border-color:#00e1ff; color:#00e1ff;">+ BUILD DECK</button>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Weapon Hardpoints -->
+                        <!-- Column 2: Weapon Hardpoints -->
                         <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
                             <h4 style="color:#ff6b6b; border-bottom: 1px solid #ff3333; padding-bottom: 4px;">Weapon Hardpoints</h4>
-                            <div id="vessel-weapons-container" style="max-height: 250px; overflow-y: auto; margin-bottom: 10px;"></div>
+                            <div id="vessel-weapons-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 10px;"></div>
                             
                             <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
                                 <label style="font-size: 9px; color: #ffaaaa;">Mount New Weapon System:</label>
                                 <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                    <input type="text" id="new-ship-wpn-loc" placeholder="Mount (e.g. Dorsal)" style="flex:1.5; margin:0; border-color:#ff3333;">
                                     <input type="text" id="new-ship-wpn-name" placeholder="Battery Name" style="flex:2; margin:0; border-color:#ff3333;">
+                                </div>
+                                <div style="display:flex; gap:6px; margin-bottom:6px;">
                                     <input type="text" id="new-ship-wpn-dice" placeholder="d20" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
                                     <input type="text" id="new-ship-wpn-mod" placeholder="+Mod" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
                                 </div>
