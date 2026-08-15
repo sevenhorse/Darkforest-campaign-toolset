@@ -305,13 +305,16 @@ async function loadTerritories() {
     const { data } = await db.from('territories').select('*').order('created_at', { ascending: true });
     if (data) {
         globalTerritoriesCache = data;
-        renderTerritoryList();
+        if (typeof renderTerritoryList === 'function') renderTerritoryList();
     }
 }
 
 async function loadHyperlanes() {
     const { data } = await db.from('hyperlanes').select('*');
-    if (data) globalHyperlanesCache = data;
+    if (data) {
+        globalHyperlanesCache = data;
+        if (typeof renderHyperlaneList === 'function') renderHyperlaneList();
+    }
 }
 
 // --- NEW ANOMALY DETECTION ENGINE ---
@@ -770,6 +773,8 @@ function populateTerritoryFactionSelect() {
 window.startDrawingTerritory = function() {
     if (currentUserRole !== 'dm') return;
     territoryDrawActive = true;
+    hyperlaneDrawActive = false; jumpPlottingActive = false; measuringTapeActive = false; pingModeActive = false;
+    window.updateToolButtonStyles();
     activeTerritoryVertices = [];
     document.getElementById('btn-start-territory-draw').style.display = 'none';
     document.getElementById('btn-finish-territory-draw').style.display = 'block';
@@ -780,6 +785,7 @@ window.startDrawingTerritory = function() {
 
 window.cancelDrawingTerritory = function() {
     territoryDrawActive = false;
+    window.updateToolButtonStyles();
     activeTerritoryVertices = [];
     document.getElementById('btn-start-territory-draw').style.display = 'block';
     document.getElementById('btn-finish-territory-draw').style.display = 'none';
@@ -845,6 +851,82 @@ window.deleteTerritory = async function(id) {
     if (!confirm("Permanently dissolve this territorial border?")) return;
     await db.from('territories').delete().eq('id', id);
     loadTerritories();
+};
+
+// --- HYPERLANE ROUTE DRAWING LOGIC ---
+window.startDrawingHyperlane = function() {
+    if (currentUserRole !== 'dm') return;
+    hyperlaneDrawActive = true;
+    territoryDrawActive = false; jumpPlottingActive = false; measuringTapeActive = false; pingModeActive = false;
+    window.updateToolButtonStyles();
+    activeHyperlaneNodes = [];
+    document.getElementById('btn-start-hyperlane-draw').style.display = 'none';
+    document.getElementById('btn-finish-hyperlane-draw').style.display = 'block';
+    document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block';
+    document.getElementById('hyperlane-drawing-status').style.display = 'block';
+    document.getElementById('hyperlane-drawing-status').innerText = 'Route Active: Click stars on map to link nodes...';
+};
+
+window.cancelDrawingHyperlane = function() {
+    hyperlaneDrawActive = false;
+    window.updateToolButtonStyles();
+    activeHyperlaneNodes = [];
+    document.getElementById('btn-start-hyperlane-draw').style.display = 'block';
+    document.getElementById('btn-finish-hyperlane-draw').style.display = 'none';
+    document.getElementById('btn-cancel-hyperlane-draw').style.display = 'none';
+    document.getElementById('hyperlane-drawing-status').style.display = 'none';
+};
+
+window.finishActiveHyperlane = async function() {
+    if (activeHyperlaneNodes.length < 2) { alert("A trade route requires at least 2 connected nodes."); return; }
+    
+    const name = prompt("Enter a designation for this Trade Route:", `Trade Route ${globalHyperlanesCache.length + 1}`);
+    if(!name) return;
+
+    const payload = {
+        name: name,
+        color: '#00e1ff',
+        nodes: activeHyperlaneNodes,
+        created_by: currentUserId
+    };
+
+    const { error } = await db.from('hyperlanes').insert(payload);
+    if (error) {
+        alert("Failed to save trade route: " + error.message);
+    } else {
+        window.cancelDrawingHyperlane();
+        loadHyperlanes();
+        await db.from('chat_logs').insert({
+            sender_id: currentUserId,
+            content: `⚡ [LOGISTICS] Overseer established a new Trade Route: '${name}'.`,
+            message_type: 'text'
+        });
+    }
+};
+
+function renderHyperlaneList() {
+    const container = document.getElementById('hyperlane-list-container');
+    if (!container) return;
+    let html = '';
+    globalHyperlanesCache.forEach((h) => {
+        html += `
+            <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:2px; border-left:3px solid ${h.color || '#00e1ff'};">
+                <div>
+                    <strong style="color:${h.color || '#00e1ff'}; font-size:11px;">${h.name}</strong>
+                    <div style="font-size:9px; color:#6b826a;">Nodes: ${(h.nodes || []).length}</div>
+                </div>
+                <button class="layer-del" onclick="window.deleteHyperlane('${h.id}')" style="padding:2px 6px; font-size:9px;">X</button>
+            </div>
+        `;
+    });
+    container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active trade routes plotted.</span>';
+}
+
+window.deleteHyperlane = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!confirm("Permanently sever this trade route?")) return;
+    await db.from('hyperlanes').delete().eq('id', id);
+    loadHyperlanes();
 };
 
 function makePanelDraggable(panelId, handleId, storageKey) {
@@ -1765,8 +1847,21 @@ function initGalaxyEngine() {
         }
 
         if (hyperlaneDrawActive) {
-            activeHyperlaneNodes.push({ x: worldPos.x, y: worldPos.y });
-            document.getElementById('hyperlane-drawing-status').innerText = `Nodes Linked: ${activeHyperlaneNodes.length} (Click Save to finalize)`;
+            let snapNode = { x: worldPos.x, y: worldPos.y, name: "Deep Space Point" };
+            let allSystems = proceduralSystems.concat(dbStarSystems);
+            let hitRadius = Math.max(15, 25 / camera.zoom);
+            
+            for (let s of allSystems) {
+                let dx = s.x - worldPos.x, dy = s.y - worldPos.y;
+                if (Math.sqrt(dx * dx + dy * dy) < hitRadius) {
+                    snapNode = { x: s.x, y: s.y, id: s.id, name: s.name };
+                    break;
+                }
+            }
+            
+            activeHyperlaneNodes.push(snapNode);
+            const statusDiv = document.getElementById('hyperlane-drawing-status');
+            if(statusDiv) statusDiv.innerText = `Nodes Linked: ${activeHyperlaneNodes.length} (Click Save to finalize)`;
             return;
         }
 
@@ -2016,6 +2111,7 @@ function initGalaxyEngine() {
         selectedTarget = null;
         if (jumpPlottingActive) window.cancelJumpPlotting();
         if (measuringTapeActive) window.toggleMeasuringTool();
+        if (hyperlaneDrawActive) window.cancelDrawingHyperlane();
         renderHUDTelemetry();
     };
 
@@ -2195,9 +2291,11 @@ function initGalaxyEngine() {
         const mBtn = document.getElementById('measuring-tape-toggle-btn');
         const pBtn = document.getElementById('ping-tool-toggle-btn');
         const tBtn = document.getElementById('territory-tool-toggle-btn');
+        const hBtn = document.getElementById('btn-start-hyperlane-draw');
         if(mBtn) { mBtn.style.borderColor = measuringTapeActive ? '#00e5a3' : '#3c4e36'; mBtn.style.color = measuringTapeActive ? '#00e5a3' : '#6b826a'; }
         if(pBtn) { pBtn.style.borderColor = pingModeActive ? '#00e5a3' : '#3c4e36'; pBtn.style.color = pingModeActive ? '#00e5a3' : '#6b826a'; }
         if(tBtn) { tBtn.style.borderColor = territoryDrawActive ? '#00e5a3' : '#3c4e36'; tBtn.style.color = territoryDrawActive ? '#00e5a3' : '#6b826a'; }
+        if(hBtn) { hBtn.style.borderColor = hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
     };
 
     function triggerTacticalPing(x, y) {
