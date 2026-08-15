@@ -309,7 +309,6 @@ async function loadAllProfiles() {
             return { ...p, character: c, skills: s, arsenal: a };
         });
         
-        // Push avatar to preview dynamically to fix Bug 11
         const myProf = allProfiles.find(p => p.id === currentUserId);
         if (myProf) {
             document.getElementById('term-username').value = myProf.username || '';
@@ -326,7 +325,6 @@ async function loadAllProfiles() {
     }
 }
 
-// BUG 3 Fix: Missing renderCharacterTerminalData logic
 window.renderCharacterTerminalData = function() {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
@@ -381,9 +379,10 @@ async function loadCampaignObjectives() {
 }
 
 async function loadChatLogs() {
-    const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: true }).limit(50);
+    // Grab the 50 newest messages (descending), then reverse the array so the absolute newest is at the bottom.
+    const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(50);
     if (data) { 
-        chatLogsList = data; 
+        chatLogsList = data.reverse(); 
         if (chatLogsList.length === 0) {
             chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked. Communication channels active.', message_type: 'text' }];
         }
@@ -727,6 +726,13 @@ window.handleLogout = async function() {
 /* ==========================================================================
    7. TERMINAL & UI CONTROLLERS
    ========================================================================== */
+/* ==========================================================================
+   js/main.js (PART 2)
+   ========================================================================== */
+
+/* ==========================================================================
+   7. TERMINAL & UI CONTROLLERS
+   ========================================================================== */
 const skillList = [
     "Athletics", "Stealth", "Survival", "Ballistic Weapons", 
     "Energy Weapons", "Explosives", "Computers", "Engineering", 
@@ -812,7 +818,7 @@ window.openFullCodexTerminal = function() {
     window.switchTermTab('codex');
 };
 
-// BUG 4 Additions: Rapid UI access directly to the vessel diagnostics deck
+// BUG 4 Fix: Rapid UI link to vessel terminal
 window.openFullVesselTerminal = function(vesselId) {
     const term = document.getElementById('character-terminal');
     term.style.display = 'block';
@@ -846,7 +852,7 @@ window.saveDmScratchpad = function() {
     localStorage.setItem('odyssey_dm_scratchpad', val);
 };
 
-// BUG 7 Fix: Offset tracking to prevent UI snap to 0,0 
+// BUG 7 Fix: Panels now calculate initial offset instead of viewport rect to prevent 0,0 snapping
 function makePanelDraggable(panelId, handleId, storageKey) {
     const panel = document.getElementById(panelId);
     const handle = document.getElementById(handleId);
@@ -1093,7 +1099,7 @@ window.saveTerminalProfile = async function() {
     const safeGet = (id) => document.getElementById(id) ? document.getElementById(id).value : '';
     await db.from('profiles').update({ username: safeGet('term-username'), avatar_url: safeGet('term-avatar') }).eq('id', currentUserId);
 
-    // BUG 8 Fix: Push presence track update so Display Handle visually updates instantly
+    // BUG 8 Fix: Update presence instantly so "Active Commanders" changes UI names.
     if (presenceChannel) {
         await presenceChannel.track({ 
             online_at: new Date().toISOString(), 
@@ -1125,61 +1131,6 @@ window.saveTerminalProfile = async function() {
     alert("Character dossier & stats secured to database.");
     loadAllProfiles();
 };
-
-/* --- MISSING TRACKER & HEALTH METHODS INJECTED HERE --- */
-
-// BUG 2/3 Fix: Pushes weapon stepper state directly to DB so reloading doesn't reverse it
-window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
-    let wpn = vessel.ship_weapons[idx];
-    
-    if (statKey === 'ammo' && wpn.ammo >= 0) wpn.ammo = Math.max(0, Math.min(wpn.max_ammo, wpn.ammo + delta));
-    if (statKey === 'cooldown') wpn.cooldown = Math.max(0, wpn.cooldown + delta);
-    if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, wpn.overheat + delta));
-    
-    const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
-    if (error) console.error("Weapon stat sync failed:", error);
-    window.renderVesselDeck();
-};
-
-// BUG 4 Fix: Master rest tool to recover all lost states for a vessel
-window.resetShipStats = async function(vesselId) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    if (!confirm("Restore maximum health profiles and resupply all ammunition banks for this vessel?")) return;
-    
-    let payload = {
-        integrity_shields: vessel.max_shields || 400,
-        integrity_hull: vessel.max_hull || 300,
-        integrity_reactive: vessel.max_reactive || 10,
-        integrity_ablative: vessel.max_ablative || 10
-    };
-    Object.assign(vessel, payload);
-    
-    if (vessel.ship_weapons) {
-        vessel.ship_weapons.forEach(w => { 
-            if(w.ammo >= 0) w.ammo = w.max_ammo; 
-            w.cooldown = 0; 
-            w.overheat = 0; 
-        });
-        payload.ship_weapons = vessel.ship_weapons;
-    }
-    
-    await db.from('ship_markers').update(payload).eq('id', vesselId);
-    window.renderVesselDeck();
-    alert("Vessel combat stats reset to maximums.");
-};
-
-// BUG 5 Fix: Inline bookmark remover utility
-window.deleteBookmark = function(idx) {
-    bookmarkedTargets.splice(idx, 1);
-    localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
-    if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
-};
-/* ==========================================================================
-   js/main.js (PART 2)
-   ========================================================================== */
 
 /* --- CARGO HUB --- */
 function sanitizeCargo(inv) {
@@ -1700,6 +1651,49 @@ window.modifySquadronLoiter = async function(vesselId, idx, delta) {
     }
 };
 
+// BUG 2/3 Fix: Pushes weapon stepper state directly to DB so reloading doesn't reverse it
+window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
+    let wpn = vessel.ship_weapons[idx];
+    
+    if (statKey === 'ammo' && wpn.ammo >= 0) wpn.ammo = Math.max(0, Math.min(wpn.max_ammo, wpn.ammo + delta));
+    if (statKey === 'cooldown') wpn.cooldown = Math.max(0, wpn.cooldown + delta);
+    if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, wpn.overheat + delta));
+    
+    const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
+    if (error) console.error("Weapon stat sync failed:", error);
+    window.renderVesselDeck();
+};
+
+// BUG 4 Fix: Master rest tool to recover all lost states for a vessel
+window.resetShipStats = async function(vesselId) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    if (!confirm("Restore maximum health profiles and resupply all ammunition banks for this vessel?")) return;
+    
+    let payload = {
+        integrity_shields: vessel.max_shields || 400,
+        integrity_hull: vessel.max_hull || 300,
+        integrity_reactive: vessel.max_reactive || 10,
+        integrity_ablative: vessel.max_ablative || 10
+    };
+    Object.assign(vessel, payload);
+    
+    if (vessel.ship_weapons) {
+        vessel.ship_weapons.forEach(w => { 
+            if(w.ammo >= 0) w.ammo = w.max_ammo; 
+            w.cooldown = 0; 
+            w.overheat = 0; 
+        });
+        payload.ship_weapons = vessel.ship_weapons;
+    }
+    
+    await db.from('ship_markers').update(payload).eq('id', vesselId);
+    window.renderVesselDeck();
+    alert("Vessel combat stats reset to maximums.");
+};
+
 // BUG 10 & Race Condition Fixes applied to Squadron Combat Roller
 window.rollSquadronWeapon = async function(vesselId, sqIdx) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
@@ -1946,7 +1940,6 @@ window.rollShipWeapon = async function(vesselId, idx) {
     await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
 };
 
-/* --- DECK / MODIFIERS SAVING --- */
 window.addShipDeck = async function() {
     const select = document.getElementById('vessel-deck-select');
     const name = document.getElementById('new-deck-name').value.trim();
@@ -2308,6 +2301,13 @@ function populateCommsRecipients() {
     if (select.querySelector(`option[value="${currentVal}"]`)) select.value = currentVal;
 }
 
+// BUG 5 FIX: Inline bookmark removal logic mapped globally
+window.deleteBookmark = function(idx) {
+    bookmarkedTargets.splice(idx, 1);
+    localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
+    if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+};
+
 /* ==========================================================================
    8. PROCEDURAL GENERATION & GALAXY MAP ENGINE
    ========================================================================== */
@@ -2403,7 +2403,7 @@ function initGalaxyEngine() {
     const container = document.getElementById('canvas-container');
     const SYSTEM_ZOOM_THRESHOLD = 1.5;
     
-    // MAP LIMIT FOR BUG 9 CLAMPING
+    // BUG 9 FIX: Camera Clamp bounds
     const MAP_LIMIT = 15000;
 
     function resize() {
@@ -2764,7 +2764,7 @@ function initGalaxyEngine() {
         window._lastMouseWorldX = worldPos.x;
         window._lastMouseWorldY = worldPos.y;
 
-        // BUG 1 FIX: Active Hover Tracking without clicking
+        // BUG 1 FIX: Active Hover Tracking
         if (!camera.isDragging && !draggedMarker && !draggedStar && !territoryDrawActive && !hyperlaneDrawActive) {
             let hitRadius = Math.max(10, 15 / camera.zoom);
             let hitTarget = null;
@@ -2797,7 +2797,7 @@ function initGalaxyEngine() {
         if (draggedMarker) { draggedMarker.x = worldPos.x; draggedMarker.y = worldPos.y; return; }
         if (draggedStar) { draggedStar.x = worldPos.x; draggedStar.y = worldPos.y; return; }
         
-        // BUG 9 FIX: Camera Translation Void Clamping
+        // BUG 9 FIX: Camera Clamp
         if (camera.isDragging) {
             let dx = e.clientX - camera.startX;
             let dy = e.clientY - camera.startY;
@@ -2840,6 +2840,7 @@ function initGalaxyEngine() {
 
         if (draggedMarker) { draggedMarker.x = worldPos.x; draggedMarker.y = worldPos.y; return; }
         if (draggedStar) { draggedStar.x = worldPos.x; draggedStar.y = worldPos.y; return; }
+        
         if (camera.isDragging) {
             e.preventDefault(); 
             let dx = pos.clientX - camera.startX;
@@ -2877,7 +2878,6 @@ function initGalaxyEngine() {
         const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
         const newZoom = Math.max(0.02, Math.min(15.0, camera.zoom * zoomFactor));
 
-        // BUG 9 FIX: Clamp zoom adjustments
         let targetX = mouseX - worldX * newZoom;
         let targetY = mouseY - worldY * newZoom;
         camera.x = Math.max(-MAP_LIMIT * newZoom, Math.min(MAP_LIMIT * newZoom, targetX));
@@ -3146,7 +3146,6 @@ function initGalaxyEngine() {
                 html += '<span style="color:#6b826a; font-size:10px;">No saved bookmarks. Click bookmark on any target telemetry.</span>';
             } else {
                 bookmarkedTargets.forEach((b, idx) => {
-                    // BUG 5 FIX: Inline Bookmark Delete Support
                     html += `
                         <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:4px;">
                             <div><strong style="color:#00e5a3;">${b.data.name}</strong><br><span style="font-size:9px; color:#6b826a;">Type: ${b.type}</span></div>
@@ -3297,7 +3296,6 @@ function initGalaxyEngine() {
                 `;
             }
 
-            // BUG 4 FIX: Added rapid UI link to full vessel deck directly from HUD
             content.innerHTML = `
                 <div style="font-size: 11px;">
                     ${lockStatusHtml}<br>
