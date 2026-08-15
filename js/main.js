@@ -1,4 +1,8 @@
 /* ==========================================================================
+   js/main.js (PART 1)
+   ========================================================================== */
+
+/* ==========================================================================
    1. SUPABASE CLIENT & GLOBAL STATE CONFIGURATION
    ========================================================================== */
 const SUPABASE_URL = 'https://uodeeyfaizbjplvvslry.supabase.co';
@@ -34,6 +38,9 @@ let activeCargoSubtab = 'perishables';
 let activeCodexCategory = 'factions';
 let codexSearchFilter = '';
 let hyperlanesVisible = true;
+
+window.hoveredTarget = null;
+window.lockedTarget = null;
 
 /* ==========================================================================
    2. STRIKE CRAFT LORE DATABASE
@@ -301,10 +308,62 @@ async function loadAllProfiles() {
             const a = arsenalData?.filter(ars => ars.profile_id === p.id || ars.character_id === c.id) || [];
             return { ...p, character: c, skills: s, arsenal: a };
         });
-        if (document.getElementById('character-terminal').style.display === 'block') { renderCharacterTerminalData(); }
+        
+        // Push avatar to preview dynamically to fix Bug 11
+        const myProf = allProfiles.find(p => p.id === currentUserId);
+        if (myProf) {
+            document.getElementById('term-username').value = myProf.username || '';
+            if (myProf.avatar_url) {
+                const preview = document.getElementById('my-terminal-avatar-preview');
+                const hiddenInput = document.getElementById('term-avatar');
+                if(preview) preview.src = myProf.avatar_url;
+                if(hiddenInput) hiddenInput.value = myProf.avatar_url;
+            }
+        }
+
+        if (document.getElementById('character-terminal').style.display === 'block') { window.renderCharacterTerminalData(); }
         populateCommsRecipients();
     }
 }
+
+// BUG 3 Fix: Missing renderCharacterTerminalData logic
+window.renderCharacterTerminalData = function() {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    
+    const c = myProf.character || {};
+    const s = myProf.skills || {};
+    
+    const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
+
+    setVal('term-sheet-name', c.name || '');
+    setVal('stat-charisma', c.stat_charisma || 'd4');
+    setVal('stat-dexterity', c.stat_dexterity || 'd4');
+    setVal('stat-intelligence', c.stat_intelligence || 'd4');
+    setVal('stat-strength', c.stat_strength || 'd4');
+    setVal('stat-toughness', c.stat_toughness || 'd4');
+    setVal('stat-willpower', c.stat_willpower || 'd4');
+    
+    setVal('term-vitality', c.vitality || 0);
+    setVal('term-stress', c.stress || 0);
+    setVal('term-adversity', c.adversity_tokens || 0);
+    
+    setVal('term-specialties', c.specialties || '');
+    setVal('term-assets', c.assets || '');
+    setVal('term-history', c.history || '');
+    
+    setVal('aug-head', c.aug_head || '');
+    setVal('aug-torso', c.aug_torso || '');
+    setVal('aug-larm', c.aug_larm || '');
+    setVal('aug-rarm', c.aug_rarm || '');
+    setVal('aug-lleg', c.aug_lleg || '');
+    setVal('aug-rleg', c.aug_rleg || '');
+    
+    skillList.forEach(skill => {
+        const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        setVal(`skill-${safeKey}`, s[safeKey] || 0);
+    });
+};
 
 async function loadPlayerNotes() {
     const { data } = await db.from('player_notes').select('*').order('created_at', { ascending: false });
@@ -635,7 +694,14 @@ function initPresenceChannel(userProfile) {
     presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
     presenceChannel.on('presence', { event: 'sync' }, () => { onlineUsersMap = presenceChannel.presenceState(); renderPresenceTicker(); })
         .subscribe(async (status) => {
-            if (status === 'SUBSCRIBED') { await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role, avatar_url: userProfile.avatar_url || '' }); }
+            if (status === 'SUBSCRIBED') { 
+                await presenceChannel.track({ 
+                    online_at: new Date().toISOString(), 
+                    username: userProfile.username || currentUserEmail.split('@')[0], 
+                    role: userProfile.role, 
+                    avatar_url: userProfile.avatar_url || '' 
+                }); 
+            }
         });
 }
 
@@ -746,6 +812,17 @@ window.openFullCodexTerminal = function() {
     window.switchTermTab('codex');
 };
 
+// BUG 4 Additions: Rapid UI access directly to the vessel diagnostics deck
+window.openFullVesselTerminal = function(vesselId) {
+    const term = document.getElementById('character-terminal');
+    term.style.display = 'block';
+    window.switchTermTab('vessel');
+    if (vesselId) {
+        const select = document.getElementById('vessel-deck-select');
+        if (select) { select.value = vesselId; window.renderVesselDeck(); }
+    }
+};
+
 window.toggleCombatTracker = function() {
     const panel = document.getElementById('combat-tracker-panel');
     panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
@@ -769,7 +846,7 @@ window.saveDmScratchpad = function() {
     localStorage.setItem('odyssey_dm_scratchpad', val);
 };
 
-// --- DRAG UI MANAGEMENT ---
+// BUG 7 Fix: Offset tracking to prevent UI snap to 0,0 
 function makePanelDraggable(panelId, handleId, storageKey) {
     const panel = document.getElementById(panelId);
     const handle = document.getElementById(handleId);
@@ -785,15 +862,18 @@ function makePanelDraggable(panelId, handleId, storageKey) {
     handle.addEventListener('mousedown', (e) => {
         if (['INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
         isDragging = true;
-        const rect = panel.getBoundingClientRect();
         startX = e.clientX; startY = e.clientY;
-        initialLeft = rect.left; initialTop = rect.top;
+        initialLeft = panel.offsetLeft; initialTop = panel.offsetTop;
         panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.left = `${initialLeft}px`; 
+        panel.style.top = `${initialTop}px`;
+        
         const onMouseMove = (moveEvent) => {
             if (!isDragging) return;
             const dx = moveEvent.clientX - startX; const dy = moveEvent.clientY - startY;
-            let newLeft = Math.max(10, Math.min(window.innerWidth - rect.width - 10, initialLeft + dx));
-            let newTop = Math.max(60, Math.min(window.innerHeight - rect.height - 10, initialTop + dy));
+            let newLeft = Math.max(10, Math.min(window.innerWidth - panel.offsetWidth - 10, initialLeft + dx));
+            let newTop = Math.max(60, Math.min(window.innerHeight - panel.offsetHeight - 10, initialTop + dy));
             panel.style.left = `${newLeft}px`; panel.style.top = `${newTop}px`;
         };
         const onMouseUp = () => {
@@ -1013,6 +1093,16 @@ window.saveTerminalProfile = async function() {
     const safeGet = (id) => document.getElementById(id) ? document.getElementById(id).value : '';
     await db.from('profiles').update({ username: safeGet('term-username'), avatar_url: safeGet('term-avatar') }).eq('id', currentUserId);
 
+    // BUG 8 Fix: Push presence track update so Display Handle visually updates instantly
+    if (presenceChannel) {
+        await presenceChannel.track({ 
+            online_at: new Date().toISOString(), 
+            username: safeGet('term-username') || currentUserEmail.split('@')[0], 
+            role: currentUserRole, 
+            avatar_url: safeGet('term-avatar') || '' 
+        });
+    }
+
     const charPayload = {
         profile_id: currentUserId, name: safeGet('term-sheet-name'),
         stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'),
@@ -1035,6 +1125,61 @@ window.saveTerminalProfile = async function() {
     alert("Character dossier & stats secured to database.");
     loadAllProfiles();
 };
+
+/* --- MISSING TRACKER & HEALTH METHODS INJECTED HERE --- */
+
+// BUG 2/3 Fix: Pushes weapon stepper state directly to DB so reloading doesn't reverse it
+window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
+    let wpn = vessel.ship_weapons[idx];
+    
+    if (statKey === 'ammo' && wpn.ammo >= 0) wpn.ammo = Math.max(0, Math.min(wpn.max_ammo, wpn.ammo + delta));
+    if (statKey === 'cooldown') wpn.cooldown = Math.max(0, wpn.cooldown + delta);
+    if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, wpn.overheat + delta));
+    
+    const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
+    if (error) console.error("Weapon stat sync failed:", error);
+    window.renderVesselDeck();
+};
+
+// BUG 4 Fix: Master rest tool to recover all lost states for a vessel
+window.resetShipStats = async function(vesselId) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    if (!confirm("Restore maximum health profiles and resupply all ammunition banks for this vessel?")) return;
+    
+    let payload = {
+        integrity_shields: vessel.max_shields || 400,
+        integrity_hull: vessel.max_hull || 300,
+        integrity_reactive: vessel.max_reactive || 10,
+        integrity_ablative: vessel.max_ablative || 10
+    };
+    Object.assign(vessel, payload);
+    
+    if (vessel.ship_weapons) {
+        vessel.ship_weapons.forEach(w => { 
+            if(w.ammo >= 0) w.ammo = w.max_ammo; 
+            w.cooldown = 0; 
+            w.overheat = 0; 
+        });
+        payload.ship_weapons = vessel.ship_weapons;
+    }
+    
+    await db.from('ship_markers').update(payload).eq('id', vesselId);
+    window.renderVesselDeck();
+    alert("Vessel combat stats reset to maximums.");
+};
+
+// BUG 5 Fix: Inline bookmark remover utility
+window.deleteBookmark = function(idx) {
+    bookmarkedTargets.splice(idx, 1);
+    localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
+    if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+};
+/* ==========================================================================
+   js/main.js (PART 2)
+   ========================================================================== */
 
 /* --- CARGO HUB --- */
 function sanitizeCargo(inv) {
@@ -1244,7 +1389,6 @@ window.renderVesselDeck = function() {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
-    // ----- RENDER CORE DIAGNOSTICS -----
     const healthContainer = document.getElementById('vessel-health-container');
     const decksContainer = document.getElementById('vessel-decks-container');
     const weaponsContainer = document.getElementById('vessel-weapons-container');
@@ -1289,8 +1433,10 @@ window.renderVesselDeck = function() {
                 </div>
             </div>
         `;
+        
+        let resetBtn = `<button class="btn-reveal" onclick="window.resetShipStats('${vessel.id}')" style="width:100%; font-size:10px; margin-bottom:10px; border-color:#00e5a3;">↺ RESET COMBAT STATS</button>`;
 
-        healthContainer.innerHTML = stanceHtml + makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull') + makeBar('REACTIVE ARMOR (PIERCE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT)', a_int, a_max, '#ffaa00', 'ablative');
+        healthContainer.innerHTML = stanceHtml + resetBtn + makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull') + makeBar('REACTIVE ARMOR (PIERCE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT)', a_int, a_max, '#ffaa00', 'ablative');
     }
 
     if (decksContainer) {
@@ -1363,7 +1509,6 @@ window.renderVesselDeck = function() {
         weaponsContainer.innerHTML = wHtml;
     }
 
-    // ----- RENDER HANGAR BAY & STRIKE CRAFT -----
     const embarkedContainer = document.getElementById('vessel-embarked-container');
     const deployedContainer = document.getElementById('vessel-deployed-container');
 
@@ -1432,6 +1577,7 @@ window.renderVesselDeck = function() {
         deployedContainer.innerHTML = dHtml;
     }
 };
+
 /* --- STRIKE CRAFT HANGAR LOGIC --- */
 window.commissionSquadron = async function() {
     const select = document.getElementById('vessel-deck-select');
@@ -1452,13 +1598,8 @@ window.commissionSquadron = async function() {
     
     let sqId = 'sq_' + Math.random().toString(36).substr(2, 9);
     hangar.push({
-        id: sqId,
-        name: name,
-        type: type,
-        count: count,
-        hp: dbStats.base_hp * count,
-        max_hp: dbStats.base_hp * count,
-        loiter: 4
+        id: sqId, name: name, type: type, count: count,
+        hp: dbStats.base_hp * count, max_hp: dbStats.base_hp * count, loiter: 4
     });
 
     await db.from('ship_markers').update({ ship_hangar: hangar }).eq('id', vessel.id);
@@ -1483,7 +1624,7 @@ window.launchSquadron = async function(vesselId, idx) {
 
     let sq = hangar.splice(idx, 1)[0];
     if (sq) {
-        sq.loiter = 4; // Reset bingo fuel on launch
+        sq.loiter = 4;
         deployed.push(sq);
         await db.from('ship_markers').update({ ship_hangar: hangar, ship_deployed: deployed }).eq('id', vessel.id);
         vessel.ship_hangar = hangar;
@@ -1559,7 +1700,8 @@ window.modifySquadronLoiter = async function(vesselId, idx, delta) {
     }
 };
 
-window.rollSquadronWeapon = function(vesselId, sqIdx) {
+// BUG 10 & Race Condition Fixes applied to Squadron Combat Roller
+window.rollSquadronWeapon = async function(vesselId, sqIdx) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
     let sq = (vessel.ship_deployed || [])[sqIdx];
@@ -1572,7 +1714,7 @@ window.rollSquadronWeapon = function(vesselId, sqIdx) {
     let wpn = dbStats.weapons[wpnIdx];
     if (!wpn) return;
 
-    let volleys = sq.count; // Squadron automatically fires its unit count
+    let volleys = sq.count;
     if (volleys <= 0) return;
 
     const diceRegex = /^(\d*)d(\d+)$/i;
@@ -1582,6 +1724,9 @@ window.rollSquadronWeapon = function(vesselId, sqIdx) {
     let baseNumDice = parseInt(match[1]) || 1;
     let numDice = baseNumDice * volleys;
     let diceFaces = parseInt(match[2]);
+
+    // BUG 10 FIX: Prevent exploding infinite loop if dice face < 2
+    let canExplode = wpn.explodes && diceFaces >= 2;
 
     let total = 0;
     let breakdown = [];
@@ -1594,7 +1739,7 @@ window.rollSquadronWeapon = function(vesselId, sqIdx) {
             currentRoll = Math.floor(Math.random() * diceFaces) + 1;
             rollTotal += currentRoll;
             subRolls.push(currentRoll);
-        } while (currentRoll === diceFaces && wpn.explodes);
+        } while (currentRoll === diceFaces && canExplode);
         total += rollTotal;
         breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
     }
@@ -1645,7 +1790,8 @@ window.rollSquadronWeapon = function(vesselId, sqIdx) {
                 }
             }
 
-            db.from('ship_markers').update({
+            // BUG FIX RACE CONDITION: Fully await database write
+            await db.from('ship_markers').update({
                 integrity_shields: s_int,
                 integrity_hull: h_int,
                 integrity_reactive: r_int,
@@ -1668,11 +1814,11 @@ window.rollSquadronWeapon = function(vesselId, sqIdx) {
         </div>
     `;
 
-    window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
+    await window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
 };
 
-/* --- CORE SHIP COMBAT FIRE HANDLER --- */
-window.rollShipWeapon = function(vesselId, idx) {
+// BUG 10 & Race Condition Fixes applied to Core Ship Combat Roller
+window.rollShipWeapon = async function(vesselId, idx) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
     
@@ -1711,6 +1857,9 @@ window.rollShipWeapon = function(vesselId, idx) {
     let diceFaces = parseInt(match[2]);
     let modVal = (parseInt(wpn.modifier) || 0) * volleys;
 
+    // BUG 10 FIX: Prevent exploding infinite loop if dice face < 2
+    let canExplode = wpn.explodes && diceFaces >= 2;
+
     let total = 0;
     let breakdown = [];
 
@@ -1722,7 +1871,7 @@ window.rollShipWeapon = function(vesselId, idx) {
             currentRoll = Math.floor(Math.random() * diceFaces) + 1;
             rollTotal += currentRoll;
             subRolls.push(currentRoll);
-        } while (currentRoll === diceFaces && wpn.explodes);
+        } while (currentRoll === diceFaces && canExplode);
         
         total += rollTotal;
         breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
@@ -1730,7 +1879,6 @@ window.rollShipWeapon = function(vesselId, idx) {
 
     total += modVal;
     
-    // Apply Attacker Stance
     let stance = vessel.ship_stance || 'Balanced';
     if (stance === 'Aggressive') { total = Math.floor(total * 1.25); breakdown.push(`[Aggressive: +25%]`); } 
     else if (stance === 'Defensive') { total = Math.floor(total * 0.75); breakdown.push(`[Defensive: -25%]`); }
@@ -1738,7 +1886,6 @@ window.rollShipWeapon = function(vesselId, idx) {
     if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
     const breakdownText = breakdown.join(' + ');
     
-    // Target processing
     let targetShip = null;
     let combatLog = ``;
     let wpnLower = wpn.name.toLowerCase();
@@ -1779,12 +1926,13 @@ window.rollShipWeapon = function(vesselId, idx) {
                 }
             }
 
-            db.from('ship_markers').update({ integrity_shields: s_int, integrity_hull: h_int, integrity_reactive: r_int, integrity_ablative: a_int }).eq('id', targetShip.id);
+            // BUG FIX RACE CONDITION: Ensure damage applies instantly
+            await db.from('ship_markers').update({ integrity_shields: s_int, integrity_hull: h_int, integrity_reactive: r_int, integrity_ablative: a_int }).eq('id', targetShip.id);
             targetShip.integrity_shields = s_int; targetShip.integrity_hull = h_int; targetShip.integrity_reactive = r_int; targetShip.integrity_ablative = a_int;
         }
     }
 
-    db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
+    await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
     window.renderVesselDeck();
 
     let volleyTag = volleys > 1 ? ` (x${volleys} Volley)` : '';
@@ -1795,7 +1943,7 @@ window.rollShipWeapon = function(vesselId, idx) {
             <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
             ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
         </div>`;
-    window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
+    await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
 };
 
 /* --- DECK / MODIFIERS SAVING --- */
@@ -2100,7 +2248,7 @@ window.wipeGalaxySlate = async function() {
     if (e1 || e2 || e3) {
         alert("Wipe failed: " + (e1?.message || e2?.message || e3?.message));
     } else {
-        selectedTarget = null;
+        window.selectedTarget = null;
         loadGalaxyData();
         loadTerritories();
         alert("Galaxy slate wiped successfully.");
@@ -2254,6 +2402,9 @@ function initGalaxyEngine() {
     const ctx = canvas.getContext('2d');
     const container = document.getElementById('canvas-container');
     const SYSTEM_ZOOM_THRESHOLD = 1.5;
+    
+    // MAP LIMIT FOR BUG 9 CLAMPING
+    const MAP_LIMIT = 15000;
 
     function resize() {
         const dpr = window.devicePixelRatio || 1;
@@ -2337,7 +2488,7 @@ function initGalaxyEngine() {
 
     let dbStarSystems = [];
     let shipMarkers = [];
-    let selectedTarget = null;
+    window.selectedTarget = null;
     let draggedMarker = null;
     let draggedStar = null; 
 
@@ -2613,10 +2764,45 @@ function initGalaxyEngine() {
         window._lastMouseWorldX = worldPos.x;
         window._lastMouseWorldY = worldPos.y;
 
+        // BUG 1 FIX: Active Hover Tracking without clicking
+        if (!camera.isDragging && !draggedMarker && !draggedStar && !territoryDrawActive && !hyperlaneDrawActive) {
+            let hitRadius = Math.max(10, 15 / camera.zoom);
+            let hitTarget = null;
+
+            for (let m of shipMarkers) {
+                if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < hitRadius) { hitTarget = { type: 'ship', data: m }; break; }
+            }
+            if (!hitTarget) {
+                for (let s of dbStarSystems) {
+                    if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < hitRadius) { hitTarget = { type: 'star', data: s }; break; }
+                }
+            }
+            if (!hitTarget) {
+                for (let s of proceduralSystems) {
+                    if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < hitRadius) { hitTarget = { type: 'star', data: s }; break; }
+                }
+            }
+
+            let foundId = hitTarget ? hitTarget.data.id : null;
+            let hoverId = window.hoveredTarget ? window.hoveredTarget.data.id : null;
+            
+            if (foundId !== hoverId) {
+                window.hoveredTarget = hitTarget;
+                if (!window.selectedTarget && activeHudTab === 'telemetry') {
+                    renderHUDTelemetry();
+                }
+            }
+        }
+
         if (draggedMarker) { draggedMarker.x = worldPos.x; draggedMarker.y = worldPos.y; return; }
         if (draggedStar) { draggedStar.x = worldPos.x; draggedStar.y = worldPos.y; return; }
+        
+        // BUG 9 FIX: Camera Translation Void Clamping
         if (camera.isDragging) {
-            camera.x += e.clientX - camera.startX; camera.y += e.clientY - camera.startY;
+            let dx = e.clientX - camera.startX;
+            let dy = e.clientY - camera.startY;
+            camera.x = Math.max(-MAP_LIMIT * camera.zoom, Math.min(MAP_LIMIT * camera.zoom, camera.x + dx));
+            camera.y = Math.max(-MAP_LIMIT * camera.zoom, Math.min(MAP_LIMIT * camera.zoom, camera.y + dy));
             camera.startX = e.clientX; camera.startY = e.clientY;
         }
     });
@@ -2656,8 +2842,10 @@ function initGalaxyEngine() {
         if (draggedStar) { draggedStar.x = worldPos.x; draggedStar.y = worldPos.y; return; }
         if (camera.isDragging) {
             e.preventDefault(); 
-            camera.x += pos.clientX - camera.startX; 
-            camera.y += pos.clientY - camera.startY;
+            let dx = pos.clientX - camera.startX;
+            let dy = pos.clientY - camera.startY;
+            camera.x = Math.max(-MAP_LIMIT * camera.zoom, Math.min(MAP_LIMIT * camera.zoom, camera.x + dx));
+            camera.y = Math.max(-MAP_LIMIT * camera.zoom, Math.min(MAP_LIMIT * camera.zoom, camera.y + dy));
             camera.startX = pos.clientX; 
             camera.startY = pos.clientY;
         }
@@ -2689,8 +2877,11 @@ function initGalaxyEngine() {
         const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
         const newZoom = Math.max(0.02, Math.min(15.0, camera.zoom * zoomFactor));
 
-        camera.x = mouseX - worldX * newZoom;
-        camera.y = mouseY - worldY * newZoom;
+        // BUG 9 FIX: Clamp zoom adjustments
+        let targetX = mouseX - worldX * newZoom;
+        let targetY = mouseY - worldY * newZoom;
+        camera.x = Math.max(-MAP_LIMIT * newZoom, Math.min(MAP_LIMIT * newZoom, targetX));
+        camera.y = Math.max(-MAP_LIMIT * newZoom, Math.min(MAP_LIMIT * newZoom, targetY));
         camera.zoom = newZoom;
     }, { passive: false });
 
@@ -2714,7 +2905,7 @@ function initGalaxyEngine() {
     window.addEventListener('keydown', (e) => {
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
         if (e.key.toLowerCase() === 'f') {
-            if (selectedTarget && selectedTarget.data) {
+            if (window.selectedTarget && window.selectedTarget.data) {
                 window.lockCameraOnSelected();
             }
         }
@@ -2732,13 +2923,13 @@ function initGalaxyEngine() {
     });
 
     window.lockCameraOnSelected = function() {
-        if (!selectedTarget || !selectedTarget.data) return;
-        let targetX = selectedTarget.data.x;
-        let targetY = selectedTarget.data.y;
+        if (!window.selectedTarget || !window.selectedTarget.data) return;
+        let targetX = window.selectedTarget.data.x;
+        let targetY = window.selectedTarget.data.y;
 
-        if (selectedTarget.type === 'body' && selectedTarget.data.parentSystem) {
-            targetX = selectedTarget.data.parentSystem.x;
-            targetY = selectedTarget.data.parentSystem.y;
+        if (window.selectedTarget.type === 'body' && window.selectedTarget.data.parentSystem) {
+            targetX = window.selectedTarget.data.parentSystem.x;
+            targetY = window.selectedTarget.data.parentSystem.y;
         }
 
         camera.x = -targetX * camera.zoom;
@@ -2746,7 +2937,7 @@ function initGalaxyEngine() {
     };
 
     window.clearSelectedTarget = function() {
-        selectedTarget = null;
+        window.selectedTarget = null;
         if (jumpPlottingActive) window.cancelJumpPlotting();
         if (measuringTapeActive) window.toggleMeasuringTool();
         if (hyperlaneDrawActive) window.cancelDrawingHyperlane();
@@ -2764,13 +2955,13 @@ function initGalaxyEngine() {
     };
 
     window.startJumpPlottingMode = function() {
-        if (!selectedTarget || selectedTarget.type !== 'ship') return;
+        if (!window.selectedTarget || window.selectedTarget.type !== 'ship') return;
         jumpPlottingActive = true;
         measuringTapeActive = false;
         pingModeActive = false;
         territoryDrawActive = false;
         hyperlaneDrawActive = false;
-        activeJumpShip = selectedTarget.data;
+        activeJumpShip = window.selectedTarget.data;
         jumpTargetPoint = null;
 
         let driveKey = activeJumpShip.drive_type || 'ftl_class1';
@@ -2831,12 +3022,12 @@ function initGalaxyEngine() {
     };
 
     window.toggleBookmarkSelected = function() {
-        if (!selectedTarget || !selectedTarget.data) return;
-        let existsIndex = bookmarkedTargets.findIndex(b => b.data.id === selectedTarget.data.id);
+        if (!window.selectedTarget || !window.selectedTarget.data) return;
+        let existsIndex = bookmarkedTargets.findIndex(b => b.data.id === window.selectedTarget.data.id);
         if (existsIndex >= 0) {
             bookmarkedTargets.splice(existsIndex, 1);
         } else {
-            bookmarkedTargets.push({ type: selectedTarget.type, data: selectedTarget.data });
+            bookmarkedTargets.push({ type: window.selectedTarget.type, data: window.selectedTarget.data });
         }
         localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
         renderHUDTelemetry();
@@ -2854,7 +3045,7 @@ function initGalaxyEngine() {
     window.jumpToBookmark = function(index) {
         let b = bookmarkedTargets[index];
         if (!b) return;
-        selectedTarget = b;
+        window.selectedTarget = b;
         window.lockCameraOnSelected();
         renderHUDTelemetry();
     };
@@ -2862,7 +3053,7 @@ function initGalaxyEngine() {
     window.jumpToRecent = function(index) {
         let r = recentTargets[index];
         if (!r) return;
-        selectedTarget = r;
+        window.selectedTarget = r;
         window.lockCameraOnSelected();
         renderHUDTelemetry();
     };
@@ -2889,8 +3080,8 @@ function initGalaxyEngine() {
     };
 
     window.saveDMBodyProperties = function(id) {
-        if (currentUserRole !== 'dm' || !selectedTarget || selectedTarget.type !== 'body') return;
-        let b = selectedTarget.data;
+        if (currentUserRole !== 'dm' || !window.selectedTarget || window.selectedTarget.type !== 'body') return;
+        let b = window.selectedTarget.data;
         
         b.name = document.getElementById('edit-body-name').value;
         b.type = document.getElementById('edit-body-type').value;
@@ -2903,7 +3094,7 @@ function initGalaxyEngine() {
     };
 
     function selectTargetAndPushRecent(target) {
-        selectedTarget = target;
+        window.selectedTarget = target;
         let existsIndex = recentTargets.findIndex(r => r.data.id === target.data.id);
         if (existsIndex >= 0) recentTargets.splice(existsIndex, 1);
         recentTargets.unshift(target);
@@ -2955,12 +3146,14 @@ function initGalaxyEngine() {
                 html += '<span style="color:#6b826a; font-size:10px;">No saved bookmarks. Click bookmark on any target telemetry.</span>';
             } else {
                 bookmarkedTargets.forEach((b, idx) => {
+                    // BUG 5 FIX: Inline Bookmark Delete Support
                     html += `
                         <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:4px;">
                             <div><strong style="color:#00e5a3;">${b.data.name}</strong><br><span style="font-size:9px; color:#6b826a;">Type: ${b.type}</span></div>
                             <div style="display:flex; gap:4px;">
                                 <button class="layer-edit" onclick="window.jumpToBookmark(${idx})" style="font-size:9px; padding:2px 6px;">Jump</button>
                                 <button class="layer-edit" onclick="window.shareBookmarkToChat('${b.data.name}', '${b.type}')" style="font-size:9px; padding:2px 6px;" title="Share">Share</button>
+                                <button class="layer-del" onclick="window.deleteBookmark(${idx})" style="font-size:9px; padding:2px 6px;" title="Delete">✕</button>
                             </div>
                         </div>
                     `;
@@ -2990,14 +3183,18 @@ function initGalaxyEngine() {
             return;
         }
 
-        if (!selectedTarget) { content.innerHTML = `<p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p>`; return; }
+        let dynamicTarget = window.selectedTarget || window.hoveredTarget;
+
+        if (!dynamicTarget) { content.innerHTML = `<p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p>`; return; }
         
-        let isBookmarked = bookmarkedTargets.some(b => b.data.id === selectedTarget.data.id);
+        let isLocked = !!window.selectedTarget;
+        let lockStatusHtml = isLocked ? `<span style="color:#00e5a3; font-size:9px;">[TARGET LOCKED]</span>` : `<span style="color:#ffaa00; font-size:9px; animation: pulse 1.5s infinite;">[SENSOR HOVER]</span>`;
+        let isBookmarked = bookmarkedTargets.some(b => b.data.id === dynamicTarget.data.id);
         let bookmarkBtn = `<button class="btn-reveal" onclick="window.toggleBookmarkSelected()" style="font-size:9px; padding:4px; margin-top:4px;">${isBookmarked ? '★ BOOKMARKED' : '☆ BOOKMARK'}</button>`;
         let lockBtn = `<button class="btn-reveal" onclick="window.lockCameraOnSelected()" style="font-size:9px; padding:4px; margin-top:4px;">🎯 LOCK VIEW (F)</button>`;
 
-        if (selectedTarget.type === 'star') {
-            const s = selectedTarget.data;
+        if (dynamicTarget.type === 'star') {
+            const s = dynamicTarget.data;
             let multiTag = s.multiType !== 'Single' ? ` | <span style="color: #ffaa00;">${s.multiType} System</span>` : '';
             
             let dmEditorBox = '';
@@ -3035,16 +3232,17 @@ function initGalaxyEngine() {
 
             content.innerHTML = `
                 <div style="font-size: 11px;">
+                    ${lockStatusHtml}<br>
                     <strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br>
                     <span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} ${multiTag}<br>
                     <span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br>
                     ${s.isCustom ? `<span style="color: #6b826a;">Industry Tier:</span> ${s.industry_tier || 0}<br>` : ''}
-                    <div style="display:flex; gap:6px;">${lockBtn} ${bookmarkBtn}</div>
+                    <div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>
                     ${dmEditorBox}
                 </div>
             `;
-        } else if (selectedTarget.type === 'ship') {
-            const m = selectedTarget.data;
+        } else if (dynamicTarget.type === 'ship') {
+            const m = dynamicTarget.data;
             const currentDrive = m.drive_type || 'ftl_class1';
 
             let driveOptionsHtml = '';
@@ -3093,14 +3291,16 @@ function initGalaxyEngine() {
                         </div>
                     </div>
                 `;
-            } else {
+            } else if (isLocked) {
                 jumpPlotterBox = `
                     <button class="btn-deploy" onclick="window.startJumpPlottingMode()" style="font-size:9px; padding:6px; margin-top:6px;">🌌 PLOT JUMP VECTOR</button>
                 `;
             }
 
+            // BUG 4 FIX: Added rapid UI link to full vessel deck directly from HUD
             content.innerHTML = `
                 <div style="font-size: 11px;">
+                    ${lockStatusHtml}<br>
                     <strong style="color: #00e1ff; font-size: 13px;">🚀 ${m.name}</strong><br>
                     <span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br>
                     <div style="margin:4px 0;">
@@ -3109,14 +3309,14 @@ function initGalaxyEngine() {
                             ${driveOptionsHtml}
                         </select>
                     </div>
-                    <div style="display:flex; gap:6px;">${lockBtn} ${bookmarkBtn}</div>
+                    <div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>
                     ${jumpPlotterBox}
-                    <button class="btn-deploy" onclick="window.openFullCargoTerminal()" style="font-size:9px; padding:4px; margin-top:6px;">📦 INSPECT FULL CARGO HOLD</button>
-                    <button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>
+                    <button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>
+                    ${currentUserRole === 'dm' ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}
                 </div>
             `;
-        } else if (selectedTarget.type === 'body') {
-            const p = selectedTarget.data;
+        } else if (dynamicTarget.type === 'body') {
+            const p = dynamicTarget.data;
             const icon = p.isStar ? '⭐' : '🪐';
 
             let dmBodyEditorBox = '';
@@ -3157,11 +3357,12 @@ function initGalaxyEngine() {
 
             content.innerHTML = `
                 <div style="font-size: 11px;">
+                    ${lockStatusHtml}<br>
                     <strong style="color: ${p.color}; font-size: 13px;">${icon} ${p.name}</strong><br>
                     <span style="color: #6b826a;">System:</span> ${p.parentSystem.name}<br>
                     <span style="color: #6b826a;">Class:</span> ${p.type} | <span style="color: #6b826a;">Grav:</span> ${p.gravity}<br>
                     <span style="color: #00e5a3; font-weight:bold; margin-top:4px; display:block;">Scans:</span> <span style="color: #d4c5a9;">${p.resources}</span>
-                    <div style="display:flex; gap:6px;">${lockBtn} ${bookmarkBtn}</div>
+                    <div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>
                     ${dmBodyEditorBox}
                 </div>
             `;
@@ -3169,8 +3370,8 @@ function initGalaxyEngine() {
     }
 
     window.updateStarName = async function(id) { await db.from('star_systems').update({ name: document.getElementById('edit-star-name').value }).eq('id', id); loadGalaxyData(); };
-    window.deleteStarSystem = async function(id) { await db.from('star_systems').delete().eq('id', id); selectedTarget = null; renderHUDTelemetry(); loadGalaxyData(); };
-    window.deleteShipToken = async function(id) { await db.from('ship_markers').delete().eq('id', id); selectedTarget = null; renderHUDTelemetry(); loadGalaxyData(); };
+    window.deleteStarSystem = async function(id) { await db.from('star_systems').delete().eq('id', id); window.selectedTarget = null; renderHUDTelemetry(); loadGalaxyData(); };
+    window.deleteShipToken = async function(id) { await db.from('ship_markers').delete().eq('id', id); window.selectedTarget = null; renderHUDTelemetry(); loadGalaxyData(); };
 
     window.handleGlobalSearchInput = function(query) {
         const dropdown = document.getElementById('search-results-dropdown');
@@ -3227,10 +3428,11 @@ function initGalaxyEngine() {
         const cx = -camera.x / camera.zoom; 
         const cy = -camera.y / camera.zoom;
 
+        let dynamicTarget = window.selectedTarget || window.hoveredTarget;
         let focusSystemId = null;
-        if (selectedTarget) {
-            if (selectedTarget.type === 'star') focusSystemId = selectedTarget.data.id;
-            if (selectedTarget.type === 'body') focusSystemId = selectedTarget.data.parentSystem.id;
+        if (dynamicTarget) {
+            if (dynamicTarget.type === 'star') focusSystemId = dynamicTarget.data.id;
+            if (dynamicTarget.type === 'body') focusSystemId = dynamicTarget.data.parentSystem.id;
         }
 
         let macroOpacity = 1.0;
@@ -3592,21 +3794,27 @@ function initGalaxyEngine() {
             ctx.restore();
         }
 
-        // Target Selection Reticle
-        if (selectedTarget && selectedTarget.data) {
-            let obj = selectedTarget.data;
+        // Target Selection Reticle (Selected OR Hovered)
+        if (dynamicTarget && dynamicTarget.data) {
+            let obj = dynamicTarget.data;
             let ox = obj.x, oy = obj.y;
-            if (selectedTarget.type === 'body') {
+            if (dynamicTarget.type === 'body') {
                 let angle = obj.baseAngle + (time * obj.speed);
                 ox = obj.parentSystem.x + Math.cos(angle) * obj.radius;
                 oy = obj.parentSystem.y + Math.sin(angle) * obj.radius;
             }
-            let pulseSize = 14 + Math.sin(time * 0.006) * 4;
-            ctx.strokeStyle = '#00e5a3';
+            
+            let isLocked = !!window.selectedTarget;
+            let pulseSize = isLocked ? (14 + Math.sin(time * 0.006) * 4) : 12;
+            
+            ctx.strokeStyle = isLocked ? '#00e5a3' : '#ffaa00';
             ctx.lineWidth = 2 / camera.zoom;
+            if (!isLocked) ctx.setLineDash([4, 4]);
+
             ctx.beginPath();
             ctx.arc(ox, oy, pulseSize / camera.zoom, 0, Math.PI * 2);
             ctx.stroke();
+            ctx.setLineDash([]);
         }
 
         ctx.restore(); requestAnimationFrame(render);
