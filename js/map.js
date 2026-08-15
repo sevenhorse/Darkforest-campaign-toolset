@@ -631,7 +631,7 @@ window.initGalaxyEngine = function() {
         }
     };
 
-    window.executePlottedJump = async function() {
+  window.executePlottedJump = async function() {
         if (!activeJumpShip || !jumpTargetPoint) return;
         let ship = activeJumpShip;
         let target = jumpTargetPoint;
@@ -641,9 +641,10 @@ window.initGalaxyEngine = function() {
         let dist = Math.sqrt(dx * dx + dy * dy);
         let tripHours = Math.max(1, Math.round(dist / selectedDriveSpeed));
 
-        universeTimeHours += tripHours;
-        localStorage.setItem('odyssey_universe_time', universeTimeHours);
-        if (typeof updateCalendarDisplay === 'function') updateCalendarDisplay();
+        // Point explicitly at the window. scopes we just fixed
+        window.universeTimeHours += tripHours;
+        localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+        if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
 
         ship.x = target.x;
         ship.y = target.y;
@@ -654,9 +655,18 @@ window.initGalaxyEngine = function() {
 
         await db.from('chat_logs').insert({
             sender_id: currentUserId,
-            content: `🚀 [FTL JUMP EXECUTION] Vessel '${ship.name}' completed jump to ${target.name || 'target coordinates'} (X: ${Math.round(target.x)}, Y: ${Math.round(target.y)}). Trip Duration: ${tripHours} hrs. Universe clock advanced to ${formatUniverseTime(universeTimeHours)}.`,
+            content: `🚀 [FTL JUMP EXECUTION] Vessel '${ship.name}' completed jump to ${target.name || 'target coordinates'} (X: ${Math.round(target.x)}, Y: ${Math.round(target.y)}). Trip Duration: ${tripHours} hrs. Universe clock advanced to ${window.formatUniverseTime(window.universeTimeHours)}.`,
             message_type: 'text'
         });
+
+        jumpPlottingActive = false;
+        activeJumpShip = null;
+        jumpTargetPoint = null;
+
+        if(typeof loadGalaxyData === 'function') loadGalaxyData();
+        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        alert(`Jump executed! Vessel arrived at destination. Elapsed time: ${tripHours} hours.`);
+    };
 
         jumpPlottingActive = false;
         activeJumpShip = null;
