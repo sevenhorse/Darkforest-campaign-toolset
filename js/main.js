@@ -353,10 +353,7 @@ async function loadCodexEntries() {
         globalCodexEntriesCache = data;
     } else {
         globalCodexEntriesCache = [
-            { id: 'cdx-1', category: 'factions', title: 'Task Force Black', subtitle: 'Allied Command', content: 'Autonomous deep-space exploration and containment fleet operating outside regular jurisdiction.' },
-            { id: 'cdx-2', category: 'factions', title: 'The Syndicate', subtitle: 'Hostile / Outer Rim', content: 'Loose cartel of rogue captains, smugglers, and black-market station masters.' },
-            { id: 'cdx-3', category: 'lore', title: 'The Dark Forest Anomaly', subtitle: 'Sector 1042', content: 'Unexplained subspace static emanating from Sector 1042. Quantum communications drop instantly upon entry.' },
-            { id: 'cdx-4', category: 'npcs', title: 'Commander Vane', subtitle: 'Task Force Black Flagship', content: 'Primary mission commander. Veteran of the First Contact Boundary skirmishes.' }
+            { id: 'cdx-1', category: 'factions', title: 'Task Force Black', subtitle: 'Allied Command', content: 'Autonomous deep-space exploration and containment fleet operating outside regular jurisdiction.' }
         ];
     }
     renderCodexMatrix();
@@ -653,20 +650,6 @@ function renderSkillInputs() {
         `;
     });
     container.innerHTML = html;
-    
-    const diceContainer = document.getElementById('dice-roller-skills');
-    let dHtml = '';
-    skillList.forEach(skill => {
-        dHtml += `<label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="roll-skill-cb" value="${skill}" style="width:auto; margin:0;"> ${skill}</label>`;
-    });
-    if(diceContainer) diceContainer.innerHTML = dHtml;
-    
-    const statContainer = document.getElementById('dice-roller-stats');
-    let sHtml = '';
-    ['Charisma', 'Dexterity', 'Intelligence', 'Strength', 'Toughness', 'Willpower'].forEach(st => {
-        sHtml += `<label style="font-size: 11px; color: #d4c5a9;"><input type="checkbox" class="roll-stat-cb" value="${st}"> ${st}</label>`;
-    });
-    if(statContainer) statContainer.innerHTML = sHtml;
 }
 renderSkillInputs();
 
@@ -1173,7 +1156,7 @@ window.broadcastTerminalCargoManifest = async function() {
     alert("Full cargo manifest broadcasted to Secure Comms!");
 };
 
-/* --- NEW VESSEL DECK LOGIC (INTEGRITY, DECKS, WEAPONS) --- */
+/* --- NEW VESSEL DECK LOGIC & COMBAT ENGINE (INTEGRITY, DECKS, WEAPONS) --- */
 function populateVesselDeckSelect() {
     const select = document.getElementById('vessel-deck-select');
     if (!select) return;
@@ -1183,6 +1166,18 @@ function populateVesselDeckSelect() {
     });
     select.innerHTML = html || '<option value="">No active vessels found</option>';
 }
+
+window.updateShipStance = async function(shipId, stance) {
+    await db.from('ship_markers').update({ ship_stance: stance }).eq('id', shipId);
+    let ship = globalShipMarkersCache.find(s => s.id === shipId);
+    if(ship) ship.ship_stance = stance;
+    
+    await db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `⚙️ [TACTICS] Vessel '${ship.name}' is now assuming **${stance.toUpperCase()}** stance.`,
+        message_type: 'text'
+    });
+};
 
 window.renderVesselDeck = function() {
     const select = document.getElementById('vessel-deck-select');
@@ -1211,6 +1206,19 @@ window.renderVesselDeck = function() {
     const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
     const a_max = vessel.max_ablative || 10;
 
+    let currentStance = vessel.ship_stance || 'Balanced';
+    let stanceHtml = `
+        <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center;">
+            <label style="font-size:10px; color:#00e5a3; font-weight:bold;">TACTICAL STANCE:</label>
+            <select onchange="window.updateShipStance('${vessel.id}', this.value)" style="width:160px; margin:0; padding:4px; font-size:10px; background:#040605; color:#00e5a3; border:1px solid #3c4e36;">
+                <option value="Balanced" ${currentStance === 'Balanced' ? 'selected' : ''}>Balanced (Standard)</option>
+                <option value="Aggressive" ${currentStance === 'Aggressive' ? 'selected' : ''}>Aggressive (+Dmg, -Def)</option>
+                <option value="Defensive" ${currentStance === 'Defensive' ? 'selected' : ''}>Defensive (+Def, -Dmg)</option>
+                <option value="Evasive" ${currentStance === 'Evasive' ? 'selected' : ''}>Evasive (Dodge Focus)</option>
+            </select>
+        </div>
+    `;
+
     const makeBar = (label, current, max, color, key) => `
         <div style="margin-bottom: 8px;">
             <div style="display:flex; justify-content:space-between; font-size:10px; color:${color}; margin-bottom:2px;">
@@ -1230,9 +1238,10 @@ window.renderVesselDeck = function() {
     `;
 
     healthContainer.innerHTML = 
+        stanceHtml +
         makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') +
         makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull') +
-        makeBar('REACTIVE ARMOR (PIERCING)', r_int, r_max, '#ffaa00', 'reactive') +
+        makeBar('REACTIVE ARMOR (PIERCE)', r_int, r_max, '#ffaa00', 'reactive') +
         makeBar('ABLATIVE ARMOR (HEAT)', a_int, a_max, '#ffaa00', 'ablative');
 
     // 2. Setup Internal Decks
@@ -1266,7 +1275,12 @@ window.renderVesselDeck = function() {
         decksContainer.innerHTML = dHtml;
     }
 
-    // 3. Setup Weapons & Hardpoints
+    // 3. Setup Weapons, Hardpoints & Targets
+    let targetOptions = '<option value="">-- No Target (Free Fire) --</option>';
+    globalShipMarkersCache.forEach(m => {
+        if(m.id !== vessel.id) targetOptions += `<option value="${m.id}">${m.name}</option>`;
+    });
+
     const weapons = vessel.ship_weapons || [];
     let wHtml = '';
     if (weapons.length === 0) {
@@ -1281,6 +1295,9 @@ window.renderVesselDeck = function() {
                         <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
                     </div>
                     <div style="display:flex; gap:6px; align-items:center;">
+                        <select id="wpn-target-${vessel.id}-${idx}" style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">
+                            ${targetOptions}
+                        </select>
                         <input type="number" id="wpn-volley-${vessel.id}-${idx}" value="1" min="1" title="Volley / Burst Count" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
                         <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
                         <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
@@ -1345,7 +1362,6 @@ window.modifyShipWeaponStat = async function(vesselId, idx, stat, delta) {
     window.renderVesselDeck();
 };
 
-// Handlers for Deck Modification
 window.addShipDeck = async function() {
     const select = document.getElementById('vessel-deck-select');
     const name = document.getElementById('new-deck-name').value.trim();
@@ -1397,7 +1413,6 @@ window.deleteShipDeck = async function(vesselId, idx) {
     window.renderVesselDeck();
 };
 
-// Handlers for Main Cascades
 window.modifyShipHealth = async function(vesselId, key, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -1418,7 +1433,6 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     window.renderVesselDeck();
 };
 
-// Handlers for Mounted Hardpoints
 window.addShipWeapon = async function() {
     const select = document.getElementById('vessel-deck-select');
     const loc = document.getElementById('new-ship-wpn-loc').value.trim() || 'Hull Mount';
@@ -1481,6 +1495,8 @@ window.rollShipWeapon = function(vesselId, idx) {
 
     let volleyInput = document.getElementById(`wpn-volley-${vesselId}-${idx}`);
     let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
+    let targetSelect = document.getElementById(`wpn-target-${vesselId}-${idx}`);
+    let targetId = targetSelect ? targetSelect.value : null;
 
     if (wpn.cooldown > 0) {
         if (!confirm(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`)) return;
@@ -1523,15 +1539,96 @@ window.rollShipWeapon = function(vesselId, idx) {
     }
 
     total += modVal;
+    
+    // Apply Attacker Stance Modifiers
+    let stance = vessel.ship_stance || 'Balanced';
+    if (stance === 'Aggressive') {
+        total = Math.floor(total * 1.25);
+        breakdown.push(`[Aggressive: +25%]`);
+    } else if (stance === 'Defensive') {
+        total = Math.floor(total * 0.75);
+        breakdown.push(`[Defensive: -25%]`);
+    }
+
     if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
 
     const breakdownText = breakdown.join(' + ');
     
+    // Process Target & Damage Routing
+    let targetShip = null;
+    let combatLog = ``;
+    let wpnLower = wpn.name.toLowerCase();
+    let isPiercing = wpnLower.includes('pierce') || wpnLower.includes('piercing') || wpnLower.includes('rail') || wpnLower.includes('gauss');
+    let isHeat = wpnLower.includes('heat') || wpnLower.includes('plasma') || wpnLower.includes('laser') || wpnLower.includes('gamma');
+    let dmgType = isPiercing ? 'Piercing' : (isHeat ? 'Heat' : 'Impact/Ion');
+
+    if (targetId) {
+        targetShip = globalShipMarkersCache.find(m => m.id === targetId);
+        if (targetShip) {
+            let tStance = targetShip.ship_stance || 'Balanced';
+            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
+            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
+            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+
+            let s_int = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
+            let h_int = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
+            let r_int = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
+            let a_int = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
+            
+            let remainingDmg = total;
+
+            let shieldDmg = Math.min(s_int, remainingDmg);
+            s_int -= shieldDmg;
+            remainingDmg -= shieldDmg;
+            if (shieldDmg > 0) combatLog += `Shields absorbed: ${shieldDmg}. `;
+
+            if (remainingDmg > 0) {
+                if (isPiercing && r_int > 0) {
+                    r_int -= 1;
+                    combatLog += `[REACTIVE ARMOR] charge expended. Hull breach negated! `;
+                    remainingDmg = 0;
+                } else if (isHeat && a_int > 0) {
+                    a_int -= 1;
+                    combatLog += `[ABLATIVE ARMOR] charge expended. Hull damage negated! `;
+                    remainingDmg = 0;
+                } else {
+                    let hullDmg = Math.min(h_int, remainingDmg);
+                    h_int -= hullDmg;
+                    remainingDmg -= hullDmg;
+                    combatLog += `Hull suffered: ${hullDmg} damage! `;
+                    if (h_int <= 0) combatLog += `**CRITICAL HULL BREACH!** `;
+                }
+            }
+
+            db.from('ship_markers').update({
+                integrity_shields: s_int,
+                integrity_hull: h_int,
+                integrity_reactive: r_int,
+                integrity_ablative: a_int
+            }).eq('id', targetShip.id);
+
+            targetShip.integrity_shields = s_int;
+            targetShip.integrity_hull = h_int;
+            targetShip.integrity_reactive = r_int;
+            targetShip.integrity_ablative = a_int;
+        }
+    }
+
     db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
     window.renderVesselDeck();
 
     let volleyTag = volleys > 1 ? ` (x${volleys} Volley)` : '';
-    window.broadcastRoll(`[${vessel.name}] FIRING [${wpn.loc || 'Mount'}]${volleyTag}: ${wpn.name}`, breakdownText, total);
+    let targetString = targetShip ? ` at ${targetShip.name}` : ` into the void`;
+    
+    let breakdownString = `
+        <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
+            <strong>Damage Type:</strong> ${dmgType}<br>
+            <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
+            ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
+        </div>
+    `;
+
+    window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
 };
 
 window.broadcastVesselStatus = async function() {
@@ -2023,17 +2120,17 @@ function initGalaxyEngine() {
             payload.integrity_reactive = 10; payload.max_reactive = 10;
             payload.integrity_ablative = 10; payload.max_ablative = 10;
             payload.ship_weapons = [
-                { loc: "Primary", name: "Gauss Cannons x32", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-                { loc: "Turrets", name: "Dual Railguns x12", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-                { loc: "Spinal", name: "Gamma Lance x2", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-                { loc: "Tubes", name: "Ship Killer Tubes x48", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0 },
-                { loc: "Tubes", name: "Capitol Killer Tubes x24", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0 },
-                { loc: "PDC", name: "PDC Grid x36", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
-                { loc: "PDL", name: "PDL Grid x36", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
-                { loc: "PDG", name: "PDG Grid x36", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-                { loc: "Turrets", name: "Flak Guns x12", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-                { loc: "Turrets", name: "Rapid Plasma Repeaters x6", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-                { loc: "Spinal", name: "Thanix Enforcer x2", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+                { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0 },
+                { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0 },
+                { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
+                { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
+                { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+                { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+                { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
                 { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 }
             ];
             payload.ship_decks = [
