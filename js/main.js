@@ -317,7 +317,6 @@ async function loadHyperlanes() {
     }
 }
 
-// --- NEW ANOMALY DETECTION ENGINE ---
 async function checkAnomalyProximity(ship) {
     if (!ship) return;
     const DRADIS_RANGE = 180;
@@ -1203,12 +1202,14 @@ window.renderVesselDeck = function() {
     }
 
     // 1. Setup Main Health/Integrity Cascades
-    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 100;
-    const s_max = vessel.max_shields || 100;
-    const a_int = vessel.integrity_armor !== undefined ? vessel.integrity_armor : 100;
-    const a_max = vessel.max_armor || 100;
-    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 100;
-    const h_max = vessel.max_hull || 100;
+    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
+    const s_max = vessel.max_shields || 400;
+    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
+    const h_max = vessel.max_hull || 300;
+    const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
+    const r_max = vessel.max_reactive || 10;
+    const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
+    const a_max = vessel.max_ablative || 10;
 
     const makeBar = (label, current, max, color, key) => `
         <div style="margin-bottom: 8px;">
@@ -1230,8 +1231,9 @@ window.renderVesselDeck = function() {
 
     healthContainer.innerHTML = 
         makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') +
-        makeBar('ARMOR PLATING', a_int, a_max, '#ffaa00', 'armor') +
-        makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
+        makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull') +
+        makeBar('REACTIVE ARMOR (PIERCING)', r_int, r_max, '#ffaa00', 'reactive') +
+        makeBar('ABLATIVE ARMOR (HEAT)', a_int, a_max, '#ffaa00', 'ablative');
 
     // 2. Setup Internal Decks
     if (decksContainer) {
@@ -1272,20 +1274,74 @@ window.renderVesselDeck = function() {
     } else {
         weapons.forEach((w, idx) => {
             wHtml += `
-            <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
-                <div>
-                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>
-                    <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
+            <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>
+                        <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
+                        <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
+                    </div>
                 </div>
-                <div style="display:flex; gap:6px;">
-                    <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
-                    <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
+                <div style="display:flex; justify-content:space-between; margin-top:8px; gap:8px;">
+                    <!-- Ammo -->
+                    <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
+                        <div style="font-size:9px; color:#6b826a; margin-bottom:4px;">AMMO: ${w.ammo < 0 ? 'INF' : `${w.ammo}/${w.max_ammo}`}</div>
+                        ${w.ammo >= 0 ? `
+                        <div style="display:flex; justify-content:center; gap:4px;">
+                            <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'ammo', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button>
+                            <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'ammo', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button>
+                        </div>` : ''}
+                    </div>
+                    <!-- Cooldown -->
+                    <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
+                        <div style="font-size:9px; color:#6b826a; margin-bottom:4px;">COOLDOWN: ${w.cooldown || 0}</div>
+                        <div style="display:flex; justify-content:center; gap:4px;">
+                            <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'cooldown', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button>
+                            <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'cooldown', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button>
+                        </div>
+                    </div>
+                    <!-- Overheat -->
+                    <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
+                        <div style="font-size:9px; color:#ffaa00; margin-bottom:4px;">OVERHEAT: ${w.overheat || 0}/10</div>
+                        <div style="display:flex; justify-content:center; gap:4px;">
+                            <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button>
+                            <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             `;
         });
     }
     weaponsContainer.innerHTML = wHtml;
+
+    // Dynamically inject the Max Ammo input field into the hardpoint adder if it doesn't exist
+    let wpnModInput = document.getElementById('new-ship-wpn-mod');
+    if (wpnModInput && !document.getElementById('new-ship-wpn-ammo')) {
+        wpnModInput.insertAdjacentHTML('afterend', '<input type="number" id="new-ship-wpn-ammo" placeholder="Max Ammo (-1 inf)" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">');
+    }
+};
+
+window.modifyShipWeaponStat = async function(vesselId, idx, stat, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let weapons = vessel.ship_weapons || [];
+    if (!weapons[idx]) return;
+
+    if (stat === 'ammo') {
+        weapons[idx].ammo = Math.max(0, Math.min(weapons[idx].max_ammo, (weapons[idx].ammo || 0) + delta));
+    } else if (stat === 'cooldown') {
+        weapons[idx].cooldown = Math.max(0, (weapons[idx].cooldown || 0) + delta);
+    } else if (stat === 'overheat') {
+        weapons[idx].overheat = Math.max(0, Math.min(10, (weapons[idx].overheat || 0) + delta));
+    }
+
+    await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vesselId);
+    vessel.ship_weapons = weapons;
+    window.renderVesselDeck();
 };
 
 // Handlers for Deck Modification
@@ -1369,6 +1425,12 @@ window.addShipWeapon = async function() {
     let dice = document.getElementById('new-ship-wpn-dice').value.trim().toLowerCase();
     let mod = document.getElementById('new-ship-wpn-mod').value.trim();
     const explodes = document.getElementById('new-ship-wpn-explodes').checked;
+    
+    let ammoInput = document.getElementById('new-ship-wpn-ammo');
+    let ammoVal = -1;
+    if (ammoInput && ammoInput.value.trim() !== '') {
+        ammoVal = parseInt(ammoInput.value);
+    }
 
     if (!select || !select.value) { alert("Select a vessel token first."); return; }
     if (!name) { alert("Please enter a weapon system name."); return; }
@@ -1380,7 +1442,10 @@ window.addShipWeapon = async function() {
     if (!vessel) return;
 
     let weapons = vessel.ship_weapons || [];
-    weapons.push({ loc, name, dice, modifier: mod, explodes });
+    weapons.push({ 
+        loc, name, dice, modifier: mod, explodes, 
+        ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0 
+    });
 
     await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
     vessel.ship_weapons = weapons;
@@ -1389,6 +1454,7 @@ window.addShipWeapon = async function() {
     document.getElementById('new-ship-wpn-name').value = '';
     document.getElementById('new-ship-wpn-dice').value = '';
     document.getElementById('new-ship-wpn-mod').value = '';
+    if (ammoInput) ammoInput.value = '';
     window.renderVesselDeck();
 };
 
@@ -1411,6 +1477,18 @@ window.rollShipWeapon = function(vesselId, idx) {
     
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
+
+    if (wpn.cooldown > 0) {
+        if (!confirm(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`)) return;
+        wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
+    } 
+    
+    if (wpn.ammo === 0) {
+        alert(`[EMPTY] ${wpn.name} is out of ammunition!`); 
+        return;
+    }
+
+    if (wpn.ammo > 0) wpn.ammo -= 1;
 
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = wpn.dice.trim().match(diceRegex);
@@ -1442,6 +1520,9 @@ window.rollShipWeapon = function(vesselId, idx) {
 
     const breakdownText = breakdown.join(' + ');
     
+    db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
+    window.renderVesselDeck();
+
     window.broadcastRoll(`[${vessel.name}] FIRING [${wpn.loc || 'Mount'}]: ${wpn.name}`, breakdownText, total);
 };
 
@@ -1451,13 +1532,14 @@ window.broadcastVesselStatus = async function() {
     let vessel = globalShipMarkersCache.find(m => m.id === select.value);
     if (!vessel) return;
 
-    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 100;
-    const a_int = vessel.integrity_armor !== undefined ? vessel.integrity_armor : 100;
-    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 100;
+    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
+    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
+    const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
+    const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
 
     await db.from('chat_logs').insert({
         sender_id: currentUserId,
-        content: `🛡️ [VESSEL DIAGNOSTICS] ${vessel.name} status check:<br><span style="color:#00e1ff">Shields: ${s_int}%</span> | <span style="color:#ffaa00">Armor: ${a_int}%</span> | <span style="color:#ff3333">Hull: ${h_int}%</span>`,
+        content: `🛡️ [VESSEL DIAGNOSTICS] ${vessel.name} status check:<br><span style="color:#00e1ff">Shields: ${s_int}</span> | <span style="color:#ff3333">Hull: ${h_int}</span><br><span style="color:#ffaa00">Reactive Armor: ${r_int}</span> | <span style="color:#ffaa00">Ablative Armor: ${a_int}</span>`,
         message_type: 'text'
     });
     alert("Vessel diagnostic broadcasted to Secure Comms!");
@@ -1912,7 +1994,57 @@ function initGalaxyEngine() {
 
     window.spawnTokenAtCenter = async function() {
         const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1';
-        await db.from('ship_markers').insert({ owner_id: currentUserId, name: document.getElementById('dm-tool-name').value || 'Task Force Black', drive_type: driveType, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color: document.getElementById('dm-tool-color').value, cargo_inventory: {}, ship_weapons: [], ship_decks: [] });
+        const name = document.getElementById('dm-tool-name').value || 'Task Force Black';
+        const color = document.getElementById('dm-tool-color').value;
+        
+        let isJupiter = confirm(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
+        
+        let payload = { 
+            owner_id: currentUserId, 
+            name: name, 
+            drive_type: driveType, 
+            x: -camera.x / camera.zoom, 
+            y: -camera.y / camera.zoom, 
+            color: color, 
+            cargo_inventory: {} 
+        };
+
+        if (isJupiter) {
+            payload.integrity_shields = 400; payload.max_shields = 400;
+            payload.integrity_hull = 300; payload.max_hull = 300;
+            payload.integrity_reactive = 10; payload.max_reactive = 10;
+            payload.integrity_ablative = 10; payload.max_ablative = 10;
+            payload.ship_weapons = [
+                { loc: "Primary", name: "Gauss Cannons x32", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+                { loc: "Turrets", name: "Dual Railguns x12", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Spinal", name: "Gamma Lance x2", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Tubes", name: "Ship Killer Tubes x48", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0 },
+                { loc: "Tubes", name: "Capitol Killer Tubes x24", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0 },
+                { loc: "PDC", name: "PDC Grid x36", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
+                { loc: "PDL", name: "PDL Grid x36", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
+                { loc: "PDG", name: "PDG Grid x36", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+                { loc: "Turrets", name: "Flak Guns x12", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+                { loc: "Turrets", name: "Rapid Plasma Repeaters x6", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Spinal", name: "Thanix Enforcer x2", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+                { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 }
+            ];
+            payload.ship_decks = [
+                { name: "Bridge / CIC", hp: 100, max_hp: 100 },
+                { name: "Engineering / Core", hp: 150, max_hp: 150 },
+                { name: "Life Support", hp: 100, max_hp: 100 },
+                { name: "Flight Deck / Hangars", hp: 120, max_hp: 120 },
+                { name: "Manufacturing", hp: 100, max_hp: 100 }
+            ];
+        } else {
+            payload.integrity_shields = 100; payload.max_shields = 100;
+            payload.integrity_hull = 100; payload.max_hull = 100;
+            payload.integrity_reactive = 5; payload.max_reactive = 5;
+            payload.integrity_ablative = 5; payload.max_ablative = 5;
+            payload.ship_weapons = [];
+            payload.ship_decks = [];
+        }
+
+        await db.from('ship_markers').insert(payload);
         loadGalaxyData();
     };
 
