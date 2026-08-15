@@ -46,7 +46,7 @@ input[type="color"] {
 button {
     width: 100%; padding: 10px; margin-top: 10px; background: #0a1410; 
     border: 1px solid #3c4e36; color: #00e5a3; border-radius: 2px; 
-    cursor: pointer; font-weight: bold; transition: all 0.2s; font-size: 11px;
+    cursor: pointer; font-weight: bold; transition: all 0.2s; font-size: 11px; 
     font-family: inherit; text-transform: uppercase; letter-spacing: 1px;
 }
 button:hover { background: #00e5a3; color: #030406; border-color: #ffffff; box-shadow: 0 0 8px rgba(0,229,163,0.4); }
@@ -267,6 +267,15 @@ canvas { display: block; width: 100%; height: 100%; }
 
 .term-panel-content { display: none; animation: fadeIn 0.3s; }
 .term-panel-content.active { display: block; }
+
+/* --- DM OPERATIONS SUB-PANEL TAB DISPLAY RULES --- */
+.dm-subpanel {
+    display: none;
+    animation: fadeIn 0.2s ease-in-out;
+}
+.dm-subpanel.active {
+    display: block;
+}
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
