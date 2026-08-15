@@ -253,7 +253,7 @@
                     </div>
                 </div>
 
-                <!-- NEW: VESSEL DIAGNOSTICS & HARDPOINTS TAB -->
+                <!-- VESSEL DIAGNOSTICS & HARDPOINTS TAB -->
                 <div id="term-panel-vessel" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
@@ -263,49 +263,104 @@
                         <button class="btn-reveal" onclick="window.broadcastVesselStatus()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">BROADCAST STATUS TO COMMS</button>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                        <!-- Column 1: Integrity & Decks -->
-                        <div>
-                            <div class="sheet-section">
-                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Integrity Cascades</h4>
-                                <div id="vessel-health-container"></div>
+                    <!-- Vessel Sub-Tabs -->
+                    <div class="cargo-subtabs" style="margin-bottom:12px;">
+                        <button class="cargo-subtab-btn active" id="vessel-subtab-core" onclick="window.switchVesselSubtab('core')">Core Diagnostics & Weapons</button>
+                        <button class="cargo-subtab-btn" id="vessel-subtab-hangar" onclick="window.switchVesselSubtab('hangar')">Hangar Bay & Strike Craft</button>
+                    </div>
+
+                    <!-- CORE DIAGNOSTICS VIEW -->
+                    <div id="vessel-core-view">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <!-- Column 1: Integrity & Decks -->
+                            <div>
+                                <div class="sheet-section">
+                                    <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Integrity Cascades</h4>
+                                    <div id="vessel-health-container"></div>
+                                </div>
+
+                                <div class="sheet-section" style="margin-top: 20px; border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
+                                    <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Internal Decks & Systems</h4>
+                                    <div id="vessel-decks-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px;"></div>
+                                    
+                                    <div style="background:#030403; padding:8px; border:1px solid #00e1ff; border-radius:2px;">
+                                        <label style="font-size: 9px; color: #00e1ff;">Construct New Deck / Subsystem:</label>
+                                        <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                            <input type="text" id="new-deck-name" placeholder="e.g. Engineering, Bridge..." style="flex:2; margin:0; border-color:#00e1ff;">
+                                            <input type="number" id="new-deck-hp" placeholder="Max HP" value="50" style="flex:1; margin:0; text-align:center; border-color:#00e1ff;">
+                                        </div>
+                                        <button class="btn-reveal" onclick="window.addShipDeck()" style="width:100%; font-size:10px; margin:0; padding: 4px 12px; border-color:#00e1ff; color:#00e1ff;">+ BUILD DECK</button>
+                                    </div>
+                                </div>
                             </div>
 
-                            <div class="sheet-section" style="margin-top: 20px; border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
-                                <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Internal Decks & Systems</h4>
-                                <div id="vessel-decks-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px;"></div>
+                            <!-- Column 2: Weapon Hardpoints -->
+                            <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
+                                <h4 style="color:#ff6b6b; border-bottom: 1px solid #ff3333; padding-bottom: 4px;">Weapon Hardpoints</h4>
+                                <div id="vessel-weapons-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 10px;"></div>
                                 
-                                <div style="background:#030403; padding:8px; border:1px solid #00e1ff; border-radius:2px;">
-                                    <label style="font-size: 9px; color: #00e1ff;">Construct New Deck / Subsystem:</label>
+                                <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
+                                    <label style="font-size: 9px; color: #ffaaaa;">Mount New Weapon System:</label>
                                     <div style="display:flex; gap:6px; margin-bottom:6px;">
-                                        <input type="text" id="new-deck-name" placeholder="e.g. Engineering, Bridge..." style="flex:2; margin:0; border-color:#00e1ff;">
-                                        <input type="number" id="new-deck-hp" placeholder="Max HP" value="50" style="flex:1; margin:0; text-align:center; border-color:#00e1ff;">
+                                        <input type="text" id="new-ship-wpn-loc" placeholder="Mount (e.g. Dorsal)" style="flex:1.5; margin:0; border-color:#ff3333;">
+                                        <input type="text" id="new-ship-wpn-name" placeholder="Battery Name" style="flex:2; margin:0; border-color:#ff3333;">
                                     </div>
-                                    <button class="btn-reveal" onclick="window.addShipDeck()" style="width:100%; font-size:10px; margin:0; padding: 4px 12px; border-color:#00e1ff; color:#00e1ff;">+ BUILD DECK</button>
+                                    <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                        <input type="text" id="new-ship-wpn-dice" placeholder="d20" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+                                        <input type="text" id="new-ship-wpn-mod" placeholder="+Mod" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                        <label style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                            <input type="checkbox" id="new-ship-wpn-explodes" checked style="margin:0;"> Exploding Dice
+                                        </label>
+                                        <button class="btn-remove" onclick="window.addShipWeapon()" style="width:auto; font-size:10px; margin:0; padding: 4px 12px;">+ INSTALL HARDPOINT</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Column 2: Weapon Hardpoints -->
-                        <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
-                            <h4 style="color:#ff6b6b; border-bottom: 1px solid #ff3333; padding-bottom: 4px;">Weapon Hardpoints</h4>
-                            <div id="vessel-weapons-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 10px;"></div>
-                            
-                            <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
-                                <label style="font-size: 9px; color: #ffaaaa;">Mount New Weapon System:</label>
-                                <div style="display:flex; gap:6px; margin-bottom:6px;">
-                                    <input type="text" id="new-ship-wpn-loc" placeholder="Mount (e.g. Dorsal)" style="flex:1.5; margin:0; border-color:#ff3333;">
-                                    <input type="text" id="new-ship-wpn-name" placeholder="Battery Name" style="flex:2; margin:0; border-color:#ff3333;">
+                    <!-- HANGAR BAY & STRIKE CRAFT VIEW -->
+                    <div id="vessel-hangar-view" style="display:none;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <!-- Left: Hangar Management & Commissioning -->
+                            <div>
+                                <div class="sheet-section" style="border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
+                                    <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Commission Squadron</h4>
+                                    <label style="font-size: 9px; color: #6b826a;">Squadron Callsign:</label>
+                                    <input type="text" id="new-squadron-name" placeholder="e.g. Red Squadron" style="font-size: 10px; margin: 2px 0;">
+                                    
+                                    <div style="display:flex; gap:6px; margin-top:4px;">
+                                        <div style="flex:2;">
+                                            <label style="font-size: 9px; color: #6b826a;">Chassis Type:</label>
+                                            <select id="new-squadron-type" style="font-size: 10px; margin: 2px 0; background: #0a1410; color: #00e1ff; border: 1px solid #00e1ff;">
+                                                <option value="raven">Raven Gen 2 MkIV (Fighter)</option>
+                                                <option value="hawk">Hawk Medium Bomber</option>
+                                                <option value="messenger">Messenger (Support/Gunship)</option>
+                                            </select>
+                                        </div>
+                                        <div style="flex:1;">
+                                            <label style="font-size: 9px; color: #6b826a;">Unit Count:</label>
+                                            <input type="number" id="new-squadron-size" value="4" min="1" style="font-size: 10px; margin: 2px 0; text-align: center;">
+                                        </div>
+                                    </div>
+                                    <button class="btn-reveal" onclick="window.commissionSquadron()" style="margin-top: 6px; width: 100%; font-size: 10px; border-color:#00e1ff; color:#00e1ff;">+ ADD TO HANGAR</button>
                                 </div>
-                                <div style="display:flex; gap:6px; margin-bottom:6px;">
-                                    <input type="text" id="new-ship-wpn-dice" placeholder="d20" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
-                                    <input type="text" id="new-ship-wpn-mod" placeholder="+Mod" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+
+                                <div class="sheet-section" style="margin-top: 15px;">
+                                    <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Embarked Air Group</h4>
+                                    <div id="vessel-embarked-container" style="max-height: 250px; overflow-y: auto;">
+                                        <span style="font-size:10px; color:#6b826a;">No squadrons currently embarked.</span>
+                                    </div>
                                 </div>
-                                <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <label style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
-                                        <input type="checkbox" id="new-ship-wpn-explodes" checked style="margin:0;"> Exploding Dice
-                                    </label>
-                                    <button class="btn-remove" onclick="window.addShipWeapon()" style="width:auto; font-size:10px; margin:0; padding: 4px 12px;">+ INSTALL HARDPOINT</button>
+                            </div>
+
+                            <!-- Right: Active Flight Operations -->
+                            <div class="sheet-section" style="border-color:#ffaa00; background:rgba(255, 170, 0, 0.05);">
+                                <h4 style="color:#ffaa00; border-bottom: 1px solid #ffaa00; padding-bottom: 4px;">Active Flight Operations</h4>
+                                <p style="font-size:9px; color:#d4c5a9; margin-top:0;">Deployed strike craft have a maximum 4-turn loiter time before bingo fuel.</p>
+                                <div id="vessel-deployed-container" style="max-height: 380px; overflow-y: auto;">
+                                    <span style="font-size:10px; color:#6b826a;">No active flights in sector.</span>
                                 </div>
                             </div>
                         </div>
