@@ -91,17 +91,33 @@ window.renderTerminalCargoDeck = function() {
     let subtabNames = { perishables: '🍏 Perishables', expendables: '⚙️ Expendables', misc: '📦 Miscellaneous' };
     if (title) title.innerText = `${subtabNames[activeCargoSubtab]} Holdings`;
 
-    // Economy UI: Elder E-M Synthesizer interface
+    // Economy UI: Elder E-M Synthesizer interface with full active-conversion mechanics
     let synthHtml = `
-        <div style="background:#0a1410; border:1px solid #00e5a3; padding:8px; margin-bottom:12px; border-radius:2px; display:flex; justify-content:space-between; align-items:center;">
-            <div>
-                <strong style="color:#00e5a3; font-size:12px;">✨ Elder E-M Synthesizer</strong>
-                <div style="font-size:9px; color:#6b826a;">Daily Mass Conversion Capacity (Recharges @ 24h)</div>
+        <div style="background:#0a1410; border:1px solid #00e5a3; padding:8px; margin-bottom:12px; border-radius:2px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <strong style="color:#00e5a3; font-size:12px;">✨ Elder E-M Synthesizer</strong>
+                    <div style="font-size:9px; color:#6b826a;">Daily Mass Conversion Capacity (Recharges @ 24h)</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <button onclick="window.modifySynthCapacity('${vessel.id}', -1)" style="padding:2px 8px; font-size:10px;">-1</button>
+                    <strong style="color:#00e5a3; font-size:14px; margin:0 10px;">${cargo.synth_capacity} / 10</strong>
+                    <button onclick="window.modifySynthCapacity('${vessel.id}', 1)" style="padding:2px 8px; font-size:10px;">+1</button>
+                </div>
             </div>
-            <div style="display:flex; align-items:center; gap:6px;">
-                <button onclick="window.modifySynthCapacity('${vessel.id}', -1)" style="padding:2px 8px; font-size:10px;">-1 Ton</button>
-                <strong style="color:#00e5a3; font-size:14px; margin:0 10px;">${cargo.synth_capacity} / 10</strong>
-                <button onclick="window.modifySynthCapacity('${vessel.id}', 1)" style="padding:2px 8px; font-size:10px;">+1 Ton</button>
+            
+            <div style="margin-top:10px; padding-top:8px; border-top:1px dashed #3c4e36; display:flex; gap:6px; align-items:center;">
+                <label for="synth-cat-${vessel.id}" style="display:none;">Category</label>
+                <select id="synth-cat-${vessel.id}" style="font-size:10px; margin:0; flex:1; background:#040605; color:#00e5a3; border:1px solid #00e5a3;">
+                    <option value="expendables">⚙️ Expendables</option>
+                    <option value="perishables">🍏 Perishables</option>
+                    <option value="misc">📦 Misc</option>
+                </select>
+                <label for="synth-name-${vessel.id}" style="display:none;">Item</label>
+                <input type="text" id="synth-name-${vessel.id}" placeholder="Item to synthesize..." style="font-size:10px; margin:0; flex:2; border:1px solid #00e5a3; background:#030403; color:#00e5a3;">
+                <label for="synth-qty-${vessel.id}" style="display:none;">Qty</label>
+                <input type="number" id="synth-qty-${vessel.id}" placeholder="Tons" min="1" max="10" value="1" style="font-size:10px; margin:0; flex:0.5; text-align:center; border:1px solid #00e5a3; background:#030403; color:#00e5a3;">
+                <button class="btn-reveal" onclick="window.executeSynthesis('${vessel.id}')" style="margin:0; font-size:10px; padding:4px 10px; border-color:#00e5a3; flex:1;">CONVERT MASS</button>
             </div>
         </div>
     `;
@@ -130,6 +146,58 @@ window.renderTerminalCargoDeck = function() {
         });
     }
     container.innerHTML = html;
+};
+
+// Automates the E-M Synthesizer conversion to the Manifest
+window.executeSynthesis = async function(vesselId) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    
+    let cat = document.getElementById(`synth-cat-${vesselId}`).value;
+    let name = document.getElementById(`synth-name-${vesselId}`).value.trim();
+    let qty = parseInt(document.getElementById(`synth-qty-${vesselId}`).value) || 0;
+    
+    if (!name) { alert("Please enter a designation for the synthesized material."); return; }
+    if (qty <= 0) { alert("Quantity must be at least 1."); return; }
+    
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+    
+    if (cargo.synth_capacity < qty) {
+        alert(`Insufficient synthesizer capacity. You need ${qty} Tons, but only have ${cargo.synth_capacity} available.`);
+        return;
+    }
+    
+    // Deduct the mass from the capacity
+    cargo.synth_capacity -= qty;
+    
+    // Append or add the new item to the chosen category
+    if (!cargo[cat]) cargo[cat] = [];
+    let existingItem = cargo[cat].find(i => i.name.toLowerCase() === name.toLowerCase());
+    
+    if (existingItem) {
+        existingItem.qty += qty;
+    } else {
+        cargo[cat].push({ name: name, qty: qty, unit: "Units" });
+    }
+    
+    // Save to database
+    await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
+    vessel.cargo_inventory = cargo;
+    
+    // Reset inputs
+    document.getElementById(`synth-name-${vesselId}`).value = '';
+    document.getElementById(`synth-qty-${vesselId}`).value = '1';
+    
+    // Automatically switch the UI to the tab where the item was just created
+    activeCargoSubtab = cat;
+    window.switchCargoSubtab(cat);
+    
+    // Broadcast the action to secure comms
+    db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `✨ [SYNTHESIS] '${vessel.name}' converted ${qty} Ton(s) of mass into **${name}**.`,
+        message_type: 'text'
+    });
 };
 
 window.modifySynthCapacity = async function(vesselId, delta) {
