@@ -361,6 +361,12 @@ window.renderCharacterTerminalData = function() {
         const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
         setVal(`skill-${safeKey}`, s[safeKey] || 0);
     });
+
+    // BUG FIX: Renders personal arsenal data and updates badge count
+    if (typeof window.renderArsenal === 'function') window.renderArsenal();
+    
+    const badgeCombat = document.getElementById('badge-combat');
+    if (badgeCombat) badgeCombat.innerText = (myProf.arsenal || []).length;
 };
 
 async function loadPlayerNotes() {
@@ -379,7 +385,6 @@ async function loadCampaignObjectives() {
 }
 
 async function loadChatLogs() {
-    // Grab the 50 newest messages (descending), then reverse the array so the absolute newest is at the bottom.
     const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(50);
     if (data) { 
         chatLogsList = data.reverse(); 
@@ -730,9 +735,6 @@ window.handleLogout = async function() {
    js/main.js (PART 2)
    ========================================================================== */
 
-/* ==========================================================================
-   7. TERMINAL & UI CONTROLLERS
-   ========================================================================== */
 const skillList = [
     "Athletics", "Stealth", "Survival", "Ballistic Weapons", 
     "Energy Weapons", "Explosives", "Computers", "Engineering", 
@@ -818,7 +820,6 @@ window.openFullCodexTerminal = function() {
     window.switchTermTab('codex');
 };
 
-// BUG 4 Fix: Rapid UI link to vessel terminal
 window.openFullVesselTerminal = function(vesselId) {
     const term = document.getElementById('character-terminal');
     term.style.display = 'block';
@@ -852,7 +853,6 @@ window.saveDmScratchpad = function() {
     localStorage.setItem('odyssey_dm_scratchpad', val);
 };
 
-// BUG 7 Fix: Panels now calculate initial offset instead of viewport rect to prevent 0,0 snapping
 function makePanelDraggable(panelId, handleId, storageKey) {
     const panel = document.getElementById(panelId);
     const handle = document.getElementById(handleId);
@@ -1099,7 +1099,6 @@ window.saveTerminalProfile = async function() {
     const safeGet = (id) => document.getElementById(id) ? document.getElementById(id).value : '';
     await db.from('profiles').update({ username: safeGet('term-username'), avatar_url: safeGet('term-avatar') }).eq('id', currentUserId);
 
-    // BUG 8 Fix: Update presence instantly so "Active Commanders" changes UI names.
     if (presenceChannel) {
         await presenceChannel.track({ 
             online_at: new Date().toISOString(), 
@@ -1131,6 +1130,195 @@ window.saveTerminalProfile = async function() {
     alert("Character dossier & stats secured to database.");
     loadAllProfiles();
 };
+
+/* ==========================================================================
+   NEW: PERSONAL ARSENAL & COMBAT ROLLER ENGINE
+   ========================================================================== */
+
+window.renderArsenal = function() {
+    const container = document.getElementById('arsenal-list-container');
+    if (!container) return;
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    
+    let arsenal = myProf.arsenal || [];
+    let html = '';
+    if (arsenal.length === 0) {
+        html = '<span style="font-size:10px; color:#6b826a;">No active weapons or powers in arsenal.</span>';
+    } else {
+        arsenal.forEach((w, idx) => {
+            html += `
+                <div class="arsenal-row">
+                    <strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>
+                    <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.dice}</span>
+                    <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.modifier}</span>
+                    <span style="font-size:10px; text-align:center;" title="Explodes">${w.explodes ? '💥' : ''}</span>
+                    <div style="display:flex; gap:4px;">
+                        <button class="layer-edit" onclick="window.rollArsenalWeapon(${idx})" style="padding:2px 8px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">ROLL</button>
+                        <button class="layer-del" onclick="window.deleteArsenalItem('${w.id}')" style="padding:2px 6px; font-size:9px;">✕</button>
+                    </div>
+                </div>
+            `;
+        });
+    }
+    container.innerHTML = html;
+    
+    const badgeCombat = document.getElementById('badge-combat');
+    if (badgeCombat) badgeCombat.innerText = arsenal.length;
+};
+
+window.addArsenalItem = async function() {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf || !myProf.character) { alert("Please save your Dossier & Stats first before adding weapons."); return; }
+    
+    const name = document.getElementById('new-wpn-name').value.trim();
+    let dice = document.getElementById('new-wpn-dice').value.trim().toLowerCase();
+    let mod = document.getElementById('new-wpn-mod').value.trim();
+    const explodes = document.getElementById('new-wpn-explodes').checked;
+
+    if (!name) { alert("Enter a weapon/power name."); return; }
+    if (!dice) dice = '1d20';
+    if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
+    if (!mod) mod = '+0';
+
+    const payload = {
+        profile_id: currentUserId,
+        character_id: myProf.character.id,
+        name: name,
+        dice: dice,
+        modifier: mod,
+        explodes: explodes
+    };
+
+    const { error } = await db.from('character_arsenal').insert(payload);
+    if (error) { alert("Failed to add weapon: " + error.message); return; }
+    
+    document.getElementById('new-wpn-name').value = '';
+    document.getElementById('new-wpn-dice').value = '';
+    document.getElementById('new-wpn-mod').value = '';
+    loadAllProfiles();
+};
+
+window.deleteArsenalItem = async function(id) {
+    if (!confirm("Remove this item from your arsenal?")) return;
+    await db.from('character_arsenal').delete().eq('id', id);
+    loadAllProfiles();
+};
+
+window.rollArsenalWeapon = async function(idx) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    let wpn = (myProf.arsenal || [])[idx];
+    if (!wpn) return;
+
+    const diceRegex = /^(\d*)d(\d+)$/i;
+    const match = wpn.dice.trim().match(diceRegex);
+    if (!match) { alert("Invalid dice format."); return; }
+
+    let numDice = parseInt(match[1]) || 1;
+    let diceFaces = parseInt(match[2]);
+    let modVal = parseInt(wpn.modifier) || 0;
+    let canExplode = wpn.explodes && diceFaces >= 2;
+
+    let total = 0;
+    let breakdown = [];
+
+    for (let i = 0; i < numDice; i++) {
+        let rollTotal = 0;
+        let subRolls = [];
+        let currentRoll;
+        do {
+            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
+            rollTotal += currentRoll;
+            subRolls.push(currentRoll);
+        } while (currentRoll === diceFaces && canExplode);
+        total += rollTotal;
+        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
+    }
+    
+    total += modVal;
+    if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
+
+    let breakdownString = `
+        <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
+            <strong>Arsenal Weapon:</strong> ${wpn.name}<br>
+            <strong>Base Output:</strong> ${breakdown.join(' + ')} = <strong style="color:#ff3333;">${total} Dmg</strong>
+        </div>
+    `;
+    
+    await window.broadcastRoll(`[${myProf.username || 'Commander'}] FIRES ${wpn.name}`, breakdownString, total);
+};
+
+window.executeDicePoolRoll = async function() {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    const char = myProf.character || {};
+    const skills = myProf.skills || {};
+
+    let statCheckboxes = document.querySelectorAll('.roll-stat-cb:checked');
+    let skillCheckboxes = document.querySelectorAll('.roll-skill-cb:checked');
+    let extraMod = parseInt(document.getElementById('roll-extra-mod').value) || 0;
+
+    if (statCheckboxes.length === 0 && skillCheckboxes.length === 0 && extraMod === 0) {
+        alert("Select at least one stat, skill, or extra modifier to roll.");
+        return;
+    }
+
+    let total = 0;
+    let breakdown = [];
+    
+    // Stats (Kids on Bikes system = stat dice explode on max)
+    statCheckboxes.forEach(cb => {
+        let statName = cb.value;
+        let statKey = 'stat_' + statName.toLowerCase();
+        let diceStr = char[statKey] || 'd4';
+        let faces = parseInt(diceStr.replace('d', ''));
+        
+        let rollTotal = 0;
+        let subRolls = [];
+        let currentRoll;
+        do {
+            currentRoll = Math.floor(Math.random() * faces) + 1;
+            rollTotal += currentRoll;
+            subRolls.push(currentRoll);
+        } while (currentRoll === faces && faces >= 2);
+        
+        total += rollTotal;
+        breakdown.push(`${statName} (d${faces}: ${subRolls.join('💥')})`);
+    });
+
+    // Skills (Flat numeric modifiers)
+    skillCheckboxes.forEach(cb => {
+        let skillName = cb.value;
+        let safeKey = skillName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        let skillMod = skills[safeKey] || 0;
+        total += skillMod;
+        breakdown.push(`[${skillName} Mod: ${skillMod >= 0 ? '+' : ''}${skillMod}]`);
+    });
+
+    if (extraMod !== 0) {
+        total += extraMod;
+        breakdown.push(`[Extra Mod: ${extraMod >= 0 ? '+' : ''}${extraMod}]`);
+    }
+
+    let breakdownString = `
+        <div style="margin-top:4px; padding:4px; border-left:2px solid #00e5a3; background:rgba(0,229,163,0.1);">
+            <strong>Roll Pool:</strong><br>
+            ${breakdown.join('<br>')}
+            <br><strong>Total Result:</strong> <strong style="color:#00e5a3;">${total}</strong>
+        </div>
+    `;
+    
+    document.querySelectorAll('.roll-stat-cb').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.roll-skill-cb').forEach(cb => cb.checked = false);
+    document.getElementById('roll-extra-mod').value = 0;
+
+    await window.broadcastRoll(`[${myProf.username || 'Commander'}] STAT/SKILL CHECK`, breakdownString, total);
+};
+
+/* ==========================================================================
+   END ARSENAL LOGIC 
+   ========================================================================== */
 
 /* --- CARGO HUB --- */
 function sanitizeCargo(inv) {
@@ -1651,438 +1839,6 @@ window.modifySquadronLoiter = async function(vesselId, idx, delta) {
     }
 };
 
-// BUG 2/3 Fix: Pushes weapon stepper state directly to DB so reloading doesn't reverse it
-window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
-    let wpn = vessel.ship_weapons[idx];
-    
-    if (statKey === 'ammo' && wpn.ammo >= 0) wpn.ammo = Math.max(0, Math.min(wpn.max_ammo, wpn.ammo + delta));
-    if (statKey === 'cooldown') wpn.cooldown = Math.max(0, wpn.cooldown + delta);
-    if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, wpn.overheat + delta));
-    
-    const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
-    if (error) console.error("Weapon stat sync failed:", error);
-    window.renderVesselDeck();
-};
-
-// BUG 4 Fix: Master rest tool to recover all lost states for a vessel
-window.resetShipStats = async function(vesselId) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    if (!confirm("Restore maximum health profiles and resupply all ammunition banks for this vessel?")) return;
-    
-    let payload = {
-        integrity_shields: vessel.max_shields || 400,
-        integrity_hull: vessel.max_hull || 300,
-        integrity_reactive: vessel.max_reactive || 10,
-        integrity_ablative: vessel.max_ablative || 10
-    };
-    Object.assign(vessel, payload);
-    
-    if (vessel.ship_weapons) {
-        vessel.ship_weapons.forEach(w => { 
-            if(w.ammo >= 0) w.ammo = w.max_ammo; 
-            w.cooldown = 0; 
-            w.overheat = 0; 
-        });
-        payload.ship_weapons = vessel.ship_weapons;
-    }
-    
-    await db.from('ship_markers').update(payload).eq('id', vesselId);
-    window.renderVesselDeck();
-    alert("Vessel combat stats reset to maximums.");
-};
-
-// BUG 10 & Race Condition Fixes applied to Squadron Combat Roller
-window.rollSquadronWeapon = async function(vesselId, sqIdx) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    let sq = (vessel.ship_deployed || [])[sqIdx];
-    if (!sq) return;
-
-    let wpnIdx = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`).value;
-    let targetId = document.getElementById(`sq-target-${vesselId}-${sqIdx}`).value;
-    
-    let dbStats = STRIKE_CRAFT_DB[sq.type];
-    let wpn = dbStats.weapons[wpnIdx];
-    if (!wpn) return;
-
-    let volleys = sq.count;
-    if (volleys <= 0) return;
-
-    const diceRegex = /^(\d*)d(\d+)$/i;
-    const match = wpn.dice.trim().match(diceRegex);
-    if (!match) return;
-
-    let baseNumDice = parseInt(match[1]) || 1;
-    let numDice = baseNumDice * volleys;
-    let diceFaces = parseInt(match[2]);
-
-    // BUG 10 FIX: Prevent exploding infinite loop if dice face < 2
-    let canExplode = wpn.explodes && diceFaces >= 2;
-
-    let total = 0;
-    let breakdown = [];
-
-    for (let i = 0; i < numDice; i++) {
-        let rollTotal = 0;
-        let subRolls = [];
-        let currentRoll;
-        do {
-            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
-            rollTotal += currentRoll;
-            subRolls.push(currentRoll);
-        } while (currentRoll === diceFaces && canExplode);
-        total += rollTotal;
-        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
-    }
-
-    const breakdownText = breakdown.join(' + ');
-
-    let targetShip = null;
-    let combatLog = ``;
-    let dmgType = wpn.dmgType || "Impact";
-    let isPiercing = dmgType === "Piercing";
-    let isHeat = dmgType === "Heat";
-
-    if (targetId) {
-        targetShip = globalShipMarkersCache.find(m => m.id === targetId);
-        if (targetShip) {
-            let tStance = targetShip.ship_stance || 'Balanced';
-            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
-            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
-            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
-
-            let s_int = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
-            let h_int = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
-            let r_int = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
-            let a_int = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
-            
-            let remainingDmg = total;
-
-            let shieldDmg = Math.min(s_int, remainingDmg);
-            s_int -= shieldDmg;
-            remainingDmg -= shieldDmg;
-            if (shieldDmg > 0) combatLog += `Shields absorbed: ${shieldDmg}. `;
-
-            if (remainingDmg > 0) {
-                if (isPiercing && r_int > 0) {
-                    r_int -= 1;
-                    combatLog += `[REACTIVE ARMOR] charge expended. Hull breach negated! `;
-                    remainingDmg = 0;
-                } else if (isHeat && a_int > 0) {
-                    a_int -= 1;
-                    combatLog += `[ABLATIVE ARMOR] charge expended. Hull damage negated! `;
-                    remainingDmg = 0;
-                } else {
-                    let hullDmg = Math.min(h_int, remainingDmg);
-                    h_int -= hullDmg;
-                    remainingDmg -= hullDmg;
-                    combatLog += `Hull suffered: ${hullDmg} damage! `;
-                    if (h_int <= 0) combatLog += `**CRITICAL HULL BREACH!** `;
-                }
-            }
-
-            // BUG FIX RACE CONDITION: Fully await database write
-            await db.from('ship_markers').update({
-                integrity_shields: s_int,
-                integrity_hull: h_int,
-                integrity_reactive: r_int,
-                integrity_ablative: a_int
-            }).eq('id', targetShip.id);
-
-            targetShip.integrity_shields = s_int;
-            targetShip.integrity_hull = h_int;
-            targetShip.integrity_reactive = r_int;
-            targetShip.integrity_ablative = a_int;
-        }
-    }
-
-    let targetString = targetShip ? ` at ${targetShip.name}` : ``;
-    let breakdownString = `
-        <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
-            <strong>Damage Type:</strong> ${dmgType}<br>
-            <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
-            ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
-        </div>
-    `;
-
-    await window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
-};
-
-// BUG 10 & Race Condition Fixes applied to Core Ship Combat Roller
-window.rollShipWeapon = async function(vesselId, idx) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    
-    let wpn = (vessel.ship_weapons || [])[idx];
-    if (!wpn) return;
-
-    let volleyInput = document.getElementById(`wpn-volley-${vesselId}-${idx}`);
-    let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
-    let targetSelect = document.getElementById(`wpn-target-${vesselId}-${idx}`);
-    let targetId = targetSelect ? targetSelect.value : null;
-
-    if (wpn.cooldown > 0) {
-        if (!confirm(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`)) return;
-        wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
-    } 
-    
-    if (wpn.ammo === 0) {
-        alert(`[EMPTY] ${wpn.name} is out of ammunition!`); 
-        return;
-    }
-
-    if (wpn.ammo > 0) {
-        if (wpn.ammo < volleys) {
-            alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
-            return;
-        }
-        wpn.ammo -= volleys; 
-    }
-
-    const diceRegex = /^(\d*)d(\d+)$/i;
-    const match = wpn.dice.trim().match(diceRegex);
-    if (!match) { alert("Invalid dice format."); return; }
-
-    let baseNumDice = parseInt(match[1]) || 1;
-    let numDice = baseNumDice * volleys;
-    let diceFaces = parseInt(match[2]);
-    let modVal = (parseInt(wpn.modifier) || 0) * volleys;
-
-    // BUG 10 FIX: Prevent exploding infinite loop if dice face < 2
-    let canExplode = wpn.explodes && diceFaces >= 2;
-
-    let total = 0;
-    let breakdown = [];
-
-    for (let i = 0; i < numDice; i++) {
-        let rollTotal = 0;
-        let subRolls = [];
-        let currentRoll;
-        do {
-            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
-            rollTotal += currentRoll;
-            subRolls.push(currentRoll);
-        } while (currentRoll === diceFaces && canExplode);
-        
-        total += rollTotal;
-        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
-    }
-
-    total += modVal;
-    
-    let stance = vessel.ship_stance || 'Balanced';
-    if (stance === 'Aggressive') { total = Math.floor(total * 1.25); breakdown.push(`[Aggressive: +25%]`); } 
-    else if (stance === 'Defensive') { total = Math.floor(total * 0.75); breakdown.push(`[Defensive: -25%]`); }
-
-    if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
-    const breakdownText = breakdown.join(' + ');
-    
-    let targetShip = null;
-    let combatLog = ``;
-    let wpnLower = wpn.name.toLowerCase();
-    let isPiercing = wpnLower.includes('pierce') || wpnLower.includes('piercing') || wpnLower.includes('rail') || wpnLower.includes('gauss');
-    let isHeat = wpnLower.includes('heat') || wpnLower.includes('plasma') || wpnLower.includes('laser') || wpnLower.includes('gamma');
-    let dmgType = isPiercing ? 'Piercing' : (isHeat ? 'Heat' : 'Impact/Ion');
-
-    if (targetId) {
-        targetShip = globalShipMarkersCache.find(m => m.id === targetId);
-        if (targetShip) {
-            let tStance = targetShip.ship_stance || 'Balanced';
-            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
-            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
-            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
-
-            let s_int = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
-            let h_int = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
-            let r_int = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
-            let a_int = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
-            
-            let remainingDmg = total;
-
-            let shieldDmg = Math.min(s_int, remainingDmg);
-            s_int -= shieldDmg;
-            remainingDmg -= shieldDmg;
-            if (shieldDmg > 0) combatLog += `Shields absorbed: ${shieldDmg}. `;
-
-            if (remainingDmg > 0) {
-                if (isPiercing && r_int > 0) {
-                    r_int -= 1; combatLog += `[REACTIVE ARMOR] charge expended. Hull breach negated! `; remainingDmg = 0;
-                } else if (isHeat && a_int > 0) {
-                    a_int -= 1; combatLog += `[ABLATIVE ARMOR] charge expended. Hull damage negated! `; remainingDmg = 0;
-                } else {
-                    let hullDmg = Math.min(h_int, remainingDmg);
-                    h_int -= hullDmg; remainingDmg -= hullDmg;
-                    combatLog += `Hull suffered: ${hullDmg} damage! `;
-                    if (h_int <= 0) combatLog += `**CRITICAL HULL BREACH!** `;
-                }
-            }
-
-            // BUG FIX RACE CONDITION: Ensure damage applies instantly
-            await db.from('ship_markers').update({ integrity_shields: s_int, integrity_hull: h_int, integrity_reactive: r_int, integrity_ablative: a_int }).eq('id', targetShip.id);
-            targetShip.integrity_shields = s_int; targetShip.integrity_hull = h_int; targetShip.integrity_reactive = r_int; targetShip.integrity_ablative = a_int;
-        }
-    }
-
-    await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
-    window.renderVesselDeck();
-
-    let volleyTag = volleys > 1 ? ` (x${volleys} Volley)` : '';
-    let targetString = targetShip ? ` at ${targetShip.name}` : ` into the void`;
-    let breakdownString = `
-        <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
-            <strong>Damage Type:</strong> ${dmgType}<br>
-            <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
-            ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
-        </div>`;
-    await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
-};
-
-window.addShipDeck = async function() {
-    const select = document.getElementById('vessel-deck-select');
-    const name = document.getElementById('new-deck-name').value.trim();
-    let maxHp = parseInt(document.getElementById('new-deck-hp').value) || 50;
-
-    if (!select || !select.value) { alert("Select a diagnostic target vessel first."); return; }
-    if (!name) { alert("Please enter a deck or system name."); return; }
-    
-    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
-    if (!vessel) return;
-
-    let decks = vessel.ship_decks || [];
-    decks.push({ name: name, hp: maxHp, max_hp: maxHp });
-
-    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vessel.id);
-    vessel.ship_decks = decks;
-
-    document.getElementById('new-deck-name').value = '';
-    document.getElementById('new-deck-hp').value = '50';
-    window.renderVesselDeck();
-};
-
-window.modifyShipDeckHealth = async function(vesselId, idx, delta) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let decks = vessel.ship_decks || [];
-    if (decks[idx]) {
-        let current = decks[idx].hp;
-        let max = decks[idx].max_hp;
-        decks[idx].hp = Math.max(0, Math.min(max, current + delta));
-        
-        await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
-        vessel.ship_decks = decks;
-        window.renderVesselDeck();
-    }
-};
-
-window.deleteShipDeck = async function(vesselId, idx) {
-    if (!confirm("Scrap this internal deck?")) return;
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let decks = vessel.ship_decks || [];
-    decks.splice(idx, 1);
-
-    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
-    vessel.ship_decks = decks;
-    window.renderVesselDeck();
-};
-
-window.modifyShipHealth = async function(vesselId, key, delta) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let dbKey = 'integrity_' + key;
-    let maxKey = 'max_' + key;
-    
-    let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
-    let max = vessel[maxKey] || 100;
-
-    current = Math.max(0, Math.min(max, current + delta));
-    
-    let payload = {};
-    payload[dbKey] = current;
-    
-    await db.from('ship_markers').update(payload).eq('id', vesselId);
-    vessel[dbKey] = current;
-    window.renderVesselDeck();
-};
-
-window.addShipWeapon = async function() {
-    const select = document.getElementById('vessel-deck-select');
-    const loc = document.getElementById('new-ship-wpn-loc').value.trim() || 'Hull Mount';
-    const name = document.getElementById('new-ship-wpn-name').value.trim();
-    let dice = document.getElementById('new-ship-wpn-dice').value.trim().toLowerCase();
-    let mod = document.getElementById('new-ship-wpn-mod').value.trim();
-    const explodes = document.getElementById('new-ship-wpn-explodes').checked;
-    
-    let ammoInput = document.getElementById('new-ship-wpn-ammo');
-    let ammoVal = -1;
-    if (ammoInput && ammoInput.value.trim() !== '') {
-        ammoVal = parseInt(ammoInput.value);
-    }
-
-    if (!select || !select.value) { alert("Select a vessel token first."); return; }
-    if (!name) { alert("Please enter a weapon system name."); return; }
-    if (!dice) dice = '1d10';
-    if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
-    if (!mod) mod = '+0';
-
-    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
-    if (!vessel) return;
-
-    let weapons = vessel.ship_weapons || [];
-    weapons.push({ 
-        loc, name, dice, modifier: mod, explodes, 
-        ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0 
-    });
-
-    await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
-    vessel.ship_weapons = weapons;
-
-    document.getElementById('new-ship-wpn-loc').value = '';
-    document.getElementById('new-ship-wpn-name').value = '';
-    document.getElementById('new-ship-wpn-dice').value = '';
-    document.getElementById('new-ship-wpn-mod').value = '';
-    if (ammoInput) ammoInput.value = '';
-    window.renderVesselDeck();
-};
-
-window.deleteShipWeapon = async function(vesselId, idx) {
-    if (!confirm("Uninstall this weapon system?")) return;
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let weapons = vessel.ship_weapons || [];
-    weapons.splice(idx, 1);
-
-    await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vesselId);
-    vessel.ship_weapons = weapons;
-    window.renderVesselDeck();
-};
-
-window.broadcastVesselStatus = async function() {
-    const select = document.getElementById('vessel-deck-select');
-    if (!select || !select.value) return;
-    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
-    if (!vessel) return;
-
-    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
-    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
-    const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
-    const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
-
-    await db.from('chat_logs').insert({
-        sender_id: currentUserId,
-        content: `🛡️ [VESSEL DIAGNOSTICS] ${vessel.name} status check:<br><span style="color:#00e1ff">Shields: ${s_int}</span> | <span style="color:#ff3333">Hull: ${h_int}</span><br><span style="color:#ffaa00">Reactive Armor: ${r_int}</span> | <span style="color:#ffaa00">Ablative Armor: ${a_int}</span>`,
-        message_type: 'text'
-    });
-    alert("Vessel diagnostic broadcasted to Secure Comms!");
-};
-
 /* Objectives & Notes */
 window.addCampaignObjective = async function() {
     const title = document.getElementById('new-obj-title').value;
@@ -2301,7 +2057,6 @@ function populateCommsRecipients() {
     if (select.querySelector(`option[value="${currentVal}"]`)) select.value = currentVal;
 }
 
-// BUG 5 FIX: Inline bookmark removal logic mapped globally
 window.deleteBookmark = function(idx) {
     bookmarkedTargets.splice(idx, 1);
     localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
@@ -2403,7 +2158,6 @@ function initGalaxyEngine() {
     const container = document.getElementById('canvas-container');
     const SYSTEM_ZOOM_THRESHOLD = 1.5;
     
-    // BUG 9 FIX: Camera Clamp bounds
     const MAP_LIMIT = 15000;
 
     function resize() {
@@ -2764,7 +2518,6 @@ function initGalaxyEngine() {
         window._lastMouseWorldX = worldPos.x;
         window._lastMouseWorldY = worldPos.y;
 
-        // BUG 1 FIX: Active Hover Tracking
         if (!camera.isDragging && !draggedMarker && !draggedStar && !territoryDrawActive && !hyperlaneDrawActive) {
             let hitRadius = Math.max(10, 15 / camera.zoom);
             let hitTarget = null;
@@ -2797,7 +2550,6 @@ function initGalaxyEngine() {
         if (draggedMarker) { draggedMarker.x = worldPos.x; draggedMarker.y = worldPos.y; return; }
         if (draggedStar) { draggedStar.x = worldPos.x; draggedStar.y = worldPos.y; return; }
         
-        // BUG 9 FIX: Camera Clamp
         if (camera.isDragging) {
             let dx = e.clientX - camera.startX;
             let dy = e.clientY - camera.startY;
@@ -3825,7 +3577,6 @@ function initGalaxyEngine() {
    9. INITIALIZATION & FILE PROCESSORS
    ========================================================================== */
 function initFileHandlers() {
-    // 1. Avatar Upload
     const avatarDropzone = document.getElementById('avatar-dropzone');
     const avatarInput = document.getElementById('avatar-file-input');
     const avatarPreview = document.getElementById('my-terminal-avatar-preview');
@@ -3868,7 +3619,6 @@ function initFileHandlers() {
         reader.readAsDataURL(file);
     }
 
-    // 2. Codex Document Attachment Uploader
     const codexDropzone = document.getElementById('codex-file-dropzone');
     const codexFileInput = document.getElementById('codex-file-input');
 
