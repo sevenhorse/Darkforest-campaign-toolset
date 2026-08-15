@@ -631,7 +631,7 @@ window.initGalaxyEngine = function() {
         }
     };
 
-  window.executePlottedJump = async function() {
+    window.executePlottedJump = async function() {
         if (!activeJumpShip || !jumpTargetPoint) return;
         let ship = activeJumpShip;
         let target = jumpTargetPoint;
@@ -641,7 +641,7 @@ window.initGalaxyEngine = function() {
         let dist = Math.sqrt(dx * dx + dy * dy);
         let tripHours = Math.max(1, Math.round(dist / selectedDriveSpeed));
 
-        // Point explicitly at the window. scopes we just fixed
+        // Use the globally assigned FTL Jump variable to avoid reference errors
         window.universeTimeHours += tripHours;
         localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
         if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
@@ -668,15 +668,6 @@ window.initGalaxyEngine = function() {
         alert(`Jump executed! Vessel arrived at destination. Elapsed time: ${tripHours} hours.`);
     };
 
-        jumpPlottingActive = false;
-        activeJumpShip = null;
-        jumpTargetPoint = null;
-
-        if(typeof loadGalaxyData === 'function') loadGalaxyData();
-        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
-        alert(`Jump executed! Vessel arrived at destination. Elapsed time: ${tripHours} hours.`);
-    };
-
     window.toggleBookmarkSelected = function() {
         if (!window.selectedTarget || !window.selectedTarget.data) return;
         let existsIndex = bookmarkedTargets.findIndex(b => b.data.id === window.selectedTarget.data.id);
@@ -686,7 +677,7 @@ window.initGalaxyEngine = function() {
             bookmarkedTargets.push({ type: window.selectedTarget.type, data: window.selectedTarget.data });
         }
         localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
-        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
     };
 
     window.shareBookmarkToChat = function(name, type) {
@@ -703,7 +694,7 @@ window.initGalaxyEngine = function() {
         if (!b) return;
         window.selectedTarget = b;
         window.lockCameraOnSelected();
-        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
     };
 
     window.jumpToRecent = function(index) {
@@ -711,7 +702,7 @@ window.initGalaxyEngine = function() {
         if (!r) return;
         window.selectedTarget = r;
         window.lockCameraOnSelected();
-        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
     };
 
     window.switchHudTab = function(tab) {
@@ -720,7 +711,7 @@ window.initGalaxyEngine = function() {
         if (tab === 'telemetry') document.getElementById('tab-btn-details').classList.add('active');
         if (tab === 'bookmarks') document.getElementById('tab-btn-bookmarks').classList.add('active');
         if (tab === 'recents') document.getElementById('tab-btn-recents').classList.add('active');
-        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
     };
 
     window.saveDMStarProperties = async function(id) {
@@ -1025,8 +1016,8 @@ window.initGalaxyEngine = function() {
     }
 
     window.updateStarName = async function(id) { await db.from('star_systems').update({ name: document.getElementById('edit-star-name').value }).eq('id', id); if(typeof loadGalaxyData === 'function') loadGalaxyData(); };
-    window.deleteStarSystem = async function(id) { await db.from('star_systems').delete().eq('id', id); window.selectedTarget = null; renderHUDTelemetry(); if(typeof loadGalaxyData === 'function') loadGalaxyData(); };
-    window.deleteShipToken = async function(id) { await db.from('ship_markers').delete().eq('id', id); window.selectedTarget = null; renderHUDTelemetry(); if(typeof loadGalaxyData === 'function') loadGalaxyData(); };
+    window.deleteStarSystem = async function(id) { await db.from('star_systems').delete().eq('id', id); window.selectedTarget = null; if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry(); if(typeof loadGalaxyData === 'function') loadGalaxyData(); };
+    window.deleteShipToken = async function(id) { await db.from('ship_markers').delete().eq('id', id); window.selectedTarget = null; if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry(); if(typeof loadGalaxyData === 'function') loadGalaxyData(); };
 
     window.handleGlobalSearchInput = function(query) {
         const dropdown = document.getElementById('search-results-dropdown');
@@ -1109,6 +1100,7 @@ window.initGalaxyEngine = function() {
 
         let allSystems = proceduralSystems.concat(globalDbSystemsCache);
 
+        // Hyperlane Trade Routes (Procedural)
         if (hyperlanesVisible && camera.zoom < 2.0) {
             ctx.strokeStyle = 'rgba(0, 229, 163, 0.12)';
             ctx.lineWidth = 1 / camera.zoom;
@@ -1130,6 +1122,7 @@ window.initGalaxyEngine = function() {
             ctx.setLineDash([]);
         }
 
+        // Draw Custom Hand-Drawn Hyperlanes
         if (hyperlanesVisible) {
             globalHyperlanesCache.forEach(route => {
                 if (!route.nodes || route.nodes.length < 2) return;
@@ -1149,6 +1142,7 @@ window.initGalaxyEngine = function() {
             });
         }
 
+        // Draw hyperlane actively being built
         if (hyperlaneDrawActive && activeHyperlaneNodes.length > 0) {
             ctx.save();
             ctx.strokeStyle = '#00e1ff';
@@ -1172,6 +1166,7 @@ window.initGalaxyEngine = function() {
             ctx.restore();
         }
 
+        // RENDER SAVED TERRITORIES
         globalTerritoriesCache.forEach(t => {
             if (!t.vertices || t.vertices.length < 3) return;
             
@@ -1209,6 +1204,7 @@ window.initGalaxyEngine = function() {
             ctx.restore();
         });
 
+        // RENDER TERRITORY DRAWING IN-PROGRESS
         if (territoryDrawActive && activeTerritoryVertices.length > 0) {
             ctx.save();
             const drawColor = document.getElementById('territory-color-input')?.value || '#00e5a3';
@@ -1252,6 +1248,7 @@ window.initGalaxyEngine = function() {
             ctx.restore();
         }
 
+        // Stars & Systems
         for (let s of allSystems) {
             let isFocused = (s.id === focusSystemId);
             let sysOpacity = isFocused ? 1.0 : macroOpacity;
@@ -1339,6 +1336,7 @@ window.initGalaxyEngine = function() {
             }
         }
 
+        // Fleet Markers
         for (let m of globalShipMarkersCache) {
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             const size = 10 / camera.zoom;
@@ -1347,6 +1345,7 @@ window.initGalaxyEngine = function() {
             if (camera.zoom > 0.1) { ctx.fillStyle = '#00e1ff'; ctx.font = `${Math.max(9, 11 / camera.zoom)}px Courier New`; ctx.fillText(m.name, m.x + 12, m.y + 3); }
         }
 
+        // Jump Plotter Reticle & Vector
         if (jumpPlottingActive && activeJumpShip) {
             let targetX = jumpTargetPoint ? jumpTargetPoint.x : (window._lastMouseWorldX || activeJumpShip.x);
             let targetY = jumpTargetPoint ? jumpTargetPoint.y : (window._lastMouseWorldY || activeJumpShip.y);
@@ -1384,6 +1383,7 @@ window.initGalaxyEngine = function() {
             ctx.restore();
         }
 
+        // Measuring Tape
         if (measuringTapeActive && measureStartPoint) {
             ctx.strokeStyle = '#00e5a3';
             ctx.lineWidth = 2 / camera.zoom;
@@ -1413,6 +1413,7 @@ window.initGalaxyEngine = function() {
             ctx.fillText(`⏱️ Travel Time: @1c: ~${travelTimeAt1cDays} days | FTL: ~${estimatedFTLHours} hrs`, endX + 15, endY + 12);
         }
 
+        // Tactical Broadcast Pings
         const now = Date.now();
         for (let i = activePings.length - 1; i >= 0; i--) {
             let p = activePings[i];
@@ -1439,6 +1440,7 @@ window.initGalaxyEngine = function() {
             ctx.restore();
         }
 
+        // Target Selection Reticle (Selected OR Hovered)
         if (dynamicTarget && dynamicTarget.data) {
             let obj = dynamicTarget.data;
             let ox = obj.x, oy = obj.y;
