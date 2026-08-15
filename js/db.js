@@ -278,6 +278,33 @@ function renderPresenceTicker() {
     listDiv.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active commanders</span>';
 }
 
+window.exportCampaignBackup = function() {
+    if (currentUserRole !== 'dm') return;
+    const backup = {
+        timestamp: new Date().toISOString(),
+        universeTimeHours: window.universeTimeHours,
+        starSystems: globalDbSystemsCache,
+        shipMarkers: globalShipMarkersCache,
+        territories: globalTerritoriesCache,
+        hyperlanes: globalHyperlanesCache,
+        codexEntries: globalCodexEntriesCache,
+        combatants: combatantsList
+    };
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `task_force_black_backup_${Date.now()}.json`);
+    document.body.appendChild(downloadAnchorNode); 
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+    
+    db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `💾 [SYSTEM] Overseer executed a full campaign state backup.`,
+        message_type: 'text'
+    });
+};
+
 window.handleLogout = async function() {
     if (presenceChannel) await presenceChannel.untrack();
     await db.auth.signOut();
