@@ -1,0 +1,285 @@
+/* ==========================================================================
+   js/db.js - Core State, Auth & Database Sync
+   ========================================================================== */
+const SUPABASE_URL = 'https://uodeeyfaizbjplvvslry.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_7Kj1D_Frh3v0MLNuAyyROQ_rcaTx2F8';
+
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let currentUserRole = 'player';
+let currentUserId = null;
+let currentUserEmail = '';
+let realtimeChannel = null;
+let presenceChannel = null;
+
+let onlineUsersMap = {};
+let allProfiles = [];
+let playerNotesList = [];
+let combatantsList = [];
+let campaignObjectivesList = [];
+let chatLogsList = [];
+let editingNoteId = null;
+
+let bookmarkedTargets = JSON.parse(localStorage.getItem('odyssey_bookmarks') || '[]');
+let recentTargets = JSON.parse(localStorage.getItem('odyssey_recents') || '[]');
+let activeHudTab = 'telemetry';
+let globalProceduralSystemsCache = [];
+let globalShipMarkersCache = [];
+let globalDbSystemsCache = [];
+let globalTerritoriesCache = [];
+let globalCodexEntriesCache = [];
+let globalHyperlanesCache = [];
+
+let editingCodexId = null;
+let activeCargoSubtab = 'perishables';
+let activeCodexCategory = 'factions';
+let codexSearchFilter = '';
+let hyperlanesVisible = true;
+
+window.hoveredTarget = null;
+window.selectedTarget = null;
+
+let measuringTapeActive = false;
+let measureStartPoint = null;
+let measureEndPoint = null;
+
+let pingModeActive = false;
+let activePings = [];
+
+let jumpPlottingActive = false;
+let activeJumpShip = null;
+let jumpTargetPoint = null;
+let selectedDriveSpeed = 250;
+
+let territoryToolActive = false;
+let territoryDrawActive = false;
+let activeTerritoryVertices = [];
+
+let hyperlaneDrawActive = false;
+let activeHyperlaneNodes = [];
+
+const driveSpeeds = {
+    sublight: { name: "Sublight Thrusters (0.1c)", speed: 10, label: "0.1c Sublight" },
+    ftl_class1: { name: "Standard Class 1 Warp Drive", speed: 250, label: "Class 1 Warp" },
+    ftl_class2: { name: "Military Class 2 Hyperdrive", speed: 600, label: "Class 2 Hyperdrive" },
+    ftl_fold: { name: "Experimental Fold/Jump Drive", speed: 2500, label: "Fold Jump" }
+};
+
+window.handleLogin = async function() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.style.display = 'none';
+
+    const { data, error } = await db.auth.signInWithPassword({ email, password });
+    if (error) {
+        errorDiv.innerText = "Access Denied: " + error.message;
+        errorDiv.style.display = 'block';
+        return;
+    }
+    fetchUserProfile(data.user);
+};
+
+async function fetchUserProfile(user) {
+    currentUserId = user.id;
+    currentUserEmail = user.email;
+    const { data, error } = await db.from('profiles').select('*').eq('id', user.id).single();
+
+    if (error) {
+        document.getElementById('error-message').innerText = "Access Denied: Profile mapping missing.";
+        document.getElementById('error-message').style.display = 'block';
+        return;
+    }
+
+    currentUserRole = data.role;
+    document.getElementById('login-wrapper').style.display = 'none';
+    document.getElementById('app-container').style.display = 'flex';
+
+    const badge = document.getElementById('user-role');
+    badge.innerText = `Role: ${data.role}`;
+    
+    const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
+    const territoryBtn = document.getElementById('territory-tool-toggle-btn');
+    const codexCreatorPanel = document.getElementById('codex-dm-creator-panel');
+    const codexPerms = document.getElementById('codex-permission-indicator');
+    
+    if (data.role === 'dm') {
+        badge.classList.add('role-dm');
+        badge.innerText = 'OVERSEER (DM)';
+        document.getElementById('dm-tools').style.display = 'block';
+        document.getElementById('dm-time-controls-box').style.display = 'block';
+        if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
+        if (territoryBtn) territoryBtn.style.display = 'inline-block';
+        if (codexCreatorPanel) codexCreatorPanel.style.display = 'block';
+        if (codexPerms) { codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE & EDIT ACCESS'; codexPerms.style.color = '#ff6b6b'; }
+        
+        const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
+        if (savedScratch && document.getElementById('dm-scratchpad-input')) {
+            document.getElementById('dm-scratchpad-input').value = savedScratch;
+        }
+    } else {
+        if (scratchpadBtn) scratchpadBtn.style.display = 'none';
+        if (territoryBtn) territoryBtn.style.display = 'none';
+        if (codexCreatorPanel) codexCreatorPanel.style.display = 'none';
+        if (codexPerms) { codexPerms.innerText = '● SECURITY CLEARANCE: LEVEL 2 // VIEW ONLY'; codexPerms.style.color = '#6b826a'; }
+    }
+
+    initPresenceChannel(data);
+    if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
+    if (typeof initCalendarEngine === 'function') initCalendarEngine();
+    
+    loadAllProfiles();
+    loadPlayerNotes();
+    loadCombatTracker();
+    loadCampaignObjectives();
+    loadChatLogs();
+    loadTerritories();
+    loadHyperlanes();
+    loadCodexEntries();
+}
+
+async function loadAllProfiles() {
+    const { data: profData } = await db.from('profiles').select('*');
+    const { data: charData } = await db.from('characters').select('*');
+    const { data: skillData } = await db.from('character_skills').select('*');
+    const { data: arsenalData } = await db.from('character_arsenal').select('*');
+
+    if (profData) {
+        allProfiles = profData.map(p => {
+            const c = charData?.find(char => char.profile_id === p.id) || {};
+            const s = skillData?.find(sk => sk.character_id === c.id) || {};
+            const a = arsenalData?.filter(ars => ars.profile_id === p.id || ars.character_id === c.id) || [];
+            return { ...p, character: c, skills: s, arsenal: a };
+        });
+        
+        const myProf = allProfiles.find(p => p.id === currentUserId);
+        if (myProf) {
+            document.getElementById('term-username').value = myProf.username || '';
+            if (myProf.avatar_url) {
+                const preview = document.getElementById('my-terminal-avatar-preview');
+                const hiddenInput = document.getElementById('term-avatar');
+                if(preview) preview.src = myProf.avatar_url;
+                if(hiddenInput) hiddenInput.value = myProf.avatar_url;
+            }
+        }
+
+        if (document.getElementById('character-terminal').style.display === 'block') { 
+            if (typeof window.renderCharacterTerminalData === 'function') window.renderCharacterTerminalData(); 
+        }
+        if (typeof populateCommsRecipients === 'function') populateCommsRecipients();
+    }
+}
+
+async function loadPlayerNotes() {
+    const { data } = await db.from('player_notes').select('*').order('created_at', { ascending: false });
+    if (data) { playerNotesList = data; if (typeof renderTerminalNotes === 'function') renderTerminalNotes(); }
+}
+
+async function loadCombatTracker() {
+    const { data } = await db.from('combat_tracker').select('*').order('initiative', { ascending: false });
+    if (data) { combatantsList = data; if (typeof renderCombatTracker === 'function') renderCombatTracker(); }
+}
+
+async function loadCampaignObjectives() {
+    const { data } = await db.from('campaign_objectives').select('*').order('created_at', { ascending: false });
+    if (data) { campaignObjectivesList = data; if (typeof renderCampaignObjectives === 'function') renderCampaignObjectives(); }
+}
+
+async function loadChatLogs() {
+    const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(50);
+    if (data) { 
+        chatLogsList = data.reverse(); 
+        if (chatLogsList.length === 0) {
+            chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked. Communication channels active.', message_type: 'text' }];
+        }
+        if (typeof renderChatFeed === 'function') renderChatFeed(); 
+    }
+}
+
+async function loadTerritories() {
+    const { data } = await db.from('territories').select('*').order('created_at', { ascending: true });
+    if (data) {
+        globalTerritoriesCache = data;
+        if (typeof renderTerritoryList === 'function') renderTerritoryList();
+    }
+}
+
+async function loadHyperlanes() {
+    const { data } = await db.from('hyperlanes').select('*');
+    if (data) {
+        globalHyperlanesCache = data;
+        if (typeof renderHyperlaneList === 'function') renderHyperlaneList();
+    }
+}
+
+async function loadCodexEntries() {
+    const { data } = await db.from('codex_entries').select('*').order('created_at', { ascending: false });
+    if (data && data.length > 0) {
+        globalCodexEntriesCache = data;
+    } else {
+        globalCodexEntriesCache = [
+            { id: 'cdx-1', category: 'factions', title: 'Task Force Black', subtitle: 'Allied Command', content: 'Autonomous deep-space exploration and containment fleet operating outside regular jurisdiction.' }
+        ];
+    }
+    if (typeof renderCodexMatrix === 'function') renderCodexMatrix();
+    if (typeof populateTerritoryFactionSelect === 'function') populateTerritoryFactionSelect();
+}
+
+async function checkAnomalyProximity(ship) {
+    if (!ship) return;
+    const DRADIS_RANGE = 180;
+    let anomalies = globalDbSystemsCache.filter(s => s.luminosity === 'Hidden Anomaly');
+    
+    for (let anomaly of anomalies) {
+        let dx = ship.x - anomaly.x;
+        let dy = ship.y - anomaly.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist < DRADIS_RANGE) {
+            await db.from('star_systems').update({ luminosity: 'Revealed Anomaly', color: '#ff3333' }).eq('id', anomaly.id);
+            await db.from('chat_logs').insert({
+                sender_id: 'system',
+                content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' has detected a massive subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}. Sensor locks updated.`,
+                message_type: 'text'
+            });
+            anomaly.luminosity = 'Revealed Anomaly';
+            anomaly.color = '#ff3333';
+        }
+    }
+}
+
+function initPresenceChannel(userProfile) {
+    presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
+    presenceChannel.on('presence', { event: 'sync' }, () => { 
+        onlineUsersMap = presenceChannel.presenceState(); 
+        if (typeof renderPresenceTicker === 'function') renderPresenceTicker(); 
+    }).subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') { 
+            await presenceChannel.track({ 
+                online_at: new Date().toISOString(), 
+                username: userProfile.username || currentUserEmail.split('@')[0], 
+                role: userProfile.role, 
+                avatar_url: userProfile.avatar_url || '' 
+            }); 
+        }
+    });
+}
+
+function renderPresenceTicker() {
+    const listDiv = document.getElementById('presence-list');
+    if (!listDiv) return;
+    let html = '';
+    Object.keys(onlineUsersMap).forEach(userId => {
+        const presences = onlineUsersMap[userId];
+        if (presences && presences.length > 0) {
+            const p = presences[0];
+            html += `<div class="presence-pill">🟢 ${p.username} ${p.role === 'dm' ? '[DM]' : ''}</div>`;
+        }
+    });
+    listDiv.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active commanders</span>';
+}
+
+window.handleLogout = async function() {
+    if (presenceChannel) await presenceChannel.untrack();
+    await db.auth.signOut();
+    location.reload();
+};
