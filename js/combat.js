@@ -31,7 +31,7 @@ const STRIKE_CRAFT_DB = {
 };
 
 /* --- CARGO HUB --- */
-function sanitizeCargo(inv) {
+window.sanitizeCargo = function(inv) {
     if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
         return {
             "perishables": [
@@ -50,9 +50,9 @@ function sanitizeCargo(inv) {
         };
     }
     return inv;
-}
+};
 
-function populateCargoVesselSelect() {
+window.populateCargoVesselSelect = function() {
     const select = document.getElementById('cargo-vessel-select');
     if (!select) return;
     let html = '';
@@ -60,16 +60,16 @@ function populateCargoVesselSelect() {
         html += `<option value="${m.id}">${m.name} (X: ${Math.round(m.x)}, Y: ${Math.round(m.y)})</option>`;
     });
     select.innerHTML = html || '<option value="">No active vessels found</option>';
-}
+};
 
 window.switchCargoSubtab = function(subtab) {
     activeCargoSubtab = subtab;
     document.querySelectorAll('.cargo-subtab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById(`cargo-subtab-${subtab}`).classList.add('active');
-    renderTerminalCargoDeck();
+    window.renderTerminalCargoDeck();
 };
 
-function renderTerminalCargoDeck() {
+window.renderTerminalCargoDeck = function() {
     const select = document.getElementById('cargo-vessel-select');
     const container = document.getElementById('terminal-cargo-items-container');
     const title = document.getElementById('cargo-category-title');
@@ -83,7 +83,7 @@ function renderTerminalCargoDeck() {
         return;
     }
 
-    const cargo = sanitizeCargo(vessel.cargo_inventory);
+    const cargo = window.sanitizeCargo(vessel.cargo_inventory);
     const currentCategoryItems = cargo[activeCargoSubtab] || [];
 
     let subtabNames = { perishables: '🍏 Perishables', expendables: '⚙️ Expendables', misc: '📦 Miscellaneous' };
@@ -102,7 +102,8 @@ function renderTerminalCargoDeck() {
                     </div>
                     <div style="display:flex; align-items:center; gap:6px;">
                         <button onclick="window.modifyCargoQty('${vessel.id}', ${index}, -1)" style="width:24px; padding:2px; font-size:12px; margin:0;">-</button>
-                        <input type="number" value="${item.qty}" onchange="window.updateCargoQtyDirect('${vessel.id}', ${index}, this.value)" style="width:65px; margin:0; text-align:center; font-size:11px; padding:3px;">
+                        <label for="cargo-qty-${vessel.id}-${index}" style="display:none;">Quantity</label>
+                        <input type="number" id="cargo-qty-${vessel.id}-${index}" value="${item.qty}" onchange="window.updateCargoQtyDirect('${vessel.id}', ${index}, this.value)" style="width:65px; margin:0; text-align:center; font-size:11px; padding:3px;">
                         <button onclick="window.modifyCargoQty('${vessel.id}', ${index}, 1)" style="width:24px; padding:2px; font-size:12px; margin:0;">+</button>
                         <button class="layer-del" onclick="window.removeCargoItem('${vessel.id}', ${index})" style="padding:3px 8px; font-size:10px; margin-left:6px;">X</button>
                     </div>
@@ -111,30 +112,30 @@ function renderTerminalCargoDeck() {
         });
     }
     container.innerHTML = html;
-}
+};
 
 window.modifyCargoQty = async function(vesselId, itemIndex, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    let cargo = sanitizeCargo(vessel.cargo_inventory);
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     if (cargo[activeCargoSubtab] && cargo[activeCargoSubtab][itemIndex]) {
         cargo[activeCargoSubtab][itemIndex].qty = Math.max(0, cargo[activeCargoSubtab][itemIndex].qty + delta);
         await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
         vessel.cargo_inventory = cargo;
-        renderTerminalCargoDeck();
+        window.renderTerminalCargoDeck();
     }
 };
 
 window.updateCargoQtyDirect = async function(vesselId, itemIndex, newQty) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    let cargo = sanitizeCargo(vessel.cargo_inventory);
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     let val = Math.max(0, parseInt(newQty) || 0);
     if (cargo[activeCargoSubtab] && cargo[activeCargoSubtab][itemIndex]) {
         cargo[activeCargoSubtab][itemIndex].qty = val;
         await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
         vessel.cargo_inventory = cargo;
-        renderTerminalCargoDeck();
+        window.renderTerminalCargoDeck();
     }
 };
 
@@ -142,12 +143,12 @@ window.removeCargoItem = async function(vesselId, itemIndex) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
     if (!confirm("Decommission this cargo item from vessel hold?")) return;
-    let cargo = sanitizeCargo(vessel.cargo_inventory);
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     if (cargo[activeCargoSubtab]) {
         cargo[activeCargoSubtab].splice(itemIndex, 1);
         await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
         vessel.cargo_inventory = cargo;
-        renderTerminalCargoDeck();
+        window.renderTerminalCargoDeck();
     }
 };
 
@@ -164,7 +165,7 @@ window.addNewCargoEntry = async function() {
     let vessel = globalShipMarkersCache.find(m => m.id === select.value);
     if (!vessel) return;
 
-    let cargo = sanitizeCargo(vessel.cargo_inventory);
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     if (!cargo[category]) cargo[category] = [];
 
     cargo[category].push({ name, qty, unit });
@@ -195,8 +196,8 @@ window.broadcastTerminalCargoManifest = async function() {
     alert("Full cargo manifest broadcasted to Secure Comms!");
 };
 
-/* --- VESSEL DECK LOGIC --- */
-function populateVesselDeckSelect() {
+/* --- VESSEL DECK LOGIC (INTEGRITY, DECKS, WEAPONS, STANCE, HANGAR) --- */
+window.populateVesselDeckSelect = function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select) return;
     let html = '';
@@ -204,7 +205,7 @@ function populateVesselDeckSelect() {
         html += `<option value="${m.id}">${m.name}</option>`;
     });
     select.innerHTML = html || '<option value="">No active vessels found</option>';
-}
+};
 
 window.switchVesselSubtab = function(subtab) {
     document.getElementById('vessel-subtab-core').classList.remove('active');
@@ -255,8 +256,8 @@ window.renderVesselDeck = function() {
         let currentStance = vessel.ship_stance || 'Balanced';
         let stanceHtml = `
             <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center;">
-                <label style="font-size:10px; color:#00e5a3; font-weight:bold;">TACTICAL STANCE:</label>
-                <select onchange="window.updateShipStance('${vessel.id}', this.value)" style="width:160px; margin:0; padding:4px; font-size:10px; background:#040605; color:#00e5a3; border:1px solid #3c4e36;">
+                <label for="vessel-stance-${vessel.id}" style="font-size:10px; color:#00e5a3; font-weight:bold;">TACTICAL STANCE:</label>
+                <select id="vessel-stance-${vessel.id}" onchange="window.updateShipStance('${vessel.id}', this.value)" style="width:160px; margin:0; padding:4px; font-size:10px; background:#040605; color:#00e5a3; border:1px solid #3c4e36;">
                     <option value="Balanced" ${currentStance === 'Balanced' ? 'selected' : ''}>Balanced (Standard)</option>
                     <option value="Aggressive" ${currentStance === 'Aggressive' ? 'selected' : ''}>Aggressive (+Dmg, -Def)</option>
                     <option value="Defensive" ${currentStance === 'Defensive' ? 'selected' : ''}>Defensive (+Def, -Dmg)</option>
@@ -332,7 +333,9 @@ window.renderVesselDeck = function() {
                             <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
                         </div>
                         <div style="display:flex; gap:6px; align-items:center;">
+                            <label for="wpn-target-${vessel.id}-${idx}" style="display:none;">Target</label>
                             <select id="wpn-target-${vessel.id}-${idx}" style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
+                            <label for="wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
                             <input type="number" id="wpn-volley-${vessel.id}-${idx}" value="1" min="1" title="Volley Count" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
                             <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
                             <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
@@ -416,7 +419,9 @@ window.renderVesselDeck = function() {
                     </div>
                     
                     <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; display:flex; gap:6px; align-items:center;">
+                        <label for="sq-wpn-select-${vessel.id}-${idx}" style="display:none;">Weapon</label>
                         <select id="sq-wpn-select-${vessel.id}-${idx}" style="flex:2; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#ffaa00; border:1px solid #3c4e36;">${wpnOptions}</select>
+                        <label for="sq-target-${vessel.id}-${idx}" style="display:none;">Target</label>
                         <select id="sq-target-${vessel.id}-${idx}" style="flex:1.5; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36;">${targetOptions}</select>
                         <button class="layer-edit" onclick="window.rollSquadronWeapon('${vessel.id}', ${idx})" style="flex:1; padding:4px; font-size:9px; border-color:#ffaa00; color:#ffaa00; margin:0;">FIRE</button>
                     </div>
@@ -427,6 +432,7 @@ window.renderVesselDeck = function() {
     }
 };
 
+/* --- STRIKE CRAFT HANGAR LOGIC --- */
 window.commissionSquadron = async function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select || !select.value) { alert("Select a vessel to commission to."); return; }
@@ -700,7 +706,9 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
         </div>
     `;
 
-    await window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
+    if(typeof window.broadcastRoll === 'function') {
+        await window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
+    }
 };
 
 window.rollShipWeapon = async function(vesselId, idx) {
@@ -826,7 +834,10 @@ window.rollShipWeapon = async function(vesselId, idx) {
             <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
             ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
         </div>`;
-    await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
+        
+    if(typeof window.broadcastRoll === 'function') {
+        await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
+    }
 };
 
 window.addShipDeck = async function() {
@@ -964,12 +975,14 @@ window.broadcastVesselStatus = async function() {
     const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
     const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
 
-    await db.from('chat_logs').insert({
-        sender_id: currentUserId,
-        content: `🛡️ [VESSEL DIAGNOSTICS] ${vessel.name} status check:<br><span style="color:#00e1ff">Shields: ${s_int}</span> | <span style="color:#ff3333">Hull: ${h_int}</span><br><span style="color:#ffaa00">Reactive Armor: ${r_int}</span> | <span style="color:#ffaa00">Ablative Armor: ${a_int}</span>`,
-        message_type: 'text'
-    });
-    alert("Vessel diagnostic broadcasted to Secure Comms!");
+    if(typeof db !== 'undefined') {
+        await db.from('chat_logs').insert({
+            sender_id: currentUserId,
+            content: `🛡️ [VESSEL DIAGNOSTICS] ${vessel.name} status check:<br><span style="color:#00e1ff">Shields: ${s_int}</span> | <span style="color:#ff3333">Hull: ${h_int}</span><br><span style="color:#ffaa00">Reactive Armor: ${r_int}</span> | <span style="color:#ffaa00">Ablative Armor: ${a_int}</span>`,
+            message_type: 'text'
+        });
+        alert("Vessel diagnostic broadcasted to Secure Comms!");
+    }
 };
 
 /* --- PERSONAL ARSENAL --- */
@@ -1157,11 +1170,61 @@ window.executeDicePoolRoll = async function() {
 };
 
 /* --- COMBAT INITIATIVE TRACKER --- */
-window.addCombatant = async function() {
-    const name = document.getElementById('comb-name').value;
-    const initiative = parseInt(document.getElementById('comb-init').value) || 10;
-    const hp = document.getElementById('comb-hp').value;
+// BUG FIX: Renders the tracker correctly per container with unique IDs
+window.renderCombatTracker = function() {
+    const containers = [
+        { el: document.getElementById('combat-tracker-body'), suffix: 'panel' },
+        { el: document.getElementById('terminal-combat-body'), suffix: 'term' }
+    ];
+
+    containers.forEach(container => {
+        if (!container.el) return;
+        let html = '';
+        if (currentUserRole === 'dm') {
+            html += `
+                <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:8px;">
+                    <label for="comb-name-${container.suffix}" style="display:none;">Name</label>
+                    <input type="text" id="comb-name-${container.suffix}" placeholder="Combatant Name..." style="font-size:10px; margin:2px 0;">
+                    <div style="display:flex; gap:6px;">
+                        <label for="comb-init-${container.suffix}" style="display:none;">Initiative</label>
+                        <input type="number" id="comb-init-${container.suffix}" placeholder="Initiative" style="font-size:10px; margin:2px 0;">
+                        <label for="comb-hp-${container.suffix}" style="display:none;">HP</label>
+                        <input type="text" id="comb-hp-${container.suffix}" placeholder="HP/Vit" value="10/10" style="font-size:10px; margin:2px 0;">
+                    </div>
+                    <button class="btn-reveal" onclick="window.addCombatant('${container.suffix}')" style="font-size:10px; margin-top:4px;">+ ADD TO INITIATIVE</button>
+                </div>
+            `;
+        }
+        html += '<div style="max-height:220px; overflow-y:auto;">';
+        combatantsList.forEach(c => {
+            html += `
+                <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:6px;">
+                    <div>
+                        <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${c.name}</strong>
+                        <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">HP/Status: ${c.hp}</p>
+                    </div>
+                    ${currentUserRole === 'dm' ? `<button class="layer-del" onclick="window.removeCombatant('${c.id}')" style="padding:2px 6px; font-size:9px;">X</button>` : ''}
+                </div>
+            `;
+        });
+        html += '</div>';
+        container.el.innerHTML = html;
+    });
+};
+
+window.addCombatant = async function(suffix) {
+    const nameInput = document.getElementById(`comb-name-${suffix}`);
+    const initInput = document.getElementById(`comb-init-${suffix}`);
+    const hpInput = document.getElementById(`comb-hp-${suffix}`);
+    
+    if (!nameInput || !initInput || !hpInput) return;
+
+    const name = nameInput.value.trim();
+    const initiative = parseInt(initInput.value) || 10;
+    const hp = hpInput.value.trim();
+    
     if (!name) return;
+    
     await db.from('combat_tracker').insert({ name, initiative, hp }); 
     if(typeof loadCombatTracker === 'function') loadCombatTracker();
 };
@@ -1170,34 +1233,3 @@ window.removeCombatant = async function(id) {
     await db.from('combat_tracker').delete().eq('id', id); 
     if(typeof loadCombatTracker === 'function') loadCombatTracker(); 
 };
-
-function renderCombatTracker() {
-    const bodies = [document.getElementById('combat-tracker-body'), document.getElementById('terminal-combat-body')];
-    let html = '';
-    if (currentUserRole === 'dm') {
-        html += `
-            <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:8px;">
-                <input type="text" id="comb-name" placeholder="Combatant Name..." style="font-size:10px; margin:2px 0;">
-                <div style="display:flex; gap:6px;">
-                    <input type="number" id="comb-init" placeholder="Initiative" style="font-size:10px; margin:2px 0;">
-                    <input type="text" id="comb-hp" placeholder="HP/Vit" value="10/10" style="font-size:10px; margin:2px 0;">
-                </div>
-                <button class="btn-reveal" onclick="window.addCombatant()" style="font-size:10px; margin-top:4px;">+ ADD TO INITIATIVE</button>
-            </div>
-        `;
-    }
-    html += '<div style="max-height:220px; overflow-y:auto;">';
-    combatantsList.forEach(c => {
-        html += `
-            <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:6px;">
-                <div>
-                    <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${c.name}</strong>
-                    <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">HP/Status: ${c.hp}</p>
-                </div>
-                ${currentUserRole === 'dm' ? `<button class="layer-del" onclick="window.removeCombatant('${c.id}')" style="padding:2px 6px; font-size:9px;">X</button>` : ''}
-            </div>
-        `;
-    });
-    html += '</div>';
-    bodies.forEach(b => { if (b) b.innerHTML = html; });
-}
