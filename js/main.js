@@ -683,6 +683,9 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'cargo') {
         populateCargoVesselSelect();
         renderTerminalCargoDeck();
+    } else if (tabName === 'vessel') {
+        populateVesselDeckSelect();
+        window.renderVesselDeck();
     } else if (tabName === 'codex') {
         window.switchCodexCategory(activeCodexCategory);
     }
@@ -1359,6 +1362,207 @@ window.broadcastTerminalCargoManifest = async function() {
     alert("Full cargo manifest broadcasted to Secure Comms!");
 };
 
+/* --- NEW VESSEL DECK LOGIC --- */
+function populateVesselDeckSelect() {
+    const select = document.getElementById('vessel-deck-select');
+    if (!select) return;
+    let html = '';
+    globalShipMarkersCache.forEach(m => {
+        html += `<option value="${m.id}">${m.name}</option>`;
+    });
+    select.innerHTML = html || '<option value="">No active vessels found</option>';
+}
+
+window.renderVesselDeck = function() {
+    const select = document.getElementById('vessel-deck-select');
+    const healthContainer = document.getElementById('vessel-health-container');
+    const weaponsContainer = document.getElementById('vessel-weapons-container');
+    if (!select || !healthContainer || !weaponsContainer) return;
+
+    const vesselId = select.value;
+    const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+
+    if (!vessel) {
+        healthContainer.innerHTML = '<span style="font-size:11px; color:#6b826a;">Select a valid vessel token above.</span>';
+        weaponsContainer.innerHTML = '';
+        return;
+    }
+
+    // Setup Health/Integrity
+    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 100;
+    const s_max = vessel.max_shields || 100;
+    const a_int = vessel.integrity_armor !== undefined ? vessel.integrity_armor : 100;
+    const a_max = vessel.max_armor || 100;
+    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 100;
+    const h_max = vessel.max_hull || 100;
+
+    const makeBar = (label, current, max, color, key) => `
+        <div style="margin-bottom: 8px;">
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:${color}; margin-bottom:2px;">
+                <strong>${label}</strong>
+                <span>${current} / ${max}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+                <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -10)" style="width:24px; padding:2px; font-size:10px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-10</button>
+                <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -1)" style="width:24px; padding:2px; font-size:12px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-</button>
+                <div style="flex-grow:1; height:12px; background:#030403; border:1px solid #3c4e36; border-radius:2px; overflow:hidden;">
+                    <div style="width:${Math.max(0, Math.min(100, (current/max)*100))}%; height:100%; background:${color}; transition:width 0.3s;"></div>
+                </div>
+                <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 1)" style="width:24px; padding:2px; font-size:12px; margin:0;">+</button>
+                <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 10)" style="width:24px; padding:2px; font-size:10px; margin:0;">+10</button>
+            </div>
+        </div>
+    `;
+
+    healthContainer.innerHTML = 
+        makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') +
+        makeBar('ARMOR PLATING', a_int, a_max, '#ffaa00', 'armor') +
+        makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
+
+    // Setup Weapons
+    const weapons = vessel.ship_weapons || [];
+    let wHtml = '';
+    if (weapons.length === 0) {
+        wHtml = '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>';
+    } else {
+        weapons.forEach((w, idx) => {
+            wHtml += `
+            <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
+                <div>
+                    <strong style="color:#ff6b6b; font-size:12px;">${w.name}</strong>
+                    <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
+                </div>
+                <div style="display:flex; gap:6px;">
+                    <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
+                    <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
+                </div>
+            </div>
+            `;
+        });
+    }
+    weaponsContainer.innerHTML = wHtml;
+};
+
+window.modifyShipHealth = async function(vesselId, key, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let dbKey = 'integrity_' + key;
+    let maxKey = 'max_' + key;
+    
+    let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
+    let max = vessel[maxKey] || 100;
+
+    current = Math.max(0, Math.min(max, current + delta));
+    
+    let payload = {};
+    payload[dbKey] = current;
+    
+    await db.from('ship_markers').update(payload).eq('id', vesselId);
+    vessel[dbKey] = current;
+    window.renderVesselDeck();
+};
+
+window.addShipWeapon = async function() {
+    const select = document.getElementById('vessel-deck-select');
+    const name = document.getElementById('new-ship-wpn-name').value.trim();
+    let dice = document.getElementById('new-ship-wpn-dice').value.trim().toLowerCase();
+    let mod = document.getElementById('new-ship-wpn-mod').value.trim();
+    const explodes = document.getElementById('new-ship-wpn-explodes').checked;
+
+    if (!select || !select.value) { alert("Select a vessel token first."); return; }
+    if (!name) { alert("Please enter a weapon system name."); return; }
+    if (!dice) dice = '1d10';
+    if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
+    if (!mod) mod = '+0';
+
+    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
+    if (!vessel) return;
+
+    let weapons = vessel.ship_weapons || [];
+    weapons.push({ name, dice, modifier: mod, explodes });
+
+    await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
+    vessel.ship_weapons = weapons;
+
+    document.getElementById('new-ship-wpn-name').value = '';
+    document.getElementById('new-ship-wpn-dice').value = '';
+    document.getElementById('new-ship-wpn-mod').value = '';
+    window.renderVesselDeck();
+};
+
+window.deleteShipWeapon = async function(vesselId, idx) {
+    if (!confirm("Uninstall this weapon system?")) return;
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let weapons = vessel.ship_weapons || [];
+    weapons.splice(idx, 1);
+
+    await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vesselId);
+    vessel.ship_weapons = weapons;
+    window.renderVesselDeck();
+};
+
+window.rollShipWeapon = function(vesselId, idx) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    
+    let wpn = (vessel.ship_weapons || [])[idx];
+    if (!wpn) return;
+
+    const diceRegex = /^(\d*)d(\d+)$/i;
+    const match = wpn.dice.trim().match(diceRegex);
+    if (!match) { alert("Invalid dice format. Use formats like 'd20' or '2d6'."); return; }
+
+    let numDice = parseInt(match[1]) || 1;
+    let diceFaces = parseInt(match[2]);
+    let modVal = parseInt(wpn.modifier) || 0;
+
+    let total = 0;
+    let breakdown = [];
+
+    for (let i = 0; i < numDice; i++) {
+        let rollTotal = 0;
+        let subRolls = [];
+        let currentRoll;
+        do {
+            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
+            rollTotal += currentRoll;
+            subRolls.push(currentRoll);
+        } while (currentRoll === diceFaces && wpn.explodes);
+        
+        total += rollTotal;
+        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
+    }
+
+    total += modVal;
+    if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
+
+    const breakdownText = breakdown.join(' + ');
+    
+    // Broadcast the roll directly
+    window.broadcastRoll(`[${vessel.name}] FIRING: ${wpn.name}`, breakdownText, total);
+};
+
+window.broadcastVesselStatus = async function() {
+    const select = document.getElementById('vessel-deck-select');
+    if (!select || !select.value) return;
+    let vessel = globalShipMarkersCache.find(m => m.id === select.value);
+    if (!vessel) return;
+
+    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 100;
+    const a_int = vessel.integrity_armor !== undefined ? vessel.integrity_armor : 100;
+    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 100;
+
+    await db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `🛡️ [VESSEL DIAGNOSTICS] ${vessel.name} status check:<br><span style="color:#00e1ff">Shields: ${s_int}%</span> | <span style="color:#ffaa00">Armor: ${a_int}%</span> | <span style="color:#ff3333">Hull: ${h_int}%</span>`,
+        message_type: 'text'
+    });
+    alert("Vessel diagnostic broadcasted to Secure Comms!");
+};
+
 /* Objectives & Notes */
 window.addCampaignObjective = async function() {
     const title = document.getElementById('new-obj-title').value;
@@ -1766,8 +1970,13 @@ function initGalaxyEngine() {
         }
         const { data: markerData } = await db.from('ship_markers').select('*');
         if (markerData) {
-            shipMarkers = markerData.map(m => ({ ...m, cargo_inventory: sanitizeCargo(m.cargo_inventory) }));
-            globalShipMarkersCache = markerData;
+            shipMarkers = markerData.map(m => ({ ...m, cargo_inventory: sanitizeCargo(m.cargo_inventory), ship_weapons: m.ship_weapons || [] }));
+            globalShipMarkersCache = shipMarkers;
+            
+            const vesselDeckPanel = document.getElementById('term-panel-vessel');
+            if (vesselDeckPanel && vesselDeckPanel.classList.contains('active')) {
+                window.renderVesselDeck();
+            }
         }
     }
     loadGalaxyData();
@@ -1803,7 +2012,7 @@ function initGalaxyEngine() {
 
     window.spawnTokenAtCenter = async function() {
         const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1';
-        await db.from('ship_markers').insert({ owner_id: currentUserId, name: document.getElementById('dm-tool-name').value || 'Task Force Black', drive_type: driveType, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color: document.getElementById('dm-tool-color').value, cargo_inventory: {} });
+        await db.from('ship_markers').insert({ owner_id: currentUserId, name: document.getElementById('dm-tool-name').value || 'Task Force Black', drive_type: driveType, x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, color: document.getElementById('dm-tool-color').value, cargo_inventory: {}, ship_weapons: [] });
         loadGalaxyData();
     };
 
