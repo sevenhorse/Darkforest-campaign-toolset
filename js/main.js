@@ -646,7 +646,6 @@ window.switchTermTab = function(tabName) {
     }
 };
 
-// FIXED: DM Operations Sub-Tab Switcher targeting .dm-subpanel
 window.switchDmSubtab = function(subtab) {
     document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('#dm-tools .dm-subpanel').forEach(p => p.classList.remove('active'));
@@ -1965,7 +1964,6 @@ function initGalaxyEngine() {
         camera.y = -targetY * camera.zoom;
     };
 
-    // FIXED: Robust Clear Selected Target handler
     window.clearSelectedTarget = function() {
         selectedTarget = null;
         if (jumpPlottingActive) window.cancelJumpPlotting();
