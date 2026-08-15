@@ -30,10 +30,10 @@ const STRIKE_CRAFT_DB = {
     }
 };
 
-/* --- CARGO HUB --- */
+/* --- CARGO HUB & LOGISTICS LOOP --- */
 window.sanitizeCargo = function(inv) {
     if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
-        return {
+        inv = {
             "perishables": [
                 { name: "Standard Rations", qty: 90, unit: "Days" },
                 { name: "Trauma MedKits", qty: 15, unit: "Crates" }
@@ -49,6 +49,8 @@ window.sanitizeCargo = function(inv) {
             ]
         };
     }
+    // Economy feature: initialize synth capacity if missing
+    if (inv.synth_capacity === undefined) inv.synth_capacity = 10;
     return inv;
 };
 
@@ -89,9 +91,25 @@ window.renderTerminalCargoDeck = function() {
     let subtabNames = { perishables: '🍏 Perishables', expendables: '⚙️ Expendables', misc: '📦 Miscellaneous' };
     if (title) title.innerText = `${subtabNames[activeCargoSubtab]} Holdings`;
 
-    let html = '';
+    // Economy UI: Elder E-M Synthesizer interface
+    let synthHtml = `
+        <div style="background:#0a1410; border:1px solid #00e5a3; padding:8px; margin-bottom:12px; border-radius:2px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <strong style="color:#00e5a3; font-size:12px;">✨ Elder E-M Synthesizer</strong>
+                <div style="font-size:9px; color:#6b826a;">Daily Mass Conversion Capacity (Recharges @ 24h)</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+                <button onclick="window.modifySynthCapacity('${vessel.id}', -1)" style="padding:2px 8px; font-size:10px;">-1 Ton</button>
+                <strong style="color:#00e5a3; font-size:14px; margin:0 10px;">${cargo.synth_capacity} / 10</strong>
+                <button onclick="window.modifySynthCapacity('${vessel.id}', 1)" style="padding:2px 8px; font-size:10px;">+1 Ton</button>
+            </div>
+        </div>
+    `;
+
+    let html = synthHtml;
+    
     if (currentCategoryItems.length === 0) {
-        html = `<span style="font-size:11px; color:#6b826a;">No cargo items recorded in this section. Use the form on the right to store items.</span>`;
+        html += `<span style="font-size:11px; color:#6b826a;">No cargo items recorded in this section. Use the form on the right to store items.</span>`;
     } else {
         currentCategoryItems.forEach((item, index) => {
             html += `
@@ -112,6 +130,16 @@ window.renderTerminalCargoDeck = function() {
         });
     }
     container.innerHTML = html;
+};
+
+window.modifySynthCapacity = async function(vesselId, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+    cargo.synth_capacity = Math.max(0, Math.min(10, cargo.synth_capacity + delta));
+    await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
+    vessel.cargo_inventory = cargo;
+    window.renderTerminalCargoDeck();
 };
 
 window.modifyCargoQty = async function(vesselId, itemIndex, delta) {
@@ -196,7 +224,7 @@ window.broadcastTerminalCargoManifest = async function() {
     alert("Full cargo manifest broadcasted to Secure Comms!");
 };
 
-/* --- VESSEL DECK LOGIC (INTEGRITY, DECKS, WEAPONS, STANCE, HANGAR) --- */
+/* --- VESSEL DECK LOGIC --- */
 window.populateVesselDeckSelect = function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select) return;
@@ -432,7 +460,48 @@ window.renderVesselDeck = function() {
     }
 };
 
-/* --- STRIKE CRAFT HANGAR LOGIC --- */
+window.modifyShipHealth = async function(vesselId, key, delta) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    // ECONOMY: Titanium Hull Plate constraint for healing
+    if (key === 'hull' && delta > 0) {
+        let cargo = vessel.cargo_inventory || window.sanitizeCargo({});
+        let expendables = cargo.expendables || [];
+        let platesIdx = expendables.findIndex(i => i.name.toLowerCase().includes('hull plate'));
+        let cost = Math.ceil(delta / 10);
+        
+        if (platesIdx >= 0 && expendables[platesIdx].qty >= cost) {
+            expendables[platesIdx].qty -= cost;
+            cargo.expendables = expendables;
+            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
+            vessel.cargo_inventory = cargo;
+            
+            db.from('chat_logs').insert({
+                sender_id: currentUserId,
+                content: `🔧 [REPAIR LOG] ${vessel.name} consumed ${cost}x Hull Plate(s) to restore ${delta} Hull Integrity.`,
+                message_type: 'text'
+            });
+            if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+        } else {
+            alert(`Cannot repair hull! Requires at least ${cost} Titanium Armor Hull Plate(s) in Expendables cargo.`);
+            return;
+        }
+    }
+
+    let dbKey = 'integrity_' + key;
+    let maxKey = 'max_' + key;
+    let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
+    let max = vessel[maxKey] || 100;
+
+    current = Math.max(0, Math.min(max, current + delta));
+    let payload = {}; payload[dbKey] = current;
+    
+    await db.from('ship_markers').update(payload).eq('id', vesselId);
+    vessel[dbKey] = current;
+    window.renderVesselDeck();
+};
+
 window.commissionSquadron = async function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select || !select.value) { alert("Select a vessel to commission to."); return; }
@@ -891,26 +960,6 @@ window.deleteShipDeck = async function(vesselId, idx) {
     window.renderVesselDeck();
 };
 
-window.modifyShipHealth = async function(vesselId, key, delta) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let dbKey = 'integrity_' + key;
-    let maxKey = 'max_' + key;
-    
-    let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
-    let max = vessel[maxKey] || 100;
-
-    current = Math.max(0, Math.min(max, current + delta));
-    
-    let payload = {};
-    payload[dbKey] = current;
-    
-    await db.from('ship_markers').update(payload).eq('id', vesselId);
-    vessel[dbKey] = current;
-    window.renderVesselDeck();
-};
-
 window.addShipWeapon = async function() {
     const select = document.getElementById('vessel-deck-select');
     const loc = document.getElementById('new-ship-wpn-loc').value.trim() || 'Hull Mount';
@@ -1047,13 +1096,13 @@ window.addArsenalItem = async function() {
     document.getElementById('new-wpn-name').value = '';
     document.getElementById('new-wpn-dice').value = '';
     document.getElementById('new-wpn-mod').value = '';
-    if(typeof loadAllProfiles === 'function') loadAllProfiles();
+    if(typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
 };
 
 window.deleteArsenalItem = async function(id) {
     if (!confirm("Remove this item from your arsenal?")) return;
     await db.from('character_arsenal').delete().eq('id', id);
-    if(typeof loadAllProfiles === 'function') loadAllProfiles();
+    if(typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
 };
 
 window.rollArsenalWeapon = async function(idx) {
@@ -1169,8 +1218,7 @@ window.executeDicePoolRoll = async function() {
     }
 };
 
-/* --- COMBAT INITIATIVE TRACKER --- */
-// BUG FIX: Renders the tracker correctly per container with unique IDs
+/* --- COMBAT INITIATIVE TRACKER & ROUND AUTOMATOR --- */
 window.renderCombatTracker = function() {
     const containers = [
         { el: document.getElementById('combat-tracker-body'), suffix: 'panel' },
@@ -1192,6 +1240,7 @@ window.renderCombatTracker = function() {
                         <input type="text" id="comb-hp-${container.suffix}" placeholder="HP/Vit" value="10/10" style="font-size:10px; margin:2px 0;">
                     </div>
                     <button class="btn-reveal" onclick="window.addCombatant('${container.suffix}')" style="font-size:10px; margin-top:4px;">+ ADD TO INITIATIVE</button>
+                    <button class="btn-deploy" onclick="window.advanceCombatRound()" style="font-size:10px; margin-top:6px; width:100%;">⏭️ ADVANCE COMBAT ROUND</button>
                 </div>
             `;
         }
@@ -1232,4 +1281,60 @@ window.addCombatant = async function(suffix) {
 window.removeCombatant = async function(id) { 
     await db.from('combat_tracker').delete().eq('id', id); 
     if(typeof loadCombatTracker === 'function') loadCombatTracker(); 
+};
+
+window.advanceCombatRound = async function() {
+    if (currentUserRole !== 'dm') return;
+    if (!confirm("Advance combat round? This will process cooldowns, overheat, and strike craft fuel globally.")) return;
+
+    let anyChanged = false;
+
+    for (let vessel of globalShipMarkersCache) {
+        let changed = false;
+        let weapons = vessel.ship_weapons || [];
+        let deployed = vessel.ship_deployed || [];
+        let flightLog = [];
+
+        weapons.forEach(w => {
+            if (w.cooldown > 0) { w.cooldown -= 1; changed = true; }
+            if (w.overheat > 0) { w.overheat -= 1; changed = true; }
+        });
+
+        deployed.forEach(sq => {
+            if (sq.loiter > 0) { 
+                sq.loiter -= 1; 
+                changed = true; 
+                if (sq.loiter === 0) {
+                    flightLog.push(`⚠️ ${sq.name} is BINGO FUEL! Must return to hangar!`);
+                }
+            }
+        });
+
+        if (changed) {
+            anyChanged = true;
+            await db.from('ship_markers').update({ 
+                ship_weapons: weapons, 
+                ship_deployed: deployed 
+            }).eq('id', vessel.id);
+        }
+        
+        if (flightLog.length > 0) {
+            await db.from('chat_logs').insert({
+                sender_id: 'system',
+                content: `🚨 [FLIGHT OPS] ${vessel.name}: ${flightLog.join(' ')}`,
+                message_type: 'text'
+            });
+        }
+    }
+
+    if (anyChanged) {
+        if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+        if(typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+    }
+
+    await db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `⏭️ [TACTICAL] Combat round advanced. Cooldowns reduced. Heat dissipated. Strike craft loiter time degraded.`,
+        message_type: 'text'
+    });
 };
