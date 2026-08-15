@@ -115,7 +115,7 @@ window.loadGalaxyData = async function() {
     }
     const { data: markerData } = await db.from('ship_markers').select('*');
     if (markerData) {
-        globalShipMarkersCache = markerData.map(m => ({ ...m, cargo_inventory: sanitizeCargo(m.cargo_inventory), ship_weapons: m.ship_weapons || [], ship_decks: m.ship_decks || [] }));
+        globalShipMarkersCache = markerData.map(m => ({ ...m, cargo_inventory: window.sanitizeCargo(m.cargo_inventory), ship_weapons: m.ship_weapons || [], ship_decks: m.ship_decks || [] }));
         
         const vesselDeckPanel = document.getElementById('term-panel-vessel');
         if (vesselDeckPanel && vesselDeckPanel.classList.contains('active')) {
@@ -555,6 +555,512 @@ window.initGalaxyEngine = function() {
         window.camera.zoom = newZoom;
     }, { passive: false });
 
+    container.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.panel')) return;
+        const worldPos = screenToWorld(e.clientX, e.clientY);
+        let allSystems = proceduralSystems.concat(globalDbSystemsCache);
+        
+        for (let s of allSystems) {
+            let dx = s.x - worldPos.x, dy = s.y - worldPos.y;
+            if (Math.sqrt(dx * dx + dy * dy) < 30) {
+                selectTargetAndPushRecent({ type: 'star', data: s });
+                window.camera.x = -s.x * 2.5; window.camera.y = -s.y * 2.5; window.camera.zoom = 2.5;
+                return;
+            }
+        }
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+        if (e.key.toLowerCase() === 'f') {
+            if (window.selectedTarget && window.selectedTarget.data) { window.lockCameraOnSelected(); }
+        }
+        if (e.key === 'Escape') {
+            if (document.getElementById('codex-fullscreen-reader').style.display === 'block') { window.closeCodexFullscreen(); return; }
+            if (measuringTapeActive && typeof window.toggleMeasuringTool === 'function') window.toggleMeasuringTool();
+            if (pingModeActive && typeof window.togglePingMode === 'function') window.togglePingMode();
+            if (jumpPlottingActive && typeof window.cancelJumpPlotting === 'function') window.cancelJumpPlotting();
+            if (territoryDrawActive && typeof window.cancelDrawingTerritory === 'function') window.cancelDrawingTerritory();
+            if (hyperlaneDrawActive && typeof window.cancelDrawingHyperlane === 'function') window.cancelDrawingHyperlane();
+        }
+    });
+
+    window.lockCameraOnSelected = function() {
+        if (!window.selectedTarget || !window.selectedTarget.data) return;
+        let targetX = window.selectedTarget.data.x;
+        let targetY = window.selectedTarget.data.y;
+
+        if (window.selectedTarget.type === 'body' && window.selectedTarget.data.parentSystem) {
+            targetX = window.selectedTarget.data.parentSystem.x;
+            targetY = window.selectedTarget.data.parentSystem.y;
+        }
+
+        window.camera.x = -targetX * window.camera.zoom;
+        window.camera.y = -targetY * window.camera.zoom;
+    };
+
+    window.clearSelectedTarget = function() {
+        window.selectedTarget = null;
+        if (jumpPlottingActive && typeof window.cancelJumpPlotting === 'function') window.cancelJumpPlotting();
+        if (measuringTapeActive && typeof window.toggleMeasuringTool === 'function') window.toggleMeasuringTool();
+        if (hyperlaneDrawActive && typeof window.cancelDrawingHyperlane === 'function') window.cancelDrawingHyperlane();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.updateShipDriveType = async function(shipId, newDriveType) {
+        await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId);
+        let ship = globalShipMarkersCache.find(s => s.id === shipId);
+        if (ship) ship.drive_type = newDriveType;
+        if (activeJumpShip && activeJumpShip.id === shipId) {
+            selectedDriveSpeed = driveSpeeds[newDriveType] ? driveSpeeds[newDriveType].speed : 250;
+        }
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.startJumpPlottingMode = function() {
+        if (!window.selectedTarget || window.selectedTarget.type !== 'ship') return;
+        jumpPlottingActive = true;
+        measuringTapeActive = false;
+        pingModeActive = false;
+        territoryDrawActive = false;
+        hyperlaneDrawActive = false;
+        activeJumpShip = window.selectedTarget.data;
+        jumpTargetPoint = null;
+
+        let driveKey = activeJumpShip.drive_type || 'ftl_class1';
+        selectedDriveSpeed = driveSpeeds[driveKey] ? driveSpeeds[driveKey].speed : 250;
+
+        if(typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.cancelJumpPlotting = function() {
+        jumpPlottingActive = false;
+        activeJumpShip = null;
+        jumpTargetPoint = null;
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.setDriveSpeedKey = function(key) {
+        if (driveSpeeds[key]) {
+            selectedDriveSpeed = driveSpeeds[key].speed;
+            if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        }
+    };
+
+    window.executePlottedJump = async function() {
+        if (!activeJumpShip || !jumpTargetPoint) return;
+        let ship = activeJumpShip;
+        let target = jumpTargetPoint;
+
+        let dx = target.x - ship.x;
+        let dy = target.y - ship.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        let tripHours = Math.max(1, Math.round(dist / selectedDriveSpeed));
+
+        // ECONOMY: Calculate FTL Fuel (Energy Cores)
+        let fuelCost = Math.max(1, Math.round(dist / 100)); // 1 core per 100 distance units
+        if (selectedDriveSpeed < 50) fuelCost = 0; // Sublight doesn't cost FTL cores
+        
+        let cargo = ship.cargo_inventory || window.sanitizeCargo({});
+        let expendables = cargo.expendables || [];
+        let fuelIdx = expendables.findIndex(i => i.name.toLowerCase().includes('energy core') || i.name.toLowerCase().includes('fuel'));
+        
+        if (fuelCost > 0) {
+            if (fuelIdx >= 0 && expendables[fuelIdx].qty >= fuelCost) {
+                expendables[fuelIdx].qty -= fuelCost;
+                cargo.expendables = expendables;
+            } else {
+                alert(`Insufficient FTL Fuel! Jump requires ${fuelCost} Energy Cores in Expendables cargo.`);
+                return; // BLOCK JUMP
+            }
+        }
+
+        let oldTime = window.universeTimeHours;
+        window.universeTimeHours += tripHours;
+        localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+        if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
+
+        ship.x = target.x;
+        ship.y = target.y;
+        ship.cargo_inventory = cargo;
+
+        await db.from('ship_markers').update({ x: target.x, y: target.y, cargo_inventory: cargo }).eq('id', ship.id);
+
+        if(typeof checkAnomalyProximity === 'function') await checkAnomalyProximity(ship);
+        
+        // Economy: Trigger 24h checks if the jump crossed daily thresholds
+        if(typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+
+        let fuelLog = fuelCost > 0 ? ` Consumed ${fuelCost}x Energy Cores.` : ``;
+
+        await db.from('chat_logs').insert({
+            sender_id: currentUserId,
+            content: `🚀 [FTL JUMP EXECUTION] Vessel '${ship.name}' completed jump to ${target.name || 'target coordinates'} (X: ${Math.round(target.x)}, Y: ${Math.round(target.y)}). Trip Duration: ${tripHours} hrs.${fuelLog} Universe clock advanced to ${window.formatUniverseTime(window.universeTimeHours)}.`,
+            message_type: 'text'
+        });
+
+        jumpPlottingActive = false;
+        activeJumpShip = null;
+        jumpTargetPoint = null;
+
+        if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        if(typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+        alert(`Jump executed! Vessel arrived at destination. Elapsed time: ${tripHours} hours.${fuelCost > 0 ? ' Cost: ' + fuelCost + ' Energy Cores.' : ''}`);
+    };
+
+    window.toggleBookmarkSelected = function() {
+        if (!window.selectedTarget || !window.selectedTarget.data) return;
+        let existsIndex = bookmarkedTargets.findIndex(b => b.data.id === window.selectedTarget.data.id);
+        if (existsIndex >= 0) {
+            bookmarkedTargets.splice(existsIndex, 1);
+        } else {
+            bookmarkedTargets.push({ type: window.selectedTarget.type, data: window.selectedTarget.data });
+        }
+        localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets));
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.shareBookmarkToChat = function(name, type) {
+        db.from('chat_logs').insert({
+            sender_id: currentUserId,
+            content: `Shared Tactical Coordinate 📍 [${type.toUpperCase()}]: ${name}`,
+            message_type: 'text'
+        });
+        alert("Bookmark broadcasted to Secure Comms!");
+    };
+
+    window.jumpToBookmark = function(index) {
+        let b = bookmarkedTargets[index];
+        if (!b) return;
+        window.selectedTarget = b;
+        window.lockCameraOnSelected();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.jumpToRecent = function(index) {
+        let r = recentTargets[index];
+        if (!r) return;
+        window.selectedTarget = r;
+        window.lockCameraOnSelected();
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.switchHudTab = function(tab) {
+        activeHudTab = tab;
+        document.querySelectorAll('.hud-tab-btn').forEach(b => b.classList.remove('active'));
+        if (tab === 'telemetry') document.getElementById('tab-btn-details').classList.add('active');
+        if (tab === 'bookmarks') document.getElementById('tab-btn-bookmarks').classList.add('active');
+        if (tab === 'recents') document.getElementById('tab-btn-recents').classList.add('active');
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+
+    window.saveDMStarProperties = async function(id) {
+        if (currentUserRole !== 'dm') return;
+        const name = document.getElementById('edit-star-name').value;
+        const ownership = document.getElementById('edit-star-ownership').value;
+        const luminosity = document.getElementById('edit-star-luminosity').value;
+        const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
+
+        await db.from('star_systems').update({ name, ownership, luminosity, industry_tier: tier }).eq('id', id);
+        alert("Stellar system parameters updated.");
+        if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+    };
+
+    window.saveDMBodyProperties = function(id) {
+        if (currentUserRole !== 'dm' || !window.selectedTarget || window.selectedTarget.type !== 'body') return;
+        let b = window.selectedTarget.data;
+        
+        b.name = document.getElementById('edit-body-name').value;
+        b.type = document.getElementById('edit-body-type').value;
+        b.gravity = document.getElementById('edit-body-gravity').value;
+        b.atmosphere = document.getElementById('edit-body-atmosphere').value;
+        b.resources = document.getElementById('edit-body-resources').value;
+
+        if(typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+        alert("Celestial body properties synchronized to tactical display.");
+    };
+
+    function selectTargetAndPushRecent(target) {
+        window.selectedTarget = target;
+        let existsIndex = recentTargets.findIndex(r => r.data.id === target.data.id);
+        if (existsIndex >= 0) recentTargets.splice(existsIndex, 1);
+        recentTargets.unshift(target);
+        if (recentTargets.length > 20) recentTargets.pop();
+        localStorage.setItem('odyssey_recents', JSON.stringify(recentTargets));
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    }
+
+    window.toggleMeasuringTool = function() {
+        measuringTapeActive = !measuringTapeActive;
+        if(!measuringTapeActive) { measureStartPoint = null; measureEndPoint = null; }
+        pingModeActive = false; jumpPlottingActive = false; territoryDrawActive = false; hyperlaneDrawActive = false;
+        if (typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
+    };
+
+    window.togglePingMode = function() {
+        pingModeActive = !pingModeActive;
+        measuringTapeActive = false; jumpPlottingActive = false; territoryDrawActive = false; hyperlaneDrawActive = false;
+        if (typeof window.updateToolButtonStyles === 'function') window.updateToolButtonStyles();
+    };
+
+    window.updateToolButtonStyles = function() {
+        const mBtn = document.getElementById('measuring-tape-toggle-btn');
+        const pBtn = document.getElementById('ping-tool-toggle-btn');
+        const tBtn = document.getElementById('territory-tool-toggle-btn');
+        const hBtn = document.getElementById('btn-start-hyperlane-draw');
+        if(mBtn) { mBtn.style.borderColor = measuringTapeActive ? '#00e5a3' : '#3c4e36'; mBtn.style.color = measuringTapeActive ? '#00e5a3' : '#6b826a'; }
+        if(pBtn) { pBtn.style.borderColor = pingModeActive ? '#00e5a3' : '#3c4e36'; pBtn.style.color = pingModeActive ? '#00e5a3' : '#6b826a'; }
+        if(tBtn) { tBtn.style.borderColor = territoryDrawActive ? '#00e5a3' : '#3c4e36'; tBtn.style.color = territoryDrawActive ? '#00e5a3' : '#6b826a'; }
+        if(hBtn) { hBtn.style.borderColor = hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
+    };
+
+    function triggerTacticalPing(x, y) {
+        if (!realtimeChannel) return;
+        realtimeChannel.send({
+            type: 'broadcast', event: 'tactical_ping',
+            payload: { x, y, username: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3' }
+        });
+        activePings.push({ x, y, color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3', user: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', startTime: Date.now() });
+        if(pingModeActive) window.togglePingMode();
+    }
+
+    function renderHUDTelemetry() {
+        const content = document.getElementById('hud-content');
+        if (!content) return;
+        
+        if (activeHudTab === 'bookmarks') {
+            let html = '<div style="font-size:11px;"><h4 style="margin:0 0 8px 0; color:#00e5a3;">Saved Bookmarks</h4>';
+            if (bookmarkedTargets.length === 0) {
+                html += '<span style="color:#6b826a; font-size:10px;">No saved bookmarks. Click bookmark on any target telemetry.</span>';
+            } else {
+                bookmarkedTargets.forEach((b, idx) => {
+                    html += `
+                        <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:4px;">
+                            <div><strong style="color:#00e5a3;">${b.data.name}</strong><br><span style="font-size:9px; color:#6b826a;">Type: ${b.type}</span></div>
+                            <div style="display:flex; gap:4px;">
+                                <button class="layer-edit" onclick="window.jumpToBookmark(${idx})" style="font-size:9px; padding:2px 6px;">Jump</button>
+                                <button class="layer-edit" onclick="window.shareBookmarkToChat('${b.data.name}', '${b.type}')" style="font-size:9px; padding:2px 6px;" title="Share">Share</button>
+                                <button class="layer-del" onclick="window.deleteBookmark(${idx})" style="font-size:9px; padding:2px 6px;" title="Delete">✕</button>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            html += '</div>';
+            content.innerHTML = html;
+            return;
+        }
+
+        if (activeHudTab === 'recents') {
+            let html = '<div style="font-size:11px;"><h4 style="margin:0 0 8px 0; color:#00e5a3;">Recent Navigation Targets</h4>';
+            if (recentTargets.length === 0) {
+                html += '<span style="color:#6b826a; font-size:10px;">No recent targets inspected.</span>';
+            } else {
+                recentTargets.forEach((r, idx) => {
+                    html += `
+                        <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:6px; margin-bottom:4px;">
+                            <div><strong style="color:#00e5a3;">${r.data.name}</strong><br><span style="font-size:9px; color:#6b826a;">Type: ${r.type}</span></div>
+                            <button class="layer-edit" onclick="window.jumpToRecent(${idx})" style="font-size:9px; padding:2px 6px;">Jump</button>
+                        </div>
+                    `;
+                });
+            }
+            html += '</div>';
+            content.innerHTML = html;
+            return;
+        }
+
+        let dynamicTarget = window.selectedTarget || window.hoveredTarget;
+
+        if (!dynamicTarget) { content.innerHTML = `<p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p>`; return; }
+        
+        let isLocked = !!window.selectedTarget;
+        let lockStatusHtml = isLocked ? `<span style="color:#00e5a3; font-size:9px;">[TARGET LOCKED]</span>` : `<span style="color:#ffaa00; font-size:9px; animation: pulse 1.5s infinite;">[SENSOR HOVER]</span>`;
+        let isBookmarked = bookmarkedTargets.some(b => b.data.id === dynamicTarget.data.id);
+        let bookmarkBtn = `<button class="btn-reveal" onclick="window.toggleBookmarkSelected()" style="font-size:9px; padding:4px; margin-top:4px;">${isBookmarked ? '★ BOOKMARKED' : '☆ BOOKMARK'}</button>`;
+        let lockBtn = `<button class="btn-reveal" onclick="window.lockCameraOnSelected()" style="font-size:9px; padding:4px; margin-top:4px;">🎯 LOCK VIEW (F)</button>`;
+
+        if (dynamicTarget.type === 'star') {
+            const s = dynamicTarget.data;
+            let multiTag = s.multiType !== 'Single' ? ` | <span style="color: #ffaa00;">${s.multiType} System</span>` : '';
+            
+            let dmEditorBox = '';
+            if (currentUserRole === 'dm' && s.isCustom) {
+                dmEditorBox = `
+                    <div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
+                        <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER STAR EDITOR</span>
+                        <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Name:</label>
+                        <input type="text" id="edit-star-name" value="${s.name}" style="font-size:10px; margin:2px 0;">
+                        
+                        <label style="font-size:9px; color:#6b826a; display:block;">Faction Claim / Ownership:</label>
+                        <input type="text" id="edit-star-ownership" value="${s.ownership || 'Unclaimed'}" style="font-size:10px; margin:2px 0;">
+                        
+                        <div style="display:flex; gap:6px;">
+                            <div style="flex:1;">
+                                <label style="font-size:9px; color:#6b826a;">Class:</label>
+                                <select id="edit-star-luminosity" style="font-size:9px; margin:2px 0;">
+                                    <option value="Class G (Yellow)" ${s.luminosity==='Class G (Yellow)'?'selected':''}>Class G</option>
+                                    <option value="Class M (Red Dwarf)" ${s.luminosity==='Class M (Red Dwarf)'?'selected':''}>Class M</option>
+                                    <option value="Class O (Blue Giant)" ${s.luminosity==='Class O (Blue Giant)'?'selected':''}>Class O</option>
+                                    <option value="Black Hole" ${s.luminosity==='Black Hole'?'selected':''}>Black Hole</option>
+                                    <option value="Hidden Anomaly" ${s.luminosity==='Hidden Anomaly'?'selected':''}>Hidden Anomaly (Stealth)</option>
+                                </select>
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-size:9px; color:#6b826a;">Industry Tier:</label>
+                                <input type="number" id="edit-star-tier" value="${s.industry_tier || 0}" style="font-size:10px; margin:2px 0;">
+                            </div>
+                        </div>
+                        <button class="btn-reveal" onclick="window.saveDMStarProperties('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">SAVE SYSTEM CHANGES</button>
+                        <button class="btn-remove" onclick="window.deleteStarSystem('${s.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DESTROY STAR SYSTEM</button>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = `
+                <div style="font-size: 11px;">
+                    ${lockStatusHtml}<br>
+                    <strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br>
+                    <span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} ${multiTag}<br>
+                    <span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br>
+                    ${s.isCustom ? `<span style="color: #6b826a;">Industry Tier:</span> ${s.industry_tier || 0}<br>` : ''}
+                    <div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>
+                    ${dmEditorBox}
+                </div>
+            `;
+        } else if (dynamicTarget.type === 'ship') {
+            const m = dynamicTarget.data;
+            const currentDrive = m.drive_type || 'ftl_class1';
+
+            let driveOptionsHtml = '';
+            Object.keys(driveSpeeds).forEach(k => {
+                driveOptionsHtml += `<option value="${k}" ${currentDrive === k ? 'selected' : ''}>${driveSpeeds[k].label}</option>`;
+            });
+
+            let jumpPlotterBox = '';
+            if (jumpPlottingActive && activeJumpShip && activeJumpShip.id === m.id) {
+                let targetInfo = jumpTargetPoint 
+                    ? `Target: <strong>${jumpTargetPoint.name || 'Custom Vector'}</strong> (X: ${Math.round(jumpTargetPoint.x)}, Y: ${Math.round(jumpTargetPoint.y)})` 
+                    : `<span style="color:#ffaa00;">Click on any star or map sector to lock target coordinates...</span>`;
+
+                let calcTimeStr = '';
+                if (jumpTargetPoint) {
+                    let dx = jumpTargetPoint.x - m.x;
+                    let dy = jumpTargetPoint.y - m.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    let hrs = Math.max(1, Math.round(dist / selectedDriveSpeed));
+                    let ly = (dist / 100).toFixed(2);
+                    let days1c = (ly * 365.25).toFixed(1);
+                    
+                    let fuelCost = Math.max(1, Math.round(dist / 100));
+                    if (selectedDriveSpeed < 50) fuelCost = 0;
+
+                    calcTimeStr = `
+                        <div style="font-size:10px; color:#00e5a3; margin:4px 0; background:#030403; padding:6px; border:1px solid #3c4e36;">
+                            Distance: ${dist.toFixed(1)} u (${ly} LY)<br>
+                            FTL Trip Duration: <strong>~${hrs} hours</strong><br>
+                            <span style="color:#ffaa00;">Fuel Cost: ${fuelCost} Energy Cores</span>
+                        </div>
+                    `;
+                }
+
+                jumpPlotterBox = `
+                    <div style="background:#040605; border:1px solid #00e1ff; padding:8px; margin-top:8px; border-radius:2px;">
+                        <span style="font-size:9px; color:#00e1ff; font-weight:bold;">🌌 JUMP VECTOR PLOTTER</span>
+                        <div style="font-size:10px; color:#d4c5a9; margin:4px 0;">${targetInfo}</div>
+                        
+                        <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Drive System Override:</label>
+                        <select onchange="window.setDriveSpeedKey(this.value)" style="font-size:9px; margin:2px 0; background:#0a1410; color:#00e1ff;">
+                            ${driveOptionsHtml}
+                        </select>
+                        
+                        ${calcTimeStr}
+                        
+                        <div style="display:flex; gap:6px; margin-top:6px;">
+                            <button class="btn-reveal" onclick="window.executePlottedJump()" ${!jumpTargetPoint ? 'disabled style="opacity:0.5;"' : ''} style="flex:2; font-size:9px; padding:6px;">🚀 EXECUTE JUMP & ADVANCE TIME</button>
+                            <button class="btn-remove" onclick="window.cancelJumpPlotting()" style="flex:1; font-size:9px; padding:6px;">CANCEL</button>
+                        </div>
+                    </div>
+                `;
+            } else if (isLocked) {
+                jumpPlotterBox = `
+                    <button class="btn-deploy" onclick="window.startJumpPlottingMode()" style="font-size:9px; padding:6px; margin-top:6px;">🌌 PLOT JUMP VECTOR</button>
+                `;
+            }
+
+            content.innerHTML = `
+                <div style="font-size: 11px;">
+                    ${lockStatusHtml}<br>
+                    <strong style="color: #00e1ff; font-size: 13px;">🚀 ${m.name}</strong><br>
+                    <span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br>
+                    <div style="margin:4px 0;">
+                        <label style="color: #6b826a; font-size:10px;">Engine Drive:</label>
+                        <select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">
+                            ${driveOptionsHtml}
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>
+                    ${jumpPlotterBox}
+                    <button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>
+                    ${currentUserRole === 'dm' ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}
+                </div>
+            `;
+        } else if (dynamicTarget.type === 'body') {
+            const p = dynamicTarget.data;
+            const icon = p.isStar ? '⭐' : '🪐';
+
+            let dmBodyEditorBox = '';
+            if (currentUserRole === 'dm') {
+                dmBodyEditorBox = `
+                    <div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
+                        <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span>
+                        <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label>
+                        <input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;">
+                        
+                        <div style="display:flex; gap:6px;">
+                            <div style="flex:1;">
+                                <label style="font-size:9px; color:#6b826a;">Body Type:</label>
+                                <select id="edit-body-type" style="font-size:9px; margin:2px 0;">
+                                    <option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option>
+                                    <option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option>
+                                    <option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option>
+                                    <option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option>
+                                    <option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option>
+                                </select>
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-size:9px; color:#6b826a;">Gravity:</label>
+                                <input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;">
+                            </div>
+                        </div>
+
+                        <label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label>
+                        <input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;">
+
+                        <label style="font-size:9px; color:#6b826a; display:block;">Scan Data / Resources:</label>
+                        <textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea>
+
+                        <button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY PLANETARY SCANS</button>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = `
+                <div style="font-size: 11px;">
+                    ${lockStatusHtml}<br>
+                    <strong style="color: ${p.color}; font-size: 13px;">${icon} ${p.name}</strong><br>
+                    <span style="color: #6b826a;">System:</span> ${p.parentSystem.name}<br>
+                    <span style="color: #6b826a;">Class:</span> ${p.type} | <span style="color: #6b826a;">Grav:</span> ${p.gravity}<br>
+                    <span style="color: #00e5a3; font-weight:bold; margin-top:4px; display:block;">Scans:</span> <span style="color: #d4c5a9;">${p.resources}</span>
+                    <div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>
+                    ${dmBodyEditorBox}
+                </div>
+            `;
+        }
+    }
+
     /* Canvas Main Render Loop */
     function render() {
         const cssWidth = container.clientWidth;
@@ -742,7 +1248,6 @@ window.initGalaxyEngine = function() {
             ctx.restore();
         }
 
-        // Stars & Systems
         for (let s of allSystems) {
             let isFocused = (s.id === focusSystemId);
             let sysOpacity = isFocused ? 1.0 : macroOpacity;
@@ -830,7 +1335,6 @@ window.initGalaxyEngine = function() {
             }
         }
 
-        // Fleet Markers
         for (let m of globalShipMarkersCache) {
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             const size = 10 / window.camera.zoom;
