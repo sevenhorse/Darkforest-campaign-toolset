@@ -905,7 +905,6 @@ window.deleteTerritory = async function(id) {
     loadTerritories();
 };
 
-// --- HYPERLANE ROUTE DRAWING LOGIC ---
 window.startDrawingHyperlane = function() {
     if (currentUserRole !== 'dm') return;
     hyperlaneDrawActive = true;
@@ -1494,11 +1493,7 @@ window.rollShipWeapon = function(vesselId, idx) {
     }
 
     if (wpn.ammo > 0) {
-        if (wpn.ammo < volleys) {
-            alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} shots left! Cannot fire volley of ${volleys}.`);
-            return;
-        }
-        wpn.ammo -= volleys;
+        wpn.ammo -= 1; // A single volley order consumes 1 synchronized battery use
     }
 
     const diceRegex = /^(\d*)d(\d+)$/i;
