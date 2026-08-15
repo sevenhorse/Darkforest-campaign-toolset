@@ -558,6 +558,7 @@
                             <option value="Class M (Red Dwarf)">Class M (Red Dwarf)</option>
                             <option value="Class O (Blue Giant)">Class O (Blue Giant)</option>
                             <option value="Black Hole">Black Hole</option>
+                            <option value="Hidden Anomaly">Hidden Anomaly (Stealth)</option>
                         </select>
                     </div>
 
@@ -586,6 +587,14 @@
                     <button class="btn-reveal" onclick="window.toggleTerritoryTool()" style="margin-top: 4px;">🗺️ OPEN TERRITORY PLOTTER</button>
                     <button class="btn-reveal" onclick="window.toggleHyperlanes()" style="margin-top: 6px;">⚡ TOGGLE HYPERLANE ROUTES</button>
                     <button class="btn-reveal" onclick="window.toggleMeasuringTool()" style="margin-top: 6px;">📏 ACTIVATE TACTICAL RULER</button>
+                    
+                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #00e1ff;">Custom Jump Routes</h4>
+                    <div style="display: flex; gap: 6px; margin-top: 8px;">
+                        <button id="btn-start-hyperlane-draw" class="btn-deploy" onclick="window.startDrawingHyperlane()" style="flex:1; font-size:10px; margin:0;">✏️ PLOT ROUTE</button>
+                        <button id="btn-finish-hyperlane-draw" class="btn-deploy" onclick="window.finishActiveHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✓ SAVE ROUTE</button>
+                        <button id="btn-cancel-hyperlane-draw" class="btn-remove" onclick="window.cancelDrawingHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
+                    </div>
+                    <div id="hyperlane-drawing-status" style="font-size: 10px; color: #00e1ff; margin-top: 6px; display: none;">Route active: Click map to link nodes...</div>
                 </div>
 
                 <!-- SUB-TAB 3: MAINTENANCE & EMERGENCY -->
