@@ -53,6 +53,10 @@ let territoryToolActive = false;
 let territoryDrawActive = false;
 let activeTerritoryVertices = [];
 
+let hyperlaneDrawActive = false;
+let activeHyperlaneNodes = [];
+let globalHyperlanesCache = [];
+
 const driveSpeeds = {
     sublight: { name: "Sublight Thrusters (0.1c)", speed: 10, label: "0.1c Sublight" },
     ftl_class1: { name: "Standard Class 1 Warp Drive", speed: 250, label: "Class 1 Warp" },
@@ -249,6 +253,7 @@ async function fetchUserProfile(user) {
     loadCampaignObjectives();
     loadChatLogs();
     loadTerritories();
+    loadHyperlanes();
     loadCodexEntries();
 }
 
@@ -301,6 +306,40 @@ async function loadTerritories() {
     if (data) {
         globalTerritoriesCache = data;
         renderTerritoryList();
+    }
+}
+
+async function loadHyperlanes() {
+    const { data } = await db.from('hyperlanes').select('*');
+    if (data) globalHyperlanesCache = data;
+}
+
+// --- NEW ANOMALY DETECTION ENGINE ---
+async function checkAnomalyProximity(ship) {
+    if (!ship) return;
+    const DRADIS_RANGE = 180; // Distance required to trigger reveal
+    
+    let anomalies = globalDbSystemsCache.filter(s => s.luminosity === 'Hidden Anomaly');
+    
+    for (let anomaly of anomalies) {
+        let dx = ship.x - anomaly.x;
+        let dy = ship.y - anomaly.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist < DRADIS_RANGE) {
+            // Trigger DRADIS Reveal
+            await db.from('star_systems')
+                .update({ luminosity: 'Revealed Anomaly', color: '#ff3333' })
+                .eq('id', anomaly.id);
+            
+            await db.from('chat_logs').insert({
+                sender_id: 'system',
+                content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' has detected a massive subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}. Sensor locks updated.`,
+                message_type: 'text'
+            });
+            anomaly.luminosity = 'Revealed Anomaly';
+            anomaly.color = '#ff3333';
+        }
     }
 }
 
@@ -1664,6 +1703,7 @@ function initGalaxyEngine() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'star_systems' }, () => { loadGalaxyData(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ship_markers' }, () => { loadGalaxyData(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'territories' }, () => { loadTerritories(); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hyperlanes' }, () => { loadHyperlanes(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'codex_entries' }, () => { loadCodexEntries(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'combat_tracker' }, () => { loadCombatTracker(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_objectives' }, () => { loadCampaignObjectives(); })
@@ -1707,7 +1747,6 @@ function initGalaxyEngine() {
 
         const worldPos = screenToWorld(e.clientX, e.clientY);
         
-        // INTERCEPT: Territory Drawing Logic & Vertex Snapping
         if (territoryDrawActive) {
             const startNode = activeTerritoryVertices[0];
             const snapDist = 30 / camera.zoom;
@@ -1722,6 +1761,12 @@ function initGalaxyEngine() {
             
             activeTerritoryVertices.push({ x: worldPos.x, y: worldPos.y });
             document.getElementById('territory-drawing-status').innerText = `Nodes Placed: ${activeTerritoryVertices.length} (Click initial node or button to save)`;
+            return;
+        }
+
+        if (hyperlaneDrawActive) {
+            activeHyperlaneNodes.push({ x: worldPos.x, y: worldPos.y });
+            document.getElementById('hyperlane-drawing-status').innerText = `Nodes Linked: ${activeHyperlaneNodes.length} (Click Save to finalize)`;
             return;
         }
 
@@ -1846,6 +1891,7 @@ function initGalaxyEngine() {
     window.addEventListener('mouseup', async () => {
         if (draggedMarker) { 
             await db.from('ship_markers').update({ x: draggedMarker.x, y: draggedMarker.y }).eq('id', draggedMarker.id); 
+            await checkAnomalyProximity(draggedMarker);
             db.from('chat_logs').insert({ sender_id: currentUserId, content: `🚀 [NAVIGATION] Fleet token '${draggedMarker.name}' repositioned to X: ${Math.round(draggedMarker.x)}, Y: ${Math.round(draggedMarker.y)}.`, message_type: 'text' });
             draggedMarker = null; 
         }
@@ -1887,6 +1933,7 @@ function initGalaxyEngine() {
     window.addEventListener('touchend', async () => {
         if (draggedMarker) { 
             await db.from('ship_markers').update({ x: draggedMarker.x, y: draggedMarker.y }).eq('id', draggedMarker.id); 
+            await checkAnomalyProximity(draggedMarker);
             db.from('chat_logs').insert({ sender_id: currentUserId, content: `🚀 [NAVIGATION] Fleet token '${draggedMarker.name}' repositioned via mobile telemetry.`, message_type: 'text' });
             draggedMarker = null; 
         }
@@ -1947,6 +1994,7 @@ function initGalaxyEngine() {
             if (pingModeActive) window.togglePingMode();
             if (jumpPlottingActive) window.cancelJumpPlotting();
             if (territoryDrawActive) window.cancelDrawingTerritory();
+            if (hyperlaneDrawActive) window.cancelDrawingHyperlane();
         }
     });
 
@@ -1987,6 +2035,7 @@ function initGalaxyEngine() {
         measuringTapeActive = false;
         pingModeActive = false;
         territoryDrawActive = false;
+        hyperlaneDrawActive = false;
         activeJumpShip = selectedTarget.data;
         jumpTargetPoint = null;
 
@@ -2029,6 +2078,8 @@ function initGalaxyEngine() {
         ship.y = target.y;
 
         await db.from('ship_markers').update({ x: target.x, y: target.y }).eq('id', ship.id);
+
+        await checkAnomalyProximity(ship);
 
         await db.from('chat_logs').insert({
             sender_id: currentUserId,
@@ -2130,13 +2181,13 @@ function initGalaxyEngine() {
     window.toggleMeasuringTool = function() {
         measuringTapeActive = !measuringTapeActive;
         if(!measuringTapeActive) { measureStartPoint = null; measureEndPoint = null; }
-        pingModeActive = false; jumpPlottingActive = false; territoryDrawActive = false;
+        pingModeActive = false; jumpPlottingActive = false; territoryDrawActive = false; hyperlaneDrawActive = false;
         window.updateToolButtonStyles();
     };
 
     window.togglePingMode = function() {
         pingModeActive = !pingModeActive;
-        measuringTapeActive = false; jumpPlottingActive = false; territoryDrawActive = false;
+        measuringTapeActive = false; jumpPlottingActive = false; territoryDrawActive = false; hyperlaneDrawActive = false;
         window.updateToolButtonStyles();
     };
 
@@ -2232,6 +2283,7 @@ function initGalaxyEngine() {
                                     <option value="Class M (Red Dwarf)" ${s.luminosity==='Class M (Red Dwarf)'?'selected':''}>Class M</option>
                                     <option value="Class O (Blue Giant)" ${s.luminosity==='Class O (Blue Giant)'?'selected':''}>Class O</option>
                                     <option value="Black Hole" ${s.luminosity==='Black Hole'?'selected':''}>Black Hole</option>
+                                    <option value="Hidden Anomaly" ${s.luminosity==='Hidden Anomaly'?'selected':''}>Hidden Anomaly (Stealth)</option>
                                 </select>
                             </div>
                             <div style="flex:1;">
@@ -2464,7 +2516,7 @@ function initGalaxyEngine() {
 
         let allSystems = proceduralSystems.concat(dbStarSystems);
 
-        // Hyperlane Trade Routes
+        // Hyperlane Trade Routes (Procedural)
         if (hyperlanesVisible && camera.zoom < 2.0) {
             ctx.strokeStyle = 'rgba(0, 229, 163, 0.12)';
             ctx.lineWidth = 1 / camera.zoom;
@@ -2484,6 +2536,50 @@ function initGalaxyEngine() {
             }
             ctx.stroke();
             ctx.setLineDash([]);
+        }
+
+        // Draw Custom Hand-Drawn Hyperlanes
+        if (hyperlanesVisible) {
+            globalHyperlanesCache.forEach(route => {
+                if (!route.nodes || route.nodes.length < 2) return;
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(route.nodes[0].x, route.nodes[0].y);
+                for (let k = 1; k < route.nodes.length; k++) {
+                    ctx.lineTo(route.nodes[k].x, route.nodes[k].y);
+                }
+                ctx.strokeStyle = route.color || '#00e1ff';
+                ctx.lineWidth = 3 / camera.zoom;
+                ctx.shadowColor = route.color || '#00e1ff';
+                ctx.shadowBlur = 10;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                ctx.restore();
+            });
+        }
+
+        // Draw hyperlane actively being built
+        if (hyperlaneDrawActive && activeHyperlaneNodes.length > 0) {
+            ctx.save();
+            ctx.strokeStyle = '#00e1ff';
+            ctx.lineWidth = 3 / camera.zoom;
+            ctx.beginPath();
+            ctx.moveTo(activeHyperlaneNodes[0].x, activeHyperlaneNodes[0].y);
+            for (let k = 1; k < activeHyperlaneNodes.length; k++) {
+                ctx.lineTo(activeHyperlaneNodes[k].x, activeHyperlaneNodes[k].y);
+            }
+            if (window._lastMouseWorldX !== undefined) {
+                ctx.lineTo(window._lastMouseWorldX, window._lastMouseWorldY);
+            }
+            ctx.stroke();
+            
+            activeHyperlaneNodes.forEach((v) => {
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(v.x, v.y, 4 / camera.zoom, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.restore();
         }
 
         // RENDER SAVED TERRITORIES
@@ -2585,11 +2681,31 @@ function initGalaxyEngine() {
                 grd.addColorStop(0, s.color + '33'); grd.addColorStop(1, s.color + '00');
                 ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill();
             } 
-            else if (s.type === 'Black Hole') {
+            else if (s.type === 'Black Hole' && s.luminosity !== 'Hidden Anomaly' && s.luminosity !== 'Revealed Anomaly') {
                 ctx.strokeStyle = `rgba(255, 100, 50, ${0.6 * sysOpacity})`; ctx.lineWidth = 2 / camera.zoom;
                 ctx.beginPath(); ctx.ellipse(s.x, s.y, s.size * 1.8, s.size * 0.6, time * 0.001, 0, Math.PI * 2); ctx.stroke();
                 ctx.fillStyle = '#000000'; ctx.shadowColor = `rgba(100, 50, 255, ${0.8 * sysOpacity})`; ctx.shadowBlur = 15;
                 ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+            }
+            else if (s.luminosity === 'Hidden Anomaly') {
+                if (currentUserRole === 'dm') {
+                    ctx.globalAlpha = sysOpacity * 0.5; // Ghosted for DM
+                    ctx.strokeStyle = '#ff3333';
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath(); ctx.arc(s.x, s.y, s.size * 2, 0, Math.PI * 2); ctx.stroke();
+                    ctx.setLineDash([]);
+                    if (camera.zoom > 0.5) {
+                        ctx.fillStyle = '#ff3333';
+                        ctx.font = `${Math.max(8, 10 / camera.zoom)}px Courier New`;
+                        ctx.fillText("[HIDDEN]", s.x + 12, s.y - 10);
+                    }
+                }
+            } 
+            else if (s.luminosity === 'Revealed Anomaly') {
+                ctx.fillStyle = '#ff3333';
+                ctx.shadowColor = '#ff3333'; ctx.shadowBlur = 15;
+                ctx.beginPath(); ctx.arc(s.x, s.y, s.size * 1.5, 0, Math.PI * 2); ctx.fill();
+                ctx.shadowBlur = 0;
             }
             else {
                 ctx.fillStyle = s.color;
