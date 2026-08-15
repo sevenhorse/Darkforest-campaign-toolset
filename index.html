@@ -69,6 +69,10 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')">
                     <span class="tab-text">Manifest</span>
                 </button>
+                <!-- NEW VESSEL DECK BUTTON -->
+                <button class="term-tab-btn-vert" id="term-tab-btn-vessel" onclick="window.switchTermTab('vessel')">
+                    <span class="tab-text">Vessel Deck</span>
+                </button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')">
                     <span class="tab-text">Intel & Ops</span> <span class="tab-badge" id="badge-notes">0</span>
                 </button>
@@ -246,6 +250,48 @@
                                 </div>
                             </div>
                             <button class="btn-reveal" onclick="window.addNewCargoEntry()" style="margin-top: 12px; font-size:11px;">+ STORE IN HOLD</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NEW: VESSEL DIAGNOSTICS & HARDPOINTS TAB -->
+                <div id="term-panel-vessel" class="term-panel-content">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
+                        <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
+                            <label style="font-size: 11px; color: #00e5a3; font-weight: bold;">DIAGNOSTIC TARGET:</label>
+                            <select id="vessel-deck-select" onchange="window.renderVesselDeck()" style="width: 280px; margin: 0; font-size: 11px; background: #0a1410; color: #00e5a3;"></select>
+                        </div>
+                        <button class="btn-reveal" onclick="window.broadcastVesselStatus()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">BROADCAST STATUS TO COMMS</button>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <!-- Integrity Cascade -->
+                        <div class="sheet-section">
+                            <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Integrity Diagnostics</h4>
+                            <div id="vessel-health-container">
+                                <!-- Rendered via JS -->
+                            </div>
+                        </div>
+
+                        <!-- Weapon Hardpoints -->
+                        <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
+                            <h4 style="color:#ff6b6b; border-bottom: 1px solid #ff3333; padding-bottom: 4px;">Weapon Hardpoints</h4>
+                            <div id="vessel-weapons-container" style="max-height: 250px; overflow-y: auto; margin-bottom: 10px;"></div>
+                            
+                            <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
+                                <label style="font-size: 9px; color: #ffaaaa;">Mount New Weapon System:</label>
+                                <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                    <input type="text" id="new-ship-wpn-name" placeholder="Battery Name" style="flex:2; margin:0; border-color:#ff3333;">
+                                    <input type="text" id="new-ship-wpn-dice" placeholder="d20" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+                                    <input type="text" id="new-ship-wpn-mod" placeholder="+Mod" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+                                </div>
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <label style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                        <input type="checkbox" id="new-ship-wpn-explodes" checked style="margin:0;"> Exploding Dice
+                                    </label>
+                                    <button class="btn-remove" onclick="window.addShipWeapon()" style="width:auto; font-size:10px; margin:0; padding: 4px 12px;">+ INSTALL HARDPOINT</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
