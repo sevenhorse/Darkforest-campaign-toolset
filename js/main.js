@@ -905,6 +905,7 @@ window.deleteTerritory = async function(id) {
     loadTerritories();
 };
 
+// --- HYPERLANE ROUTE DRAWING LOGIC ---
 window.startDrawingHyperlane = function() {
     if (currentUserRole !== 'dm') return;
     hyperlaneDrawActive = true;
@@ -1280,7 +1281,8 @@ window.renderVesselDeck = function() {
                         <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>
                         <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
                     </div>
-                    <div style="display:flex; gap:6px;">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="number" id="wpn-volley-${vessel.id}-${idx}" value="1" min="1" title="Volley / Burst Count" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
                         <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
                         <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
                     </div>
@@ -1478,6 +1480,9 @@ window.rollShipWeapon = function(vesselId, idx) {
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
 
+    let volleyInput = document.getElementById(`wpn-volley-${vesselId}-${idx}`);
+    let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
+
     if (wpn.cooldown > 0) {
         if (!confirm(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`)) return;
         wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
@@ -1488,15 +1493,22 @@ window.rollShipWeapon = function(vesselId, idx) {
         return;
     }
 
-    if (wpn.ammo > 0) wpn.ammo -= 1;
+    if (wpn.ammo > 0) {
+        if (wpn.ammo < volleys) {
+            alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} shots left! Cannot fire volley of ${volleys}.`);
+            return;
+        }
+        wpn.ammo -= volleys;
+    }
 
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = wpn.dice.trim().match(diceRegex);
     if (!match) { alert("Invalid dice format. Use formats like 'd20' or '2d6'."); return; }
 
-    let numDice = parseInt(match[1]) || 1;
+    let baseNumDice = parseInt(match[1]) || 1;
+    let numDice = baseNumDice * volleys;
     let diceFaces = parseInt(match[2]);
-    let modVal = parseInt(wpn.modifier) || 0;
+    let modVal = (parseInt(wpn.modifier) || 0) * volleys;
 
     let total = 0;
     let breakdown = [];
@@ -1523,7 +1535,8 @@ window.rollShipWeapon = function(vesselId, idx) {
     db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
     window.renderVesselDeck();
 
-    window.broadcastRoll(`[${vessel.name}] FIRING [${wpn.loc || 'Mount'}]: ${wpn.name}`, breakdownText, total);
+    let volleyTag = volleys > 1 ? ` (x${volleys} Volley)` : '';
+    window.broadcastRoll(`[${vessel.name}] FIRING [${wpn.loc || 'Mount'}]${volleyTag}: ${wpn.name}`, breakdownText, total);
 };
 
 window.broadcastVesselStatus = async function() {
