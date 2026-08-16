@@ -49,7 +49,6 @@ window.sanitizeCargo = function(inv) {
             ]
         };
     }
-    // Economy feature: initialize synth capacity if missing
     if (inv.synth_capacity === undefined) inv.synth_capacity = 10;
     return inv;
 };
@@ -91,7 +90,6 @@ window.renderTerminalCargoDeck = function() {
     let subtabNames = { perishables: '🍏 Perishables', expendables: '⚙️ Expendables', misc: '📦 Miscellaneous' };
     if (title) title.innerText = `${subtabNames[activeCargoSubtab]} Holdings`;
 
-    // Economy UI: Elder E-M Synthesizer interface with full active-conversion mechanics
     let synthHtml = `
         <div style="background:#0a1410; border:1px solid #00e5a3; padding:8px; margin-bottom:12px; border-radius:2px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -148,7 +146,6 @@ window.renderTerminalCargoDeck = function() {
     container.innerHTML = html;
 };
 
-// Automates the E-M Synthesizer conversion to the Manifest
 window.executeSynthesis = async function(vesselId) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -163,14 +160,13 @@ window.executeSynthesis = async function(vesselId) {
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     
     if (cargo.synth_capacity < qty) {
+        if (window.AudioEngine) window.AudioEngine.playError();
         alert(`Insufficient synthesizer capacity. You need ${qty} Tons, but only have ${cargo.synth_capacity} available.`);
         return;
     }
     
-    // Deduct the mass from the capacity
     cargo.synth_capacity -= qty;
     
-    // Append or add the new item to the chosen category
     if (!cargo[cat]) cargo[cat] = [];
     let existingItem = cargo[cat].find(i => i.name.toLowerCase() === name.toLowerCase());
     
@@ -180,19 +176,17 @@ window.executeSynthesis = async function(vesselId) {
         cargo[cat].push({ name: name, qty: qty, unit: "Units" });
     }
     
-    // Save to database
     await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
     vessel.cargo_inventory = cargo;
     
-    // Reset inputs
     document.getElementById(`synth-name-${vesselId}`).value = '';
     document.getElementById(`synth-qty-${vesselId}`).value = '1';
     
-    // Automatically switch the UI to the tab where the item was just created
     activeCargoSubtab = cat;
     window.switchCargoSubtab(cat);
     
-    // Broadcast the action to secure comms
+    if (window.AudioEngine) window.AudioEngine.playShoot();
+
     db.from('chat_logs').insert({
         sender_id: currentUserId,
         content: `✨ [SYNTHESIS] '${vessel.name}' converted ${qty} Ton(s) of mass into **${name}**.`,
@@ -552,6 +546,7 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
             });
             if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
         } else {
+            if (window.AudioEngine) window.AudioEngine.playError();
             alert(`Cannot repair hull! Requires at least ${cost} Titanium Armor Hull Plate(s) in Expendables cargo.`);
             return;
         }
@@ -843,6 +838,8 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
         </div>
     `;
 
+    if (window.AudioEngine) window.AudioEngine.playShoot();
+
     if(typeof window.broadcastRoll === 'function') {
         await window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
     }
@@ -866,12 +863,14 @@ window.rollShipWeapon = async function(vesselId, idx) {
     } 
     
     if (wpn.ammo === 0) {
+        if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[EMPTY] ${wpn.name} is out of ammunition!`); 
         return;
     }
 
     if (wpn.ammo > 0) {
         if (wpn.ammo < volleys) {
+            if (window.AudioEngine) window.AudioEngine.playError();
             alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
             return;
         }
@@ -972,6 +971,8 @@ window.rollShipWeapon = async function(vesselId, idx) {
             ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
         </div>`;
         
+    if (window.AudioEngine) window.AudioEngine.playShoot();
+
     if(typeof window.broadcastRoll === 'function') {
         await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
     }
@@ -1214,6 +1215,8 @@ window.rollArsenalWeapon = async function(idx) {
         </div>
     `;
     
+    if (window.AudioEngine) window.AudioEngine.playShoot();
+
     if(typeof window.broadcastRoll === 'function') {
         await window.broadcastRoll(`[${myProf.username || 'Commander'}] FIRES ${wpn.name}`, breakdownString, total);
     }
@@ -1280,6 +1283,8 @@ window.executeDicePoolRoll = async function() {
     document.querySelectorAll('.roll-stat-cb').forEach(cb => cb.checked = false);
     document.querySelectorAll('.roll-skill-cb').forEach(cb => cb.checked = false);
     document.getElementById('roll-extra-mod').value = 0;
+
+    if (window.AudioEngine) window.AudioEngine.playShoot();
 
     if(typeof window.broadcastRoll === 'function') {
         await window.broadcastRoll(`[${myProf.username || 'Commander'}] STAT/SKILL CHECK`, breakdownString, total);
@@ -1356,6 +1361,7 @@ window.advanceCombatRound = async function() {
     if (!confirm("Advance combat round? This will process cooldowns, overheat, and strike craft fuel globally.")) return;
 
     let anyChanged = false;
+    let klaxonTriggered = false;
 
     for (let vessel of globalShipMarkersCache) {
         let changed = false;
@@ -1374,6 +1380,7 @@ window.advanceCombatRound = async function() {
                 changed = true; 
                 if (sq.loiter === 0) {
                     flightLog.push(`⚠️ ${sq.name} is BINGO FUEL! Must return to hangar!`);
+                    klaxonTriggered = true;
                 }
             }
         });
@@ -1398,6 +1405,10 @@ window.advanceCombatRound = async function() {
     if (anyChanged) {
         if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
         if(typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+    }
+
+    if (klaxonTriggered && window.AudioEngine) {
+        window.AudioEngine.playKlaxon();
     }
 
     await db.from('chat_logs').insert({
