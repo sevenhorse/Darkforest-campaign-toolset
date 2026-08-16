@@ -278,6 +278,18 @@ window.saveTerminalProfile = async function() {
     let skillsPayload = { character_id: charData.id };
     skillList.forEach(skill => { const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_'); skillsPayload[safeKey] = parseInt(safeGet(`skill-${safeKey}`)) || 0; });
     await db.from('character_skills').upsert(skillsPayload, { onConflict: 'character_id' });
+
+    // Patch the local profile cache immediately so handle/avatar changes are reflected
+    // right away (roster, chat feed, presence) instead of waiting on a reload or the
+    // next chat message to trigger a re-render against fresh data.
+    const newUsername = safeGet('term-username'); const newAvatar = safeGet('term-avatar');
+    let myProf = allProfiles.find(p => p.id === currentUserId);
+    if (myProf) { myProf.username = newUsername; myProf.avatar_url = newAvatar; }
+    if (typeof window.refreshMyPresence === 'function' && myProf) window.refreshMyPresence(myProf);
+    if (typeof renderChatFeed === 'function') renderChatFeed();
+    if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
+    if (typeof window.populateCommsRecipients === 'function') window.populateCommsRecipients();
+
     alert("Character dossier & stats secured to database.");
     if (typeof loadAllProfiles === 'function') loadAllProfiles();
 };
