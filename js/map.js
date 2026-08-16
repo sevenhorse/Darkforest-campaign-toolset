@@ -448,3 +448,152 @@ window.initGalaxyEngine = function() {
     }
     render();
 };
+/* ==========================================================================
+   MISSING MAP TOOLS BLOCK (Ruler, Pings, Jumps, Territories & Bookmarks)
+   ========================================================================== */
+
+window.toggleMeasuringTool = function() {
+    window.measuringTapeActive = !window.measuringTapeActive;
+    if(!window.measuringTapeActive) { window.measureStartPoint = null; window.measureEndPoint = null; }
+    window.pingModeActive = false; window.jumpPlottingActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
+    window.updateToolButtonStyles();
+};
+
+window.togglePingMode = function() {
+    window.pingModeActive = !window.pingModeActive;
+    window.measuringTapeActive = false; window.jumpPlottingActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
+    window.updateToolButtonStyles();
+};
+
+window.toggleTerritoryTool = function() {
+    if (currentUserRole !== 'dm') return; 
+    window.territoryToolActive = !window.territoryToolActive;
+    
+    const panel = document.getElementById('territory-control-panel'); 
+    panel.style.display = window.territoryToolActive ? 'block' : 'none';
+    
+    if (window.territoryToolActive) {
+        // Fix: Forces the lists to populate when panel is opened!
+        if (typeof window.populateTerritoryFactionSelect === 'function') window.populateTerritoryFactionSelect();
+        if (typeof window.renderTerritoryList === 'function') window.renderTerritoryList();
+    } else {
+        window.cancelDrawingTerritory(); 
+    }
+    window.updateToolButtonStyles();
+};
+
+window.startDrawingTerritory = function() { window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+window.finishActiveTerritory = async function() {
+    if (window.activeTerritoryVertices.length < 3) { alert("Requires at least 3 nodes."); return; }
+    const name = document.getElementById('territory-name-input').value || 'New Sector'; const color = document.getElementById('territory-color-input').value || '#00e5a3'; const faction = document.getElementById('territory-faction-select') ? document.getElementById('territory-faction-select').value : '';
+    await db.from('territories').insert({ name, color, vertices: window.activeTerritoryVertices, faction_name: faction }); window.cancelDrawingTerritory(); if (typeof window.loadTerritories === 'function') window.loadTerritories();
+};
+window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
+
+window.toggleHyperlanes = function() {
+    if (currentUserRole === 'dm') { const hBtn = document.getElementById('btn-start-hyperlane-draw'); if(hBtn && hBtn.style.display !== 'none') { window.hyperlanesVisible = !window.hyperlanesVisible; } } else { window.hyperlanesVisible = !window.hyperlanesVisible; }
+    window.updateToolButtonStyles();
+};
+
+window.startDrawingHyperlane = function() { window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+window.finishActiveHyperlane = async function() {
+    if (window.activeHyperlaneNodes.length < 2) { alert("Requires at least 2 nodes."); return; }
+    await db.from('hyperlanes').insert({ name: 'Trade Route', color: '#00e1ff', nodes: window.activeHyperlaneNodes });
+    window.cancelDrawingHyperlane(); if (typeof loadHyperlanes === 'function') loadHyperlanes();
+};
+window.cancelDrawingHyperlane = function() { window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'block'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'none'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'none'; document.getElementById('hyperlane-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
+
+window.triggerTacticalPing = function(x, y) {
+    if (!realtimeChannel) return;
+    if (window.AudioEngine) window.AudioEngine.playPing();
+    realtimeChannel.send({ type: 'broadcast', event: 'tactical_ping', payload: { x, y, username: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3' } });
+    window.activePings.push({ x, y, color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3', user: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', startTime: Date.now() });
+    if(window.pingModeActive) window.togglePingMode();
+};
+
+window.updateToolButtonStyles = function() {
+    const mBtn = document.getElementById('measuring-tape-toggle-btn'); const pBtn = document.getElementById('ping-tool-toggle-btn'); const tBtn = document.getElementById('territory-tool-toggle-btn'); const hBtn = document.getElementById('btn-start-hyperlane-draw');
+    if(mBtn) { mBtn.style.borderColor = window.measuringTapeActive ? '#00e5a3' : '#3c4e36'; mBtn.style.color = window.measuringTapeActive ? '#00e5a3' : '#6b826a'; }
+    if(pBtn) { pBtn.style.borderColor = window.pingModeActive ? '#00e5a3' : '#3c4e36'; pBtn.style.color = window.pingModeActive ? '#00e5a3' : '#6b826a'; }
+    if(tBtn) { tBtn.style.borderColor = window.territoryDrawActive ? '#00e5a3' : '#3c4e36'; tBtn.style.color = window.territoryDrawActive ? '#00e5a3' : '#6b826a'; }
+    if(hBtn) { hBtn.style.borderColor = window.hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = window.hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
+};
+
+window.clearSelectedTarget = function() {
+    window.selectedTarget = null;
+    if (window.jumpPlottingActive) window.cancelJumpPlotting();
+    if (window.measuringTapeActive) window.toggleMeasuringTool();
+    if (window.hyperlaneDrawActive) window.cancelDrawingHyperlane();
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+};
+
+window.lockCameraOnSelected = function() {
+    if (!window.selectedTarget || !window.selectedTarget.data) return;
+    let targetX = window.selectedTarget.data.x; let targetY = window.selectedTarget.data.y;
+    if (window.selectedTarget.type === 'body' && window.selectedTarget.data.parentSystem) { targetX = window.selectedTarget.data.parentSystem.x; targetY = window.selectedTarget.data.parentSystem.y; }
+    window.camera.x = -targetX * window.camera.zoom; window.camera.y = -targetY * window.camera.zoom;
+};
+
+window.startJumpPlottingMode = function() {
+    if (!window.selectedTarget || window.selectedTarget.type !== 'ship') return;
+    window.jumpPlottingActive = true; window.measuringTapeActive = false; window.pingModeActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
+    window.activeJumpShip = window.selectedTarget.data; window.jumpTargetPoint = null;
+    window.selectedDriveSpeed = driveSpeeds[window.activeJumpShip.drive_type || 'ftl_class1'].speed;
+    window.updateToolButtonStyles(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+};
+window.cancelJumpPlotting = function() { window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.setDriveSpeedKey = function(key) { if (driveSpeeds[key]) { window.selectedDriveSpeed = driveSpeeds[key].speed; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); } };
+window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId) { window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; let cargo = ship.cargo_inventory || {}; cargo.iff = newIff; await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', shipId); ship.cargo_inventory = cargo; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+
+window.executePlottedJump = async function() {
+    if (!window.activeJumpShip || !window.jumpTargetPoint) return;
+    let ship = window.activeJumpShip; let target = window.jumpTargetPoint;
+    let dist = Math.hypot(target.x - ship.x, target.y - ship.y);
+    let tripHours = Math.max(1, Math.round(dist / window.selectedDriveSpeed));
+    let fuelCost = Math.max(1, Math.round(dist / 100)); if (window.selectedDriveSpeed < 50) fuelCost = 0;
+    
+    let cargo = ship.cargo_inventory || {}; let expendables = cargo.expendables || [];
+    let fuelIdx = expendables.findIndex(i => i.name.toLowerCase().includes('energy core') || i.name.toLowerCase().includes('fuel'));
+    
+    if (fuelCost > 0) {
+        if (fuelIdx >= 0 && expendables[fuelIdx].qty >= fuelCost) { expendables[fuelIdx].qty -= fuelCost; cargo.expendables = expendables; } 
+        else { if (window.AudioEngine) window.AudioEngine.playError(); alert(`Insufficient Fuel! Requires ${fuelCost} Energy Cores.`); return; }
+    }
+
+    if (window.AudioEngine) window.AudioEngine.playWarp();
+    let oldTime = window.universeTimeHours; window.universeTimeHours += tripHours; localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+    if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
+
+    ship.x = target.x; ship.y = target.y; ship.cargo_inventory = cargo;
+    await db.from('ship_markers').update({ x: target.x, y: target.y, cargo_inventory: cargo }).eq('id', ship.id);
+    if(typeof checkAnomalyProximity === 'function') await checkAnomalyProximity(ship);
+    if(typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+
+    await db.from('chat_logs').insert({ sender_id: currentUserId, content: `🚀 [FTL JUMP] Vessel '${ship.name}' completed jump to ${target.name}. Trip: ${tripHours} hrs.`, message_type: 'text' });
+    window.cancelJumpPlotting(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+};
+
+window.toggleBookmarkSelected = function() {
+    if (!window.selectedTarget || !window.selectedTarget.data) return;
+    let existsIndex = bookmarkedTargets.findIndex(b => b.data.id === window.selectedTarget.data.id);
+    if (existsIndex >= 0) { bookmarkedTargets.splice(existsIndex, 1); } else { bookmarkedTargets.push({ type: window.selectedTarget.type, data: window.selectedTarget.data }); }
+    localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+};
+window.shareBookmarkToChat = function(name, type) { db.from('chat_logs').insert({ sender_id: currentUserId, content: `Shared Coordinate 📍 [${type.toUpperCase()}]: ${name}`, message_type: 'text' }); alert("Broadcasted to Comms!"); };
+window.jumpToBookmark = function(index) { let b = bookmarkedTargets[index]; if (!b) return; window.selectedTarget = b; window.lockCameraOnSelected(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.deleteBookmark = function(index) { bookmarkedTargets.splice(index, 1); localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.jumpToRecent = function(index) { let r = recentTargets[index]; if (!r) return; window.selectedTarget = r; window.lockCameraOnSelected(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+
+window.saveDMStarProperties = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    const name = document.getElementById('edit-star-name').value; const ownership = document.getElementById('edit-star-ownership').value; const luminosity = document.getElementById('edit-star-luminosity').value; const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
+    await db.from('star_systems').update({ name, ownership, luminosity, industry_tier: tier }).eq('id', id); alert("Parameters updated."); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+};
+window.saveDMBodyProperties = function(id) {
+    if (currentUserRole !== 'dm' || !window.selectedTarget || window.selectedTarget.type !== 'body') return;
+    let b = window.selectedTarget.data; b.name = document.getElementById('edit-body-name').value; b.type = document.getElementById('edit-body-type').value; b.gravity = document.getElementById('edit-body-gravity').value; b.atmosphere = document.getElementById('edit-body-atmosphere').value; b.resources = document.getElementById('edit-body-resources').value;
+    if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); alert("Celestial body updated locally.");
+};
+window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!confirm("Destroy star system?")) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
+window.deleteShipToken = async function(id) { if (currentUserRole !== 'dm') return; if(!confirm("Decommission token?")) return; await db.from('ship_markers').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
