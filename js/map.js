@@ -339,7 +339,7 @@ window.initGalaxyEngine = function() {
         if (heat > 0.85) { color = '#000000'; luminosity = 'Singularity'; hazard = 'Gravity Well'; } else if (heat > 0.5) { color = '#ffe9c4'; luminosity = 'Class G (Yellow)'; hazard = 'None'; }
         proceduralSystems.push({ id: `proc-core-${i}`, name: `Core Sector-${2000 + i}`, x, y, size: rng() * 2.5 + 3.5, color, type: luminosity === 'Singularity' ? 'Black Hole' : 'Star', luminosity, hazard, multiType: rng() > 0.7 ? 'Binary' : 'Single', ownership: 'Galactic Core', isCustom: false });
     }
-    for (let i = 0; i < 1200; i++) {
+    for (let i = 0; i < 2400; i++) {
         let arm = i % 4; let r = Math.pow(rng(), 0.6) * (galaxyRadius - coreRadius) + coreRadius;
         let spiralTheta = (Math.log(r / coreRadius) * 2.2) + ((arm * 2 * Math.PI) / 4);
         let finalTheta = spiralTheta + (rng() - 0.5) * (0.35 + (r / galaxyRadius) * 0.4);
