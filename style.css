@@ -322,9 +322,10 @@ canvas { display: block; width: 100%; height: 100%; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: #3c4e36; border-radius: 3px; }
 /* ==========================================================================
-   MOBILE RESPONSIVENESS (PORTRAIT MODE PATCH)
+   MOBILE RESPONSIVENESS (PORTRAIT & LANDSCAPE PATCH)
    ========================================================================== */
 
+/* Target phones in Portrait (and smaller Landscape screens) */
 @media screen and (max-width: 768px) {
     /* Convert the terminal layout from Side-by-Side to Top-and-Bottom */
     .term-layout {
@@ -345,10 +346,9 @@ canvas { display: block; width: 100%; height: 100%; }
         border-bottom: 2px solid #3c4e36 !important;
         padding-bottom: 10px !important;
         margin-bottom: 10px !important;
-        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+        -webkit-overflow-scrolling: touch;
     }
 
-    /* Adjust the sidebar buttons to sit side-by-side */
     .term-tab-btn-vert {
         display: inline-flex !important;
         width: auto !important;
@@ -357,12 +357,11 @@ canvas { display: block; width: 100%; height: 100%; }
         white-space: nowrap !important;
     }
 
-    /* Hide the collapse sidebar button on mobile (not needed for horizontal rail) */
     .term-sidebar button[onclick="window.toggleSidebar()"] {
         display: none !important;
     }
 
-    /* Force all inline grid columns (1fr 1fr, 2fr 1fr, etc.) to stack vertically */
+    /* Force all inline grid columns to stack vertically */
     div[style*="grid-template-columns"] {
         grid-template-columns: 1fr !important;
         display: flex !important;
@@ -370,29 +369,61 @@ canvas { display: block; width: 100%; height: 100%; }
         gap: 10px !important;
     }
 
-    /* Mass Effect Codex Rail - Make it horizontal */
-    .codex-me-deck {
+    /* Fix the top Header Bars in Cargo & Vessel Tabs */
+    #term-panel-cargo > div:first-child,
+    #term-panel-vessel > div:first-child {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+    }
+
+    /* Nuke hardcoded 280px widths on dropdowns */
+    #cargo-vessel-select, 
+    #vessel-deck-select {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    /* Allow sub-tabs (Perishables, Expendables) to wrap instead of pushing off-screen */
+    .cargo-subtabs {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 4px !important;
+    }
+
+    .cargo-subtab-btn {
+        flex: 1 1 100% !important; /* Forces them to stack neatly */
+        white-space: normal !important;
+        font-size: 10px !important;
+        padding: 6px !important;
+    }
+
+    /* Convert rigid side-by-side rows (Cargo items, Weapons) to stacked rows */
+    #terminal-cargo-items-container .note-card, 
+    #vessel-weapons-container .note-card, 
+    #vessel-deployed-container .note-card,
+    #vessel-embarked-container .note-card {
         display: flex !important;
         flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
     }
 
-    .codex-me-rail {
+    /* Ensure buttons inside those cards wrap and stretch properly */
+    #terminal-cargo-items-container .note-card > div,
+    #vessel-weapons-container .note-card > div,
+    #vessel-deployed-container .note-card > div,
+    #vessel-embarked-container .note-card > div {
         width: 100% !important;
-        display: flex !important;
-        flex-direction: row !important;
-        overflow-x: auto !important;
-        border-right: none !important;
-        border-bottom: 1px solid #ff6b6b !important;
-        margin-bottom: 10px !important;
+        justify-content: flex-start !important;
+        flex-wrap: wrap !important;
     }
 
-    .codex-me-btn {
-        width: auto !important;
-        margin-right: 8px !important;
-        margin-bottom: 0 !important;
+    /* Synthesizer Form Wrap */
+    div[style*="border-top:1px dashed #3c4e36"] {
+        flex-wrap: wrap !important;
     }
-
-    /* Ensure content doesn't overflow horizontally */
+    
     .term-content-area {
         width: 100% !important;
         max-width: 100% !important;
@@ -400,15 +431,42 @@ canvas { display: block; width: 100%; height: 100%; }
         box-sizing: border-box !important;
     }
 
-    /* Make inputs and selects stretch properly instead of spilling over */
     input, select, textarea {
         max-width: 100% !important;
         box-sizing: border-box !important;
     }
     
-    /* Ensure specific combat tracker / cargo lists fit */
     .sheet-section {
         width: 100% !important;
         box-sizing: border-box !important;
+    }
+
+    /* Codex Rail */
+    .codex-me-deck { display: flex !important; flex-direction: column !important; }
+    .codex-me-rail {
+        width: 100% !important; display: flex !important; flex-direction: row !important;
+        overflow-x: auto !important; border-right: none !important; border-bottom: 1px solid #ff6b6b !important;
+        margin-bottom: 10px !important;
+    }
+    .codex-me-btn { width: auto !important; margin-right: 8px !important; margin-bottom: 0 !important; }
+}
+
+/* Target ultra-short landscape screens (phones turned sideways) */
+@media screen and (max-height: 500px) {
+    #character-terminal {
+        height: 100vh !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        border-radius: 0 !important;
+        padding: 10px !important;
+    }
+    
+    /* Compress containers to allow scrolling */
+    #terminal-cargo-items-container,
+    #vessel-weapons-container,
+    #vessel-deployed-container {
+        max-height: 40vh !important; 
     }
 }
