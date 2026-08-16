@@ -1,6 +1,8 @@
 /* ==========================================================================
    js/db.js - Core State, Auth & Database Sync
    ========================================================================== */
+console.log('%c [SYSTEM] DB.JS LOADED SUCCESSFULLY', 'color: #00e5a3; font-weight: bold; font-size: 14px;');
+
 const SUPABASE_URL = 'https://uodeeyfaizbjplvvslry.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_7Kj1D_Frh3v0MLNuAyyROQ_rcaTx2F8';
 
