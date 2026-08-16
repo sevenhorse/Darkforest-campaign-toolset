@@ -333,7 +333,7 @@ window.initGalaxyEngine = function() {
     const coreRadius = 1400; const galaxyRadius = 11000;
     
     proceduralSystems.push({ id: 'proc-core-blackhole', name: 'Sagittarius Prime', x: 0, y: 0, size: 10, color: '#000000', type: 'Black Hole', luminosity: 'Supermassive Singularity', hazard: 'Gravity Well', multiType: 'Single', ownership: 'Uninhabitable Core', isCustom: false });
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 240; i++) {
         let r = Math.pow(rng(), 0.7) * coreRadius + 120; let theta = rng() * Math.PI * 2; let x = Math.cos(theta) * r; let y = Math.sin(theta) * r; let heat = rng();
         let color = '#7694ff'; let luminosity = 'Class O (Blue Giant)'; let hazard = 'Pulsar';
         if (heat > 0.85) { color = '#000000'; luminosity = 'Singularity'; hazard = 'Gravity Well'; } else if (heat > 0.5) { color = '#ffe9c4'; luminosity = 'Class G (Yellow)'; hazard = 'None'; }
