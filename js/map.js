@@ -248,7 +248,7 @@ window.handleGlobalSearchInput = function(query) {
     query = (query || '').trim().toLowerCase();
     if (!query) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; window._globalSearchResults = []; return; }
 
-    let allSystems = proceduralSystems.concat(globalDbSystemsCache);
+    let allSystems = globalProceduralSystemsCache.concat(globalDbSystemsCache);
     let results = [];
     allSystems.forEach(s => { if (s.name && s.name.toLowerCase().includes(query)) results.push({ type: 'star', data: s }); });
     globalShipMarkersCache.forEach(m => { if (m.name && m.name.toLowerCase().includes(query)) results.push({ type: 'ship', data: m }); });
