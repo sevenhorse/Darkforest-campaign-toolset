@@ -676,6 +676,7 @@ window.initGalaxyEngine = function() {
 
         if(typeof checkAnomalyProximity === 'function') await checkAnomalyProximity(ship);
         
+        // Economy: Trigger 24h checks if the jump crossed daily thresholds
         if(typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
 
         let fuelLog = fuelCost > 0 ? ` Consumed ${fuelCost}x Energy Cores.` : ``;
@@ -1348,24 +1349,28 @@ window.initGalaxyEngine = function() {
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             const size = 10 / window.camera.zoom;
 
+            // Resolve IFF Color
             let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied';
-            let iffColor = '#00e5a3'; 
-            if (iff === 'hostile') iffColor = '#ff3333'; 
-            if (iff === 'neutral') iffColor = '#ffaa00'; 
+            let iffColor = '#00e5a3'; // Allied (Cyan/Green)
+            if (iff === 'hostile') iffColor = '#ff3333'; // Foe (Red)
+            if (iff === 'neutral') iffColor = '#ffaa00'; // Neutral (Amber)
 
+            // Draw IFF Tactical Target Ring
             ctx.strokeStyle = iffColor;
             ctx.lineWidth = 1.5 / window.camera.zoom;
             ctx.setLineDash([8 / window.camera.zoom, 4 / window.camera.zoom]);
             ctx.beginPath();
             ctx.arc(m.x, m.y, size * 1.8, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.setLineDash([]); 
+            ctx.setLineDash([]); // Reset line dash for other drawings
 
+            // Draw Core Ship Token
             ctx.fillStyle = m.color || '#00e1ff';
             ctx.beginPath(); ctx.moveTo(m.x, m.y - size); ctx.lineTo(m.x + size, m.y); ctx.lineTo(m.x, m.y + size); ctx.lineTo(m.x - size, m.y); ctx.closePath(); ctx.fill();
             
+            // Draw Ship Designation 
             if (window.camera.zoom > 0.1) { 
-                ctx.fillStyle = iffColor; 
+                ctx.fillStyle = iffColor; // Text color matches IFF status
                 ctx.font = `${Math.max(9, 11 / window.camera.zoom)}px Courier New`; 
                 ctx.fillText(m.name, m.x + 18 / window.camera.zoom, m.y + 4 / window.camera.zoom); 
             }
