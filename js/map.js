@@ -6,12 +6,6 @@ window.camera = { x: 0, y: 0, zoom: 0.2, isDragging: false, startX: 0, startY: 0
 window.draggedMarker = null; 
 window.draggedStar = null;
 
-window.measuringTapeActive = false; window.measureStartPoint = null; window.measureEndPoint = null;
-window.pingModeActive = false; window.activePings = [];
-window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; window.selectedDriveSpeed = 250;
-window.territoryToolActive = false; window.territoryDrawActive = false; window.activeTerritoryVertices = [];
-window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = [];
-
 function stringToHash(str) { let hash = 0; for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; } return Math.abs(hash); }
 function mulberry32(a) { return function() { var t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 8, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
@@ -58,264 +52,7 @@ window.getSystemBodies = function(system) {
     generatedSystems[system.id] = bodies; return bodies;
 };
 
-/* FOW ENGINE: Removed the DM God-Mode Bypass so the DM sees what players see */
-window.getFowTier = function(system) {
-    if (window.scannedSystems && window.scannedSystems.includes(system.id)) return 3; // Tier 3
-    let inRange = false;
-    for (let m of globalShipMarkersCache) {
-        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied') || currentUserRole === 'dm') {
-            if (Math.hypot(m.x - system.x, m.y - system.y) <= 300) { inRange = true; break; }
-        }
-    }
-    return inRange ? 2 : 1;
-};
-
-window.wipeGalaxySlate = async function() {
-    if (currentUserRole !== 'dm') return; if (!confirm("Wipe all custom stars, ships, and territories?")) return;
-    await db.from('star_systems').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await db.from('ship_markers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await db.from('territories').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    window.selectedTarget = null; if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-};
-
-window.loadGalaxyData = async function() {
-    const { data: starData } = await db.from('star_systems').select('*');
-    if (starData) globalDbSystemsCache = starData.map(s => ({ ...s, isCustom: true, size: s.size || 5.0, type: s.luminosity === 'Black Hole' ? 'Black Hole' : (s.hazard === 'Nebula' ? 'Nebula' : 'Star'), multiType: s.multiType || 'Single', custom_bodies: s.custom_bodies || [] }));
-    const { data: markerData } = await db.from('ship_markers').select('*');
-    if (markerData) globalShipMarkersCache = markerData.map(m => ({ ...m, cargo_inventory: window.sanitizeCargo ? window.sanitizeCargo(m.cargo_inventory) : (m.cargo_inventory || {}), ship_weapons: m.ship_weapons || [], ship_decks: m.ship_decks || [] }));
-};
-
-/* SYSTEM ARCHITECT */
-let architectPlanets = [];
-window.openSystemArchitect = function() { if (currentUserRole !== 'dm') return; architectPlanets = []; document.getElementById('system-architect-modal').style.display = 'flex'; };
-window.closeSystemArchitect = function() { document.getElementById('system-architect-modal').style.display = 'none'; };
-window.architectClassChanged = function(val) { if (val === 'Black Hole') document.getElementById('arch-hazard').value = 'Gravity Well'; };
-window.addArchitectPlanetRow = function() { let count = architectPlanets.length + 1; architectPlanets.push({ name: `Planet ${count}`, type: 'Terrestrial', gravity: '1.0 G', atmosphere: 'Breathable', resources: 'Unknown', radius: 20 + count * 25, size: 1.6, color: '#4287f5' }); window.renderArchitectPlanets(); };
-window.removeArchitectPlanetRow = function(idx) { architectPlanets.splice(idx, 1); window.renderArchitectPlanets(); };
-window.renderArchitectPlanets = function() {
-    const cont = document.getElementById('arch-planets-container'); if (!cont) return;
-    if (architectPlanets.length === 0) { cont.innerHTML = `<span style="font-size:10px; color:#6b826a;">No custom planets added.</span>`; return; }
-    let html = '';
-    architectPlanets.forEach((p, idx) => {
-        html += `<div style="background:#030403; border:1px solid #3c4e36; padding:6px; border-radius:2px; font-size:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <input type="text" value="${p.name}" onchange="architectPlanets[${idx}].name=this.value" style="font-size:10px; padding:2px; width:140px; margin:0;">
-                    <select onchange="architectPlanets[${idx}].type=this.value; architectPlanets[${idx}].color=getPlanetColor(this.value, Math.random); window.renderArchitectPlanets();" style="font-size:10px; margin:0; width:110px;">
-                        <option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option>
-                        <option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option>
-                        <option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option>
-                    </select>
-                    <button class="layer-del" onclick="window.removeArchitectPlanetRow(${idx})" style="padding:1px 5px; font-size:9px;">✕</button>
-                </div>
-                <div style="display:flex; gap:6px;">
-                    <input type="text" placeholder="Gravity" value="${p.gravity}" onchange="architectPlanets[${idx}].gravity=this.value" style="font-size:9px; padding:2px; flex:1; margin:0;">
-                    <input type="text" placeholder="Atmosphere" value="${p.atmosphere}" onchange="architectPlanets[${idx}].atmosphere=this.value" style="font-size:9px; padding:2px; flex:1; margin:0;">
-                    <input type="text" placeholder="Resource Scans" value="${p.resources}" onchange="architectPlanets[${idx}].resources=this.value" style="font-size:9px; padding:2px; flex:2; margin:0;">
-                </div></div>`;
-    });
-    cont.innerHTML = html;
-};
-
-window.commitArchitectSystem = async function() {
-    if (currentUserRole !== 'dm') return;
-    const name = document.getElementById('arch-name').value || 'Target System'; const luminosity = document.getElementById('arch-lum').value; const multiType = document.getElementById('arch-multi').value; const hazard = document.getElementById('arch-hazard').value;
-    let color = '#ffe9c4'; if (luminosity === 'Class M (Red Dwarf)') color = '#ffb37b'; if (luminosity === 'Class O (Blue Giant)') color = '#7694ff'; if (luminosity === 'Black Hole') color = '#000000'; if (luminosity === 'Hidden Anomaly') color = '#ff3333';
-    let customBodiesClean = architectPlanets.map((p, idx) => ({ ...p, isStar: false, radius: 25 + (idx + 1) * 30, baseAngle: idx * 1.25, speed: 0.0002 / (idx + 1) }));
-    const payload = { name, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, size: luminosity === 'Black Hole' ? 7.0 : 5.0, color, luminosity, multiType, hazard, ownership: 'Unclaimed', control: 'Uncontested', industry_tier: 1, custom_bodies: customBodiesClean };
-    await db.from('star_systems').insert(payload); window.closeSystemArchitect(); if(typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
-};
-
-/* RE-ADDED TASK FORCE BLACK PRESET LOGIC */
-window.spawnTokenAtCenter = async function() {
-    const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1'; 
-    const name = document.getElementById('dm-tool-name').value || 'Task Force Black'; 
-    const iffStatus = document.getElementById('dm-tool-iff') ? document.getElementById('dm-tool-iff').value : 'allied';
-    
-    let isJupiter = false;
-    if (name.toLowerCase().includes("task force black") || name.toLowerCase().includes("horizon")) {
-        isJupiter = confirm(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
-    }
-    
-    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {}; 
-    newCargo.iff = iffStatus;
-    
-    let payload = { owner_id: currentUserId, name: name, drive_type: driveType, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, color: iffStatus === 'hostile' ? '#ff3333' : (iffStatus === 'neutral' ? '#ffaa00' : '#00e1ff'), cargo_inventory: newCargo };
-
-    if (isJupiter) {
-        payload.integrity_shields = 400; payload.max_shields = 400;
-        payload.integrity_hull = 300; payload.max_hull = 300;
-        payload.integrity_reactive = 10; payload.max_reactive = 10;
-        payload.integrity_ablative = 10; payload.max_ablative = 10;
-        payload.ship_weapons = [
-            { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-            { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0 },
-            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0 },
-            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
-            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
-            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-            { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-            { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 }
-        ];
-        payload.ship_decks = [
-            { name: "Bridge / CIC", hp: 100, max_hp: 100 },
-            { name: "Engineering / Core", hp: 150, max_hp: 150 },
-            { name: "Life Support", hp: 100, max_hp: 100 },
-            { name: "Flight Deck / Hangars", hp: 120, max_hp: 120 },
-            { name: "Manufacturing", hp: 100, max_hp: 100 }
-        ];
-    }
-
-    await db.from('ship_markers').insert(payload); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-};
-
-window.spawnStarSystemAtCenter = async function() {
-    const name = document.getElementById('dm-tool-name').value || 'New System'; const luminosity = document.getElementById('dm-tool-luminosity').value; const color = document.getElementById('dm-tool-color').value;
-    await db.from('star_systems').insert({ name, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, size: 5.0, color, luminosity, ownership: 'Unclaimed', control: 'Uncontested', industry_tier: 1 });
-    if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-};
-
-/* --- TOOL TOGGLES --- */
-window.toggleMeasuringTool = function() {
-    window.measuringTapeActive = !window.measuringTapeActive;
-    if(!window.measuringTapeActive) { window.measureStartPoint = null; window.measureEndPoint = null; }
-    window.pingModeActive = false; window.jumpPlottingActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
-    window.updateToolButtonStyles();
-};
-
-window.togglePingMode = function() {
-    window.pingModeActive = !window.pingModeActive;
-    window.measuringTapeActive = false; window.jumpPlottingActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
-    window.updateToolButtonStyles();
-};
-
-window.toggleTerritoryTool = function() {
-    if (currentUserRole !== 'dm') return; window.territoryToolActive = !window.territoryToolActive;
-    const panel = document.getElementById('territory-control-panel'); panel.style.display = window.territoryToolActive ? 'block' : 'none';
-    if(!window.territoryToolActive) window.cancelDrawingTerritory(); window.updateToolButtonStyles();
-};
-
-window.startDrawingTerritory = function() { window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
-window.finishActiveTerritory = async function() {
-    if (window.activeTerritoryVertices.length < 3) { alert("Requires at least 3 nodes."); return; }
-    const name = document.getElementById('territory-name-input').value || 'New Sector'; const color = document.getElementById('territory-color-input').value || '#00e5a3'; const faction = document.getElementById('territory-faction-select') ? document.getElementById('territory-faction-select').value : '';
-    await db.from('territories').insert({ name, color, vertices: window.activeTerritoryVertices, faction_name: faction }); window.cancelDrawingTerritory(); if (typeof window.loadTerritories === 'function') window.loadTerritories();
-};
-window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
-
-window.toggleHyperlanes = function() {
-    if (currentUserRole === 'dm') { const hBtn = document.getElementById('btn-start-hyperlane-draw'); if(hBtn && hBtn.style.display !== 'none') { window.hyperlanesVisible = !window.hyperlanesVisible; } } else { window.hyperlanesVisible = !window.hyperlanesVisible; }
-    window.updateToolButtonStyles();
-};
-
-window.startDrawingHyperlane = function() { window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
-window.finishActiveHyperlane = async function() {
-    if (window.activeHyperlaneNodes.length < 2) { alert("Requires at least 2 nodes."); return; }
-    await db.from('hyperlanes').insert({ name: 'Trade Route', color: '#00e1ff', nodes: window.activeHyperlaneNodes });
-    window.cancelDrawingHyperlane(); if (typeof loadHyperlanes === 'function') loadHyperlanes();
-};
-window.cancelDrawingHyperlane = function() { window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'block'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'none'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'none'; document.getElementById('hyperlane-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
-
-window.triggerTacticalPing = function(x, y) {
-    if (!realtimeChannel) return;
-    if (window.AudioEngine) window.AudioEngine.playPing();
-    realtimeChannel.send({ type: 'broadcast', event: 'tactical_ping', payload: { x, y, username: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3' } });
-    window.activePings.push({ x, y, color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3', user: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', startTime: Date.now() });
-    if(window.pingModeActive) window.togglePingMode();
-};
-
-window.updateToolButtonStyles = function() {
-    const mBtn = document.getElementById('measuring-tape-toggle-btn'); const pBtn = document.getElementById('ping-tool-toggle-btn'); const tBtn = document.getElementById('territory-tool-toggle-btn'); const hBtn = document.getElementById('btn-start-hyperlane-draw');
-    if(mBtn) { mBtn.style.borderColor = window.measuringTapeActive ? '#00e5a3' : '#3c4e36'; mBtn.style.color = window.measuringTapeActive ? '#00e5a3' : '#6b826a'; }
-    if(pBtn) { pBtn.style.borderColor = window.pingModeActive ? '#00e5a3' : '#3c4e36'; pBtn.style.color = window.pingModeActive ? '#00e5a3' : '#6b826a'; }
-    if(tBtn) { tBtn.style.borderColor = window.territoryDrawActive ? '#00e5a3' : '#3c4e36'; tBtn.style.color = window.territoryDrawActive ? '#00e5a3' : '#6b826a'; }
-    if(hBtn) { hBtn.style.borderColor = window.hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = window.hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
-};
-
-window.clearSelectedTarget = function() {
-    window.selectedTarget = null;
-    if (window.jumpPlottingActive) window.cancelJumpPlotting();
-    if (window.measuringTapeActive) window.toggleMeasuringTool();
-    if (window.hyperlaneDrawActive) window.cancelDrawingHyperlane();
-    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
-};
-
-window.lockCameraOnSelected = function() {
-    if (!window.selectedTarget || !window.selectedTarget.data) return;
-    let targetX = window.selectedTarget.data.x; let targetY = window.selectedTarget.data.y;
-    if (window.selectedTarget.type === 'body' && window.selectedTarget.data.parentSystem) { targetX = window.selectedTarget.data.parentSystem.x; targetY = window.selectedTarget.data.parentSystem.y; }
-    window.camera.x = -targetX * window.camera.zoom; window.camera.y = -targetY * window.camera.zoom;
-};
-
-/* --- JUMP PLOTTING --- */
-window.startJumpPlottingMode = function() {
-    if (!window.selectedTarget || window.selectedTarget.type !== 'ship') return;
-    window.jumpPlottingActive = true; window.measuringTapeActive = false; window.pingModeActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
-    window.activeJumpShip = window.selectedTarget.data; window.jumpTargetPoint = null;
-    window.selectedDriveSpeed = driveSpeeds[window.activeJumpShip.drive_type || 'ftl_class1'].speed;
-    window.updateToolButtonStyles(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
-};
-window.cancelJumpPlotting = function() { window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-window.setDriveSpeedKey = function(key) { if (driveSpeeds[key]) { window.selectedDriveSpeed = driveSpeeds[key].speed; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); } };
-window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId) { window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; let cargo = ship.cargo_inventory || {}; cargo.iff = newIff; await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', shipId); ship.cargo_inventory = cargo; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-
-window.executePlottedJump = async function() {
-    if (!window.activeJumpShip || !window.jumpTargetPoint) return;
-    let ship = window.activeJumpShip; let target = window.jumpTargetPoint;
-    let dist = Math.hypot(target.x - ship.x, target.y - ship.y);
-    let tripHours = Math.max(1, Math.round(dist / window.selectedDriveSpeed));
-    let fuelCost = Math.max(1, Math.round(dist / 100)); if (window.selectedDriveSpeed < 50) fuelCost = 0;
-    
-    let cargo = ship.cargo_inventory || {}; let expendables = cargo.expendables || [];
-    let fuelIdx = expendables.findIndex(i => i.name.toLowerCase().includes('energy core') || i.name.toLowerCase().includes('fuel'));
-    
-    if (fuelCost > 0) {
-        if (fuelIdx >= 0 && expendables[fuelIdx].qty >= fuelCost) { expendables[fuelIdx].qty -= fuelCost; cargo.expendables = expendables; } 
-        else { if (window.AudioEngine) window.AudioEngine.playError(); alert(`Insufficient Fuel! Requires ${fuelCost} Energy Cores.`); return; }
-    }
-
-    if (window.AudioEngine) window.AudioEngine.playWarp();
-    let oldTime = window.universeTimeHours; window.universeTimeHours += tripHours; localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
-    if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
-
-    ship.x = target.x; ship.y = target.y; ship.cargo_inventory = cargo;
-    await db.from('ship_markers').update({ x: target.x, y: target.y, cargo_inventory: cargo }).eq('id', ship.id);
-    if(typeof checkAnomalyProximity === 'function') await checkAnomalyProximity(ship);
-    if(typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
-
-    await db.from('chat_logs').insert({ sender_id: currentUserId, content: `🚀 [FTL JUMP] Vessel '${ship.name}' completed jump to ${target.name}. Trip: ${tripHours} hrs.`, message_type: 'text' });
-    window.cancelJumpPlotting(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-};
-
-window.toggleBookmarkSelected = function() {
-    if (!window.selectedTarget || !window.selectedTarget.data) return;
-    let existsIndex = bookmarkedTargets.findIndex(b => b.data.id === window.selectedTarget.data.id);
-    if (existsIndex >= 0) { bookmarkedTargets.splice(existsIndex, 1); } else { bookmarkedTargets.push({ type: window.selectedTarget.type, data: window.selectedTarget.data }); }
-    localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
-};
-window.shareBookmarkToChat = function(name, type) { db.from('chat_logs').insert({ sender_id: currentUserId, content: `Shared Coordinate 📍 [${type.toUpperCase()}]: ${name}`, message_type: 'text' }); alert("Broadcasted to Comms!"); };
-window.jumpToBookmark = function(index) { let b = bookmarkedTargets[index]; if (!b) return; window.selectedTarget = b; window.lockCameraOnSelected(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-window.deleteBookmark = function(index) { bookmarkedTargets.splice(index, 1); localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-window.jumpToRecent = function(index) { let r = recentTargets[index]; if (!r) return; window.selectedTarget = r; window.lockCameraOnSelected(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-
-window.saveDMStarProperties = async function(id) {
-    if (currentUserRole !== 'dm') return;
-    const name = document.getElementById('edit-star-name').value; const ownership = document.getElementById('edit-star-ownership').value; const luminosity = document.getElementById('edit-star-luminosity').value; const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
-    await db.from('star_systems').update({ name, ownership, luminosity, industry_tier: tier }).eq('id', id); alert("Parameters updated."); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-};
-window.saveDMBodyProperties = function(id) {
-    if (currentUserRole !== 'dm' || !window.selectedTarget || window.selectedTarget.type !== 'body') return;
-    let b = window.selectedTarget.data; b.name = document.getElementById('edit-body-name').value; b.type = document.getElementById('edit-body-type').value; b.gravity = document.getElementById('edit-body-gravity').value; b.atmosphere = document.getElementById('edit-body-atmosphere').value; b.resources = document.getElementById('edit-body-resources').value;
-    if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); alert("Celestial body updated locally.");
-};
-window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!confirm("Destroy star system?")) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
-window.deleteShipToken = async function(id) { if (currentUserRole !== 'dm') return; if(!confirm("Decommission token?")) return; await db.from('ship_markers').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
-
-/* --- THE CANVAS ENGINE --- */
+/* --- THE CANVAS ENGINE & FOG OF WAR --- */
 window.initGalaxyEngine = function() {
     const canvas = document.getElementById('galaxyCanvas'); if (!canvas) return;
     const ctx = canvas.getContext('2d'); const container = document.getElementById('canvas-container');
@@ -451,6 +188,7 @@ window.initGalaxyEngine = function() {
         window.camera.zoom = newZoom;
     }, { passive: false });
 
+    // HUD TELEMETRY RENDERER
     window.renderHUDTelemetry = function() {
         const content = document.getElementById('hud-content'); if (!content) return;
         
@@ -500,7 +238,6 @@ window.initGalaxyEngine = function() {
             }
         } else if (dynamicTarget.type === 'ship') {
             const m = dynamicTarget.data; let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied'; let iffColor = iff === 'hostile' ? '#ff3333' : (iff === 'neutral' ? '#ffaa00' : '#00e5a3');
-            
             let driveOptionsHtml = ''; Object.keys(driveSpeeds).forEach(k => { driveOptionsHtml += `<option value="${k}" ${m.drive_type === k ? 'selected' : ''}>${driveSpeeds[k].label}</option>`; });
             let dmIffBox = currentUserRole === 'dm' ? `<div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">IFF Tag:</label><select onchange="window.updateShipIff('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:${iffColor}; border:1px solid ${iffColor}; margin:2px 0;"><option value="allied" ${iff === 'allied' ? 'selected' : ''} style="color:#00e5a3;">Allied</option><option value="hostile" ${iff === 'hostile' ? 'selected' : ''} style="color:#ff3333;">Hostile</option><option value="neutral" ${iff === 'neutral' ? 'selected' : ''} style="color:#ffaa00;">Neutral</option></select></div>` : '';
 
@@ -566,16 +303,32 @@ window.initGalaxyEngine = function() {
             ctx.stroke(); window.activeHyperlaneNodes.forEach((v) => { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(v.x, v.y, 4 / window.camera.zoom, 0, Math.PI * 2); ctx.fill(); }); ctx.restore();
         }
 
+        /* MODULE C: FOW TERRITORY STEALTH HACK */
         globalTerritoriesCache.forEach(t => {
             if (!t.vertices || t.vertices.length < 3) return;
+            
+            let isHidden = t.faction_name && t.faction_name.includes('[HIDDEN]');
+            if (isHidden && currentUserRole !== 'dm') return; // Hide from players entirely!
+
             ctx.save(); ctx.beginPath(); ctx.moveTo(t.vertices[0].x, t.vertices[0].y);
             for (let k = 1; k < t.vertices.length; k++) { ctx.lineTo(t.vertices[k].x, t.vertices[k].y); }
-            ctx.closePath(); ctx.fillStyle = t.color + '22'; ctx.fill();
-            ctx.strokeStyle = t.color; ctx.lineWidth = 2 / window.camera.zoom; ctx.shadowColor = t.color; ctx.shadowBlur = 8; ctx.stroke(); ctx.shadowBlur = 0;
+            ctx.closePath(); 
+            
+            ctx.fillStyle = t.color + (isHidden ? '11' : '22'); ctx.fill();
+            ctx.strokeStyle = t.color; ctx.lineWidth = 2 / window.camera.zoom; 
+            
+            if (isHidden) ctx.setLineDash([10 / window.camera.zoom, 10 / window.camera.zoom]); // Dashed border for hidden DM zones
+            
+            ctx.shadowColor = t.color; ctx.shadowBlur = 8; ctx.stroke(); ctx.shadowBlur = 0;
+            ctx.setLineDash([]); 
+
             if (window.camera.zoom > 0.04) {
                 let avgX = t.vertices.reduce((sum, v) => sum + v.x, 0) / t.vertices.length; let avgY = t.vertices.reduce((sum, v) => sum + v.y, 0) / t.vertices.length;
-                ctx.fillStyle = t.color; ctx.font = `bold ${Math.max(10, 14 / window.camera.zoom)}px Courier New`; ctx.textAlign = 'center'; ctx.fillText(`⬡ ${t.name.toUpperCase()}`, avgX, avgY);
-                if (t.faction_name) { ctx.font = `${Math.max(8, 10 / window.camera.zoom)}px Courier New`; ctx.fillText(`[${t.faction_name}]`, avgX, avgY + (14 / window.camera.zoom)); }
+                let displayFaction = t.faction_name ? t.faction_name.replace('[HIDDEN] ', '').replace('[HIDDEN]', '') : '';
+                
+                ctx.fillStyle = t.color; ctx.font = `bold ${Math.max(10, 14 / window.camera.zoom)}px Courier New`; ctx.textAlign = 'center'; 
+                ctx.fillText(`⬡ ${t.name.toUpperCase()}${isHidden ? ' (HIDDEN)' : ''}`, avgX, avgY);
+                if (displayFaction) { ctx.font = `${Math.max(8, 10 / window.camera.zoom)}px Courier New`; ctx.fillText(`[${displayFaction}]`, avgX, avgY + (14 / window.camera.zoom)); }
                 ctx.textAlign = 'left';
             }
             ctx.restore();
