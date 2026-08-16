@@ -232,7 +232,7 @@ window.updateCargoQtyDirect = async function(vesselId, itemIndex, newQty) {
 window.removeCargoItem = async function(vesselId, itemIndex) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    if (!confirm("Decommission this cargo item from vessel hold?")) return;
+    if (!(await window.showConfirmModal("Decommission this cargo item from vessel hold?"))) return;
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     if (cargo[activeCargoSubtab]) {
         cargo[activeCargoSubtab].splice(itemIndex, 1);
@@ -420,14 +420,15 @@ window.renderVesselDeck = function() {
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
                             <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>
-                            <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''}</div>
+                            <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · ${w.damage_type || window.inferLegacyDamageType(w.name)}</div>
                         </div>
                         <div style="display:flex; gap:6px; align-items:center;">
                             <label for="wpn-target-${vessel.id}-${idx}" style="display:none;">Target</label>
                             <select id="wpn-target-${vessel.id}-${idx}" style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
                             <label for="wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
-                            <input type="number" id="wpn-volley-${vessel.id}-${idx}" value="1" min="1" title="Volley Count" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
+                            <input type="number" id="wpn-volley-${vessel.id}-${idx}" value="1" min="1" max="${w.gun_count || 1}" title="Volley Count (max ${w.gun_count || 1} guns)" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
                             <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
+                            <button class="layer-edit" onclick="window.openEditWeaponModal('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;" title="Edit weapon">✎</button>
                             <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
                         </div>
                     </div>
@@ -649,7 +650,7 @@ window.recallSquadron = async function(vesselId, idx) {
 };
 
 window.deleteSquadron = async function(vesselId, idx, isDeployed) {
-    if (!confirm(isDeployed ? "Record this squadron as destroyed in combat?" : "Decommission this squadron from the hangar?")) return;
+    if (!(await window.showConfirmModal(isDeployed ? "Record this squadron as destroyed in combat?" : "Decommission this squadron from the hangar?"))) return;
     
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -703,7 +704,7 @@ window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
 window.resetShipStats = async function(vesselId) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    if (!confirm("Restore maximum health profiles and resupply all ammunition banks for this vessel?")) return;
+    if (!(await window.showConfirmModal("Restore maximum health profiles and resupply all ammunition banks for this vessel?"))) return;
     
     let payload = {
         integrity_shields: vessel.max_shields || 400,
@@ -857,8 +858,15 @@ window.rollShipWeapon = async function(vesselId, idx) {
     let targetSelect = document.getElementById(`wpn-target-${vesselId}-${idx}`);
     let targetId = targetSelect ? targetSelect.value : null;
 
+    let gunCount = wpn.gun_count || 1;
+    if (volleys > gunCount) {
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`[MOUNT LIMIT] ${wpn.name} has ${gunCount} gun(s) installed — cannot fire a volley of ${volleys}.`);
+        return;
+    }
+
     if (wpn.cooldown > 0) {
-        if (!confirm(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`)) return;
+        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
         wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
     } 
     
@@ -916,10 +924,9 @@ window.rollShipWeapon = async function(vesselId, idx) {
     
     let targetShip = null;
     let combatLog = ``;
-    let wpnLower = wpn.name.toLowerCase();
-    let isPiercing = wpnLower.includes('pierce') || wpnLower.includes('piercing') || wpnLower.includes('rail') || wpnLower.includes('gauss');
-    let isHeat = wpnLower.includes('heat') || wpnLower.includes('plasma') || wpnLower.includes('laser') || wpnLower.includes('gamma');
-    let dmgType = isPiercing ? 'Piercing' : (isHeat ? 'Heat' : 'Impact/Ion');
+    let dmgType = wpn.damage_type || window.inferLegacyDamageType(wpn.name);
+    let isPiercing = dmgType === 'Piercing';
+    let isHeat = dmgType === 'Heat';
 
     if (targetId) {
         targetShip = globalShipMarkersCache.find(m => m.id === targetId);
@@ -1017,7 +1024,7 @@ window.modifyShipDeckHealth = async function(vesselId, idx, delta) {
 };
 
 window.deleteShipDeck = async function(vesselId, idx) {
-    if (!confirm("Scrap this internal deck?")) return;
+    if (!(await window.showConfirmModal("Scrap this internal deck?"))) return;
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
@@ -1027,6 +1034,44 @@ window.deleteShipDeck = async function(vesselId, idx) {
     await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
     vessel.ship_decks = decks;
     window.renderVesselDeck();
+};
+
+/* Inject Ammo / Gun Count / Damage Type fields into the "Mount New Weapon System"
+   form. These fields didn't exist in the HTML at all (the ammo field was being
+   looked up by addShipWeapon() but never rendered), and there was no way to set
+   damage type or gun count when installing a weapon. Anchored off the exploding-dice
+   checkbox, which is guaranteed to exist, so this works without touching index.html. */
+function injectWeaponFormExtras() {
+    if (document.getElementById('new-ship-wpn-guns')) return; // already injected
+    const explodesCb = document.getElementById('new-ship-wpn-explodes');
+    if (!explodesCb) return;
+    const row = explodesCb.parentElement.parentElement;
+    if (!row) return;
+    row.insertAdjacentHTML('beforebegin', `
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <label for="new-ship-wpn-ammo" style="display:none;">Ammo</label>
+            <input type="number" id="new-ship-wpn-ammo" placeholder="Ammo (blank = ∞)" min="0" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+            <label for="new-ship-wpn-guns" style="display:none;">Gun Count</label>
+            <input type="number" id="new-ship-wpn-guns" placeholder="Guns" min="1" value="1" title="Number of physical guns/mounts in this battery — caps max volley size" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+            <label for="new-ship-wpn-dmgtype" style="display:none;">Damage Type</label>
+            <select id="new-ship-wpn-dmgtype" style="flex:1.6; margin:0; border-color:#ff3333;">
+                <option value="Impact/Ion">Impact/Ion</option>
+                <option value="Piercing">Piercing (bypasses Reactive Armor)</option>
+                <option value="Heat">Heat (bypasses Ablative Armor)</option>
+            </select>
+        </div>`);
+}
+injectWeaponFormExtras();
+
+/* Legacy weapons installed before damage_type existed as an explicit field had
+   their damage type guessed from keywords in the weapon's name. Keep that as a
+   fallback so old installed weapons keep behaving the same, but new/edited
+   weapons always use the explicit field. */
+window.inferLegacyDamageType = function(name) {
+    let n = (name || '').toLowerCase();
+    if (n.includes('pierce') || n.includes('piercing') || n.includes('rail') || n.includes('gauss')) return 'Piercing';
+    if (n.includes('heat') || n.includes('plasma') || n.includes('laser') || n.includes('gamma')) return 'Heat';
+    return 'Impact/Ion';
 };
 
 window.addShipWeapon = async function() {
@@ -1040,8 +1085,14 @@ window.addShipWeapon = async function() {
     let ammoInput = document.getElementById('new-ship-wpn-ammo');
     let ammoVal = -1;
     if (ammoInput && ammoInput.value.trim() !== '') {
-        ammoVal = parseInt(ammoInput.value);
+        ammoVal = Math.max(0, parseInt(ammoInput.value) || 0);
     }
+
+    let gunsInput = document.getElementById('new-ship-wpn-guns');
+    let gunCount = (gunsInput && parseInt(gunsInput.value) > 0) ? parseInt(gunsInput.value) : 1;
+
+    let dmgTypeSelect = document.getElementById('new-ship-wpn-dmgtype');
+    let damageType = dmgTypeSelect ? dmgTypeSelect.value : 'Impact/Ion';
 
     if (!select || !select.value) { alert("Select a vessel token first."); return; }
     if (!name) { alert("Please enter a weapon system name."); return; }
@@ -1055,7 +1106,8 @@ window.addShipWeapon = async function() {
     let weapons = vessel.ship_weapons || [];
     weapons.push({ 
         loc, name, dice, modifier: mod, explodes, 
-        ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0 
+        ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0,
+        gun_count: gunCount, damage_type: damageType
     });
 
     await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
@@ -1066,11 +1118,12 @@ window.addShipWeapon = async function() {
     document.getElementById('new-ship-wpn-dice').value = '';
     document.getElementById('new-ship-wpn-mod').value = '';
     if (ammoInput) ammoInput.value = '';
+    if (gunsInput) gunsInput.value = '1';
     window.renderVesselDeck();
 };
 
 window.deleteShipWeapon = async function(vesselId, idx) {
-    if (!confirm("Uninstall this weapon system?")) return;
+    if (!(await window.showConfirmModal("Uninstall this weapon system?"))) return;
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
@@ -1081,6 +1134,103 @@ window.deleteShipWeapon = async function(vesselId, idx) {
     vessel.ship_weapons = weapons;
     window.renderVesselDeck();
 };
+
+/* --- WEAPON EDIT MODAL ---
+   Previously the only way to change an installed weapon's stats was to delete
+   it and re-add it from scratch, losing any accumulated ammo/cooldown/overheat
+   state in the process. This lets a DM edit any field in place. */
+(function() {
+    let overlay, currentVesselId, currentIdx;
+    function ensureEditModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'weapon-edit-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:380px; max-width:92vw; border-color:#ff6b6b;">
+            <h4 style="color:#ff6b6b; margin-top:0;">Edit Weapon System</h4>
+            <label for="wpn-edit-loc" style="font-size:9px; color:#ffaaaa;">Mount Location</label>
+            <input type="text" id="wpn-edit-loc" style="border-color:#ff3333;">
+            <label for="wpn-edit-name" style="font-size:9px; color:#ffaaaa;">Name</label>
+            <input type="text" id="wpn-edit-name" style="border-color:#ff3333;">
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="wpn-edit-dice" style="font-size:9px; color:#ffaaaa;">Dice</label><input type="text" id="wpn-edit-dice" style="border-color:#ff3333; text-align:center;"></div>
+                <div style="flex:1;"><label for="wpn-edit-mod" style="font-size:9px; color:#ffaaaa;">Mod</label><input type="text" id="wpn-edit-mod" style="border-color:#ff3333; text-align:center;"></div>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="wpn-edit-ammo" style="font-size:9px; color:#ffaaaa;">Ammo (blank=∞)</label><input type="number" id="wpn-edit-ammo" min="0" style="border-color:#ff3333; text-align:center;"></div>
+                <div style="flex:1;"><label for="wpn-edit-maxammo" style="font-size:9px; color:#ffaaaa;">Max Ammo</label><input type="number" id="wpn-edit-maxammo" min="0" style="border-color:#ff3333; text-align:center;"></div>
+                <div style="flex:1;"><label for="wpn-edit-guns" style="font-size:9px; color:#ffaaaa;">Gun Count</label><input type="number" id="wpn-edit-guns" min="1" style="border-color:#ff3333; text-align:center;"></div>
+            </div>
+            <label for="wpn-edit-dmgtype" style="font-size:9px; color:#ffaaaa;">Damage Type</label>
+            <select id="wpn-edit-dmgtype" style="border-color:#ff3333;">
+                <option value="Impact/Ion">Impact/Ion</option>
+                <option value="Piercing">Piercing (bypasses Reactive Armor)</option>
+                <option value="Heat">Heat (bypasses Ablative Armor)</option>
+            </select>
+            <label for="wpn-edit-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;">
+                <input type="checkbox" id="wpn-edit-explodes" style="margin:0;"> Exploding Dice
+            </label>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button id="wpn-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
+                <button id="wpn-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0;">SAVE CHANGES</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('wpn-edit-cancel-btn').addEventListener('click', () => { overlay.style.display = 'none'; });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+        document.getElementById('wpn-edit-save-btn').addEventListener('click', async () => {
+            let vessel = globalShipMarkersCache.find(m => m.id === currentVesselId);
+            if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[currentIdx]) { overlay.style.display = 'none'; return; }
+            let wpn = vessel.ship_weapons[currentIdx];
+
+            wpn.loc = document.getElementById('wpn-edit-loc').value.trim() || 'Hull Mount';
+            wpn.name = document.getElementById('wpn-edit-name').value.trim() || wpn.name;
+            let dice = document.getElementById('wpn-edit-dice').value.trim().toLowerCase();
+            wpn.dice = dice || wpn.dice;
+            let mod = document.getElementById('wpn-edit-mod').value.trim();
+            if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
+            wpn.modifier = mod || '+0';
+            wpn.explodes = document.getElementById('wpn-edit-explodes').checked;
+            wpn.damage_type = document.getElementById('wpn-edit-dmgtype').value;
+
+            let gunsVal = parseInt(document.getElementById('wpn-edit-guns').value);
+            wpn.gun_count = (gunsVal && gunsVal > 0) ? gunsVal : 1;
+
+            let ammoStr = document.getElementById('wpn-edit-ammo').value.trim();
+            let maxAmmoStr = document.getElementById('wpn-edit-maxammo').value.trim();
+            if (ammoStr === '') {
+                wpn.ammo = -1; wpn.max_ammo = -1;
+            } else {
+                wpn.ammo = Math.max(0, parseInt(ammoStr) || 0);
+                let maxAmmo = maxAmmoStr !== '' ? parseInt(maxAmmoStr) || wpn.ammo : (wpn.max_ammo && wpn.max_ammo > 0 ? wpn.max_ammo : wpn.ammo);
+                wpn.max_ammo = Math.max(wpn.ammo, maxAmmo);
+            }
+
+            const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', currentVesselId);
+            if (error) { alert("Failed to save weapon changes: " + error.message); return; }
+            overlay.style.display = 'none';
+            window.renderVesselDeck();
+        });
+    }
+
+    window.openEditWeaponModal = function(vesselId, idx) {
+        let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+        if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
+        let wpn = vessel.ship_weapons[idx];
+        ensureEditModal();
+        currentVesselId = vesselId; currentIdx = idx;
+        document.getElementById('wpn-edit-loc').value = wpn.loc || '';
+        document.getElementById('wpn-edit-name').value = wpn.name || '';
+        document.getElementById('wpn-edit-dice').value = wpn.dice || '';
+        document.getElementById('wpn-edit-mod').value = wpn.modifier || '+0';
+        document.getElementById('wpn-edit-ammo').value = (wpn.ammo === undefined || wpn.ammo < 0) ? '' : wpn.ammo;
+        document.getElementById('wpn-edit-maxammo').value = (wpn.max_ammo === undefined || wpn.max_ammo < 0) ? '' : wpn.max_ammo;
+        document.getElementById('wpn-edit-guns').value = wpn.gun_count || 1;
+        document.getElementById('wpn-edit-dmgtype').value = wpn.damage_type || window.inferLegacyDamageType(wpn.name);
+        document.getElementById('wpn-edit-explodes').checked = !!wpn.explodes;
+        overlay.style.display = 'flex';
+    };
+})();
 
 window.broadcastVesselStatus = async function() {
     const select = document.getElementById('vessel-deck-select');
@@ -1169,7 +1319,7 @@ window.addArsenalItem = async function() {
 };
 
 window.deleteArsenalItem = async function(id) {
-    if (!confirm("Remove this item from your arsenal?")) return;
+    if (!(await window.showConfirmModal("Remove this item from your arsenal?"))) return;
     await db.from('character_arsenal').delete().eq('id', id);
     if(typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
 };
@@ -1298,6 +1448,9 @@ window.renderCombatTracker = function() {
         { el: document.getElementById('terminal-combat-body'), suffix: 'term' }
     ];
 
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    const myCombatName = (myProf && myProf.character && myProf.character.name) ? myProf.character.name : (myProf ? (myProf.username || 'Commander') : 'Commander');
+
     containers.forEach(container => {
         if (!container.el) return;
         let html = '';
@@ -1316,16 +1469,26 @@ window.renderCombatTracker = function() {
                     <button class="btn-deploy" onclick="window.advanceCombatRound()" style="font-size:10px; margin-top:6px; width:100%;">⏭️ ADVANCE COMBAT ROUND</button>
                 </div>
             `;
+        } else {
+            html += `
+                <div style="background:#040605; padding:8px; border:1px solid #3c4e36; margin-bottom:8px;">
+                    <span style="font-size:9px; color:#6b826a;">Joining as: <strong style="color:#00e5a3;">${myCombatName}</strong></span>
+                    <label for="comb-init-${container.suffix}" style="display:none;">Initiative</label>
+                    <input type="number" id="comb-init-${container.suffix}" placeholder="Your Initiative Roll" style="font-size:10px; margin:4px 0;">
+                    <button class="btn-reveal" onclick="window.joinCombatInitiative('${container.suffix}')" style="font-size:10px; width:100%;">+ JOIN INITIATIVE</button>
+                </div>
+            `;
         }
         html += '<div style="max-height:220px; overflow-y:auto;">';
         combatantsList.forEach(c => {
+            const canRemove = currentUserRole === 'dm' || c.owner_id === currentUserId;
             html += `
                 <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:6px;">
                     <div>
                         <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${c.name}</strong>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">HP/Status: ${c.hp}</p>
                     </div>
-                    ${currentUserRole === 'dm' ? `<button class="layer-del" onclick="window.removeCombatant('${c.id}')" style="padding:2px 6px; font-size:9px;">X</button>` : ''}
+                    ${canRemove ? `<button class="layer-del" onclick="window.removeCombatant('${c.id}')" style="padding:2px 6px; font-size:9px;">${currentUserRole === 'dm' && c.owner_id !== currentUserId ? 'X' : 'LEAVE'}</button>` : ''}
                 </div>
             `;
         });
@@ -1347,18 +1510,38 @@ window.addCombatant = async function(suffix) {
     
     if (!name) return;
     
-    await db.from('combat_tracker').insert({ name, initiative, hp }); 
+    const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId });
+    if (error) { alert("Failed to add combatant: " + error.message); return; }
+    nameInput.value = ''; initInput.value = ''; hpInput.value = '10/10';
     if(typeof loadCombatTracker === 'function') loadCombatTracker();
 };
 
-window.removeCombatant = async function(id) { 
+window.joinCombatInitiative = async function(suffix) {
+    const initInput = document.getElementById(`comb-init-${suffix}`);
+    if (!initInput) return;
+    const initiative = parseInt(initInput.value) || 10;
+
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    const name = (myProf && myProf.character && myProf.character.name) ? myProf.character.name : (myProf ? (myProf.username || 'Commander') : 'Commander');
+    const vitality = (myProf && myProf.character && myProf.character.vitality !== undefined) ? myProf.character.vitality : null;
+    const hp = vitality !== null ? `${vitality}/${vitality}` : '10/10';
+
+    const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId });
+    if (error) { alert("Failed to join initiative: " + error.message); return; }
+    initInput.value = '';
+    if(typeof loadCombatTracker === 'function') loadCombatTracker();
+};
+
+window.removeCombatant = async function(id) {
+    const c = combatantsList.find(x => x.id === id);
+    if (c && currentUserRole !== 'dm' && c.owner_id !== currentUserId) return;
     await db.from('combat_tracker').delete().eq('id', id); 
     if(typeof loadCombatTracker === 'function') loadCombatTracker(); 
 };
 
 window.advanceCombatRound = async function() {
     if (currentUserRole !== 'dm') return;
-    if (!confirm("Advance combat round? This will process cooldowns, overheat, and strike craft fuel globally.")) return;
+    if (!(await window.showConfirmModal("Advance combat round? This will process cooldowns, overheat, and strike craft fuel globally."))) return;
 
     let anyChanged = false;
     let klaxonTriggered = false;
