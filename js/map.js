@@ -158,13 +158,33 @@ window.initGalaxyEngine = function() {
         window.camera.isDragging = true; window.camera.startX = e.clientX; window.camera.startY = e.clientY;
     });
 
-    window.addEventListener('mousemove', (e) => {
-        const worldPos = screenToWorld(e.clientX, e.clientY); window._lastMouseWorldX = worldPos.x; window._lastMouseWorldY = worldPos.y;
+   window.addEventListener('mousemove', (e) => {
+        const worldPos = screenToWorld(e.clientX, e.clientY); 
+        window._lastMouseWorldX = worldPos.x; 
+        window._lastMouseWorldY = worldPos.y;
+        
+        // SURGICAL FIX: Make the tokens actually follow the mouse!
+        if (window.draggedMarker) {
+            window.draggedMarker.x = worldPos.x;
+            window.draggedMarker.y = worldPos.y;
+            return; // Stop here so the camera doesn't pan while dragging a ship
+        }
+        
+        if (window.draggedStar) {
+            window.draggedStar.x = worldPos.x;
+            window.draggedStar.y = worldPos.y;
+            return; // Stop here so the camera doesn't pan while dragging a star
+        }
+
         if (window.camera.isDragging) {
-            let dx = e.clientX - window.camera.startX; let dy = e.clientY - window.camera.startY;
+            let dx = e.clientX - window.camera.startX; 
+            let dy = e.clientY - window.camera.startY;
             window.camera.x = Math.max(-MAP_LIMIT * window.camera.zoom, Math.min(MAP_LIMIT * window.camera.zoom, window.camera.x + dx));
             window.camera.y = Math.max(-MAP_LIMIT * window.camera.zoom, Math.min(MAP_LIMIT * window.camera.zoom, window.camera.y + dy));
-            window.camera.startX = e.clientX; window.camera.startY = e.clientY;
+            window.camera.startX = e.clientX; 
+            window.camera.startY = e.clientY;
+        }
+    });
         }
     });
 
