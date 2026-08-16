@@ -227,9 +227,28 @@ window.cancelDrawingHyperlane = function() { window.hyperlaneDrawActive = false;
 window.triggerTacticalPing = function(x, y) {
     if (!realtimeChannel) return;
     if (window.AudioEngine) window.AudioEngine.playPing();
-    realtimeChannel.send({ type: 'broadcast', event: 'tactical_ping', payload: { x, y, username: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3' } });
-    window.activePings.push({ x, y, color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3', user: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', startTime: Date.now() });
+    const username = allProfiles.find(p => p.id === currentUserId)?.username || 'Commander';
+    const color = currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3';
+    realtimeChannel.send({ type: 'broadcast', event: 'tactical_ping', payload: { x, y, username, color } });
+    window.activePings.push({ x, y, color, user: username, startTime: Date.now() });
     if(window.pingModeActive) window.togglePingMode();
+
+    // Also post a Comms notification with a clickable jump link, so anyone
+    // who steps away or misses the live map animation can still navigate
+    // straight to the ping afterward. Coordinates ride in roll_data (an
+    // existing jsonb column reused here) rather than needing a new column.
+    db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `📍 ${username} dropped a tactical ping.`,
+        message_type: 'ping',
+        roll_data: { x, y }
+    }).then(({ error }) => { if (!error && typeof loadChatLogs === 'function') loadChatLogs(); });
+};
+
+window.jumpToPingLocation = function(x, y) {
+    window.camera.x = -x * window.camera.zoom;
+    window.camera.y = -y * window.camera.zoom;
+    if (window.AudioEngine) window.AudioEngine.playPing();
 };
 
 window.updateToolButtonStyles = function() {
@@ -483,7 +502,7 @@ window.initGalaxyEngine = function() {
                     for (let b of window.getSystemBodies(s)) {
                         let angle = b.baseAngle + (time * b.speed); let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
                         if (Math.hypot(bx - worldPos.x, by - worldPos.y) < (b.isStar ? starHitRadius : planetHitRadius)) { 
-                            window.selectedTarget = { type: 'body', data: b }; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return; 
+                            window.selectedTarget = { type: 'body', data: b }; window.addRecentTarget(window.selectedTarget); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return; 
                         }
                     }
                 }
@@ -492,13 +511,13 @@ window.initGalaxyEngine = function() {
 
         for (let m of globalShipMarkersCache) {
             if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < tokenHitRadius && (currentUserRole === 'dm' || m.owner_id === currentUserId)) {
-                window.draggedMarker = m; window.selectedTarget = { type: 'ship', data: m }; 
+                window.draggedMarker = m; window.selectedTarget = { type: 'ship', data: m }; window.addRecentTarget(window.selectedTarget);
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
             }
         }
         for (let s of allSystems) {
             if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < starHitRadius) {
-                window.selectedTarget = { type: 'star', data: s };
+                window.selectedTarget = { type: 'star', data: s }; window.addRecentTarget(window.selectedTarget);
                 if(currentUserRole === 'dm' && s.isCustom) window.draggedStar = s; 
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
             }
@@ -744,7 +763,41 @@ window.initGalaxyEngine = function() {
         for (let m of globalShipMarkersCache) {
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             const size = 10 / window.camera.zoom; let iffColor = (m.cargo_inventory && m.cargo_inventory.iff === 'hostile') ? '#ff3333' : '#00e5a3';
+
+            // FEATURE: Faction-based token ownership — visually distinguish "mine" from
+            // "another player's" from "Overseer/NPC asset" so the drag-permission
+            // boundary already enforced in the click handler above is visible before
+            // you try to drag, not just discovered by a failed drag attempt.
+            const isMine = m.owner_id === currentUserId;
+            const ownerProfile = allProfiles.find(p => p.id === m.owner_id);
+            const isNpcAsset = !ownerProfile || ownerProfile.role === 'dm';
+            let ringColor = isMine ? '#00e5a3' : (isNpcAsset ? '#ff6b6b' : '#4a7ab5');
+
+            ctx.save();
+            ctx.beginPath(); ctx.arc(m.x, m.y, size + (5 / window.camera.zoom), 0, Math.PI * 2);
+            ctx.strokeStyle = ringColor; ctx.lineWidth = (isMine ? 2 : 1.5) / window.camera.zoom;
+            if (isNpcAsset) ctx.setLineDash([4 / window.camera.zoom, 3 / window.camera.zoom]);
+            ctx.stroke(); ctx.setLineDash([]);
+            ctx.restore();
+
             ctx.fillStyle = iffColor; ctx.beginPath(); ctx.moveTo(m.x, m.y - size); ctx.lineTo(m.x + size, m.y); ctx.lineTo(m.x, m.y + size); ctx.lineTo(m.x - size, m.y); ctx.closePath(); ctx.fill();
+
+            // Persistent callout label: dark outline stroke behind the fill keeps it
+            // legible over any canvas background (starfield, nebula haze, territory
+            // fills), and font size is clamped so it scales gracefully with zoom
+            // instead of vanishing when zoomed out or overwhelming the view zoomed in.
+            let labelSize = Math.max(9, Math.min(13, 11 / window.camera.zoom));
+            ctx.font = `${labelSize}px Courier New`;
+            ctx.textBaseline = 'middle';
+            let labelX = m.x + size + (6 / window.camera.zoom);
+            let labelY = m.y;
+            let ownerTag = isMine ? '' : (isNpcAsset ? ' [NPC]' : ` [${ownerProfile.username || 'ALLY'}]`);
+            let labelText = m.name + ownerTag;
+            ctx.lineWidth = 3 / window.camera.zoom;
+            ctx.strokeStyle = 'rgba(3, 4, 6, 0.85)';
+            ctx.strokeText(labelText, labelX, labelY);
+            ctx.fillStyle = iffColor;
+            ctx.fillText(labelText, labelX, labelY);
         }
 
         if (window.jumpPlottingActive && window.activeJumpShip) {
