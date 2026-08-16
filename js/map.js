@@ -142,7 +142,7 @@ window.spawnTokenAtCenter = async function() {
     let isJupiter = confirm(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
     
     let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {};
-    newCargo.iff = iffStatus; // Stamp IFF signature into Cargo JSON
+    newCargo.iff = iffStatus;
 
     let payload = { 
         owner_id: currentUserId, 
@@ -591,7 +591,6 @@ window.initGalaxyEngine = function() {
         if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
     };
     
-    // NEW: Function to let DM manually flip IFF tag from the Telemetry overlay
     window.updateShipIff = async function(shipId, newIff) {
         let ship = globalShipMarkersCache.find(s => s.id === shipId);
         if (!ship) return;
@@ -647,7 +646,7 @@ window.initGalaxyEngine = function() {
         let fuelCost = Math.max(1, Math.round(dist / 100)); // 1 core per 100 distance units
         if (selectedDriveSpeed < 50) fuelCost = 0; // Sublight doesn't cost FTL cores
         
-        let cargo = ship.cargo_inventory || typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {};
+        let cargo = ship.cargo_inventory || (typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {});
         let expendables = cargo.expendables || [];
         let fuelIdx = expendables.findIndex(i => i.name.toLowerCase().includes('energy core') || i.name.toLowerCase().includes('fuel'));
         
@@ -656,10 +655,13 @@ window.initGalaxyEngine = function() {
                 expendables[fuelIdx].qty -= fuelCost;
                 cargo.expendables = expendables;
             } else {
+                if (window.AudioEngine) window.AudioEngine.playError();
                 alert(`Insufficient FTL Fuel! Jump requires ${fuelCost} Energy Cores in Expendables cargo.`);
                 return; // BLOCK JUMP
             }
         }
+
+        if (window.AudioEngine) window.AudioEngine.playWarp();
 
         let oldTime = window.universeTimeHours;
         window.universeTimeHours += tripHours;
@@ -674,7 +676,6 @@ window.initGalaxyEngine = function() {
 
         if(typeof checkAnomalyProximity === 'function') await checkAnomalyProximity(ship);
         
-        // Economy: Trigger 24h checks if the jump crossed daily thresholds
         if(typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
 
         let fuelLog = fuelCost > 0 ? ` Consumed ${fuelCost}x Energy Cores.` : ``;
@@ -803,6 +804,7 @@ window.initGalaxyEngine = function() {
 
     function triggerTacticalPing(x, y) {
         if (!realtimeChannel) return;
+        if (window.AudioEngine) window.AudioEngine.playPing();
         realtimeChannel.send({
             type: 'broadcast', event: 'tactical_ping',
             payload: { x, y, username: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3' }
@@ -921,9 +923,9 @@ window.initGalaxyEngine = function() {
 
             // IFF Logic
             let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied';
-            let iffColor = '#00e5a3'; // Allied
-            if (iff === 'hostile') iffColor = '#ff3333';
-            if (iff === 'neutral') iffColor = '#ffaa00';
+            let iffColor = '#00e5a3'; // Allied (Cyan/Green)
+            if (iff === 'hostile') iffColor = '#ff3333'; // Foe (Red)
+            if (iff === 'neutral') iffColor = '#ffaa00'; // Neutral (Amber)
 
             let driveOptionsHtml = '';
             Object.keys(driveSpeeds).forEach(k => {
@@ -1346,28 +1348,24 @@ window.initGalaxyEngine = function() {
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             const size = 10 / window.camera.zoom;
 
-            // Resolve IFF Color
             let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied';
-            let iffColor = '#00e5a3'; // Allied (Cyan/Green)
-            if (iff === 'hostile') iffColor = '#ff3333'; // Foe (Red)
-            if (iff === 'neutral') iffColor = '#ffaa00'; // Neutral (Amber)
+            let iffColor = '#00e5a3'; 
+            if (iff === 'hostile') iffColor = '#ff3333'; 
+            if (iff === 'neutral') iffColor = '#ffaa00'; 
 
-            // Draw IFF Tactical Target Ring
             ctx.strokeStyle = iffColor;
             ctx.lineWidth = 1.5 / window.camera.zoom;
             ctx.setLineDash([8 / window.camera.zoom, 4 / window.camera.zoom]);
             ctx.beginPath();
             ctx.arc(m.x, m.y, size * 1.8, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.setLineDash([]); // Reset line dash for other drawings
+            ctx.setLineDash([]); 
 
-            // Draw Core Ship Token
             ctx.fillStyle = m.color || '#00e1ff';
             ctx.beginPath(); ctx.moveTo(m.x, m.y - size); ctx.lineTo(m.x + size, m.y); ctx.lineTo(m.x, m.y + size); ctx.lineTo(m.x - size, m.y); ctx.closePath(); ctx.fill();
             
-            // Draw Ship Designation 
             if (window.camera.zoom > 0.1) { 
-                ctx.fillStyle = iffColor; // Text color matches IFF status
+                ctx.fillStyle = iffColor; 
                 ctx.font = `${Math.max(9, 11 / window.camera.zoom)}px Courier New`; 
                 ctx.fillText(m.name, m.x + 18 / window.camera.zoom, m.y + 4 / window.camera.zoom); 
             }
