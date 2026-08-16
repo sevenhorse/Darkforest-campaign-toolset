@@ -240,6 +240,49 @@ window.updateToolButtonStyles = function() {
     if(hBtn) { hBtn.style.borderColor = window.hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = window.hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
 };
 
+/* --- GLOBAL SYSTEM SEARCH --- */
+window._globalSearchResults = [];
+window.handleGlobalSearchInput = function(query) {
+    const dropdown = document.getElementById('search-results-dropdown');
+    if (!dropdown) return;
+    query = (query || '').trim().toLowerCase();
+    if (!query) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; window._globalSearchResults = []; return; }
+
+    let allSystems = proceduralSystems.concat(globalDbSystemsCache);
+    let results = [];
+    allSystems.forEach(s => { if (s.name && s.name.toLowerCase().includes(query)) results.push({ type: 'star', data: s }); });
+    globalShipMarkersCache.forEach(m => { if (m.name && m.name.toLowerCase().includes(query)) results.push({ type: 'ship', data: m }); });
+    results = results.slice(0, 8);
+    window._globalSearchResults = results;
+
+    if (results.length === 0) {
+        dropdown.innerHTML = '<div class="search-result-item" style="cursor:default; color:#6b826a;">No matches</div>';
+    } else {
+        dropdown.innerHTML = results.map((r, idx) => `<div class="search-result-item" onclick="window.selectGlobalSearchResult(${idx})">${r.data.name} <span style="color:#6b826a; font-size:9px;">[${r.type.toUpperCase()}]</span></div>`).join('');
+    }
+    dropdown.style.display = 'block';
+};
+
+window.selectGlobalSearchResult = function(idx) {
+    const r = window._globalSearchResults[idx];
+    if (!r) return;
+    window.selectedTarget = { type: r.type, data: r.data };
+    window.lockCameraOnSelected();
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    const dropdown = document.getElementById('search-results-dropdown');
+    if (dropdown) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; }
+    const input = document.getElementById('global-terminal-search');
+    if (input) input.value = '';
+};
+
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('search-results-dropdown');
+    const input = document.getElementById('global-terminal-search');
+    if (!dropdown || dropdown.style.display === 'none') return;
+    if (e.target === input || dropdown.contains(e.target)) return;
+    dropdown.innerHTML = ''; dropdown.style.display = 'none';
+});
+
 window.clearSelectedTarget = function() {
     window.selectedTarget = null;
     if (window.jumpPlottingActive) window.cancelJumpPlotting();
@@ -253,6 +296,16 @@ window.lockCameraOnSelected = function() {
     let targetX = window.selectedTarget.data.x; let targetY = window.selectedTarget.data.y;
     if (window.selectedTarget.type === 'body' && window.selectedTarget.data.parentSystem) { targetX = window.selectedTarget.data.parentSystem.x; targetY = window.selectedTarget.data.parentSystem.y; }
     window.camera.x = -targetX * window.camera.zoom; window.camera.y = -targetY * window.camera.zoom;
+    window.addRecentTarget(window.selectedTarget);
+};
+
+window.addRecentTarget = function(target) {
+    if (!target || !target.data || target.data.id === undefined) return;
+    recentTargets = recentTargets.filter(r => !(r.data && r.data.id === target.data.id && r.type === target.type));
+    recentTargets.unshift({ type: target.type, data: target.data });
+    if (recentTargets.length > 10) recentTargets.length = 10;
+    localStorage.setItem('odyssey_recents', JSON.stringify(recentTargets));
+    if (window.activeHudTab === 'recents' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 
 /* --- JUMP PLOTTING, TARGETS, SAVES --- */
