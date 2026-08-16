@@ -223,6 +223,7 @@ function initPresenceChannel(userProfile) {
         if (!payload) return;
         window.activePings.push({ x: payload.x, y: payload.y, color: payload.color, user: payload.username, startTime: Date.now() });
         if (window.AudioEngine) window.AudioEngine.playPing();
+        if (typeof loadChatLogs === 'function') loadChatLogs();
     }).subscribe(async (status) => {
         if (status === 'SUBSCRIBED') { 
             await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role, avatar_url: userProfile.avatar_url || '' }); 
@@ -261,6 +262,40 @@ window.snapToCommander = function(userId) {
         if (window.AudioEngine) window.AudioEngine.playPing();
     } else {
         alert("DRADIS Error: No active vessel found assigned to this commander.");
+    }
+};
+
+/* --- FEATURE: UNIVERSAL "JUMP TO SHIP" / SPACETIME INVERSION SHORTCUT ---
+   Pans the canvas to the user's own vessel, opens the character terminal
+   straight to the Vessel Deck tab, and applies a small in-universe clock
+   rollback as an Expeditionary-Force-style FTL jump time-inversion flourish.
+   The rollback is intentionally small and always logged to Comms so a DM
+   watching the timeline isn't surprised by it — it's flavor, not a way for
+   players to freely rewind the shared campaign clock (that stays DM-gated
+   via window.adjustTime). */
+window.JUMP_TIME_INVERSION_HOURS = 3;
+window.jumpToActiveShip = async function() {
+    let ship = globalShipMarkersCache.find(m => m.owner_id === currentUserId);
+    if (!ship) { alert("DRADIS Error: No active vessel found assigned to your callsign."); return; }
+
+    window.selectedTarget = { type: 'ship', data: ship };
+    if (typeof window.lockCameraOnSelected === 'function') window.lockCameraOnSelected();
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(ship.id);
+    if (window.AudioEngine) window.AudioEngine.playPing();
+
+    if (typeof window.universeTimeHours === 'number') {
+        let oldTime = window.universeTimeHours;
+        window.universeTimeHours = Math.max(0, window.universeTimeHours - window.JUMP_TIME_INVERSION_HOURS);
+        localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+        if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
+        if (typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+        await db.from('chat_logs').insert({
+            sender_id: 'system',
+            content: `🌀 [TEMPORAL DESYNC] ${ship.name} completed an FTL jump. Chronometer reads ${window.JUMP_TIME_INVERSION_HOURS}h prior to departure per relativistic inversion.`,
+            message_type: 'text'
+        });
+        if (typeof loadChatLogs === 'function') loadChatLogs();
     }
 };
 
