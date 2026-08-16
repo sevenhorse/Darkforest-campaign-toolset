@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=2.4">
+    <link rel="stylesheet" href="style.css?v=3.0">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -37,9 +37,7 @@
             </div>
             <button onclick="window.closeCodexFullscreen()" style="width: auto; padding: 8px 24px; background: #3d0c0c; border-color: #ff3333; color: #ffaaaa; font-size: 12px;">✕ CLOSE READER (ESC)</button>
         </div>
-
         <div id="reader-doc-action-bar" style="margin-bottom: 20px; display: none;"></div>
-
         <div class="reader-body" id="reader-body-content"></div>
     </div>
 
@@ -130,6 +128,8 @@
             </div>
 
             <div class="term-content-area" id="term-content-area">
+                
+                <!-- DOSSIER & STATS TAB -->
                 <div id="term-panel-stats" class="term-panel-content active">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <div>
@@ -154,7 +154,6 @@
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 1: Core Stats & Trackers</h4>
                                 <label for="term-sheet-name" style="font-size: 10px; color: #6b826a;">Character Name:</label>
                                 <input type="text" id="term-sheet-name">
-
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;">
                                     <div><label for="stat-charisma" style="font-size: 9px; color: #6b826a;">Charisma:</label><select id="stat-charisma"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                     <div><label for="stat-dexterity" style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
@@ -163,7 +162,6 @@
                                     <div><label for="stat-toughness" style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                     <div><label for="stat-willpower" style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                 </div>
-
                                 <div style="display: flex; gap: 10px; margin-top: 10px;">
                                     <div style="flex: 1;"><label for="term-vitality" style="font-size: 10px; color: #ff6b6b;">Vitality (0-10):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
                                     <div style="flex: 1;"><label for="term-stress" style="font-size: 10px; color: #ffaa00;">Stress (0-20):</label><input type="number" id="term-stress" min="0" max="20" value="0"></div>
@@ -208,6 +206,7 @@
                     <button class="btn-reveal" onclick="window.saveTerminalProfile()" style="margin-top: 10px; width: 100%;">SAVE DOSSIER & STATS</button>
                 </div>
 
+                <!-- COMBAT ARSENAL TAB -->
                 <div id="term-panel-combat" class="term-panel-content">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <div class="sheet-section">
@@ -252,6 +251,7 @@
                     <button class="btn-reveal" onclick="window.saveTerminalProfile()" style="margin-top: 15px; width: 100%;">SAVE COMBAT DATA</button>
                 </div>
 
+                <!-- CARGO TAB -->
                 <div id="term-panel-cargo" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
@@ -272,7 +272,6 @@
                             <h4 id="cargo-category-title" style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3;">Manifest Matrix</h4>
                             <div id="terminal-cargo-items-container" style="max-height: 52vh; overflow-y: auto; padding-right: 5px;"></div>
                         </div>
-
                         <div class="sheet-section" style="border-color: #00e5a3; background: rgba(0, 229, 163, 0.03);">
                             <h4 style="border-bottom: 1px solid #00e5a3; padding-bottom: 4px; color: #00e5a3;">+ Add Cargo Entry</h4>
                             <label for="new-cargo-category" style="font-size: 10px; color: #6b826a;">Target Category:</label>
@@ -281,10 +280,8 @@
                                 <option value="expendables">Expendables</option>
                                 <option value="misc">Miscellaneous</option>
                             </select>
-
                             <label for="new-cargo-name" style="font-size: 10px; color: #6b826a; margin-top: 6px; display:block;">Item Name / Designation:</label>
                             <input type="text" id="new-cargo-name" placeholder="e.g. MedKits, 120mm Shells, Fuel" style="font-size:11px; margin:2px 0;">
-
                             <div style="display: flex; gap: 8px; margin-top: 6px;">
                                 <div style="flex:1;">
                                     <label for="new-cargo-qty" style="font-size: 10px; color: #6b826a;">Quantity:</label>
@@ -300,6 +297,7 @@
                     </div>
                 </div>
 
+                <!-- VESSEL DIAGNOSTICS TAB -->
                 <div id="term-panel-vessel" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
@@ -321,11 +319,9 @@
                                     <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Integrity Cascades</h4>
                                     <div id="vessel-health-container"></div>
                                 </div>
-
                                 <div class="sheet-section" style="margin-top: 20px; border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
                                     <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Internal Decks & Systems</h4>
                                     <div id="vessel-decks-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px;"></div>
-                                    
                                     <div style="background:#030403; padding:8px; border:1px solid #00e1ff; border-radius:2px;">
                                         <label for="new-deck-name" style="font-size: 9px; color: #00e1ff;">Construct New Deck / Subsystem:</label>
                                         <div style="display:flex; gap:6px; margin-bottom:6px;">
@@ -337,11 +333,9 @@
                                     </div>
                                 </div>
                             </div>
-
                             <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
                                 <h4 style="color:#ff6b6b; border-bottom: 1px solid #ff3333; padding-bottom: 4px;">Weapon Hardpoints</h4>
                                 <div id="vessel-weapons-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 10px;"></div>
-                                
                                 <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
                                     <label for="new-ship-wpn-loc" style="font-size: 9px; color: #ffaaaa;">Mount New Weapon System:</label>
                                     <div style="display:flex; gap:6px; margin-bottom:6px;">
@@ -373,7 +367,6 @@
                                     <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Commission Squadron</h4>
                                     <label for="new-squadron-name" style="font-size: 9px; color: #6b826a;">Squadron Callsign:</label>
                                     <input type="text" id="new-squadron-name" placeholder="e.g. Red Squadron" style="font-size: 10px; margin: 2px 0;">
-                                    
                                     <div style="display:flex; gap:6px; margin-top:4px;">
                                         <div style="flex:2;">
                                             <label for="new-squadron-type" style="font-size: 9px; color: #6b826a;">Chassis Type:</label>
@@ -390,7 +383,6 @@
                                     </div>
                                     <button class="btn-reveal" onclick="window.commissionSquadron()" style="margin-top: 6px; width: 100%; font-size: 10px; border-color:#00e1ff; color:#00e1ff;">+ ADD TO HANGAR</button>
                                 </div>
-
                                 <div class="sheet-section" style="margin-top: 15px;">
                                     <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Embarked Air Group</h4>
                                     <div id="vessel-embarked-container" style="max-height: 250px; overflow-y: auto;">
@@ -398,7 +390,6 @@
                                     </div>
                                 </div>
                             </div>
-
                             <div class="sheet-section" style="border-color:#ffaa00; background:rgba(255, 170, 0, 0.05);">
                                 <h4 style="color:#ffaa00; border-bottom: 1px solid #ffaa00; padding-bottom: 4px;">Active Flight Operations</h4>
                                 <p style="font-size:9px; color:#d4c5a9; margin-top:0;">Deployed strike craft have a maximum 4-turn loiter time before bingo fuel.</p>
@@ -410,6 +401,7 @@
                     </div>
                 </div>
 
+                <!-- CODEX TAB WITH MODULE C SYSTEM LINKER -->
                 <div id="term-panel-codex" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ff6b6b; padding-bottom: 8px; margin-bottom: 15px;">
                         <div>
@@ -451,8 +443,11 @@
 
                                 <label for="new-codex-subtitle" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Subtitle / Metadata:</label>
                                 <input type="text" id="new-codex-subtitle" placeholder="e.g. Allied / Flagship / Outer Rim" style="font-size: 10px; margin: 2px 0;">
-<label for="new-codex-link" style="font-size: 9px; color: #00e1ff; margin-top: 4px; display: block;">Linked Star System ID (Optional - Hides lore until DRADIS Scan):</label>
-<input type="text" id="new-codex-link" placeholder="e.g. proc-spiral-120" style="font-size: 10px; margin: 2px 0; border-color: #00e1ff;">
+
+                                <!-- MODULE C SYSTEM LINKER INPUT -->
+                                <label for="new-codex-link" style="font-size: 9px; color: #00e1ff; margin-top: 4px; display: block;">Linked Star System ID (Optional - Hides lore until DRADIS Scan):</label>
+                                <input type="text" id="new-codex-link" placeholder="e.g. proc-spiral-120" style="font-size: 10px; margin: 2px 0; border-color: #00e1ff;">
+
                                 <label for="new-codex-content" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary:</label>
                                 <textarea id="new-codex-content" rows="4" placeholder="Full briefing..." style="font-size: 10px; margin: 2px 0;"></textarea>
 
@@ -758,11 +753,11 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=2.5"></script>
-    <script src="js/audio.js?v=2.5"></script>
-    <script src="js/ui.js?v=2.5"></script>
-    <script src="js/combat.js?v=2.5"></script>
-    <script src="js/map.js?v=2.5"></script>
+    <script src="js/db.js?v=3.0"></script>
+    <script src="js/audio.js?v=3.0"></script>
+    <script src="js/ui.js?v=3.0"></script>
+    <script src="js/combat.js?v=3.0"></script>
+    <script src="js/map.js?v=3.0"></script>
 
 </body>
 </html>
