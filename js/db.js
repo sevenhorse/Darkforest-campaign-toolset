@@ -51,7 +51,7 @@ window.hoveredTarget = null;
 window.selectedTarget = null;
 
 let measuringTapeActive = false; let measureStartPoint = null; let measureEndPoint = null;
-let pingModeActive = false; let activePings = [];
+// NOTE: ping state lives on window (window.pingModeActive / window.activePings), set in map.js
 let jumpPlottingActive = false; let activeJumpShip = null; let jumpTargetPoint = null; let selectedDriveSpeed = 250;
 let territoryToolActive = false; let territoryDrawActive = false; let activeTerritoryVertices = [];
 let hyperlaneDrawActive = false; let activeHyperlaneNodes = [];
@@ -215,9 +215,14 @@ async function checkAnomalyProximity(ship) {
 
 function initPresenceChannel(userProfile) {
     presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
+    realtimeChannel = presenceChannel;
     presenceChannel.on('presence', { event: 'sync' }, () => { 
         onlineUsersMap = presenceChannel.presenceState(); 
         if (typeof renderPresenceTicker === 'function') renderPresenceTicker(); 
+    }).on('broadcast', { event: 'tactical_ping' }, ({ payload }) => {
+        if (!payload) return;
+        window.activePings.push({ x: payload.x, y: payload.y, color: payload.color, user: payload.username, startTime: Date.now() });
+        if (window.AudioEngine) window.AudioEngine.playPing();
     }).subscribe(async (status) => {
         if (status === 'SUBSCRIBED') { 
             await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role, avatar_url: userProfile.avatar_url || '' }); 
