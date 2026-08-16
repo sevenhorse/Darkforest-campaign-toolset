@@ -68,12 +68,14 @@ window.handleLogin = async function() {
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     const errorDiv = document.getElementById('error-message');
-    errorDiv.style.display = 'none';
+    if (errorDiv) errorDiv.style.display = 'none';
 
     const { data, error } = await db.auth.signInWithPassword({ email, password });
     if (error) {
-        errorDiv.innerText = "Access Denied: " + error.message;
-        errorDiv.style.display = 'block';
+        if (errorDiv) {
+            errorDiv.innerText = "Access Denied: " + error.message;
+            errorDiv.style.display = 'block';
+        }
         return;
     }
     fetchUserProfile(data.user);
@@ -85,42 +87,61 @@ async function fetchUserProfile(user) {
     const { data, error } = await db.from('profiles').select('*').eq('id', user.id).single();
 
     if (error) {
-        document.getElementById('error-message').innerText = "Access Denied: Profile mapping missing.";
-        document.getElementById('error-message').style.display = 'block';
+        const errorDiv = document.getElementById('error-message');
+        if (errorDiv) {
+            errorDiv.innerText = "Access Denied: Profile mapping missing.";
+            errorDiv.style.display = 'block';
+        }
         return;
     }
 
     currentUserRole = data.role;
-    document.getElementById('login-wrapper').style.display = 'none';
-    document.getElementById('app-container').style.display = 'flex';
+    
+    // DEFENSIVE DOM CHECKS: Verify element exists before touching its style
+    const loginWrap = document.getElementById('login-wrapper');
+    if (loginWrap) loginWrap.style.display = 'none';
+    
+    const appCont = document.getElementById('app-container');
+    if (appCont) appCont.style.display = 'flex';
 
     const badge = document.getElementById('user-role');
-    badge.innerText = `Role: ${data.role}`;
+    if (badge) badge.innerText = `Role: ${data.role}`;
     
     const scratchpadBtn = document.getElementById('dm-scratchpad-toggle-btn');
     const territoryBtn = document.getElementById('territory-tool-toggle-btn');
     const codexCreatorPanel = document.getElementById('codex-dm-creator-panel');
     const codexPerms = document.getElementById('codex-permission-indicator');
+    const dmToolsPanel = document.getElementById('dm-tools');
+    const dmTimeBox = document.getElementById('dm-time-controls-box');
     
     if (data.role === 'dm') {
-        badge.classList.add('role-dm');
-        badge.innerText = 'OVERSEER (DM)';
-        document.getElementById('dm-tools').style.display = 'block';
-        document.getElementById('dm-time-controls-box').style.display = 'block';
+        if (badge) {
+            badge.classList.add('role-dm');
+            badge.innerText = 'OVERSEER (DM)';
+        }
+        if (dmToolsPanel) dmToolsPanel.style.display = 'block';
+        if (dmTimeBox) dmTimeBox.style.display = 'block';
         if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
         if (territoryBtn) territoryBtn.style.display = 'inline-block';
         if (codexCreatorPanel) codexCreatorPanel.style.display = 'block';
-        if (codexPerms) { codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE & EDIT ACCESS'; codexPerms.style.color = '#ff6b6b'; }
+        if (codexPerms) { 
+            codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE & EDIT ACCESS'; 
+            codexPerms.style.color = '#ff6b6b'; 
+        }
         
         const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
-        if (savedScratch && document.getElementById('dm-scratchpad-input')) {
-            document.getElementById('dm-scratchpad-input').value = savedScratch;
+        const scratchInput = document.getElementById('dm-scratchpad-input');
+        if (savedScratch && scratchInput) {
+            scratchInput.value = savedScratch;
         }
     } else {
         if (scratchpadBtn) scratchpadBtn.style.display = 'none';
         if (territoryBtn) territoryBtn.style.display = 'none';
         if (codexCreatorPanel) codexCreatorPanel.style.display = 'none';
-        if (codexPerms) { codexPerms.innerText = '● SECURITY CLEARANCE: LEVEL 2 // VIEW ONLY'; codexPerms.style.color = '#6b826a'; }
+        if (codexPerms) { 
+            codexPerms.innerText = '● SECURITY CLEARANCE: LEVEL 2 // VIEW ONLY'; 
+            codexPerms.style.color = '#6b826a'; 
+        }
     }
 
     initPresenceChannel(data);
@@ -153,7 +174,8 @@ async function loadAllProfiles() {
         
         const myProf = allProfiles.find(p => p.id === currentUserId);
         if (myProf) {
-            document.getElementById('term-username').value = myProf.username || '';
+            const termUsername = document.getElementById('term-username');
+            if (termUsername) termUsername.value = myProf.username || '';
             if (myProf.avatar_url) {
                 const preview = document.getElementById('my-terminal-avatar-preview');
                 const hiddenInput = document.getElementById('term-avatar');
@@ -162,7 +184,8 @@ async function loadAllProfiles() {
             }
         }
 
-        if (document.getElementById('character-terminal').style.display === 'block') { 
+        const charTerminal = document.getElementById('character-terminal');
+        if (charTerminal && charTerminal.style.display === 'block') { 
             if (typeof window.renderCharacterTerminalData === 'function') window.renderCharacterTerminalData(); 
         }
         if (typeof populateCommsRecipients === 'function') populateCommsRecipients();
@@ -241,6 +264,7 @@ async function checkAnomalyProximity(ship) {
                 content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' has detected a massive subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}. Sensor locks updated.`,
                 message_type: 'text'
             });
+            if (window.AudioEngine) window.AudioEngine.playKlaxon();
             anomaly.luminosity = 'Revealed Anomaly';
             anomaly.color = '#ff3333';
         }
