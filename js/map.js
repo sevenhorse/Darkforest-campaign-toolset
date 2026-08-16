@@ -3,7 +3,8 @@
    ========================================================================== */
 
 window.camera = { x: 0, y: 0, zoom: 0.2, isDragging: false, startX: 0, startY: 0 };
-window.draggedMarker = null; window.draggedStar = null;
+window.draggedMarker = null; 
+window.draggedStar = null;
 
 window.measuringTapeActive = false; window.measureStartPoint = null; window.measureEndPoint = null;
 window.pingModeActive = false; window.activePings = [];
@@ -22,6 +23,7 @@ function getPlanetColor(type, prng) {
     if(type === 'Barren Rock') return ['#8a8a8a', '#a69b8d'][Math.floor(prng()*2)];
     if(type === 'Volcanic') return ['#d1451f', '#ff5e00'][Math.floor(prng()*2)]; return '#ffffff';
 }
+
 function getPlanetResources(type, prng) {
     const rares = ['Uranium', 'Platinum', 'Dark Matter Trace', 'Neodymium', 'Promethium', 'Quantum Silicates'];
     const commons = ['Iron', 'Nickel', 'Cobalt', 'Silicon', 'Ice'];
@@ -56,13 +58,12 @@ window.getSystemBodies = function(system) {
     generatedSystems[system.id] = bodies; return bodies;
 };
 
-/* FOW & DATA LOADING */
+/* FOW ENGINE: Removed the DM God-Mode Bypass so the DM sees what players see */
 window.getFowTier = function(system) {
-    if (currentUserRole === 'dm') return 3; // DM sees all
     if (window.scannedSystems && window.scannedSystems.includes(system.id)) return 3; // Tier 3
     let inRange = false;
     for (let m of globalShipMarkersCache) {
-        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied')) {
+        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied') || currentUserRole === 'dm') {
             if (Math.hypot(m.x - system.x, m.y - system.y) <= 300) { inRange = true; break; }
         }
     }
@@ -124,10 +125,50 @@ window.commitArchitectSystem = async function() {
     await db.from('star_systems').insert(payload); window.closeSystemArchitect(); if(typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
 };
 
+/* RE-ADDED TASK FORCE BLACK PRESET LOGIC */
 window.spawnTokenAtCenter = async function() {
-    const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1'; const name = document.getElementById('dm-tool-name').value || 'Task Force Black'; const iffStatus = document.getElementById('dm-tool-iff') ? document.getElementById('dm-tool-iff').value : 'allied';
-    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {}; newCargo.iff = iffStatus;
+    const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1'; 
+    const name = document.getElementById('dm-tool-name').value || 'Task Force Black'; 
+    const iffStatus = document.getElementById('dm-tool-iff') ? document.getElementById('dm-tool-iff').value : 'allied';
+    
+    let isJupiter = false;
+    if (name.toLowerCase().includes("task force black") || name.toLowerCase().includes("horizon")) {
+        isJupiter = confirm(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
+    }
+    
+    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {}; 
+    newCargo.iff = iffStatus;
+    
     let payload = { owner_id: currentUserId, name: name, drive_type: driveType, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, color: iffStatus === 'hostile' ? '#ff3333' : (iffStatus === 'neutral' ? '#ffaa00' : '#00e1ff'), cargo_inventory: newCargo };
+
+    if (isJupiter) {
+        payload.integrity_shields = 400; payload.max_shields = 400;
+        payload.integrity_hull = 300; payload.max_hull = 300;
+        payload.integrity_reactive = 10; payload.max_reactive = 10;
+        payload.integrity_ablative = 10; payload.max_ablative = 10;
+        payload.ship_weapons = [
+            { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+            { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+            { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0 },
+            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0 },
+            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
+            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
+            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+            { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
+            { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+            { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
+            { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 }
+        ];
+        payload.ship_decks = [
+            { name: "Bridge / CIC", hp: 100, max_hp: 100 },
+            { name: "Engineering / Core", hp: 150, max_hp: 150 },
+            { name: "Life Support", hp: 100, max_hp: 100 },
+            { name: "Flight Deck / Hangars", hp: 120, max_hp: 120 },
+            { name: "Manufacturing", hp: 100, max_hp: 100 }
+        ];
+    }
+
     await db.from('ship_markers').insert(payload); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 
@@ -137,7 +178,7 @@ window.spawnStarSystemAtCenter = async function() {
     if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 
-/* --- TOOL TOGGLES (THE MISSING FUNCTIONS) --- */
+/* --- TOOL TOGGLES --- */
 window.toggleMeasuringTool = function() {
     window.measuringTapeActive = !window.measuringTapeActive;
     if(!window.measuringTapeActive) { window.measureStartPoint = null; window.measureEndPoint = null; }
@@ -152,36 +193,28 @@ window.togglePingMode = function() {
 };
 
 window.toggleTerritoryTool = function() {
-    if (currentUserRole !== 'dm') return;
-    window.territoryToolActive = !window.territoryToolActive;
-    const panel = document.getElementById('territory-control-panel');
-    panel.style.display = window.territoryToolActive ? 'block' : 'none';
-    if(!window.territoryToolActive) window.cancelDrawingTerritory();
-    window.updateToolButtonStyles();
+    if (currentUserRole !== 'dm') return; window.territoryToolActive = !window.territoryToolActive;
+    const panel = document.getElementById('territory-control-panel'); panel.style.display = window.territoryToolActive ? 'block' : 'none';
+    if(!window.territoryToolActive) window.cancelDrawingTerritory(); window.updateToolButtonStyles();
 };
 
 window.startDrawingTerritory = function() { window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
 window.finishActiveTerritory = async function() {
     if (window.activeTerritoryVertices.length < 3) { alert("Requires at least 3 nodes."); return; }
     const name = document.getElementById('territory-name-input').value || 'New Sector'; const color = document.getElementById('territory-color-input').value || '#00e5a3'; const faction = document.getElementById('territory-faction-select') ? document.getElementById('territory-faction-select').value : '';
-    await db.from('territories').insert({ name, color, vertices: window.activeTerritoryVertices, faction_name: faction });
-    window.cancelDrawingTerritory(); if (typeof window.loadTerritories === 'function') window.loadTerritories();
+    await db.from('territories').insert({ name, color, vertices: window.activeTerritoryVertices, faction_name: faction }); window.cancelDrawingTerritory(); if (typeof window.loadTerritories === 'function') window.loadTerritories();
 };
 window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
 
 window.toggleHyperlanes = function() {
-    if (currentUserRole === 'dm') {
-        const hBtn = document.getElementById('btn-start-hyperlane-draw');
-        if(hBtn && hBtn.style.display !== 'none') { window.hyperlanesVisible = !window.hyperlanesVisible; }
-    } else { window.hyperlanesVisible = !window.hyperlanesVisible; }
+    if (currentUserRole === 'dm') { const hBtn = document.getElementById('btn-start-hyperlane-draw'); if(hBtn && hBtn.style.display !== 'none') { window.hyperlanesVisible = !window.hyperlanesVisible; } } else { window.hyperlanesVisible = !window.hyperlanesVisible; }
     window.updateToolButtonStyles();
 };
 
 window.startDrawingHyperlane = function() { window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
 window.finishActiveHyperlane = async function() {
     if (window.activeHyperlaneNodes.length < 2) { alert("Requires at least 2 nodes."); return; }
-    const color = '#00e1ff';
-    await db.from('hyperlanes').insert({ name: 'Trade Route', color, nodes: window.activeHyperlaneNodes });
+    await db.from('hyperlanes').insert({ name: 'Trade Route', color: '#00e1ff', nodes: window.activeHyperlaneNodes });
     window.cancelDrawingHyperlane(); if (typeof loadHyperlanes === 'function') loadHyperlanes();
 };
 window.cancelDrawingHyperlane = function() { window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'block'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'none'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'none'; document.getElementById('hyperlane-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
@@ -190,7 +223,7 @@ window.triggerTacticalPing = function(x, y) {
     if (!realtimeChannel) return;
     if (window.AudioEngine) window.AudioEngine.playPing();
     realtimeChannel.send({ type: 'broadcast', event: 'tactical_ping', payload: { x, y, username: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3' } });
-    activePings.push({ x, y, color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3', user: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', startTime: Date.now() });
+    window.activePings.push({ x, y, color: currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3', user: allProfiles.find(p => p.id === currentUserId)?.username || 'Commander', startTime: Date.now() });
     if(window.pingModeActive) window.togglePingMode();
 };
 
@@ -380,7 +413,8 @@ window.initGalaxyEngine = function() {
         for (let s of allSystems) {
             if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < starHitRadius) {
                 window.selectedTarget = { type: 'star', data: s };
-                if(currentUserRole === 'dm') window.draggedStar = s; 
+                // ERROR FIX: Only allow dragging if the star is CUSTOM and the user is a DM
+                if(currentUserRole === 'dm' && s.isCustom) window.draggedStar = s; 
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
             }
         }
@@ -417,7 +451,6 @@ window.initGalaxyEngine = function() {
         window.camera.zoom = newZoom;
     }, { passive: false });
 
-    // HUD TELEMETRY RENDERER (MODULE C: FOG OF WAR)
     window.renderHUDTelemetry = function() {
         const content = document.getElementById('hud-content'); if (!content) return;
         
@@ -496,7 +529,10 @@ window.initGalaxyEngine = function() {
         const cssWidth = container.clientWidth; const cssHeight = container.clientHeight;
         ctx.fillStyle = '#010201'; ctx.fillRect(0, 0, cssWidth, cssHeight);
         ctx.save(); ctx.translate(cssWidth / 2 + window.camera.x, cssHeight / 2 + window.camera.y); ctx.scale(window.camera.zoom, window.camera.zoom);
-        const time = Date.now(); const hw = cssWidth / (2 * window.camera.zoom); const hh = cssHeight / (2 * window.camera.zoom); const cx = -window.camera.x / window.camera.zoom; const cy = -window.camera.y / window.camera.zoom;
+
+        const time = Date.now();
+        const hw = cssWidth / (2 * window.camera.zoom); const hh = cssHeight / (2 * window.camera.zoom);
+        const cx = -window.camera.x / window.camera.zoom; const cy = -window.camera.y / window.camera.zoom;
 
         if (window.camera.zoom < 0.8) { let coreGrd = ctx.createRadialGradient(0, 0, 100, 0, 0, 1800); coreGrd.addColorStop(0, 'rgba(118, 148, 255, 0.12)'); coreGrd.addColorStop(0.5, 'rgba(0, 229, 163, 0.04)'); coreGrd.addColorStop(1, 'rgba(0, 0, 0, 0)'); ctx.fillStyle = coreGrd; ctx.beginPath(); ctx.arc(0, 0, 1800, 0, Math.PI * 2); ctx.fill(); }
 
@@ -559,6 +595,15 @@ window.initGalaxyEngine = function() {
             ctx.restore();
         }
 
+        // RENDER PINGS
+        window.activePings = window.activePings.filter(p => time - p.startTime < 3000);
+        window.activePings.forEach(p => {
+            let life = (time - p.startTime) / 3000;
+            let pSize = (20 + (life * 60)) / window.camera.zoom;
+            ctx.strokeStyle = p.color; ctx.lineWidth = 2 / window.camera.zoom; ctx.globalAlpha = 1.0 - life;
+            ctx.beginPath(); ctx.arc(p.x, p.y, pSize, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1.0;
+        });
+
         for (let s of allSystems) {
             if (Math.abs(s.x - cx) > hw + 200 || Math.abs(s.y - cy) > hh + 200) continue;
             let fowTier = window.getFowTier(s);
@@ -604,11 +649,17 @@ window.initGalaxyEngine = function() {
             ctx.beginPath(); ctx.arc(targetX, targetY, (16 + Math.sin(time * 0.008) * 4) / window.camera.zoom, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
         }
 
+        // RESTORED MEASURE TOOL DISTANCE TEXT
         if (window.measuringTapeActive && window.measureStartPoint) {
             ctx.strokeStyle = '#00e5a3'; ctx.lineWidth = 2 / window.camera.zoom; ctx.setLineDash([4, 4]);
             let endX = window.measureEndPoint ? window.measureEndPoint.x : (window._lastMouseWorldX || window.measureStartPoint.x);
             let endY = window.measureEndPoint ? window.measureEndPoint.y : (window._lastMouseWorldY || window.measureStartPoint.y);
             ctx.beginPath(); ctx.moveTo(window.measureStartPoint.x, window.measureStartPoint.y); ctx.lineTo(endX, endY); ctx.stroke(); ctx.setLineDash([]);
+            
+            let dist = Math.hypot(endX - window.measureStartPoint.x, endY - window.measureStartPoint.y);
+            let ly = (dist / 100).toFixed(2); let days1c = (ly * 365.25).toFixed(1); let hrs = Math.max(1, Math.round(dist / 250));
+            ctx.fillStyle = '#00e5a3'; ctx.font = `${Math.max(10, 12 / window.camera.zoom)}px Courier New`;
+            ctx.fillText(`Dist: ${dist.toFixed(1)}u (${ly} LY) | Sublight: ${days1c}d | FTL: ~${hrs}h`, endX + 15 / window.camera.zoom, endY);
         }
 
         let dynamicTarget = window.selectedTarget || window.hoveredTarget;
