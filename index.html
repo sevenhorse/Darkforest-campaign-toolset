@@ -27,7 +27,7 @@
         </div>
     </div>
 
-    <!-- 2. FULLSCREEN CODEX READER MODAL (EXPAND VIEW) -->
+    <!-- 2. FULLSCREEN CODEX & INTEL READER MODAL -->
     <div id="codex-fullscreen-reader">
         <div class="reader-header">
             <div>
@@ -40,12 +40,71 @@
 
         <div id="reader-doc-action-bar" style="margin-bottom: 20px; display: none;"></div>
 
-        <div class="reader-body" id="reader-body-content">
-            <!-- Full narrative text rendered dynamically -->
+        <div class="reader-body" id="reader-body-content"></div>
+    </div>
+
+    <!-- 3. SYSTEM ARCHITECT MODAL (MODULE B) -->
+    <div id="system-architect-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(1, 3, 2, 0.88); z-index: 10000; justify-content: center; align-items: center; padding: 20px;">
+        <div class="panel" style="width: 580px; max-width: 95%; max-height: 90vh; overflow-y: auto; border-color: #00e5a3; box-shadow: 0 0 25px rgba(0, 229, 163, 0.2);">
+            <div class="panel-header-drag" style="cursor: default;">
+                <h3 style="margin: 0; color: #00e5a3; font-size: 14px;">🌌 OVERSEER SYSTEM ARCHITECT</h3>
+                <button onclick="window.closeSystemArchitect()" class="layer-del" style="font-size: 10px; padding: 2px 6px;">✕</button>
+            </div>
+            <p style="font-size: 10px; color: #6b826a; margin: 6px 0 12px 0;">Design stellar classification, orbits, and custom planetary biomes before deploying to sector coordinates.</p>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <label for="arch-name" style="font-size: 9px; color: #6b826a;">System Designation:</label>
+                    <input type="text" id="arch-name" value="Tartarus Prime" style="font-size: 11px; margin: 2px 0;">
+                </div>
+                <div>
+                    <label for="arch-multi" style="font-size: 9px; color: #6b826a;">Star Multiplicity:</label>
+                    <select id="arch-multi" style="font-size: 11px; margin: 2px 0;">
+                        <option value="Single">Single Star</option>
+                        <option value="Binary">Binary Stars</option>
+                        <option value="Trinary">Trinary Stars</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px;">
+                <div>
+                    <label for="arch-lum" style="font-size: 9px; color: #6b826a;">Primary Stellar Class:</label>
+                    <select id="arch-lum" onchange="window.architectClassChanged(this.value)" style="font-size: 10px; margin: 2px 0;">
+                        <option value="Class G (Yellow)">Class G (Yellow Standard)</option>
+                        <option value="Class M (Red Dwarf)">Class M (Red Dwarf)</option>
+                        <option value="Class O (Blue Giant)">Class O (Blue Giant Hazard)</option>
+                        <option value="Black Hole">Singularity (Black Hole)</option>
+                        <option value="Hidden Anomaly">Subspace Anomaly (Stealth)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="arch-hazard" style="font-size: 9px; color: #6b826a;">Environmental Hazard:</label>
+                    <select id="arch-hazard" style="font-size: 10px; margin: 2px 0; background: #0a1410; color: #ffaa00; border-color: #ffaa00;">
+                        <option value="None">Clear Sector (No Hazards)</option>
+                        <option value="Nebula">Dense Nebula (Shields Offline / EMCON)</option>
+                        <option value="Pulsar">Pulsar Radiation (Double Weapon Overheat)</option>
+                        <option value="Gravity Well">High Gravity Accretion (2x FTL Fuel Cost)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="margin-top: 10px; border-top: 1px solid #3c4e36; padding-top: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 11px; color: #00e5a3; font-weight: bold;">Orbital Manifest</span>
+                    <button class="btn-reveal" onclick="window.addArchitectPlanetRow()" style="font-size: 9px; padding: 2px 8px; width: auto; margin: 0;">+ ADD PLANETARY BODY</button>
+                </div>
+                <div id="arch-planets-container" style="max-height: 220px; overflow-y: auto; margin-top: 8px; display: flex; flex-direction: column; gap: 6px;"></div>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-top: 15px;">
+                <button class="btn-deploy" onclick="window.commitArchitectSystem()" style="flex: 2; font-size: 11px; margin: 0;">🚀 DEPLOY SYSTEM TO MAP CENTER</button>
+                <button class="btn-remove" onclick="window.closeSystemArchitect()" style="flex: 1; font-size: 11px; margin: 0;">CANCEL</button>
+            </div>
         </div>
     </div>
 
-    <!-- 3. FULL SCREEN CHARACTER & SHIP TERMINAL -->
+    <!-- 4. FULL SCREEN CHARACTER & SHIP TERMINAL -->
     <div id="character-terminal">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3c4e36; padding-bottom: 12px; margin-bottom: 15px;">
             <div>
@@ -56,38 +115,21 @@
         </div>
 
         <div class="term-layout">
-            <!-- LEFT VERTICAL SIDEBAR -->
             <div class="term-sidebar" id="term-sidebar">
                 <button onclick="window.toggleSidebar()" style="text-align: left; padding: 6px; font-size: 10px; border: none; background: transparent; color: #6b826a; cursor:pointer;">
                     <span id="sidebar-toggle-icon">COLLAPSE SIDEBAR</span>
                 </button>
 
-                <button class="term-tab-btn-vert active" id="term-tab-btn-stats" onclick="window.switchTermTab('stats')">
-                    <span class="tab-text">Dossier & Stats</span>
-                </button>
-                <button class="term-tab-btn-vert" id="term-tab-btn-combat" onclick="window.switchTermTab('combat')">
-                    <span class="tab-text">Arsenal</span> <span class="tab-badge" id="badge-combat">0</span>
-                </button>
-                <button class="term-tab-btn-vert" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')">
-                    <span class="tab-text">Manifest</span>
-                </button>
-                <button class="term-tab-btn-vert" id="term-tab-btn-vessel" onclick="window.switchTermTab('vessel')">
-                    <span class="tab-text">Vessel Deck</span>
-                </button>
-                <button class="term-tab-btn-vert" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')">
-                    <span class="tab-text">Intel & Ops</span> <span class="tab-badge" id="badge-notes">0</span>
-                </button>
-                <button class="term-tab-btn-vert" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')">
-                    <span class="tab-text">Crew Roster</span> <span class="tab-badge" id="badge-roster">0</span>
-                </button>
-                <button class="term-tab-btn-vert" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff6b6b; color:#ff6b6b;">
-                    <span class="tab-text">Cloud Codex</span>
-                </button>
+                <button class="term-tab-btn-vert active" id="term-tab-btn-stats" onclick="window.switchTermTab('stats')"><span class="tab-text">Dossier & Stats</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-combat" onclick="window.switchTermTab('combat')"><span class="tab-text">Arsenal</span> <span class="tab-badge" id="badge-combat">0</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')"><span class="tab-text">Manifest</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-vessel" onclick="window.switchTermTab('vessel')"><span class="tab-text">Vessel Deck</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')"><span class="tab-text">Intel & Ops</span> <span class="tab-badge" id="badge-notes">0</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')"><span class="tab-text">Crew Roster</span> <span class="tab-badge" id="badge-roster">0</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff6b6b; color:#ff6b6b;"><span class="tab-text">Cloud Codex</span></button>
             </div>
 
-            <!-- RIGHT CONTENT AREA -->
             <div class="term-content-area" id="term-content-area">
-                
                 <div id="term-panel-stats" class="term-panel-content active">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <div>
@@ -100,10 +142,8 @@
                                         <input type="text" id="term-username" placeholder="Handle...">
                                     </div>
                                 </div>
-                                <div id="avatar-dropzone" style="margin-top: 10px; border: 2px dashed #3c4e36; padding: 10px; text-align: center; background: #040605; border-radius: 2px; cursor: pointer; transition: border-color 0.2s;">
-                                    <p id="dropzone-label" style="margin: 0; font-size: 10px; color: #6b826a;">
-                                        Drag & drop profile image here, or <span style="color:#00e5a3; text-decoration:underline;">browse files</span>
-                                    </p>
+                                <div id="avatar-dropzone" style="margin-top: 10px; border: 2px dashed #3c4e36; padding: 10px; text-align: center; background: #040605; border-radius: 2px; cursor: pointer;">
+                                    <p id="dropzone-label" style="margin: 0; font-size: 10px; color: #6b826a;">Drag & drop profile image here, or <span style="color:#00e5a3; text-decoration:underline;">browse files</span></p>
                                     <label for="avatar-file-input" style="display:none;">Avatar File</label>
                                     <input type="file" id="avatar-file-input" accept="image/*" style="display: none;">
                                 </div>
@@ -212,7 +252,6 @@
                     <button class="btn-reveal" onclick="window.saveTerminalProfile()" style="margin-top: 15px; width: 100%;">SAVE COMBAT DATA</button>
                 </div>
 
-                <!-- FULL-SCREEN CARGO & MANIFEST TAB -->
                 <div id="term-panel-cargo" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
@@ -261,7 +300,6 @@
                     </div>
                 </div>
 
-                <!-- VESSEL DIAGNOSTICS & HARDPOINTS TAB -->
                 <div id="term-panel-vessel" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #040605; padding: 10px; border: 1px solid #3c4e36; border-radius: 2px;">
                         <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1;">
@@ -271,16 +309,13 @@
                         <button class="btn-reveal" onclick="window.broadcastVesselStatus()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">BROADCAST STATUS TO COMMS</button>
                     </div>
 
-                    <!-- Vessel Sub-Tabs -->
                     <div class="cargo-subtabs" style="margin-bottom:12px;">
                         <button class="cargo-subtab-btn active" id="vessel-subtab-core" onclick="window.switchVesselSubtab('core')">Core Diagnostics & Weapons</button>
                         <button class="cargo-subtab-btn" id="vessel-subtab-hangar" onclick="window.switchVesselSubtab('hangar')">Hangar Bay & Strike Craft</button>
                     </div>
 
-                    <!-- CORE DIAGNOSTICS VIEW -->
                     <div id="vessel-core-view">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                            <!-- Column 1: Integrity & Decks -->
                             <div>
                                 <div class="sheet-section">
                                     <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Integrity Cascades</h4>
@@ -303,7 +338,6 @@
                                 </div>
                             </div>
 
-                            <!-- Column 2: Weapon Hardpoints -->
                             <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
                                 <h4 style="color:#ff6b6b; border-bottom: 1px solid #ff3333; padding-bottom: 4px;">Weapon Hardpoints</h4>
                                 <div id="vessel-weapons-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 10px;"></div>
@@ -332,10 +366,8 @@
                         </div>
                     </div>
 
-                    <!-- HANGAR BAY & STRIKE CRAFT VIEW -->
                     <div id="vessel-hangar-view" style="display:none;">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                            <!-- Left: Hangar Management & Commissioning -->
                             <div>
                                 <div class="sheet-section" style="border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
                                     <h4 style="border-bottom: 1px solid #00e1ff; padding-bottom: 4px; color:#00e1ff;">Commission Squadron</h4>
@@ -367,7 +399,6 @@
                                 </div>
                             </div>
 
-                            <!-- Right: Active Flight Operations -->
                             <div class="sheet-section" style="border-color:#ffaa00; background:rgba(255, 170, 0, 0.05);">
                                 <h4 style="color:#ffaa00; border-bottom: 1px solid #ffaa00; padding-bottom: 4px;">Active Flight Operations</h4>
                                 <p style="font-size:9px; color:#d4c5a9; margin-top:0;">Deployed strike craft have a maximum 4-turn loiter time before bingo fuel.</p>
@@ -379,7 +410,6 @@
                     </div>
                 </div>
 
-                <!-- OVERSEER CODEX TAB (MASS EFFECT STYLE DECK) -->
                 <div id="term-panel-codex" class="term-panel-content">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ff6b6b; padding-bottom: 8px; margin-bottom: 15px;">
                         <div>
@@ -393,34 +423,21 @@
                     </div>
 
                     <div class="codex-me-deck">
-                        <!-- LEFT MASS EFFECT SUB-NAV RAIL -->
                         <div class="codex-me-rail">
-                            <button class="codex-me-btn active" id="codex-rail-factions" onclick="window.switchCodexCategory('factions')">
-                                🛡️ Factions
-                            </button>
-                            <button class="codex-me-btn" id="codex-rail-lore" onclick="window.switchCodexCategory('lore')">
-                                🌌 Sector Lore
-                            </button>
-                            <button class="codex-me-btn" id="codex-rail-npcs" onclick="window.switchCodexCategory('npcs')">
-                                👤 Key NPCs
-                            </button>
-                            <button class="codex-me-btn" id="codex-rail-docs" onclick="window.switchCodexCategory('docs')">
-                                📄 Documents
-                            </button>
+                            <button class="codex-me-btn active" id="codex-rail-factions" onclick="window.switchCodexCategory('factions')">🛡️ Factions</button>
+                            <button class="codex-me-btn" id="codex-rail-lore" onclick="window.switchCodexCategory('lore')">🌌 Sector Lore</button>
+                            <button class="codex-me-btn" id="codex-rail-npcs" onclick="window.switchCodexCategory('npcs')">👤 Key NPCs</button>
+                            <button class="codex-me-btn" id="codex-rail-docs" onclick="window.switchCodexCategory('docs')">📄 Documents</button>
                         </div>
 
-                        <!-- RIGHT CODEX MATRIX AREA -->
                         <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; overflow: hidden; height: 100%;">
-                            <!-- Entries Matrix (All Users) -->
                             <div style="display: flex; flex-direction: column; overflow: hidden;">
                                 <h4 id="codex-deck-title" style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px; color: #00e5a3; margin-bottom: 10px;">Factions & Powers</h4>
                                 <div id="codex-entries-matrix" style="flex-grow: 1; overflow-y: auto; padding-right: 6px;"></div>
                             </div>
 
-                            <!-- DM Entry Creator & Document Attachment / Editor (DM Only) -->
                             <div id="codex-dm-creator-panel" style="display: none; background: rgba(10, 15, 20, 0.8); border: 1px solid #ff6b6b; padding: 12px; border-radius: 2px; overflow-y: auto; max-height: 58vh;">
                                 <h4 id="codex-creator-heading" style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px; margin-bottom:8px;">+ New Codex Entry</h4>
-                                
                                 <label for="new-codex-category" style="font-size: 9px; color: #6b826a;">Category:</label>
                                 <select id="new-codex-category" style="font-size: 10px; margin: 2px 0;">
                                     <option value="factions">🛡️ Factions & Powers</option>
@@ -432,13 +449,13 @@
                                 <label for="new-codex-title" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Title / Designation:</label>
                                 <input type="text" id="new-codex-title" placeholder="Entry Title..." style="font-size: 10px; margin: 2px 0;">
 
-                                <label for="new-codex-subtitle" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Subtitle / Metadata (Status, Affiliation, Loc):</label>
+                                <label for="new-codex-subtitle" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Subtitle / Metadata:</label>
                                 <input type="text" id="new-codex-subtitle" placeholder="e.g. Allied / Flagship / Outer Rim" style="font-size: 10px; margin: 2px 0;">
 
                                 <label for="new-codex-content" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary:</label>
-                                <textarea id="new-codex-content" rows="4" placeholder="Full briefing or narrative text..." style="font-size: 10px; margin: 2px 0;"></textarea>
+                                <textarea id="new-codex-content" rows="4" placeholder="Full briefing..." style="font-size: 10px; margin: 2px 0;"></textarea>
 
-                                <label for="codex-file-input" style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Document / Log File Attachment:</label>
+                                <label for="codex-file-input" style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Document File Attachment:</label>
                                 <div id="codex-current-doc-wrapper" style="display: none; margin-bottom: 6px;">
                                     <div class="attached-doc-tag">
                                         <span id="codex-current-doc-name">📎 attached-file.txt</span>
@@ -446,12 +463,10 @@
                                     </div>
                                 </div>
                                 <div id="codex-file-dropzone" style="border: 1px dashed #ff6b6b; padding: 8px; text-align: center; background: #040605; cursor: pointer; border-radius: 2px; margin-top: 2px;">
-                                    <p id="codex-file-label" style="margin: 0; font-size: 9px; color: #6b826a;">Click to upload / replace .txt, .md, .pdf, or image</p>
+                                    <p id="codex-file-label" style="margin: 0; font-size: 9px; color: #6b826a;">Click to upload .txt, .md, .pdf, or image</p>
                                     <input type="file" id="codex-file-input" accept=".txt,.md,.pdf,image/*" style="display: none;">
                                 </div>
-                                <input type="hidden" id="new-codex-doc-name">
-                                <input type="hidden" id="new-codex-doc-data">
-                                <input type="hidden" id="new-codex-doc-type">
+                                <input type="hidden" id="new-codex-doc-name"><input type="hidden" id="new-codex-doc-data"><input type="hidden" id="new-codex-doc-type">
 
                                 <div style="display: flex; gap: 6px; margin-top: 10px;">
                                     <button id="btn-save-codex-entry" class="btn-remove" onclick="window.saveNewCodexEntry()" style="flex: 2; font-size: 10px; margin: 0;">+ PUBLISH TO CODEX</button>
@@ -499,12 +514,11 @@
                     <h3 style="border-bottom: 1px solid #3c4e36; padding-bottom: 6px; margin-bottom: 12px;">Active Task Force Roster</h3>
                     <div id="crew-roster-container" style="display: flex; flex-direction: column; gap: 12px; max-height: 70vh; overflow-y: auto;"></div>
                 </div>
-
-            </div> <!-- END RIGHT CONTENT AREA -->
+            </div>
         </div>
     </div>
 
-    <!-- 4. MAIN APP CONTAINER -->
+    <!-- 5. MAIN APP CONTAINER -->
     <div id="app-container">
         <div id="top-bar">
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -516,9 +530,9 @@
                 </div>
                 <button id="measuring-tape-toggle-btn" onclick="window.toggleMeasuringTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">MEASURE</button>
                 <button id="ping-tool-toggle-btn" onclick="window.togglePingMode()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">PING</button>
-                <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;" title="Toggle procedural routes">ROUTES</button>
+                <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">ROUTES</button>
                 <button id="territory-tool-toggle-btn" onclick="window.toggleTerritoryTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px; display: none;">TERRITORIES</button>
-                <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 8px; border-radius: 2px; font-size: 10px; color: #00e5a3; cursor: pointer; white-space: nowrap;" onclick="window.toggleCalendarControls()" title="Click to inspect/control timeline">
+                <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 8px; border-radius: 2px; font-size: 10px; color: #00e5a3; cursor: pointer; white-space: nowrap;" onclick="window.toggleCalendarControls()">
                     <span id="clock-ticker-text">YR 2800.01.01 // 00:00</span>
                 </div>
                 <span class="sync-indicator">LINKED</span>
@@ -542,14 +556,11 @@
                 <canvas id="galaxyCanvas"></canvas>
             </div>
             
-            <!-- DM TERRITORY CONTROL PANEL -->
             <div id="territory-control-panel" class="panel">
                 <div id="territory-control-header" class="panel-header-drag">
                     <h4 style="margin:0; color:#00e5a3;">Overseer Territory Control</h4>
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
-                <p style="font-size: 9px; color: #6b826a; margin: 0 0 6px 0;">Click map to place nodes. Click node 1 to snap & close shape.</p>
-                
                 <label for="territory-name-input" style="font-size: 10px; color: #6b826a;">Territory Name:</label>
                 <input type="text" id="territory-name-input" placeholder="e.g. Outer Rim DMZ" style="font-size: 11px; margin: 2px 0;">
                 
@@ -569,37 +580,29 @@
                     <button id="btn-finish-territory-draw" class="btn-reveal" onclick="window.finishActiveTerritory()" style="flex:1; font-size:10px; margin:0; display:none;">✓ CLOSE & SAVE</button>
                     <button id="btn-cancel-territory-draw" class="btn-remove" onclick="window.cancelDrawingTerritory()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
                 </div>
-                <div id="territory-drawing-status" style="font-size: 10px; color: #ffaa00; margin-top: 6px; display: none;">Drawing Active: Click map to place nodes...</div>
+                <div id="territory-drawing-status" style="font-size: 10px; color: #ffaa00; margin-top: 6px; display: none;">Drawing Active...</div>
 
                 <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Sector Borders</h4>
                 <div id="territory-list-container" style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
-                
-                <div style="margin-top: 10px; text-align: right;">
-                    <button onclick="window.toggleTerritoryTool()" style="width: auto; padding: 4px 12px; font-size: 9px;">CLOSE</button>
-                </div>
+                <button onclick="window.toggleTerritoryTool()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
             </div>
 
-            <!-- DM SCRATCHPAD PANEL -->
             <div id="dm-scratchpad-panel" class="panel">
                 <div id="dm-scratchpad-header" class="panel-header-drag">
                     <h4 style="margin:0; color:#ff6b6b;">Overseer Scratchpad</h4>
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
-                <p style="font-size: 9px; color: #6b826a; margin: 0 0 6px 0;">Private session notes saved locally.</p>
                 <label for="dm-scratchpad-input" style="display:none;">Notes</label>
-                <textarea id="dm-scratchpad-input" rows="8" placeholder="Quick encounter notes, secret rolls, plot hooks..." style="font-size: 11px; resize: vertical;" oninput="window.saveDmScratchpad()"></textarea>
+                <textarea id="dm-scratchpad-input" rows="8" placeholder="Quick encounter notes..." style="font-size: 11px; resize: vertical;" oninput="window.saveDmScratchpad()"></textarea>
                 <button onclick="window.toggleDmScratchpad()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 6px; float: right;">CLOSE</button>
             </div>
 
-            <!-- DM TIME CONTROL PANEL -->
             <div id="calendar-control-panel" class="panel">
                 <div id="calendar-control-header" class="panel-header-drag">
                     <h4 style="margin:0;">Chronology Control Deck</h4>
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
-                <div style="font-size: 11px; margin-bottom: 8px;">
-                    Current Date: <strong id="modal-clock-display" style="color: #00e5a3;">YR 2800.01.01 // 00:00</strong>
-                </div>
+                <div style="font-size: 11px; margin-bottom: 8px;">Current Date: <strong id="modal-clock-display" style="color: #00e5a3;">YR 2800.01.01 // 00:00</strong></div>
                 <div id="dm-time-controls-box" style="display: none;">
                     <p style="font-size: 9px; color: #ff6b6b; margin: 0 0 6px 0;">OVERSEER TIMELINE MANIPULATION</p>
                     <div style="display: flex; gap: 4px; margin-bottom: 6px;">
@@ -616,7 +619,6 @@
                     </div>
 
                     <div style="background: #040605; border: 1px solid #3c4e36; padding: 6px; margin-top: 6px; border-radius: 2px;">
-                        <label style="font-size: 9px; color: #6b826a; display:block; margin-bottom:2px;">Manual Set (Year / Month / Day / Hour):</label>
                         <div style="display: flex; gap: 4px;">
                             <label for="set-yr" style="display:none;">Year</label><input type="number" id="set-yr" placeholder="YYYY" style="margin:0; font-size:10px; padding:4px; text-align:center;">
                             <label for="set-mo" style="display:none;">Month</label><input type="number" id="set-mo" placeholder="MM" min="1" max="12" style="margin:0; font-size:10px; padding:4px; text-align:center;">
@@ -631,9 +633,7 @@
                         <button class="btn-remove" onclick="window.resetTimeline()" style="flex:1; font-size:10px; margin:0;">RESET YR 2800</button>
                     </div>
                 </div>
-                <div style="margin-top: 10px; text-align: right;">
-                    <button onclick="window.toggleCalendarControls()" style="width: auto; padding: 4px 12px; font-size: 9px;">CLOSE</button>
-                </div>
+                <button onclick="window.toggleCalendarControls()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
             </div>
 
             <div id="comms-array-panel" class="panel">
@@ -670,41 +670,26 @@
                 <div id="combat-tracker-body"></div>
             </div>
 
-            <!-- DM OPERATIONS (MAP EDITOR) PANEL WITH SEPARATE SUB-TABS -->
+            <!-- DM OPERATIONS PANEL WITH SYSTEM ARCHITECT TRIGGER -->
             <div id="dm-tools" class="panel" style="display:none;">
                 <div id="dm-tools-header" class="panel-header-drag">
                     <h4 style="margin:0;">DM Operations (Map Editor)</h4>
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
 
-                <!-- SUB-TABS NAVIGATION -->
                 <div class="hud-tabs" style="margin-bottom: 10px;">
                     <button class="hud-tab-btn active" id="dm-subtab-btn-spawn" onclick="window.switchDmSubtab('spawn')">⭐ SPAWN</button>
                     <button class="hud-tab-btn" id="dm-subtab-btn-map" onclick="window.switchDmSubtab('map')">🗺️ MAP TOOLS</button>
                     <button class="hud-tab-btn" id="dm-subtab-btn-maint" onclick="window.switchDmSubtab('maint')">⚙️ MAINT</button>
                 </div>
 
-                <!-- SUB-TAB 1: SPAWN SYSTEMS & FLEETS -->
                 <div id="dm-panel-spawn" class="dm-subpanel active">
-                    <p style="font-size: 9px; color: #00e5a3; margin-top:0;">Tip: Drag and drop custom stars or ships directly on map.</p>
-                    <label for="dm-tool-name" style="font-size: 10px; color: #6b826a;">New Asset / Star / Fleet Name:</label>
-                    <input type="text" id="dm-tool-name" value="Sol Prime">
+                    <p style="font-size: 9px; color: #00e5a3; margin-top:0;">Deploy advanced star systems and fleet tokens.</p>
                     
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-                        <label for="dm-tool-luminosity" style="font-size: 10px; color: #6b826a;">Stellar Classification:</label>
-                        <select id="dm-tool-luminosity" style="width: 140px; font-size: 10px;">
-                            <option value="Class G (Yellow)">Class G (Yellow)</option>
-                            <option value="Class M (Red Dwarf)">Class M (Red Dwarf)</option>
-                            <option value="Class O (Blue Giant)">Class O (Blue Giant)</option>
-                            <option value="Black Hole">Black Hole</option>
-                            <option value="Hidden Anomaly">Hidden Anomaly (Stealth)</option>
-                        </select>
-                    </div>
+                    <button class="btn-reveal" onclick="window.openSystemArchitect()" style="font-size: 11px; border-color: #00e5a3; color: #00e5a3; margin-bottom: 10px;">🌌 OPEN SYSTEM ARCHITECT (CUSTOM STAR)</button>
 
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-                        <label for="dm-tool-color" style="font-size: 10px; color: #6b826a;">Color Designation:</label>
-                        <input type="color" id="dm-tool-color" value="#ffe9c4">
-                    </div>
+                    <label for="dm-tool-name" style="font-size: 10px; color: #6b826a;">Fleet / Token Designation:</label>
+                    <input type="text" id="dm-tool-name" value="Task Force Black">
 
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
                         <label for="dm-tool-iff" style="font-size: 10px; color: #6b826a;">IFF Signature:</label>
@@ -725,11 +710,9 @@
                         </select>
                     </div>
                     
-                    <button class="btn-deploy" onclick="window.spawnStarSystemAtCenter()">SPAWN STAR SYSTEM</button>
-                    <button class="btn-deploy" onclick="window.spawnTokenAtCenter()">SPAWN FLEET TOKEN</button>
+                    <button class="btn-deploy" onclick="window.spawnTokenAtCenter()" style="margin-top: 10px;">SPAWN FLEET TOKEN</button>
                 </div>
 
-                <!-- SUB-TAB 2: MAP TOOLS & BORDERS -->
                 <div id="dm-panel-map" class="dm-subpanel">
                     <p style="font-size: 9px; color: #6b826a; margin-top:0;">Cartography & Sovereignty Controls.</p>
                     <button class="btn-reveal" onclick="window.toggleTerritoryTool()" style="margin-top: 4px;">🗺️ OPEN TERRITORY PLOTTER</button>
@@ -742,15 +725,14 @@
                         <button id="btn-finish-hyperlane-draw" class="btn-deploy" onclick="window.finishActiveHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✓ SAVE ROUTE</button>
                         <button id="btn-cancel-hyperlane-draw" class="btn-remove" onclick="window.cancelDrawingHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
                     </div>
-                    <div id="hyperlane-drawing-status" style="font-size: 10px; color: #00e1ff; margin-top: 6px; display: none;">Route Active: Click stars on map to link nodes...</div>
+                    <div id="hyperlane-drawing-status" style="font-size: 10px; color: #00e1ff; margin-top: 6px; display: none;">Route Active...</div>
                     
                     <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Trade Routes</h4>
                     <div id="hyperlane-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
                 </div>
 
-                <!-- SUB-TAB 3: MAINTENANCE & EMERGENCY -->
                 <div id="dm-panel-maint" class="dm-subpanel">
-                    <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Emergency Maintenance & Data Sanitization.</p>
+                    <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Emergency Maintenance.</p>
                     <button class="btn-remove" onclick="window.resetTimeline()">⏳ RESET IN-UNIVERSE TIMELINE</button>
                     <button class="btn-remove" onclick="window.resetUiLayout()" style="margin-top: 6px;">🖥️ RESET LOCAL UI POSITIONS</button>
                     <button class="btn-reveal" onclick="window.exportCampaignBackup()" style="margin-top: 6px;">💾 BACKUP CAMPAIGN STATE (JSON)</button>
@@ -767,21 +749,19 @@
                         <button class="hud-tab-btn" id="tab-btn-bookmarks" onclick="window.switchHudTab('bookmarks')">BOOKMARKS</button>
                         <button class="hud-tab-btn" id="tab-btn-recents" onclick="window.switchHudTab('recents')">RECENTS</button>
                     </div>
-                    <button onclick="window.clearSelectedTarget()" class="layer-del" style="margin-left:8px; font-size:9px; padding:4px;" title="Deselect Target">[ESC] CLEAR</button>
+                    <button onclick="window.clearSelectedTarget()" class="layer-del" style="margin-left:8px; font-size:9px; padding:4px;">[ESC] CLEAR</button>
                 </div>
-                <div id="hud-content">
-                    <p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p>
-                </div>
+                <div id="hud-content"><p style="margin: 0; font-size: 12px; color: #6b826a;">Hover or click a target...</p></div>
             </div>
         </div>
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=2.2"></script>
-    <script src="js/audio.js?v=2.2"></script>
-    <script src="js/ui.js?v=2.2"></script>
-    <script src="js/combat.js?v=2.2"></script>
-    <script src="js/map.js?v=2.2"></script>
+    <script src="js/db.js?v=2.5"></script>
+    <script src="js/audio.js?v=2.5"></script>
+    <script src="js/ui.js?v=2.5"></script>
+    <script src="js/combat.js?v=2.5"></script>
+    <script src="js/map.js?v=2.5"></script>
 
 </body>
 </html>
