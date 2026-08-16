@@ -2,6 +2,48 @@
    js/ui.js - Interface, Layout, Time & Menus (100% COMPLETE)
    ========================================================================== */
 
+/* --- CUSTOM CONFIRM MODAL ---
+   Native confirm()/alert() can be permanently silenced by the browser if the
+   user ever checks "Prevent this page from creating additional dialogs" —
+   after that, confirm() just returns false with no prompt, forever, for the
+   rest of the page session. This in-app modal replaces confirm() everywhere
+   so DM/player actions gated behind a confirmation can never get bricked
+   that way. window.showConfirmModal(message) returns a Promise<boolean>. */
+(function() {
+    let overlay, msgEl, okBtn, cancelBtn, resolver;
+    function ensureModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'custom-confirm-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:360px; max-width:90vw; border-color:#ff6b6b; text-align:center;">
+            <p id="custom-confirm-message" style="color:#d4c5a9; font-size:13px; margin:0 0 16px 0; line-height:1.5;"></p>
+            <div style="display:flex; gap:10px;">
+                <button id="custom-confirm-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
+                <button id="custom-confirm-ok-btn" class="btn-remove" style="flex:1; margin-top:0;">CONFIRM</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        msgEl = document.getElementById('custom-confirm-message');
+        okBtn = document.getElementById('custom-confirm-ok-btn');
+        cancelBtn = document.getElementById('custom-confirm-cancel-btn');
+        okBtn.addEventListener('click', () => finish(true));
+        cancelBtn.addEventListener('click', () => finish(false));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) finish(false); });
+        document.addEventListener('keydown', (e) => { if (overlay.style.display !== 'none' && e.key === 'Escape') finish(false); });
+    }
+    function finish(result) {
+        overlay.style.display = 'none';
+        if (resolver) { resolver(result); resolver = null; }
+    }
+    window.showConfirmModal = function(message) {
+        ensureModal();
+        msgEl.textContent = message;
+        overlay.style.display = 'flex';
+        return new Promise((resolve) => { resolver = resolve; });
+    };
+})();
+
 /* --- CALENDAR & TIME ENGINE --- */
 window.universeTimeHours = parseInt(localStorage.getItem('odyssey_universe_time') || '24192000'); 
 window.timeFlowActive = false;
@@ -112,7 +154,7 @@ window.applyManualTime = async function() {
 
 window.resetTimeline = async function() {
     if (currentUserRole !== 'dm') return;
-    if (!confirm("Reset timeline back to YR 2800.01.01?")) return;
+    if (!(await window.showConfirmModal("Reset timeline back to YR 2800.01.01?"))) return;
     let oldTime = window.universeTimeHours;
     window.universeTimeHours = 24192000;
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
@@ -263,7 +305,14 @@ window.renderCharacterTerminalData = function() {
 
 window.saveTerminalProfile = async function() {
     const safeGet = (id) => document.getElementById(id) ? document.getElementById(id).value : '';
-    await db.from('profiles').update({ username: safeGet('term-username'), avatar_url: safeGet('term-avatar') }).eq('id', currentUserId);
+
+    const newUsername = safeGet('term-username').trim(); const newAvatar = safeGet('term-avatar');
+    if (newUsername) {
+        let handleTaken = allProfiles.some(p => p.id !== currentUserId && (p.username || '').trim().toLowerCase() === newUsername.toLowerCase());
+        if (handleTaken) { alert(`Handle "${newUsername}" is already in use by another Commander. Choose a different one.`); return; }
+    }
+
+    await db.from('profiles').update({ username: newUsername, avatar_url: newAvatar }).eq('id', currentUserId);
 
     const charPayload = {
         profile_id: currentUserId, name: safeGet('term-sheet-name'),
@@ -282,7 +331,6 @@ window.saveTerminalProfile = async function() {
     // Patch the local profile cache immediately so handle/avatar changes are reflected
     // right away (roster, chat feed, presence) instead of waiting on a reload or the
     // next chat message to trigger a re-render against fresh data.
-    const newUsername = safeGet('term-username'); const newAvatar = safeGet('term-avatar');
     let myProf = allProfiles.find(p => p.id === currentUserId);
     if (myProf) { myProf.username = newUsername; myProf.avatar_url = newAvatar; }
     if (typeof window.refreshMyPresence === 'function' && myProf) window.refreshMyPresence(myProf);
@@ -453,7 +501,7 @@ window.cancelCodexEdit = function() {
 
 window.deleteCodexEntry = async function(id) {
     if (currentUserRole !== 'dm') return;
-    if (!confirm("Permanently erase this record?")) return;
+    if (!(await window.showConfirmModal("Permanently erase this record?"))) return;
     await db.from('codex_entries').delete().eq('id', id);
     if (window.editingCodexId === id) window.cancelCodexEdit();
     if (typeof loadCodexEntries === 'function') loadCodexEntries();
@@ -532,7 +580,7 @@ window.addCampaignObjective = async function() {
 };
 
 window.toggleObjectiveComplete = async function(id, currentStatus) { await db.from('campaign_objectives').update({ completed: !currentStatus }).eq('id', id); if (typeof loadCampaignObjectives === 'function') loadCampaignObjectives(); };
-window.deleteCampaignObjective = async function(id) { if (!confirm("Delete objective?")) return; await db.from('campaign_objectives').delete().eq('id', id); if (typeof loadCampaignObjectives === 'function') loadCampaignObjectives(); };
+window.deleteCampaignObjective = async function(id) { if (!(await window.showConfirmModal("Delete objective?"))) return; await db.from('campaign_objectives').delete().eq('id', id); if (typeof loadCampaignObjectives === 'function') loadCampaignObjectives(); };
 
 window.renderCampaignObjectives = function() {
     const container = document.getElementById('objectives-list-container'); if (!container) return;
@@ -571,7 +619,7 @@ window.editNote = function(id) {
 };
 
 window.deleteNote = async function(id) {
-    if(!confirm("Permanently delete this note?")) return; await db.from('player_notes').delete().eq('id', id);
+    if(!(await window.showConfirmModal("Permanently delete this note?"))) return; await db.from('player_notes').delete().eq('id', id);
     if(editingNoteId === id) { editingNoteId = null; document.getElementById('btn-create-note').innerText = "+ CREATE NOTE"; document.getElementById('term-note-title').value = ''; document.getElementById('term-note-content').value = ''; }
     if (typeof loadPlayerNotes === 'function') loadPlayerNotes();
 };
@@ -763,7 +811,7 @@ window.toggleTerritoryVisibility = async function(id, currentlyHidden) {
 
 window.deleteTerritory = async function(id) {
     if (currentUserRole !== 'dm') return;
-    if (!confirm("Permanently erase this territory border?")) return;
+    if (!(await window.showConfirmModal("Permanently erase this territory border?"))) return;
     await db.from('territories').delete().eq('id', id);
     if (typeof loadTerritories === 'function') loadTerritories();
 };
@@ -787,7 +835,7 @@ window.renderHyperlaneList = function() {
 
 window.deleteHyperlane = async function(id) {
     if (currentUserRole !== 'dm') return;
-    if (!confirm("Permanently erase this trade route?")) return;
+    if (!(await window.showConfirmModal("Permanently erase this trade route?"))) return;
     await db.from('hyperlanes').delete().eq('id', id);
     if (typeof loadHyperlanes === 'function') loadHyperlanes();
 };
