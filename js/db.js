@@ -4,7 +4,13 @@
 const SUPABASE_URL = 'https://uodeeyfaizbjplvvslry.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_7Kj1D_Frh3v0MLNuAyyROQ_rcaTx2F8';
 
-const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let db = null;
+if (window.supabase) {
+    db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} else {
+    console.error("CRITICAL ERROR: Supabase CDN failed to load. Check internet connection or AdBlockers.");
+}
+
 let currentUserRole = 'player';
 let currentUserId = null;
 let currentUserEmail = '';
@@ -65,6 +71,11 @@ const driveSpeeds = {
 };
 
 window.handleLogin = async function() {
+    if (!db) {
+        alert("Database connection failed. Are you offline?");
+        return;
+    }
+
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     const errorDiv = document.getElementById('error-message');
@@ -97,7 +108,7 @@ async function fetchUserProfile(user) {
 
     currentUserRole = data.role;
     
-    // DEFENSIVE DOM CHECKS: Verify element exists before touching its style
+    // DEFENSIVE DOM CHECKS
     const loginWrap = document.getElementById('login-wrapper');
     if (loginWrap) loginWrap.style.display = 'none';
     
