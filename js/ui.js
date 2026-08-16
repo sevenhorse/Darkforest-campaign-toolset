@@ -259,6 +259,30 @@ window.openFullVesselTerminal = function(vesselId) {
     if (vesselId) { const select = document.getElementById('vessel-deck-select'); if (select) { select.value = vesselId; if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck(); } }
 };
 
+/* --- FEATURE: "JUMP TO SHIP" BUTTON ON EVERY MAJOR OVERLAY HEADER ---
+   Injected rather than hand-duplicated into each header block in index.html,
+   so every panel gets an identical, consistently-styled shortcut button and
+   future header markup changes don't risk the seven copies drifting apart. */
+function injectJumpToShipButtons() {
+    const headerIds = [
+        'hud-overlay-header', 'combat-tracker-header', 'dm-tools-header',
+        'comms-array-header', 'calendar-control-header', 'dm-scratchpad-header',
+        'territory-control-header'
+    ];
+    headerIds.forEach(id => {
+        const header = document.getElementById(id);
+        if (!header || header.querySelector('.jump-to-ship-btn')) return; // already injected
+        const btn = document.createElement('button');
+        btn.className = 'layer-edit jump-to-ship-btn';
+        btn.title = 'Jump to your vessel — opens Vessel Deck & inverts the chronometer';
+        btn.style.cssText = 'padding:4px 8px; font-size:10px; margin-left:6px; white-space:nowrap;';
+        btn.innerHTML = '🚀 JUMP';
+        btn.onclick = (e) => { e.stopPropagation(); if (typeof window.jumpToActiveShip === 'function') window.jumpToActiveShip(); };
+        header.appendChild(btn);
+    });
+}
+injectJumpToShipButtons();
+
 window.toggleCombatTracker = function() { const panel = document.getElementById('combat-tracker-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
 window.toggleCommsArray = function() { const panel = document.getElementById('comms-array-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; if (panel.style.display === 'block' && typeof window.populateCommsRecipients === 'function') window.populateCommsRecipients(); };
 window.toggleDmScratchpad = function() { if (currentUserRole !== 'dm') return; const panel = document.getElementById('dm-scratchpad-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
@@ -682,8 +706,10 @@ window.renderChatFeed = function() {
         const isDM = !!log.recipient_id; let headerColor = isDM ? '#c778dd' : '#00e5a3'; let prefix = isDM ? '🔒 [PRIVATE]' : '🌐';
         if (log.sender_id === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
         if (log.message_type === 'roll') { headerColor = '#ff6b6b'; prefix = '🎲 [ROLL]'; }
+        if (log.message_type === 'ping') { headerColor = '#00e1ff'; prefix = '📍 [PING]'; }
         let contentHTML = log.content;
         if (log.message_type === 'roll' && log.roll_data) { contentHTML = `<strong style="font-size:12px;">${log.content}</strong><br><span style="font-size:9px; color:#6b826a;">${log.roll_data.breakdown}</span>`; }
+        if (log.message_type === 'ping' && log.roll_data) { contentHTML = `${log.content} <button class="layer-edit" onclick="window.jumpToPingLocation(${log.roll_data.x}, ${log.roll_data.y})" style="padding:2px 8px; font-size:9px; margin-left:6px;">JUMP TO LOCATION</button>`; }
         html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.sender_id === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;">${contentHTML}</div></div>`;
     });
     feed.innerHTML = html; feed.scrollTop = feed.scrollHeight;
