@@ -504,12 +504,92 @@
         </div>
     </div>
 
-    <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js"></script>
-    <script src="js/audio.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/combat.js"></script>
-    <script src="js/map.js"></script>
+    <!-- DM OPERATIONS (MAP EDITOR) PANEL WITH SEPARATE SUB-TABS -->
+    <div id="dm-tools" class="panel" style="display:none;">
+        <div id="dm-tools-header" class="panel-header-drag">
+            <h4 style="margin:0;">DM Operations (Map Editor)</h4>
+            <span style="font-size: 10px; color: #6b826a;">DRAG</span>
+        </div>
 
-</body>
-</html>
+        <!-- SUB-TABS NAVIGATION -->
+        <div class="hud-tabs" style="margin-bottom: 10px;">
+            <button class="hud-tab-btn active" id="dm-subtab-btn-spawn" onclick="window.switchDmSubtab('spawn')">⭐ SPAWN</button>
+            <button class="hud-tab-btn" id="dm-subtab-btn-map" onclick="window.switchDmSubtab('map')">🗺️ MAP TOOLS</button>
+            <button class="hud-tab-btn" id="dm-subtab-btn-maint" onclick="window.switchDmSubtab('maint')">⚙️ MAINT</button>
+        </div>
+
+        <!-- SUB-TAB 1: SPAWN SYSTEMS & FLEETS -->
+        <div id="dm-panel-spawn" class="dm-subpanel active">
+            <p style="font-size: 9px; color: #00e5a3; margin-top:0;">Tip: Drag and drop custom stars or ships directly on map.</p>
+            <label for="dm-tool-name" style="font-size: 10px; color: #6b826a;">New Asset / Star / Fleet Name:</label>
+            <input type="text" id="dm-tool-name" value="Sol Prime">
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                <label for="dm-tool-luminosity" style="font-size: 10px; color: #6b826a;">Stellar Classification:</label>
+                <select id="dm-tool-luminosity" style="width: 140px; font-size: 10px;">
+                    <option value="Class G (Yellow)">Class G (Yellow)</option>
+                    <option value="Class M (Red Dwarf)">Class M (Red Dwarf)</option>
+                    <option value="Class O (Blue Giant)">Class O (Blue Giant)</option>
+                    <option value="Black Hole">Black Hole</option>
+                    <option value="Hidden Anomaly">Hidden Anomaly (Stealth)</option>
+                </select>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                <label for="dm-tool-color" style="font-size: 10px; color: #6b826a;">Color Designation:</label>
+                <input type="color" id="dm-tool-color" value="#ffe9c4">
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                <label for="dm-tool-iff" style="font-size: 10px; color: #6b826a;">IFF Signature:</label>
+                <select id="dm-tool-iff" style="width: 150px; font-size: 10px; background:#0a1410; color:#00e5a3; border: 1px solid #3c4e36;">
+                    <option value="allied">Allied (Green/Cyan)</option>
+                    <option value="hostile" style="color:#ff3333;">Hostile (Red)</option>
+                    <option value="neutral" style="color:#ffaa00;">Neutral (Amber)</option>
+                </select>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                <label for="dm-tool-drivetype" style="font-size: 10px; color: #6b826a;">Engine Drive System:</label>
+                <select id="dm-tool-drivetype" style="width: 150px; font-size: 10px; background:#0a1410;">
+                    <option value="ftl_class1">Class 1 Warp Drive</option>
+                    <option value="ftl_class2">Class 2 Hyperdrive</option>
+                    <option value="ftl_fold">Experimental Fold Drive</option>
+                    <option value="sublight">Sublight Thrusters</option>
+                </select>
+            </div>
+            
+            <button class="btn-deploy" onclick="window.spawnStarSystemAtCenter()">SPAWN STAR SYSTEM</button>
+            <button class="btn-deploy" onclick="window.spawnTokenAtCenter()">SPAWN FLEET TOKEN</button>
+        </div>
+
+        <!-- SUB-TAB 2: MAP TOOLS & BORDERS -->
+        <div id="dm-panel-map" class="dm-subpanel">
+            <p style="font-size: 9px; color: #6b826a; margin-top:0;">Cartography & Sovereignty Controls.</p>
+            <button class="btn-reveal" onclick="window.toggleTerritoryTool()" style="margin-top: 4px;">🗺️ OPEN TERRITORY PLOTTER</button>
+            <button class="btn-reveal" onclick="window.toggleMeasuringTool()" style="margin-top: 6px;">📏 ACTIVATE TACTICAL RULER</button>
+            <button class="btn-reveal" onclick="window.toggleHyperlanes()" style="margin-top: 6px;">⚡ TOGGLE PROCEDURAL ROUTES</button>
+            
+            <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #00e1ff;">Trade Route Plotter</h4>
+            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                <button id="btn-start-hyperlane-draw" class="btn-deploy" onclick="window.startDrawingHyperlane()" style="flex:1; font-size:10px; margin:0;">✏️ PLOT ROUTE</button>
+                <button id="btn-finish-hyperlane-draw" class="btn-deploy" onclick="window.finishActiveHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✓ SAVE ROUTE</button>
+                <button id="btn-cancel-hyperlane-draw" class="btn-remove" onclick="window.cancelDrawingHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
+            </div>
+            <div id="hyperlane-drawing-status" style="font-size: 10px; color: #00e1ff; margin-top: 6px; display: none;">Route Active: Click stars on map to link nodes...</div>
+            
+            <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Trade Routes</h4>
+            <div id="hyperlane-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
+        </div>
+
+        <!-- SUB-TAB 3: MAINTENANCE & EMERGENCY -->
+        <div id="dm-panel-maint" class="dm-subpanel">
+            <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Emergency Maintenance & Data Sanitization.</p>
+            <button class="btn-remove" onclick="window.resetTimeline()">⏳ RESET IN-UNIVERSE TIMELINE</button>
+            <button class="btn-remove" onclick="window.resetUiLayout()" style="margin-top: 6px;">🖥️ RESET LOCAL UI POSITIONS</button>
+            <button class="btn-reveal" onclick="window.exportCampaignBackup()" style="margin-top: 6px;">💾 BACKUP CAMPAIGN STATE (JSON)</button>
+            
+            <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #ff3333;">Critical Emergency Wipe</h4>
+            <button class="btn-wipe" onclick="window.wipeGalaxySlate()">WIPE GALAXY SLATE</button>
+        </div>
+    </div>
