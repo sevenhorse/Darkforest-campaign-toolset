@@ -137,9 +137,13 @@ window.spawnTokenAtCenter = async function() {
     const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1';
     const name = document.getElementById('dm-tool-name').value || 'Task Force Black';
     const color = document.getElementById('dm-tool-color').value;
+    const iffStatus = document.getElementById('dm-tool-iff') ? document.getElementById('dm-tool-iff').value : 'allied';
     
     let isJupiter = confirm(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
     
+    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {};
+    newCargo.iff = iffStatus; // Stamp IFF signature into Cargo JSON
+
     let payload = { 
         owner_id: currentUserId, 
         name: name, 
@@ -147,7 +151,7 @@ window.spawnTokenAtCenter = async function() {
         x: -window.camera.x / window.camera.zoom, 
         y: -window.camera.y / window.camera.zoom, 
         color: color, 
-        cargo_inventory: {} 
+        cargo_inventory: newCargo 
     };
 
     if (isJupiter) {
@@ -555,36 +559,6 @@ window.initGalaxyEngine = function() {
         window.camera.zoom = newZoom;
     }, { passive: false });
 
-    container.addEventListener('dblclick', (e) => {
-        if (e.target.closest('.panel')) return;
-        const worldPos = screenToWorld(e.clientX, e.clientY);
-        let allSystems = proceduralSystems.concat(globalDbSystemsCache);
-        
-        for (let s of allSystems) {
-            let dx = s.x - worldPos.x, dy = s.y - worldPos.y;
-            if (Math.sqrt(dx * dx + dy * dy) < 30) {
-                selectTargetAndPushRecent({ type: 'star', data: s });
-                window.camera.x = -s.x * 2.5; window.camera.y = -s.y * 2.5; window.camera.zoom = 2.5;
-                return;
-            }
-        }
-    });
-
-    window.addEventListener('keydown', (e) => {
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-        if (e.key.toLowerCase() === 'f') {
-            if (window.selectedTarget && window.selectedTarget.data) { window.lockCameraOnSelected(); }
-        }
-        if (e.key === 'Escape') {
-            if (document.getElementById('codex-fullscreen-reader').style.display === 'block') { window.closeCodexFullscreen(); return; }
-            if (measuringTapeActive && typeof window.toggleMeasuringTool === 'function') window.toggleMeasuringTool();
-            if (pingModeActive && typeof window.togglePingMode === 'function') window.togglePingMode();
-            if (jumpPlottingActive && typeof window.cancelJumpPlotting === 'function') window.cancelJumpPlotting();
-            if (territoryDrawActive && typeof window.cancelDrawingTerritory === 'function') window.cancelDrawingTerritory();
-            if (hyperlaneDrawActive && typeof window.cancelDrawingHyperlane === 'function') window.cancelDrawingHyperlane();
-        }
-    });
-
     window.lockCameraOnSelected = function() {
         if (!window.selectedTarget || !window.selectedTarget.data) return;
         let targetX = window.selectedTarget.data.x;
@@ -614,6 +588,17 @@ window.initGalaxyEngine = function() {
         if (activeJumpShip && activeJumpShip.id === shipId) {
             selectedDriveSpeed = driveSpeeds[newDriveType] ? driveSpeeds[newDriveType].speed : 250;
         }
+        if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
+    };
+    
+    // NEW: Function to let DM manually flip IFF tag from the Telemetry overlay
+    window.updateShipIff = async function(shipId, newIff) {
+        let ship = globalShipMarkersCache.find(s => s.id === shipId);
+        if (!ship) return;
+        let cargo = ship.cargo_inventory || {};
+        cargo.iff = newIff;
+        await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', shipId);
+        ship.cargo_inventory = cargo;
         if (typeof renderHUDTelemetry === 'function') renderHUDTelemetry();
     };
 
@@ -662,7 +647,7 @@ window.initGalaxyEngine = function() {
         let fuelCost = Math.max(1, Math.round(dist / 100)); // 1 core per 100 distance units
         if (selectedDriveSpeed < 50) fuelCost = 0; // Sublight doesn't cost FTL cores
         
-        let cargo = ship.cargo_inventory || window.sanitizeCargo({});
+        let cargo = ship.cargo_inventory || typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {};
         let expendables = cargo.expendables || [];
         let fuelIdx = expendables.findIndex(i => i.name.toLowerCase().includes('energy core') || i.name.toLowerCase().includes('fuel'));
         
@@ -934,10 +919,30 @@ window.initGalaxyEngine = function() {
             const m = dynamicTarget.data;
             const currentDrive = m.drive_type || 'ftl_class1';
 
+            // IFF Logic
+            let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied';
+            let iffColor = '#00e5a3'; // Allied
+            if (iff === 'hostile') iffColor = '#ff3333';
+            if (iff === 'neutral') iffColor = '#ffaa00';
+
             let driveOptionsHtml = '';
             Object.keys(driveSpeeds).forEach(k => {
                 driveOptionsHtml += `<option value="${k}" ${currentDrive === k ? 'selected' : ''}>${driveSpeeds[k].label}</option>`;
             });
+
+            let dmIffBox = '';
+            if (currentUserRole === 'dm') {
+                dmIffBox = `
+                    <div style="margin:4px 0;">
+                        <label style="color: #6b826a; font-size:10px;">IFF Tag:</label>
+                        <select onchange="window.updateShipIff('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:${iffColor}; border:1px solid ${iffColor}; margin:2px 0;">
+                            <option value="allied" ${iff === 'allied' ? 'selected' : ''} style="color:#00e5a3;">Allied</option>
+                            <option value="hostile" ${iff === 'hostile' ? 'selected' : ''} style="color:#ff3333;">Hostile</option>
+                            <option value="neutral" ${iff === 'neutral' ? 'selected' : ''} style="color:#ffaa00;">Neutral</option>
+                        </select>
+                    </div>
+                `;
+            }
 
             let jumpPlotterBox = '';
             if (jumpPlottingActive && activeJumpShip && activeJumpShip.id === m.id) {
@@ -993,7 +998,7 @@ window.initGalaxyEngine = function() {
             content.innerHTML = `
                 <div style="font-size: 11px;">
                     ${lockStatusHtml}<br>
-                    <strong style="color: #00e1ff; font-size: 13px;">🚀 ${m.name}</strong><br>
+                    <strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br>
                     <span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br>
                     <div style="margin:4px 0;">
                         <label style="color: #6b826a; font-size:10px;">Engine Drive:</label>
@@ -1001,6 +1006,7 @@ window.initGalaxyEngine = function() {
                             ${driveOptionsHtml}
                         </select>
                     </div>
+                    ${dmIffBox}
                     <div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>
                     ${jumpPlotterBox}
                     <button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>
@@ -1335,12 +1341,36 @@ window.initGalaxyEngine = function() {
             }
         }
 
+        // IFF RENDER LOOP FOR SHIPS
         for (let m of globalShipMarkersCache) {
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             const size = 10 / window.camera.zoom;
+
+            // Resolve IFF Color
+            let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied';
+            let iffColor = '#00e5a3'; // Allied (Cyan/Green)
+            if (iff === 'hostile') iffColor = '#ff3333'; // Foe (Red)
+            if (iff === 'neutral') iffColor = '#ffaa00'; // Neutral (Amber)
+
+            // Draw IFF Tactical Target Ring
+            ctx.strokeStyle = iffColor;
+            ctx.lineWidth = 1.5 / window.camera.zoom;
+            ctx.setLineDash([8 / window.camera.zoom, 4 / window.camera.zoom]);
+            ctx.beginPath();
+            ctx.arc(m.x, m.y, size * 1.8, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset line dash for other drawings
+
+            // Draw Core Ship Token
             ctx.fillStyle = m.color || '#00e1ff';
             ctx.beginPath(); ctx.moveTo(m.x, m.y - size); ctx.lineTo(m.x + size, m.y); ctx.lineTo(m.x, m.y + size); ctx.lineTo(m.x - size, m.y); ctx.closePath(); ctx.fill();
-            if (window.camera.zoom > 0.1) { ctx.fillStyle = '#00e1ff'; ctx.font = `${Math.max(9, 11 / window.camera.zoom)}px Courier New`; ctx.fillText(m.name, m.x + 12, m.y + 3); }
+            
+            // Draw Ship Designation 
+            if (window.camera.zoom > 0.1) { 
+                ctx.fillStyle = iffColor; // Text color matches IFF status
+                ctx.font = `${Math.max(9, 11 / window.camera.zoom)}px Courier New`; 
+                ctx.fillText(m.name, m.x + 18 / window.camera.zoom, m.y + 4 / window.camera.zoom); 
+            }
         }
 
         if (jumpPlottingActive && activeJumpShip) {
