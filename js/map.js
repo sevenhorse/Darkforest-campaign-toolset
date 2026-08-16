@@ -340,7 +340,6 @@ window.initGalaxyEngine = function() {
         proceduralSystems.push({ id: `proc-core-${i}`, name: `Core Sector-${2000 + i}`, x, y, size: rng() * 2.5 + 3.5, color, type: luminosity === 'Singularity' ? 'Black Hole' : 'Star', luminosity, hazard, multiType: rng() > 0.7 ? 'Binary' : 'Single', ownership: 'Galactic Core', isCustom: false });
     }
     for (let i = 0; i < 2400; i++) {
-      for (let i = 0; i < 2400; i++) {
         let arm = i % 4; 
         let r = Math.pow(rng(), 0.6) * (galaxyRadius - coreRadius) + coreRadius;
         
