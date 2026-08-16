@@ -230,6 +230,13 @@ function initPresenceChannel(userProfile) {
     });
 }
 
+// Re-track presence with fresh profile data (e.g. after a display handle change)
+// so the Active Commanders ticker updates immediately instead of only on reload.
+window.refreshMyPresence = async function(userProfile) {
+    if (!presenceChannel) return;
+    await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role || currentUserRole, avatar_url: userProfile.avatar_url || '' });
+};
+
 function renderPresenceTicker() {
     const listDiv = document.getElementById('presence-list');
     if (!listDiv) return;
