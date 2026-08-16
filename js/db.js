@@ -73,11 +73,7 @@ const driveSpeeds = {
 };
 
 window.handleLogin = async function() {
-    if (!db) {
-        alert("Database connection failed. Are you offline?");
-        return;
-    }
-
+    if (!db) { alert("Database connection failed. Are you offline?"); return; }
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     const errorDiv = document.getElementById('error-message');
@@ -85,10 +81,7 @@ window.handleLogin = async function() {
 
     const { data, error } = await db.auth.signInWithPassword({ email, password });
     if (error) {
-        if (errorDiv) {
-            errorDiv.innerText = "Access Denied: " + error.message;
-            errorDiv.style.display = 'block';
-        }
+        if (errorDiv) { errorDiv.innerText = "Access Denied: " + error.message; errorDiv.style.display = 'block'; }
         return;
     }
     fetchUserProfile(data.user);
@@ -101,22 +94,16 @@ async function fetchUserProfile(user) {
 
     if (error) {
         const errorDiv = document.getElementById('error-message');
-        if (errorDiv) {
-            errorDiv.innerText = "Access Denied: Profile mapping missing.";
-            errorDiv.style.display = 'block';
-        }
+        if (errorDiv) { errorDiv.innerText = "Access Denied: Profile mapping missing."; errorDiv.style.display = 'block'; }
         return;
     }
 
     currentUserRole = data.role;
     
-    // DEFENSIVE DOM CHECKS
     const loginWrap = document.getElementById('login-wrapper');
     if (loginWrap) loginWrap.style.display = 'none';
-    
     const appCont = document.getElementById('app-container');
     if (appCont) appCont.style.display = 'flex';
-
     const badge = document.getElementById('user-role');
     if (badge) badge.innerText = `Role: ${data.role}`;
     
@@ -128,33 +115,22 @@ async function fetchUserProfile(user) {
     const dmTimeBox = document.getElementById('dm-time-controls-box');
     
     if (data.role === 'dm') {
-        if (badge) {
-            badge.classList.add('role-dm');
-            badge.innerText = 'OVERSEER (DM)';
-        }
+        if (badge) { badge.classList.add('role-dm'); badge.innerText = 'OVERSEER (DM)'; }
         if (dmToolsPanel) dmToolsPanel.style.display = 'block';
         if (dmTimeBox) dmTimeBox.style.display = 'block';
         if (scratchpadBtn) scratchpadBtn.style.display = 'inline-block';
         if (territoryBtn) territoryBtn.style.display = 'inline-block';
         if (codexCreatorPanel) codexCreatorPanel.style.display = 'block';
-        if (codexPerms) { 
-            codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE & EDIT ACCESS'; 
-            codexPerms.style.color = '#ff6b6b'; 
-        }
+        if (codexPerms) { codexPerms.innerText = '● OVERSEER AUTHORIZATION // FULL WRITE & EDIT ACCESS'; codexPerms.style.color = '#ff6b6b'; }
         
         const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
         const scratchInput = document.getElementById('dm-scratchpad-input');
-        if (savedScratch && scratchInput) {
-            scratchInput.value = savedScratch;
-        }
+        if (savedScratch && scratchInput) scratchInput.value = savedScratch;
     } else {
         if (scratchpadBtn) scratchpadBtn.style.display = 'none';
         if (territoryBtn) territoryBtn.style.display = 'none';
         if (codexCreatorPanel) codexCreatorPanel.style.display = 'none';
-        if (codexPerms) { 
-            codexPerms.innerText = '● SECURITY CLEARANCE: LEVEL 2 // VIEW ONLY'; 
-            codexPerms.style.color = '#6b826a'; 
-        }
+        if (codexPerms) { codexPerms.innerText = '● SECURITY CLEARANCE: LEVEL 2 // VIEW ONLY'; codexPerms.style.color = '#6b826a'; }
     }
 
     initPresenceChannel(data);
@@ -200,6 +176,7 @@ async function loadAllProfiles() {
         const charTerminal = document.getElementById('character-terminal');
         if (charTerminal && charTerminal.style.display === 'block') { 
             if (typeof window.renderCharacterTerminalData === 'function') window.renderCharacterTerminalData(); 
+            if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
         }
         if (typeof populateCommsRecipients === 'function') populateCommsRecipients();
     }
@@ -224,27 +201,19 @@ async function loadChatLogs() {
     const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(50);
     if (data) { 
         chatLogsList = data.reverse(); 
-        if (chatLogsList.length === 0) {
-            chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked. Communication channels active.', message_type: 'text' }];
-        }
+        if (chatLogsList.length === 0) chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked. Communication channels active.', message_type: 'text' }];
         if (typeof renderChatFeed === 'function') renderChatFeed(); 
     }
 }
 
 async function loadTerritories() {
     const { data } = await db.from('territories').select('*').order('created_at', { ascending: true });
-    if (data) {
-        globalTerritoriesCache = data;
-        if (typeof renderTerritoryList === 'function') renderTerritoryList();
-    }
+    if (data) { globalTerritoriesCache = data; if (typeof renderTerritoryList === 'function') renderTerritoryList(); }
 }
 
 async function loadHyperlanes() {
     const { data } = await db.from('hyperlanes').select('*');
-    if (data) {
-        globalHyperlanesCache = data;
-        if (typeof renderHyperlaneList === 'function') renderHyperlaneList();
-    }
+    if (data) { globalHyperlanesCache = data; if (typeof renderHyperlaneList === 'function') renderHyperlaneList(); }
 }
 
 async function loadCodexEntries() {
@@ -252,9 +221,7 @@ async function loadCodexEntries() {
     if (data && data.length > 0) {
         globalCodexEntriesCache = data;
     } else {
-        globalCodexEntriesCache = [
-            { id: 'cdx-1', category: 'factions', title: 'Task Force Black', subtitle: 'Allied Command', content: 'Autonomous deep-space exploration and containment fleet operating outside regular jurisdiction.' }
-        ];
+        globalCodexEntriesCache = [{ id: 'cdx-1', category: 'factions', title: 'Task Force Black', subtitle: 'Allied Command', content: 'Autonomous deep-space exploration and containment fleet operating outside regular jurisdiction.' }];
     }
     if (typeof renderCodexMatrix === 'function') renderCodexMatrix();
     if (typeof populateTerritoryFactionSelect === 'function') populateTerritoryFactionSelect();
@@ -266,20 +233,13 @@ async function checkAnomalyProximity(ship) {
     let anomalies = globalDbSystemsCache.filter(s => s.luminosity === 'Hidden Anomaly');
     
     for (let anomaly of anomalies) {
-        let dx = ship.x - anomaly.x;
-        let dy = ship.y - anomaly.y;
+        let dx = ship.x - anomaly.x; let dy = ship.y - anomaly.y;
         let dist = Math.sqrt(dx*dx + dy*dy);
-        
         if (dist < DRADIS_RANGE) {
             await db.from('star_systems').update({ luminosity: 'Revealed Anomaly', color: '#ff3333' }).eq('id', anomaly.id);
-            await db.from('chat_logs').insert({
-                sender_id: 'system',
-                content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' has detected a massive subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}. Sensor locks updated.`,
-                message_type: 'text'
-            });
+            await db.from('chat_logs').insert({ sender_id: 'system', content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' has detected a massive subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}. Sensor locks updated.`, message_type: 'text' });
             if (window.AudioEngine) window.AudioEngine.playKlaxon();
-            anomaly.luminosity = 'Revealed Anomaly';
-            anomaly.color = '#ff3333';
+            anomaly.luminosity = 'Revealed Anomaly'; anomaly.color = '#ff3333';
         }
     }
 }
@@ -291,12 +251,7 @@ function initPresenceChannel(userProfile) {
         if (typeof renderPresenceTicker === 'function') renderPresenceTicker(); 
     }).subscribe(async (status) => {
         if (status === 'SUBSCRIBED') { 
-            await presenceChannel.track({ 
-                online_at: new Date().toISOString(), 
-                username: userProfile.username || currentUserEmail.split('@')[0], 
-                role: userProfile.role, 
-                avatar_url: userProfile.avatar_url || '' 
-            }); 
+            await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role, avatar_url: userProfile.avatar_url || '' }); 
         }
     });
 }
@@ -309,37 +264,42 @@ function renderPresenceTicker() {
         const presences = onlineUsersMap[userId];
         if (presences && presences.length > 0) {
             const p = presences[0];
-            html += `<div class="presence-pill">🟢 ${p.username} ${p.role === 'dm' ? '[DM]' : ''}</div>`;
+            // Added clickable Quick-Jump trigger
+            html += `<div class="presence-pill" onclick="window.snapToCommander('${userId}')" style="cursor:pointer;" title="Click to locate vessel">🟢 ${p.username} ${p.role === 'dm' ? '[DM]' : ''}</div>`;
         }
     });
     listDiv.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active commanders</span>';
 }
 
+// MODULE A: Quick-Jump Locator
+window.snapToCommander = function(userId) {
+    let ship = globalShipMarkersCache.find(m => m.owner_id === userId);
+    if (ship) {
+        window.selectedTarget = { type: 'ship', data: ship };
+        if (typeof window.lockCameraOnSelected === 'function') window.lockCameraOnSelected();
+        if (typeof renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+        document.getElementById('character-terminal').style.display = 'none'; // Closes terminal if open
+        if (window.AudioEngine) window.AudioEngine.playPing();
+    } else {
+        alert("DRADIS Error: No active vessel found assigned to this commander.");
+    }
+};
+
 window.exportCampaignBackup = function() {
     if (currentUserRole !== 'dm') return;
     const backup = {
-        timestamp: new Date().toISOString(),
-        universeTimeHours: window.universeTimeHours,
-        starSystems: globalDbSystemsCache,
-        shipMarkers: globalShipMarkersCache,
-        territories: globalTerritoriesCache,
-        hyperlanes: globalHyperlanesCache,
-        codexEntries: globalCodexEntriesCache,
-        combatants: combatantsList
+        timestamp: new Date().toISOString(), universeTimeHours: window.universeTimeHours,
+        starSystems: globalDbSystemsCache, shipMarkers: globalShipMarkersCache,
+        territories: globalTerritoriesCache, hyperlanes: globalHyperlanesCache,
+        codexEntries: globalCodexEntriesCache, combatants: combatantsList
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup, null, 2));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
     downloadAnchorNode.setAttribute("download", `task_force_black_backup_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchorNode); 
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove();
     
-    db.from('chat_logs').insert({
-        sender_id: currentUserId,
-        content: `💾 [SYSTEM] Overseer executed a full campaign state backup.`,
-        message_type: 'text'
-    });
+    db.from('chat_logs').insert({ sender_id: currentUserId, content: `💾 [SYSTEM] Overseer executed a full campaign state backup.`, message_type: 'text' });
 };
 
 window.handleLogout = async function() {
