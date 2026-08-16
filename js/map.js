@@ -72,7 +72,7 @@ window.getFowTier = function(system) {
 
 /* DB SYNC & WIPES */
 window.wipeGalaxySlate = async function() {
-    if (currentUserRole !== 'dm') return; if (!confirm("Wipe all custom stars, ships, and territories?")) return;
+    if (currentUserRole !== 'dm') return; if (!(await window.showConfirmModal("Wipe all custom stars, ships, and territories?"))) return;
     await db.from('star_systems').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     await db.from('ship_markers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     await db.from('territories').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -133,7 +133,7 @@ window.spawnTokenAtCenter = async function() {
     
     let isJupiter = false;
     if (name.toLowerCase().includes("task force black") || name.toLowerCase().includes("horizon")) {
-        isJupiter = confirm(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
+        isJupiter = await window.showConfirmModal(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
     }
     
     let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {}; 
@@ -242,9 +242,25 @@ window.updateToolButtonStyles = function() {
 
 /* --- GLOBAL SYSTEM SEARCH --- */
 window._globalSearchResults = [];
-window.handleGlobalSearchInput = function(query) {
+let _searchDropdownEscaped = false;
+function escapeSearchDropdownClipping() {
+    // #search-results-dropdown lives inside #top-bar, which has overflow-y:hidden
+    // (so the horizontally-scrolling toolbar doesn't grow a vertical scrollbar).
+    // That silently clips the dropdown to nothing once it's taller than the bar.
+    // Moving it to <body> and switching to position:fixed escapes that clipping
+    // without touching the CSS rule (which other things in the bar likely rely on).
+    if (_searchDropdownEscaped) return;
     const dropdown = document.getElementById('search-results-dropdown');
     if (!dropdown) return;
+    document.body.appendChild(dropdown);
+    _searchDropdownEscaped = true;
+}
+
+window.handleGlobalSearchInput = function(query) {
+    escapeSearchDropdownClipping();
+    const dropdown = document.getElementById('search-results-dropdown');
+    const inputEl = document.getElementById('global-terminal-search');
+    if (!dropdown || !inputEl) return;
     query = (query || '').trim().toLowerCase();
     if (!query) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; window._globalSearchResults = []; return; }
 
@@ -254,6 +270,12 @@ window.handleGlobalSearchInput = function(query) {
     globalShipMarkersCache.forEach(m => { if (m.name && m.name.toLowerCase().includes(query)) results.push({ type: 'ship', data: m }); });
     results = results.slice(0, 8);
     window._globalSearchResults = results;
+
+    const rect = inputEl.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.width = rect.width + 'px';
 
     if (results.length === 0) {
         dropdown.innerHTML = '<div class="search-result-item" style="cursor:default; color:#6b826a;">No matches</div>';
@@ -370,8 +392,8 @@ window.saveDMBodyProperties = function(id) {
     let b = window.selectedTarget.data; b.name = document.getElementById('edit-body-name').value; b.type = document.getElementById('edit-body-type').value; b.gravity = document.getElementById('edit-body-gravity').value; b.atmosphere = document.getElementById('edit-body-atmosphere').value; b.resources = document.getElementById('edit-body-resources').value;
     if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); alert("Celestial body updated locally.");
 };
-window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!confirm("Destroy star system?")) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
-window.deleteShipToken = async function(id) { if (currentUserRole !== 'dm') return; if(!confirm("Decommission token?")) return; await db.from('ship_markers').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
+window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Destroy star system?"))) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
+window.deleteShipToken = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Decommission token?"))) return; await db.from('ship_markers').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
 
 /* --- THE CANVAS ENGINE --- */
 window.initGalaxyEngine = function() {
