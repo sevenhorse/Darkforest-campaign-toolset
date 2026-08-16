@@ -32,23 +32,45 @@ window.updateCalendarDisplay = function() {
     if (modalClock) modalClock.innerText = timeStr;
 };
 
-// NEW: Global observer that listens for time crossing 24h boundaries to reset Daily Economy loops
 window.processTimeAdvancement = async function(oldHours, newHours) {
     let daysPassed = Math.floor(newHours / 24) - Math.floor(oldHours / 24);
     if (daysPassed > 0 && typeof globalShipMarkersCache !== 'undefined') {
         let anyUpdated = false;
+        let rationsLogged = false;
+        
         for (let vessel of globalShipMarkersCache) {
             let cargo = vessel.cargo_inventory || {};
+            let changed = false;
+            
             if (cargo.synth_capacity !== 10) {
                 cargo.synth_capacity = 10;
+                changed = true;
+            }
+            
+            // MODULE D (Preview): Daily Life Support Loop
+            if (cargo.perishables) {
+                let rationIdx = cargo.perishables.findIndex(i => i.name.toLowerCase().includes('ration') || i.name.toLowerCase().includes('food'));
+                if (rationIdx >= 0 && cargo.perishables[rationIdx].qty > 0) {
+                    cargo.perishables[rationIdx].qty -= 1;
+                    changed = true;
+                    rationsLogged = true;
+                } else if (rationIdx >= 0 || cargo.perishables.length > 0) {
+                    await db.from('chat_logs').insert({ sender_id: 'system', content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has depleted Standard Rations. Starvation protocols active.`, message_type: 'text' });
+                    if (window.AudioEngine) window.AudioEngine.playError();
+                }
+            }
+
+            if (changed) {
                 await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
                 anyUpdated = true;
             }
         }
+        
         if (anyUpdated) {
+            let rationText = rationsLogged ? " Rations consumed." : "";
             await db.from('chat_logs').insert({
                 sender_id: 'system',
-                content: `✨ [DAILY RESET] 24-hour cycle completed. All Elder E-M Synthesizers recharged to 10/10 capacity.`,
+                content: `✨ [DAILY LOGISTICS] 24-hour cycle complete. Elder E-M Synthesizers recharged to 10/10.${rationText}`,
                 message_type: 'text'
             });
             if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
@@ -90,7 +112,6 @@ window.adjustTime = async function(amount, unit) {
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
     window.broadcastTimeSync();
-    
     await window.processTimeAdvancement(oldTime, window.universeTimeHours);
 };
 
@@ -113,7 +134,6 @@ window.applyManualTime = async function() {
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
     window.broadcastTimeSync();
-    
     await window.processTimeAdvancement(oldTime, window.universeTimeHours);
     alert("Chronology manually updated.");
 };
@@ -121,13 +141,11 @@ window.applyManualTime = async function() {
 window.resetTimeline = async function() {
     if (currentUserRole !== 'dm') return;
     if (!confirm("Reset timeline back to YR 2800.01.01?")) return;
-    
     let oldTime = window.universeTimeHours;
     window.universeTimeHours = 24192000;
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
     window.broadcastTimeSync();
-    
     await window.processTimeAdvancement(oldTime, window.universeTimeHours);
 };
 
@@ -252,16 +270,16 @@ window.switchTermTab = function(tabName) {
         if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
     } else if (tabName === 'codex') {
         window.switchCodexCategory(activeCodexCategory);
+    } else if (tabName === 'roster') {
+        if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
     }
 };
 
 window.switchDmSubtab = function(subtab) {
     document.querySelectorAll('#dm-tools .hud-tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('#dm-tools .dm-subpanel').forEach(p => p.classList.remove('active'));
-    
     const btn = document.getElementById(`dm-subtab-btn-${subtab}`);
     if (btn) btn.classList.add('active');
-    
     const panel = document.getElementById(`dm-panel-${subtab}`);
     if (panel) panel.classList.add('active');
 };
@@ -335,7 +353,6 @@ window.renderCharacterTerminalData = function() {
     
     const c = myProf.character || {};
     const s = myProf.skills || {};
-    
     const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
 
     setVal('term-sheet-name', c.name || '');
@@ -354,12 +371,9 @@ window.renderCharacterTerminalData = function() {
     setVal('term-assets', c.assets || '');
     setVal('term-history', c.history || '');
     
-    setVal('aug-head', c.aug_head || '');
-    setVal('aug-torso', c.aug_torso || '');
-    setVal('aug-larm', c.aug_larm || '');
-    setVal('aug-rarm', c.aug_rarm || '');
-    setVal('aug-lleg', c.aug_lleg || '');
-    setVal('aug-rleg', c.aug_rleg || '');
+    setVal('aug-head', c.aug_head || ''); setVal('aug-torso', c.aug_torso || '');
+    setVal('aug-larm', c.aug_larm || ''); setVal('aug-rarm', c.aug_rarm || '');
+    setVal('aug-lleg', c.aug_lleg || ''); setVal('aug-rleg', c.aug_rleg || '');
     
     skillList.forEach(skill => {
         const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -367,9 +381,6 @@ window.renderCharacterTerminalData = function() {
     });
 
     if (typeof window.renderArsenal === 'function') window.renderArsenal();
-    
-    const badgeCombat = document.getElementById('badge-combat');
-    if (badgeCombat) badgeCombat.innerText = (myProf.arsenal || []).length;
 };
 
 window.saveTerminalProfile = async function() {
@@ -377,23 +388,15 @@ window.saveTerminalProfile = async function() {
     await db.from('profiles').update({ username: safeGet('term-username'), avatar_url: safeGet('term-avatar') }).eq('id', currentUserId);
 
     if (presenceChannel) {
-        await presenceChannel.track({ 
-            online_at: new Date().toISOString(), 
-            username: safeGet('term-username') || currentUserEmail.split('@')[0], 
-            role: currentUserRole, 
-            avatar_url: safeGet('term-avatar') || '' 
-        });
+        await presenceChannel.track({ online_at: new Date().toISOString(), username: safeGet('term-username') || currentUserEmail.split('@')[0], role: currentUserRole, avatar_url: safeGet('term-avatar') || '' });
     }
 
     const charPayload = {
         profile_id: currentUserId, name: safeGet('term-sheet-name'),
-        stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'),
-        stat_intelligence: safeGet('stat-intelligence'), stat_strength: safeGet('stat-strength'),
-        stat_toughness: safeGet('stat-toughness'), stat_willpower: safeGet('stat-willpower'),
+        stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'), stat_intelligence: safeGet('stat-intelligence'), stat_strength: safeGet('stat-strength'), stat_toughness: safeGet('stat-toughness'), stat_willpower: safeGet('stat-willpower'),
         vitality: parseInt(safeGet('term-vitality')) || 0, stress: parseInt(safeGet('term-stress')) || 0, adversity_tokens: parseInt(safeGet('term-adversity')) || 0,
         specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'),
-        aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'),
-        aug_larm: safeGet('aug-larm'), aug_rarm: safeGet('aug-rarm'), aug_lleg: safeGet('aug-lleg'), aug_rleg: safeGet('aug-rleg')
+        aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'), aug_larm: safeGet('aug-larm'), aug_rarm: safeGet('aug-rarm'), aug_lleg: safeGet('aug-lleg'), aug_rleg: safeGet('aug-rleg')
     };
     const { data: charData, error: charErr } = await db.from('characters').upsert(charPayload, { onConflict: 'profile_id' }).select().single();
     if (charErr) return;
@@ -408,6 +411,81 @@ window.saveTerminalProfile = async function() {
     if (typeof loadAllProfiles === 'function') loadAllProfiles();
 };
 
+/* --- MODULE A: OVERSEER ROSTER (DM GOD-MODE DOSSIERS) --- */
+window.renderCrewRoster = function() {
+    const container = document.getElementById('crew-roster-container');
+    if (!container) return;
+    
+    let html = '';
+    
+    allProfiles.forEach(p => {
+        let char = p.character || {};
+        
+        if (currentUserRole === 'dm') {
+            html += `
+                <div class="note-card" style="border-color:#ff6b6b; padding:10px;">
+                    <div style="display:flex; gap:10px; align-items:flex-start;">
+                        <img src="${p.avatar_url || ''}" style="width:40px; height:40px; border:1px solid #3c4e36; background:#040605; object-fit:cover;" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'40\\' height=\\'40\\'><rect width=\\'40\\' height=\\'40\\' fill=\\'%23040605\\'/><text x=\\'50%25\\' y=\\'50%25\\' fill=\\'%2300e5a3\\' font-size=\\'14\\' text-anchor=\\'middle\\' dominant-baseline=\\'middle\\'>?</text></svg>'">
+                        <div style="flex:1;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div>
+                                    <strong style="color:#00e5a3; font-size:14px;">${char.name || p.username || 'Unknown Operator'}</strong>
+                                    <span style="color:#6b826a; font-size:10px; display:block;">Profile Handle: ${p.username || 'N/A'}</span>
+                                </div>
+                                <button class="btn-reveal" onclick="window.snapToCommander('${p.id}')" style="font-size:9px; padding:2px 6px;">LOCATE VESSEL</button>
+                            </div>
+                            
+                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-top:8px;">
+                                <div><label style="font-size:9px; color:#ff6b6b;">Vitality</label><input type="number" id="dm-edit-vit-${p.id}" value="${char.vitality || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
+                                <div><label style="font-size:9px; color:#ffaa00;">Stress</label><input type="number" id="dm-edit-str-${p.id}" value="${char.stress || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
+                                <div><label style="font-size:9px; color:#00e5a3;">Adversity</label><input type="number" id="dm-edit-adv-${p.id}" value="${char.adversity_tokens || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
+                            </div>
+                            
+                            <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Tactical Gear / Inventory Override:</label>
+                            <textarea id="dm-edit-assets-${p.id}" rows="2" style="font-size:10px; margin:2px 0;">${char.assets || ''}</textarea>
+
+                            <button class="btn-reveal" onclick="window.dmUpdatePlayerStats('${p.id}')" style="width:100%; font-size:9px; margin-top:4px; border-color:#ff6b6b; color:#ff6b6b;">APPLY OVERSEER OVERRIDE</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="note-card" style="padding:10px;">
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <img src="${p.avatar_url || ''}" style="width:40px; height:40px; border:1px solid #3c4e36; background:#040605; object-fit:cover;" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'40\\' height=\\'40\\'><rect width=\\'40\\' height=\\'40\\' fill=\\'%23040605\\'/><text x=\\'50%25\\' y=\\'50%25\\' fill=\\'%2300e5a3\\' font-size=\\'14\\' text-anchor=\\'middle\\' dominant-baseline=\\'middle\\'>?</text></svg>'">
+                        <div style="flex:1; display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <strong style="color:#00e5a3; font-size:14px;">${char.name || p.username || 'Unknown Operator'}</strong>
+                                <span style="color:#6b826a; font-size:10px; display:block;">Vitality: ${char.vitality || 0} | Stress: ${char.stress || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    container.innerHTML = html;
+};
+
+window.dmUpdatePlayerStats = async function(profileId) {
+    if (currentUserRole !== 'dm') return;
+    const vit = parseInt(document.getElementById(`dm-edit-vit-${profileId}`).value) || 0;
+    const str = parseInt(document.getElementById(`dm-edit-str-${profileId}`).value) || 0;
+    const adv = parseInt(document.getElementById(`dm-edit-adv-${profileId}`).value) || 0;
+    const assets = document.getElementById(`dm-edit-assets-${profileId}`).value;
+    
+    const prof = allProfiles.find(p => p.id === profileId);
+    if (!prof || !prof.character) { alert("Character sheet not initialized by player yet."); return; }
+    
+    await db.from('characters').update({ vitality: vit, stress: str, adversity_tokens: adv, assets: assets }).eq('id', prof.character.id);
+    
+    db.from('chat_logs').insert({ sender_id: 'system', content: `⚙️ [OVERSEER] System parameters overridden for Commander ${prof.username}.`, message_type: 'text' });
+    if (typeof loadAllProfiles === 'function') loadAllProfiles();
+    alert("Player metrics overridden and saved to cloud.");
+};
+
 /* --- CODEX & LOG UI --- */
 window.switchCodexCategory = function(cat) {
     activeCodexCategory = cat;
@@ -415,15 +493,9 @@ window.switchCodexCategory = function(cat) {
     const btn = document.getElementById(`codex-rail-${cat}`);
     if (btn) btn.classList.add('active');
 
-    const titles = {
-        factions: '🛡️ Factions & Registered Powers',
-        lore: '🌌 Sector Lore & Classified Intel',
-        npcs: '👤 Key NPCs & Tactical Contacts',
-        docs: '📄 Tactical Documents & Field Logs'
-    };
+    const titles = { factions: '🛡️ Factions & Registered Powers', lore: '🌌 Sector Lore & Classified Intel', npcs: '👤 Key NPCs & Tactical Contacts', docs: '📄 Tactical Documents & Field Logs' };
     const header = document.getElementById('codex-deck-title');
     if (header) header.innerText = titles[cat] || 'Codex Archive';
-
     if (typeof window.renderCodexMatrix === 'function') window.renderCodexMatrix();
 };
 
@@ -438,11 +510,7 @@ window.renderCodexMatrix = function() {
 
     let entries = globalCodexEntriesCache.filter(e => e.category === activeCodexCategory);
     if (codexSearchFilter) {
-        entries = entries.filter(e => 
-            (e.title && e.title.toLowerCase().includes(codexSearchFilter)) ||
-            (e.subtitle && e.subtitle.toLowerCase().includes(codexSearchFilter)) ||
-            (e.content && e.content.toLowerCase().includes(codexSearchFilter))
-        );
+        entries = entries.filter(e => (e.title && e.title.toLowerCase().includes(codexSearchFilter)) || (e.subtitle && e.subtitle.toLowerCase().includes(codexSearchFilter)) || (e.content && e.content.toLowerCase().includes(codexSearchFilter)));
     }
 
     if (entries.length === 0) {
@@ -455,13 +523,7 @@ window.renderCodexMatrix = function() {
 
     entries.forEach(e => {
         let docHtml = '';
-        if (e.doc_data && e.doc_name) {
-            docHtml = `
-                <div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">
-                    📎 ATTACHMENT: ${e.doc_name} (${(e.doc_type || 'FILE').toUpperCase()})
-                </div>
-            `;
-        }
+        if (e.doc_data && e.doc_name) { docHtml = `<div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">📎 ATTACHMENT: ${e.doc_name} (${(e.doc_type || 'FILE').toUpperCase()})</div>`; }
 
         html += `
             <div class="codex-entry-card category-${e.category}">
@@ -476,14 +538,11 @@ window.renderCodexMatrix = function() {
                         ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${e.id}')" style="font-size:9px; padding:3px 6px;">✕</button>` : ''}
                     </div>
                 </div>
-                <p style="margin:8px 0 4px 0; font-size:11px; color:#d4c5a9; line-height:1.5; max-height:80px; overflow:hidden; text-overflow:ellipsis;">
-                    ${e.content || ''}
-                </p>
+                <p style="margin:8px 0 4px 0; font-size:11px; color:#d4c5a9; line-height:1.5; max-height:80px; overflow:hidden; text-overflow:ellipsis;">${e.content || ''}</p>
                 ${docHtml}
             </div>
         `;
     });
-
     container.innerHTML = html;
 };
 
@@ -498,7 +557,6 @@ window.editCodexEntry = function(id) {
     document.getElementById('new-codex-title').value = entry.title || '';
     document.getElementById('new-codex-subtitle').value = entry.subtitle || '';
     document.getElementById('new-codex-content').value = entry.content || '';
-    
     document.getElementById('new-codex-doc-name').value = entry.doc_name || '';
     document.getElementById('new-codex-doc-data').value = entry.doc_data || '';
     document.getElementById('new-codex-doc-type').value = entry.doc_type || '';
@@ -506,11 +564,8 @@ window.editCodexEntry = function(id) {
     const currentDocWrapper = document.getElementById('codex-current-doc-wrapper');
     const currentDocName = document.getElementById('codex-current-doc-name');
     if (entry.doc_name && entry.doc_data) {
-        currentDocWrapper.style.display = 'block';
-        currentDocName.innerText = `📎 ${entry.doc_name} (${(entry.doc_type || 'file').toUpperCase()})`;
-    } else {
-        currentDocWrapper.style.display = 'none';
-    }
+        currentDocWrapper.style.display = 'block'; currentDocName.innerText = `📎 ${entry.doc_name} (${(entry.doc_type || 'file').toUpperCase()})`;
+    } else { currentDocWrapper.style.display = 'none'; }
 
     document.getElementById('btn-save-codex-entry').innerText = "✓ UPDATE CODEX ENTRY";
     document.getElementById('btn-cancel-codex-edit').style.display = "block";
@@ -519,25 +574,18 @@ window.editCodexEntry = function(id) {
 window.cancelCodexEdit = function() {
     editingCodexId = null;
     document.getElementById('codex-creator-heading').innerText = "+ New Codex Entry";
-    document.getElementById('new-codex-title').value = '';
-    document.getElementById('new-codex-subtitle').value = '';
-    document.getElementById('new-codex-content').value = '';
-    document.getElementById('new-codex-doc-name').value = '';
-    document.getElementById('new-codex-doc-data').value = '';
-    document.getElementById('new-codex-doc-type').value = '';
+    document.getElementById('new-codex-title').value = ''; document.getElementById('new-codex-subtitle').value = '';
+    document.getElementById('new-codex-content').value = ''; document.getElementById('new-codex-doc-name').value = '';
+    document.getElementById('new-codex-doc-data').value = ''; document.getElementById('new-codex-doc-type').value = '';
     document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
     document.getElementById('codex-current-doc-wrapper').style.display = 'none';
-
     document.getElementById('btn-save-codex-entry').innerText = "+ PUBLISH TO CODEX";
     document.getElementById('btn-cancel-codex-edit').style.display = "none";
 };
 
 window.removeCodexAttachmentFromForm = function() {
-    document.getElementById('new-codex-doc-name').value = '';
-    document.getElementById('new-codex-doc-data').value = '';
-    document.getElementById('new-codex-doc-type').value = '';
-    document.getElementById('codex-current-doc-wrapper').style.display = 'none';
-    document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
+    document.getElementById('new-codex-doc-name').value = ''; document.getElementById('new-codex-doc-data').value = ''; document.getElementById('new-codex-doc-type').value = '';
+    document.getElementById('codex-current-doc-wrapper').style.display = 'none'; document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
 };
 
 window.saveNewCodexEntry = async function() {
@@ -552,44 +600,19 @@ window.saveNewCodexEntry = async function() {
 
     if (!title) { alert("Please enter an entry title."); return; }
 
-    const payload = {
-        category: cat,
-        title: title,
-        subtitle: subtitle,
-        content: content,
-        doc_name: docName || null,
-        doc_data: docData || null,
-        doc_type: docType || null,
-        created_by: currentUserId
-    };
+    const payload = { category: cat, title: title, subtitle: subtitle, content: content, doc_name: docName || null, doc_data: docData || null, doc_type: docType || null, created_by: currentUserId };
 
     if (editingCodexId) {
         const { error } = await db.from('codex_entries').update(payload).eq('id', editingCodexId);
-        if (error) {
-            alert("Failed to update Codex entry: " + error.message);
-        } else {
-            window.cancelCodexEdit();
-            window.switchCodexCategory(cat);
-            if (typeof loadCodexEntries === 'function') loadCodexEntries();
-            await db.from('chat_logs').insert({
-                sender_id: currentUserId,
-                content: `📖 [CODEX REVISED] Overseer modified archive: '${title}' under [${cat.toUpperCase()}].`,
-                message_type: 'text'
-            });
+        if (error) { alert("Failed to update Codex entry: " + error.message); } else {
+            window.cancelCodexEdit(); window.switchCodexCategory(cat); if (typeof loadCodexEntries === 'function') loadCodexEntries();
+            await db.from('chat_logs').insert({ sender_id: currentUserId, content: `📖 [CODEX REVISED] Overseer modified archive: '${title}'.`, message_type: 'text' });
         }
     } else {
         const { error } = await db.from('codex_entries').insert(payload);
-        if (error) {
-            alert("Failed to publish to Cloud Codex: " + error.message);
-        } else {
-            window.cancelCodexEdit();
-            window.switchCodexCategory(cat);
-            if (typeof loadCodexEntries === 'function') loadCodexEntries();
-            await db.from('chat_logs').insert({
-                sender_id: currentUserId,
-                content: `📖 [CODEX PUBLISHED] Overseer filed archive: '${title}' under [${cat.toUpperCase()}].`,
-                message_type: 'text'
-            });
+        if (error) { alert("Failed to publish to Cloud Codex: " + error.message); } else {
+            window.cancelCodexEdit(); window.switchCodexCategory(cat); if (typeof loadCodexEntries === 'function') loadCodexEntries();
+            await db.from('chat_logs').insert({ sender_id: currentUserId, content: `📖 [CODEX PUBLISHED] Overseer filed archive: '${title}'.`, message_type: 'text' });
         }
     }
 };
@@ -615,15 +638,10 @@ window.openCodexFullscreen = function(id) {
     const actionBar = document.getElementById('reader-doc-action-bar');
     if (entry.doc_data && entry.doc_name) {
         actionBar.style.display = 'block';
-        actionBar.innerHTML = `
-            <button class="btn-reveal" onclick="window.openCodexAttachment('${entry.id}')" style="width:auto; font-size:11px; padding:6px 16px;">
-                📥 OPEN / DOWNLOAD ATTACHED DOCUMENT (${entry.doc_name})
-            </button>
-        `;
+        actionBar.innerHTML = `<button class="btn-reveal" onclick="window.openCodexAttachment('${entry.id}')" style="width:auto; font-size:11px; padding:6px 16px;">📥 OPEN / DOWNLOAD ATTACHED DOCUMENT (${entry.doc_name})</button>`;
     } else {
         actionBar.style.display = 'none';
     }
-
     modal.style.display = 'block';
 };
 
@@ -641,11 +659,7 @@ window.openCodexAttachment = function(id) {
     } else {
         const blob = new Blob([entry.doc_data], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = entry.doc_name || 'document.txt';
-        a.click();
-        URL.revokeObjectURL(url);
+        const a = document.createElement('a'); a.href = url; a.download = entry.doc_name || 'document.txt'; a.click(); URL.revokeObjectURL(url);
     }
 };
 
@@ -723,36 +737,61 @@ window.deleteNote = async function(id) {
     if(editingNoteId === id) {
         editingNoteId = null;
         document.getElementById('btn-create-note').innerText = "+ CREATE NOTE";
-        document.getElementById('term-note-title').value = ''; 
-        document.getElementById('term-note-content').value = '';
+        document.getElementById('term-note-title').value = ''; document.getElementById('term-note-content').value = '';
     }
     if (typeof loadPlayerNotes === 'function') loadPlayerNotes();
 };
 
+/* --- MODULE A: INTEL NOTE SURVEILLANCE & FULLSCREEN --- */
 window.renderTerminalNotes = function() {
     const container = document.getElementById('term-notes-list-container');
     if (!container) return;
     let html = '';
+    
     playerNotesList.forEach(n => {
-        if (n.author_id !== currentUserId && n.share_scope === 'private') return;
+        // DM bypasses private lock completely
+        if (n.author_id !== currentUserId && n.share_scope === 'private' && currentUserRole !== 'dm') return;
+        
         const isMine = n.author_id === currentUserId;
+        const isAudit = !isMine && n.share_scope === 'private' && currentUserRole === 'dm';
+        let auditTag = isAudit ? `<span style="color:#ff3333; font-size:9px; margin-left:6px;">[OVERSEER AUDIT]</span>` : '';
+        
         html += `
-            <div class="note-card">
+            <div class="note-card" style="border-color:${isAudit ? '#ff3333' : '#3c4e36'};">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <strong style="color:#00e5a3; font-size:11px;">${n.title}</strong>
-                    ${isMine ? `
+                    <strong style="color:#00e5a3; font-size:11px;">${n.title} ${auditTag}</strong>
                     <div style="display:flex; gap:4px;">
+                        <button class="layer-edit" onclick="window.openNoteFullscreen('${n.id}')" style="font-size:8px;">⛶ FULL</button>
+                        ${isMine || currentUserRole === 'dm' ? `
                         <button class="layer-edit" onclick="window.editNote('${n.id}')" style="font-size:8px;">Edit</button>
                         <button class="layer-del" onclick="window.deleteNote('${n.id}')" style="font-size:8px;">X</button>
+                        ` : ''}
                     </div>
-                    ` : ''}
                 </div>
-                <p style="margin:4px 0 2px 0; font-size:10px; color:#d4c5a9; white-space:pre-wrap;">${n.content || ''}</p>
-                <span style="font-size:9px; color:#6b826a;">Scope: ${n.share_scope}</span>
+                <p style="margin:4px 0 2px 0; font-size:10px; color:#d4c5a9; white-space:pre-wrap; max-height:40px; overflow:hidden; text-overflow:ellipsis;">${n.content || ''}</p>
+                <span style="font-size:9px; color:#6b826a;">Scope: ${n.share_scope.toUpperCase()} | Author: ${allProfiles.find(p=>p.id===n.author_id)?.username || 'Unknown'}</span>
             </div>
         `;
     });
     container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No notes recorded.</span>';
+};
+
+window.openNoteFullscreen = function(id) {
+    let n = playerNotesList.find(x => x.id === id);
+    if (!n) return;
+    
+    const modal = document.getElementById('codex-fullscreen-reader');
+    document.getElementById('reader-category-badge').innerText = `INTEL LOG // ${(allProfiles.find(p=>p.id===n.author_id)?.username || 'Unknown').toUpperCase()}`;
+    document.getElementById('reader-title').innerText = n.title;
+    
+    const isAudit = n.author_id !== currentUserId && n.share_scope === 'private' && currentUserRole === 'dm';
+    const auditStr = isAudit ? ` <span style="color:#ff3333;">[OVERSEER AUDIT BYPASS ACTIVE]</span>` : '';
+    document.getElementById('reader-subtitle').innerText = `Security Scope: ${n.share_scope.toUpperCase()}` + auditStr;
+    
+    document.getElementById('reader-body-content').innerText = n.content || 'No narrative content recorded.';
+    document.getElementById('reader-doc-action-bar').style.display = 'none';
+    
+    modal.style.display = 'block';
 };
 
 window.sendChatMessage = async function() {
@@ -800,9 +839,7 @@ window.populateCommsRecipients = function() {
     if (!select) return;
     let currentVal = select.value;
     let html = '<option value="global">🌐 Global Broadcast</option>';
-    allProfiles.forEach(p => {
-        if (p.id !== currentUserId) { html += `<option value="${p.id}">🔒 DM: ${p.username || 'Commander'}</option>`; }
-    });
+    allProfiles.forEach(p => { if (p.id !== currentUserId) { html += `<option value="${p.id}">🔒 DM: ${p.username || 'Commander'}</option>`; } });
     select.innerHTML = html;
     if (select.querySelector(`option[value="${currentVal}"]`)) select.value = currentVal;
 };
@@ -833,17 +870,13 @@ function initFileHandlers() {
         reader.onload = function (event) {
             const img = new Image();
             img.onload = function () {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                const maxDim = 256;
-                let width = img.width; let height = img.height;
+                const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+                const maxDim = 256; let width = img.width; let height = img.height;
                 if (width > height) { if (width > maxDim) { height *= maxDim / width; width = maxDim; } }
                 else { if (height > maxDim) { width *= maxDim / height; height = maxDim; } }
-                canvas.width = width; canvas.height = height;
-                ctx.drawImage(img, 0, 0, width, height);
+                canvas.width = width; canvas.height = height; ctx.drawImage(img, 0, 0, width, height);
                 const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
-                avatarPreview.src = compressedBase64;
-                hiddenAvatarInput.value = compressedBase64;
+                avatarPreview.src = compressedBase64; hiddenAvatarInput.value = compressedBase64;
                 document.getElementById('dropzone-label').innerText = '✓ Image Loaded: ' + file.name;
             };
             img.src = event.target.result;
@@ -902,5 +935,4 @@ function initFileHandlers() {
         }
     }
 }
-
 document.addEventListener('DOMContentLoaded', initFileHandlers);
