@@ -340,11 +340,14 @@ window.initGalaxyEngine = function() {
         proceduralSystems.push({ id: `proc-core-${i}`, name: `Core Sector-${2000 + i}`, x, y, size: rng() * 2.5 + 3.5, color, type: luminosity === 'Singularity' ? 'Black Hole' : 'Star', luminosity, hazard, multiType: rng() > 0.7 ? 'Binary' : 'Single', ownership: 'Galactic Core', isCustom: false });
     }
     for (let i = 0; i < 2400; i++) {
-        let arm = i % 4; let r = Math.pow(rng(), 0.6) * (galaxyRadius - coreRadius) + coreRadius;
-        let spiralTheta = (Math.log(r / coreRadius) * 2.2) + ((arm * 2 * Math.PI) / 4);
-        let finalTheta = spiralTheta + (rng() - 0.5) * (0.35 + (r / galaxyRadius) * 0.4);
-        let finalR = r + (rng() - 0.5) * (180 + (r / galaxyRadius) * 400);
-        if (rng() > 0.88) { finalTheta = rng() * Math.PI * 2; finalR = rng() * galaxyRadius; }
+       // 1.6 winding factor removes the "pointiness", making arms open up gracefully
+        let spiralTheta = (Math.log(r / coreRadius) * 1.6) + ((arm * 2 * Math.PI) / 4);
+        // Doubled scatter angle to widen the arms
+        let finalTheta = spiralTheta + (rng() - 0.5) * (0.8 + (r / galaxyRadius) * 0.8);
+        // Doubled radius scatter to fill the gaps between arms
+        let finalR = r + (rng() - 0.5) * (400 + (r / galaxyRadius) * 800);
+        // Increased outlier chance from 12% to 18% to seed the dark voids with rogue stars
+        if (rng() > 0.82) { finalTheta = rng() * Math.PI * 2; finalR = rng() * galaxyRadius; }
         
         let x = Math.cos(finalTheta) * finalR; let y = Math.sin(finalTheta) * finalR;
         let type = 'Star'; let size = rng() * 2.0 + 3.0; let color = '#ffe9c4'; let luminosity = 'Class G (Yellow)'; let hazard = 'None';
