@@ -358,7 +358,6 @@ window.renderCodexMatrix = function() {
         entries = entries.filter(e => (e.title && e.title.toLowerCase().includes(window.codexSearchFilter)) || (e.subtitle && e.subtitle.toLowerCase().includes(window.codexSearchFilter)) || (e.content && e.content.toLowerCase().includes(window.codexSearchFilter)));
     }
 
-    // MODULE C FOW LINKING FILTER
     entries = entries.filter(e => {
         if (currentUserRole === 'dm') return true;
         let linkMatch = (e.subtitle || '').match(/LINK:(.+)/);
@@ -695,3 +694,88 @@ function initFileHandlers() {
     }
 }
 document.addEventListener('DOMContentLoaded', initFileHandlers);
+
+/* --- CARTOGRAPHY MANAGERS (TERRITORIES & ROUTES) --- */
+window.populateTerritoryFactionSelect = function() {
+    const select = document.getElementById('territory-faction-select');
+    if (!select) return;
+    let html = '<option value="">-- No Faction / Neutral --</option>';
+    const factions = globalCodexEntriesCache.filter(e => e.category === 'factions');
+    factions.forEach(f => { html += `<option value="${f.title}">${f.title}</option>`; });
+    select.innerHTML = html;
+};
+
+window.renderTerritoryList = function() {
+    const container = document.getElementById('territory-list-container');
+    if (!container) return;
+    let html = '';
+    globalTerritoriesCache.forEach(t => {
+        let isHidden = t.faction_name && t.faction_name.includes('[HIDDEN]');
+        let displayFaction = t.faction_name ? t.faction_name.replace('[HIDDEN] ', '').replace('[HIDDEN]', '') : 'None';
+        
+        html += `
+            <div class="note-card" style="border-left: 3px solid ${t.color}; padding: 6px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong style="color: ${t.color}; font-size: 11px;">${t.name}</strong><br>
+                        <span style="font-size: 9px; color: #6b826a;">Faction: ${displayFaction}</span>
+                    </div>
+                    <div style="display: flex; gap: 4px;">
+                        ${currentUserRole === 'dm' ? `
+                        <button class="layer-edit" onclick="window.toggleTerritoryVisibility('${t.id}', ${isHidden})" style="font-size: 9px; padding: 2px 4px;">${isHidden ? '👁️ Unhide' : '🌫️ Hide'}</button>
+                        <button class="layer-del" onclick="window.deleteTerritory('${t.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active territories.</span>';
+};
+
+window.toggleTerritoryVisibility = async function(id, currentlyHidden) {
+    if (currentUserRole !== 'dm') return;
+    const t = globalTerritoriesCache.find(x => x.id === id);
+    if (!t) return;
+    
+    let newFaction = t.faction_name || '';
+    if (currentlyHidden) {
+        newFaction = newFaction.replace('[HIDDEN] ', '').replace('[HIDDEN]', '');
+    } else {
+        newFaction = '[HIDDEN] ' + newFaction;
+    }
+    
+    await db.from('territories').update({ faction_name: newFaction }).eq('id', id);
+    if (typeof loadTerritories === 'function') loadTerritories();
+};
+
+window.deleteTerritory = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!confirm("Permanently erase this territory border?")) return;
+    await db.from('territories').delete().eq('id', id);
+    if (typeof loadTerritories === 'function') loadTerritories();
+};
+
+window.renderHyperlaneList = function() {
+    const container = document.getElementById('hyperlane-list-container');
+    if (!container) return;
+    let html = '';
+    globalHyperlanesCache.forEach(h => {
+        html += `
+            <div class="note-card" style="border-left: 3px solid ${h.color || '#00e1ff'}; padding: 6px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong style="color: ${h.color || '#00e1ff'}; font-size: 11px;">Trade Route (${h.nodes?.length || 0} Jumps)</strong>
+                    ${currentUserRole === 'dm' ? `<button class="layer-del" onclick="window.deleteHyperlane('${h.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>` : ''}
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active routes.</span>';
+};
+
+window.deleteHyperlane = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!confirm("Permanently erase this trade route?")) return;
+    await db.from('hyperlanes').delete().eq('id', id);
+    if (typeof loadHyperlanes === 'function') loadHyperlanes();
+};
