@@ -216,6 +216,27 @@ window.renderFleetGroupsPanel = function() {
             const editable = canManage(f);
             const ship = globalShipMarkersCache.find(m => m.id === f.linked_ship_id);
             const route = globalHyperlanesCache.find(r => r.id === f.patrol_hyperlane_id);
+
+            let dockingLine = '';
+            if (ship && editable) {
+                if (ship.docked_to) {
+                    const master = globalShipMarkersCache.find(m => m.id === ship.docked_to);
+                    dockingLine = `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:9px; color:#a2c4f5;">
+                        <span>🔗 Docked to ${master ? master.name : 'Unknown'}</span>
+                        <button class="layer-del" onclick="window.undockShip('${ship.id}')" style="padding:2px 6px; font-size:8px;">DETACH</button>
+                    </div>`;
+                } else {
+                    const otherShips = globalShipMarkersCache.filter(s => s.id !== ship.id && !s.docked_to);
+                    if (otherShips.length > 0) {
+                        dockingLine = `<div style="display:flex; gap:4px; margin-top:6px;">
+                            <label for="fleet-dock-select-${f.id}" style="display:none;">Dock To</label>
+                            <select id="fleet-dock-select-${f.id}" style="flex:1; margin:0; font-size:9px; padding:3px;">${otherShips.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+                            <button class="btn-reveal" onclick="window.dockShipToMaster('${ship.id}', document.getElementById('fleet-dock-select-${f.id}').value)" style="width:auto; margin:0; padding:3px 7px; font-size:9px;">🔗 DOCK</button>
+                        </div>`;
+                    }
+                }
+            }
+
             html += `
                 <div class="note-card">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -231,6 +252,7 @@ window.renderFleetGroupsPanel = function() {
                             <button class="layer-del" onclick="window.deleteFleetGroup('${f.id}')" style="padding:3px 7px; font-size:9px;">✕</button>` : ''}
                         </div>
                     </div>
+                    ${dockingLine}
                 </div>`;
         });
         container.innerHTML = html;
