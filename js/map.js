@@ -340,6 +340,42 @@ function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
     return spacing;
 }
 
+/* --- DRADIS RADAR: DYNAMIC ANCHOR TRACKING ---
+   Converts a world-space anchor point (galactic core, or the currently
+   focused system from the render loop above) into screen-space left/top
+   using the exact same transform the canvas itself uses, so the dish is
+   always pixel-locked to what's actually on screen. Runs every frame while
+   active (early-returns instantly when not, so it's zero-cost otherwise) —
+   left/top are NOT CSS-transitioned so tracking stays perfectly in sync
+   during pan/zoom; only the dish's width/height transition (see .radar-sweep
+   in style.css) for a smooth resize at the galaxy<->system-focus boundary. */
+const GALAXY_RADIUS_WORLD = 11000;
+function updateRadarSweepPosition(cssWidth, cssHeight) {
+    if (!window.radarSweepActive) return;
+    const overlay = document.getElementById('radar-sweep-overlay');
+    if (!overlay) return;
+
+    const focused = window._radarFocusedSystem;
+    let anchorWorldX = 0, anchorWorldY = 0, radiusPx;
+    if (focused) {
+        anchorWorldX = focused.x; anchorWorldY = focused.y;
+        radiusPx = 260; // fixed dish size at system-scale focus
+    } else {
+        // No system in focus (zoomed out, or nothing nearby) — default to
+        // the galactic core, sized to cover the major galactic bounds.
+        radiusPx = Math.max(160, Math.min(520, GALAXY_RADIUS_WORLD * window.camera.zoom));
+    }
+
+    const screenX = cssWidth / 2 + window.camera.x + anchorWorldX * window.camera.zoom;
+    const screenY = cssHeight / 2 + window.camera.y + anchorWorldY * window.camera.zoom;
+
+    overlay.style.left = `${screenX}px`;
+    overlay.style.top = `${screenY}px`;
+    overlay.style.width = `${radiusPx * 2}px`;
+    overlay.style.height = `${radiusPx * 2}px`;
+    overlay.style.transform = 'translate(-50%, -50%)';
+}
+
 /* --- CIC TACTICAL TABLE: TELEMETRY READOUT ---
    Corner brackets are static CSS (see .cic-frame), zero runtime cost. This
    just updates the handful of text values (sector coords, zoom%, grid
@@ -839,15 +875,17 @@ window.initGalaxyEngine = function() {
         // planet/orbit diagram simultaneously, which in dense clusters (the
         // galactic core especially) makes neighboring systems visually bleed
         // into each other instead of showing one system at a time.
-        let focusedSystemId = null;
+        // Also drives the DRADIS radar overlay's re-anchoring below.
+        let focusedSystemId = null; let focusedSystemObj = null;
         if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD) {
             let nearestDist = Infinity;
             for (let s of allSystems) {
                 if (s.type === 'Nebula') continue;
                 let d = Math.hypot(s.x - cx, s.y - cy);
-                if (d < nearestDist) { nearestDist = d; focusedSystemId = s.id; }
+                if (d < nearestDist) { nearestDist = d; focusedSystemId = s.id; focusedSystemObj = s; }
             }
         }
+        window._radarFocusedSystem = focusedSystemObj;
 
         for (let s of allSystems) {
             if (Math.abs(s.x - cx) > hw + 200 || Math.abs(s.y - cy) > hh + 200) continue;
@@ -952,6 +990,7 @@ window.initGalaxyEngine = function() {
 
         ctx.restore();
         updateCicTelemetry(cx, cy, window.camera.zoom, _gridSpacing);
+        updateRadarSweepPosition(cssWidth, cssHeight);
         requestAnimationFrame(render);
     }
     render();
