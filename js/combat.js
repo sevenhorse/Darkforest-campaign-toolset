@@ -342,6 +342,8 @@ window.renderVesselDeck = function() {
         const r_max = vessel.max_reactive || 10;
         const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
         const a_max = vessel.max_ablative || 10;
+        const hd_int = vessel.integrity_hardened !== undefined ? vessel.integrity_hardened : 0;
+        const hd_max = vessel.max_hardened || 0;
 
         let currentStance = vessel.ship_stance || 'Balanced';
         let stanceHtml = `
@@ -376,7 +378,7 @@ window.renderVesselDeck = function() {
         
         let resetBtn = `<button class="btn-reveal" onclick="window.resetShipStats('${vessel.id}')" style="width:100%; font-size:10px; margin-bottom:10px; border-color:#00e5a3;">↺ RESET COMBAT STATS</button>`;
 
-        healthContainer.innerHTML = stanceHtml + resetBtn + makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull') + makeBar('REACTIVE ARMOR (PIERCE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT)', a_int, a_max, '#ffaa00', 'ablative');
+        healthContainer.innerHTML = stanceHtml + resetBtn + makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('REACTIVE ARMOR (IMPACT/EXPLOSIVE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT/ENERGY)', a_int, a_max, '#ffaa00', 'ablative') + makeBar('HARDENED ARMOR', hd_int, Math.max(1, hd_max), '#c9962f', 'hardened') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
     }
 
     if (decksContainer) {
@@ -415,12 +417,14 @@ window.renderVesselDeck = function() {
         if (weapons.length === 0) wHtml = '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>';
         else {
             weapons.forEach((w, idx) => {
+                let wDmgType = window.normalizeDamageType(w.damage_type || window.inferLegacyDamageType(w.name));
+                let wDmgInfo = window.DAMAGE_TYPES[wDmgType];
                 wHtml += `
                 <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
                             <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>
-                            <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · ${w.damage_type || window.inferLegacyDamageType(w.name)}</div>
+                            <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
                         </div>
                         <div style="display:flex; gap:6px; align-items:center;">
                             <label for="wpn-target-${vessel.id}-${idx}" style="display:none;">Target</label>
@@ -710,7 +714,8 @@ window.resetShipStats = async function(vesselId) {
         integrity_shields: vessel.max_shields || 400,
         integrity_hull: vessel.max_hull || 300,
         integrity_reactive: vessel.max_reactive || 10,
-        integrity_ablative: vessel.max_ablative || 10
+        integrity_ablative: vessel.max_ablative || 10,
+        integrity_hardened: vessel.max_hardened || 0
     };
     Object.assign(vessel, payload);
     
@@ -924,9 +929,7 @@ window.rollShipWeapon = async function(vesselId, idx) {
     
     let targetShip = null;
     let combatLog = ``;
-    let dmgType = wpn.damage_type || window.inferLegacyDamageType(wpn.name);
-    let isPiercing = dmgType === 'Piercing';
-    let isHeat = dmgType === 'Heat';
+    let dmgType = window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name));
 
     if (targetId) {
         targetShip = globalShipMarkersCache.find(m => m.id === targetId);
@@ -936,33 +939,19 @@ window.rollShipWeapon = async function(vesselId, idx) {
             if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
             if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
 
-            let s_int = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
-            let h_int = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
-            let r_int = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
-            let a_int = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
-            
-            let remainingDmg = total;
+            const result = window.resolveShipDamage(targetShip, dmgType, total);
+            combatLog += result.log;
 
-            let shieldDmg = Math.min(s_int, remainingDmg);
-            s_int -= shieldDmg;
-            remainingDmg -= shieldDmg;
-            if (shieldDmg > 0) combatLog += `Shields absorbed: ${shieldDmg}. `;
-
-            if (remainingDmg > 0) {
-                if (isPiercing && r_int > 0) {
-                    r_int -= 1; combatLog += `[REACTIVE ARMOR] charge expended. Hull breach negated! `; remainingDmg = 0;
-                } else if (isHeat && a_int > 0) {
-                    a_int -= 1; combatLog += `[ABLATIVE ARMOR] charge expended. Hull damage negated! `; remainingDmg = 0;
-                } else {
-                    let hullDmg = Math.min(h_int, remainingDmg);
-                    h_int -= hullDmg; remainingDmg -= hullDmg;
-                    combatLog += `Hull suffered: ${hullDmg} damage! `;
-                    if (h_int <= 0) combatLog += `**CRITICAL HULL BREACH!** `;
-                }
-            }
-
-            await db.from('ship_markers').update({ integrity_shields: s_int, integrity_hull: h_int, integrity_reactive: r_int, integrity_ablative: a_int }).eq('id', targetShip.id);
-            targetShip.integrity_shields = s_int; targetShip.integrity_hull = h_int; targetShip.integrity_reactive = r_int; targetShip.integrity_ablative = a_int;
+            await db.from('ship_markers').update({
+                integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
+                integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
+                integrity_hardened: result.integrity_hardened
+            }).eq('id', targetShip.id);
+            Object.assign(targetShip, {
+                integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
+                integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
+                integrity_hardened: result.integrity_hardened
+            });
         }
     }
 
@@ -1041,6 +1030,54 @@ window.deleteShipDeck = async function(vesselId, idx) {
    looked up by addShipWeapon() but never rendered), and there was no way to set
    damage type or gun count when installing a weapon. Anchored off the exploding-dice
    checkbox, which is guaranteed to exist, so this works without touching index.html. */
+
+/* --- 12-TIER DAMAGE TYPE MATRIX ---
+   Single source of truth for every damage-type dropdown, tooltip, and the
+   combat cascade resolution in rollShipWeapon(). Defense layer order is:
+   Shields -> Reactive Armor -> Ablative Armor -> Hardened Armor -> Hull.
+   blockedBy: fully negates the hit at that layer (consumes a charge).
+   bypassesLayers: skips straight past those layers as if they weren't there.
+   hullMult: multiplier applied once damage actually reaches Hull.
+   shieldMode: 'normal' | 'antimatter' (partial bypass) | 'ion' (double dmg
+   to shields, minimal hull dmg) | 'exotic' (only thing shields fully stop). */
+window.DAMAGE_TYPES = {
+    'Impact':    { color: '#d4c5a9', blockedBy: 'reactive', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+        desc: 'Standard kinetic ordnance — the baseline most weapons default to.', shreds: 'Unarmored hull, light craft', mitigatedBy: 'Reactive Armor' },
+    'Piercing':  { color: '#ffaa00', blockedBy: null, bypassesLayers: ['reactive', 'ablative'], hullMult: 1, shieldMode: 'normal',
+        desc: 'Armor-defeating penetrators engineered to punch through countermeasures.', shreds: 'Reactive & Ablative Armor — ignores both entirely', mitigatedBy: 'Hardened Armor, Hull' },
+    'Explosive': { color: '#ff6b6b', blockedBy: 'reactive', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+        desc: 'Warheads detonating on impact for wide-area kinetic shock.', shreds: 'Unarmored hull, strike craft formations', mitigatedBy: 'Reactive Armor' },
+    'Flak':      { color: '#ffe066', blockedBy: null, bypassesLayers: [], hullMult: 0.4, shieldMode: 'normal',
+        desc: 'Proximity-fused shrapnel bursts built to shred small, fast, fragile targets.', shreds: 'Strike Craft — devastating vs fighters/bombers', mitigatedBy: 'Capital-scale Hull (weak vs Ships)' },
+    'Energy':    { color: '#00e1ff', blockedBy: 'ablative', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+        desc: 'Directed-energy beams and pulses — lasers, particle cannons, plasma bolts.', shreds: 'Unarmored hull, exposed systems', mitigatedBy: 'Ablative Armor' },
+    'Antimatter':{ color: '#c778dd', blockedBy: null, bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 2, shieldMode: 'antimatter',
+        desc: 'Exotic matter-antimatter warheads — among the most destructive ordnance in known space.', shreds: 'Hardened Armor & Hull — a genuine capital ship hull-melter', mitigatedBy: 'Shields (only partially)' },
+    'Exotic':    { color: '#33ff99', blockedBy: null, bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 1, shieldMode: 'exotic',
+        desc: 'Anomalous or poorly-understood physics effects with no established countermeasure.', shreds: 'All armor layers — ignored entirely', mitigatedBy: 'Shields only' },
+    'Ion':       { color: '#7694ff', blockedBy: null, bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 0.25, shieldMode: 'ion',
+        desc: 'Electromagnetic pulse weaponry designed to overload power systems, not breach hull.', shreds: 'Shields & reactor systems — bypasses all physical armor', mitigatedBy: 'Nothing stops it, but it barely scratches Hull' },
+    'Heat':      { color: '#ff3333', blockedBy: 'ablative', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+        desc: 'Thermal lances and incendiary ordnance that cooks through plating.', shreds: 'Unarmored hull, exposed systems', mitigatedBy: 'Ablative Armor' },
+    'Cold':      { color: '#66d9ff', blockedBy: null, bypassesLayers: [], hullMult: 1.25, shieldMode: 'normal',
+        desc: 'Cryogenic disruptors that embrittle plating rather than melting it outright.', shreds: 'Exposed Hull once armor is stripped — brittle-fracture bonus', mitigatedBy: 'Nothing specific; weak vs intact armor' },
+    'Corrosive': { color: '#7cbf3f', blockedBy: null, bypassesLayers: ['hardened'], hullMult: 1, shieldMode: 'normal',
+        desc: 'Acidic or nanite-based agents that eat through even hardened plating.', shreds: 'Hardened Armor specifically — ignores it entirely', mitigatedBy: 'Reactive Armor, Ablative Armor' },
+    'Healing':   { color: '#00e5a3', blockedBy: null, bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+        desc: 'Repair-drone swarms, nanite weaves, or damage-control beams — restores rather than harms.', shreds: 'Nothing — restores Shields first, then Hull', mitigatedBy: 'N/A' }
+};
+
+window.buildDamageTypeOptionsHtml = function(selected) {
+    return Object.keys(window.DAMAGE_TYPES).map(k => `<option value="${k}" ${k === selected ? 'selected' : ''}>${k}</option>`).join('');
+};
+
+// Native title tooltips (reliable, no extra markup) built from the shared table.
+window.getDamageTypeTooltip = function(dmgType) {
+    const info = window.DAMAGE_TYPES[dmgType];
+    if (!info) return '';
+    return `${dmgType}\n${info.desc}\n\nSHREDS: ${info.shreds}\nMITIGATED BY: ${info.mitigatedBy}`;
+};
+
 function injectWeaponFormExtras() {
     if (document.getElementById('new-ship-wpn-guns')) return; // already injected
     const explodesCb = document.getElementById('new-ship-wpn-explodes');
@@ -1055,23 +1092,110 @@ function injectWeaponFormExtras() {
             <input type="number" id="new-ship-wpn-guns" placeholder="Guns" min="1" value="1" title="Number of physical guns/mounts in this battery — caps max volley size" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
             <label for="new-ship-wpn-dmgtype" style="display:none;">Damage Type</label>
             <select id="new-ship-wpn-dmgtype" style="flex:1.6; margin:0; border-color:#ff3333;">
-                <option value="Impact/Ion">Impact/Ion</option>
-                <option value="Piercing">Piercing (bypasses Reactive Armor)</option>
-                <option value="Heat">Heat (bypasses Ablative Armor)</option>
+                ${window.buildDamageTypeOptionsHtml('Impact')}
             </select>
         </div>`);
 }
 injectWeaponFormExtras();
 
+function injectArsenalDamageTypeOptions() {
+    const sel = document.getElementById('new-wpn-dmgtype');
+    if (!sel || sel.dataset.populated) return;
+    sel.insertAdjacentHTML('beforeend', window.buildDamageTypeOptionsHtml(''));
+    sel.dataset.populated = 'true';
+}
+injectArsenalDamageTypeOptions();
+
 /* Legacy weapons installed before damage_type existed as an explicit field had
-   their damage type guessed from keywords in the weapon's name. Keep that as a
-   fallback so old installed weapons keep behaving the same, but new/edited
-   weapons always use the explicit field. */
+   their damage type guessed from keywords in the weapon's name, or used the
+   old combined "Impact/Ion" label before the 12-type matrix split those into
+   separate types. Keep both fallbacks so old installed weapons keep behaving
+   the same, but new/edited weapons always use the explicit field. */
 window.inferLegacyDamageType = function(name) {
     let n = (name || '').toLowerCase();
     if (n.includes('pierce') || n.includes('piercing') || n.includes('rail') || n.includes('gauss')) return 'Piercing';
     if (n.includes('heat') || n.includes('plasma') || n.includes('laser') || n.includes('gamma')) return 'Heat';
-    return 'Impact/Ion';
+    if (n.includes('flak') || n.includes('pdc') || n.includes('pdl') || n.includes('pdg')) return 'Flak';
+    return 'Impact';
+};
+window.normalizeDamageType = function(dmgType) {
+    if (dmgType === 'Impact/Ion') return 'Impact'; // pre-12-type legacy label
+    return (dmgType && window.DAMAGE_TYPES[dmgType]) ? dmgType : 'Impact';
+};
+
+/* --- CASCADE DEFENSE RESOLUTION ---
+   Shields -> Reactive Armor -> Ablative Armor -> Hardened Armor -> Hull.
+   Each damage type's interaction with that cascade is fully data-driven
+   from DAMAGE_TYPES above — this function is the single place that logic
+   actually executes, so NPC/template ships (Overseer repository) and player
+   ships resolve identically once deployment wiring exists. */
+window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
+    let s = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
+    let r = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
+    let a = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
+    let hd = targetShip.integrity_hardened !== undefined ? targetShip.integrity_hardened : 0;
+    let h = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
+    let log = '';
+    const info = window.DAMAGE_TYPES[dmgType] || window.DAMAGE_TYPES['Impact'];
+
+    if (dmgType === 'Healing') {
+        let sMax = targetShip.max_shields || 400; let hMax = targetShip.max_hull || 300;
+        let toShields = Math.min(totalDamage, Math.max(0, sMax - s)); s += toShields;
+        let toHull = Math.min(totalDamage - toShields, Math.max(0, hMax - h)); h += toHull;
+        log += `Repair systems restored ${toShields} Shields`; if (toHull > 0) log += ` and ${toHull} Hull`; log += `. `;
+        return { integrity_shields: s, integrity_reactive: r, integrity_ablative: a, integrity_hardened: hd, integrity_hull: h, log };
+    }
+
+    let remainingDmg = totalDamage;
+
+    // --- SHIELDS ---
+    if (info.shieldMode === 'antimatter') {
+        let normalAbsorb = Math.min(s, remainingDmg);
+        let leak = Math.floor(normalAbsorb * 0.5);
+        s -= normalAbsorb;
+        remainingDmg = (remainingDmg - normalAbsorb) + leak;
+        if (normalAbsorb > 0) log += `[ANTIMATTER] Shields partially overwhelmed (absorbed ${normalAbsorb - leak}, ${leak} bled through). `;
+    } else if (info.shieldMode === 'ion') {
+        let ionShieldDmg = Math.min(s, remainingDmg * 2);
+        s -= ionShieldDmg;
+        remainingDmg = Math.max(0, Math.floor((remainingDmg - Math.ceil(ionShieldDmg / 2)) * 0.25));
+        log += `[ION SURGE] Shield capacitors overloaded (-${ionShieldDmg}). Physical armor bypassed entirely. `;
+    } else {
+        let absorb = Math.min(s, remainingDmg); s -= absorb; remainingDmg -= absorb;
+        if (absorb > 0) log += `Shields absorbed ${absorb}. `;
+    }
+
+    // --- ARMOR LAYERS ---
+    if (remainingDmg > 0) {
+        const bypassesReactive = info.bypassesLayers.includes('reactive');
+        const bypassesAblative = info.bypassesLayers.includes('ablative');
+        const bypassesHardened = info.bypassesLayers.includes('hardened');
+
+        if (!bypassesReactive && info.blockedBy === 'reactive' && r > 0) {
+            r -= 1; log += `[REACTIVE ARMOR] charge expended — ${dmgType} damage negated! `; remainingDmg = 0;
+        } else if (!bypassesAblative && info.blockedBy === 'ablative' && a > 0) {
+            a -= 1; log += `[ABLATIVE ARMOR] charge expended — ${dmgType} damage negated! `; remainingDmg = 0;
+        } else {
+            if (bypassesHardened) {
+                if (hd > 0) log += `[${dmgType.toUpperCase()}] bypasses Hardened Armor entirely! `;
+            } else if (hd > 0) {
+                let hdAbsorb = Math.min(hd, remainingDmg);
+                hd -= hdAbsorb; remainingDmg -= hdAbsorb;
+                if (hdAbsorb > 0) log += `Hardened Armor absorbed ${hdAbsorb}. `;
+            }
+
+            if (remainingDmg > 0) {
+                let hullMult = info.hullMult;
+                if (dmgType === 'Cold' && hd <= 0) hullMult = 1.25; // brittle-fracture bonus once armor's stripped
+                let hullDmg = Math.min(h, Math.ceil(remainingDmg * hullMult));
+                h -= hullDmg; remainingDmg -= hullDmg;
+                log += `Hull suffered ${hullDmg} damage! `;
+                if (h <= 0) log += `**CRITICAL HULL BREACH!** `;
+            }
+        }
+    }
+
+    return { integrity_shields: s, integrity_reactive: r, integrity_ablative: a, integrity_hardened: hd, integrity_hull: h, log };
 };
 
 window.addShipWeapon = async function() {
@@ -1163,9 +1287,7 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             </div>
             <label for="wpn-edit-dmgtype" style="font-size:9px; color:#ffaaaa;">Damage Type</label>
             <select id="wpn-edit-dmgtype" style="border-color:#ff3333;">
-                <option value="Impact/Ion">Impact/Ion</option>
-                <option value="Piercing">Piercing (bypasses Reactive Armor)</option>
-                <option value="Heat">Heat (bypasses Ablative Armor)</option>
+                ${window.buildDamageTypeOptionsHtml('Impact')}
             </select>
             <label for="wpn-edit-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;">
                 <input type="checkbox" id="wpn-edit-explodes" style="margin:0;"> Exploding Dice
@@ -1226,7 +1348,7 @@ window.deleteShipWeapon = async function(vesselId, idx) {
         document.getElementById('wpn-edit-ammo').value = (wpn.ammo === undefined || wpn.ammo < 0) ? '' : wpn.ammo;
         document.getElementById('wpn-edit-maxammo').value = (wpn.max_ammo === undefined || wpn.max_ammo < 0) ? '' : wpn.max_ammo;
         document.getElementById('wpn-edit-guns').value = wpn.gun_count || 1;
-        document.getElementById('wpn-edit-dmgtype').value = wpn.damage_type || window.inferLegacyDamageType(wpn.name);
+        document.getElementById('wpn-edit-dmgtype').value = window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name));
         document.getElementById('wpn-edit-explodes').checked = !!wpn.explodes;
         overlay.style.display = 'flex';
     };
@@ -1266,12 +1388,21 @@ window.renderArsenal = function() {
         html = '<span style="font-size:10px; color:#6b826a;">No active weapons or powers in arsenal.</span>';
     } else {
         arsenal.forEach((w, idx) => {
+            let dmgBadge = '';
+            if (w.damage_type && window.DAMAGE_TYPES[window.normalizeDamageType(w.damage_type)]) {
+                let dt = window.normalizeDamageType(w.damage_type);
+                let info = window.DAMAGE_TYPES[dt];
+                dmgBadge = `<span class="dmg-tooltip" style="font-size:9px; color:${info.color}; text-align:center; cursor:help;" title="${window.getDamageTypeTooltip(dt)}">${dt} ⓘ</span>`;
+            } else {
+                dmgBadge = `<span style="font-size:9px; color:#6b826a; text-align:center;">—</span>`;
+            }
             html += `
                 <div class="arsenal-row">
                     <strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>
                     <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.dice}</span>
                     <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.modifier}</span>
                     <span style="font-size:10px; text-align:center;" title="Explodes">${w.explodes ? '💥' : ''}</span>
+                    ${dmgBadge}
                     <div style="display:flex; gap:4px;">
                         <button class="layer-edit" onclick="window.rollArsenalWeapon(${idx})" style="padding:2px 8px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">ROLL</button>
                         <button class="layer-del" onclick="window.deleteArsenalItem('${w.id}')" style="padding:2px 6px; font-size:9px;">✕</button>
@@ -1294,6 +1425,8 @@ window.addArsenalItem = async function() {
     let dice = document.getElementById('new-wpn-dice').value.trim().toLowerCase();
     let mod = document.getElementById('new-wpn-mod').value.trim();
     const explodes = document.getElementById('new-wpn-explodes').checked;
+    const dmgTypeSelect = document.getElementById('new-wpn-dmgtype');
+    const damageType = dmgTypeSelect ? dmgTypeSelect.value : ''; // optional — blank is valid
 
     if (!name) { alert("Enter a weapon/power name."); return; }
     if (!dice) dice = '1d20';
@@ -1306,7 +1439,8 @@ window.addArsenalItem = async function() {
         name: name,
         dice: dice,
         modifier: mod,
-        explodes: explodes
+        explodes: explodes,
+        damage_type: damageType || null
     };
 
     const { error } = await db.from('character_arsenal').insert(payload);
@@ -1315,6 +1449,7 @@ window.addArsenalItem = async function() {
     document.getElementById('new-wpn-name').value = '';
     document.getElementById('new-wpn-dice').value = '';
     document.getElementById('new-wpn-mod').value = '';
+    if (dmgTypeSelect) dmgTypeSelect.value = '';
     if(typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
 };
 
