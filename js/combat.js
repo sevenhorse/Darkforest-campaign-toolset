@@ -410,7 +410,7 @@ window.renderVesselDeck = function() {
 
     if (weaponsContainer) {
         let targetOptions = '<option value="">-- No Target --</option>';
-        globalShipMarkersCache.forEach(m => { if(m.id !== vessel.id) targetOptions += `<option value="${m.id}">${m.name}</option>`; });
+        globalShipMarkersCache.forEach(m => { if(m.id !== vessel.id) targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
         const weapons = vessel.ship_weapons || [];
         let wHtml = '';
@@ -473,7 +473,7 @@ window.renderVesselDeck = function() {
                         <div style="font-size:9px; color:#6b826a;">${dbStats.label} | Units: ${sq.count} | Max HP: ${dbStats.base_hp * sq.count}</div>
                     </div>
                     <div style="display:flex; gap:6px;">
-                        <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:9px; border-color:#00e1ff; color:#00e1ff;">LAUNCH</button>
+                        <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:9px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH WING</button>
                         <button class="layer-del" onclick="window.deleteSquadron('${vessel.id}', ${idx}, false)" style="padding:4px 8px; font-size:9px;">✕</button>
                     </div>
                 </div>`;
@@ -484,7 +484,7 @@ window.renderVesselDeck = function() {
 
     if (deployedContainer) {
         let targetOptions = '<option value="">-- Target --</option>';
-        globalShipMarkersCache.forEach(m => { if(m.id !== vessel.id) targetOptions += `<option value="${m.id}">${m.name}</option>`; });
+        globalShipMarkersCache.forEach(m => { if(m.id !== vessel.id) targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
         let dHtml = '';
         const deployed = vessel.ship_deployed || [];
@@ -570,6 +570,66 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     window.renderVesselDeck();
 };
 
+/* --- STRIKE CRAFT MAP/INITIATIVE PRESENCE ---
+   The hangar/deployed system above (ship_hangar / ship_deployed JSONB on the
+   carrier) is the single source of truth for squadron HP and fuel — it
+   already existed and already works. This layer just gives a DEPLOYED
+   squadron a companion ship_markers token (visible/selectable on the map)
+   and a companion combat_tracker row (visible in Initiative), linked back
+   via squadron_id, WITHOUT duplicating fuel/HP into a second place that
+   could drift out of sync with the real data on the carrier. */
+async function spawnSquadronToken(vessel, sq) {
+    const { error: tokenError } = await db.from('ship_markers').insert({
+        owner_id: vessel.owner_id, name: sq.name,
+        x: vessel.x + (Math.random() * 80 - 40), y: vessel.y + (Math.random() * 80 - 40),
+        drive_type: 'sublight', color: '#ffaa00',
+        cargo_inventory: window.sanitizeCargo({}),
+        integrity_hull: sq.hp, max_hull: sq.max_hp,
+        integrity_shields: 0, max_shields: 0, integrity_reactive: 0, max_reactive: 0,
+        integrity_ablative: 0, max_ablative: 0, integrity_hardened: 0, max_hardened: 0,
+        parent_id: vessel.id, is_strike_craft: true, squadron_id: sq.id
+    });
+    if (tokenError) { console.error('Failed to spawn squadron token:', tokenError.message); }
+
+    const { error: trackerError } = await db.from('combat_tracker').insert({
+        name: sq.name, initiative: 14, hp: `${sq.hp}/${sq.max_hp}`,
+        owner_id: vessel.owner_id, parent_id: vessel.id, squadron_id: sq.id, is_strike_craft: true
+    });
+    if (trackerError) { console.error('Failed to inject squadron into initiative tracker:', trackerError.message); }
+
+    if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+    if (typeof loadCombatTracker === 'function') loadCombatTracker();
+}
+
+async function despawnSquadronToken(squadronId) {
+    await db.from('ship_markers').delete().eq('squadron_id', squadronId);
+    await db.from('combat_tracker').delete().eq('squadron_id', squadronId);
+    if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+    if (typeof loadCombatTracker === 'function') loadCombatTracker();
+}
+
+// Strike craft tokens got their own integrity_hull as a one-time snapshot at
+// spawn time so they could render/take damage like any other ship_markers
+// row — but the REAL squadron HP (shown in the carrier's Hangar Bay panel,
+// and what bingo-fuel recall/casualty logic reads) lives in the parent's
+// ship_deployed[].hp. Without this, damage taken via ship-to-ship weapon
+// fire against a strike craft token would silently never reach the actual
+// squadron record — exactly the kind of dual-source drift this whole
+// system was designed to avoid. Called after any damage resolution against
+// a target that turns out to be a strike craft.
+async function syncSquadronHpToParent(targetShip) {
+    if (!targetShip.is_strike_craft || !targetShip.parent_id || !targetShip.squadron_id) return;
+    const parent = globalShipMarkersCache.find(m => m.id === targetShip.parent_id);
+    if (!parent) return;
+    const deployed = parent.ship_deployed || [];
+    const sq = deployed.find(s => s.id === targetShip.squadron_id);
+    if (!sq) return;
+    sq.hp = Math.max(0, Math.min(sq.max_hp, targetShip.integrity_hull));
+    await db.from('ship_markers').update({ ship_deployed: deployed }).eq('id', parent.id);
+    parent.ship_deployed = deployed;
+    if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+}
+
 window.commissionSquadron = async function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select || !select.value) { alert("Select a vessel to commission to."); return; }
@@ -622,6 +682,9 @@ window.launchSquadron = async function(vesselId, idx) {
         vessel.ship_deployed = deployed;
         window.renderVesselDeck();
 
+        if (window.AudioEngine) window.AudioEngine.playWarp();
+        await spawnSquadronToken(vessel, sq);
+
         await db.from('chat_logs').insert({
             sender_id: currentUserId,
             content: `🛫 [FLIGHT OPS] ${sq.name} launched from ${vessel.name}. Cleared hot for 4 turns.`,
@@ -644,6 +707,7 @@ window.recallSquadron = async function(vesselId, idx) {
         vessel.ship_hangar = hangar;
         vessel.ship_deployed = deployed;
         window.renderVesselDeck();
+        await despawnSquadronToken(sq.id);
 
         await db.from('chat_logs').insert({
             sender_id: currentUserId,
@@ -667,6 +731,8 @@ window.deleteSquadron = async function(vesselId, idx, isDeployed) {
     
     if (isDeployed) vessel.ship_deployed = targetArray;
     else vessel.ship_hangar = targetArray;
+
+    if (isDeployed && sq) await despawnSquadronToken(sq.id);
 
     window.renderVesselDeck();
 
@@ -779,9 +845,7 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
 
     let targetShip = null;
     let combatLog = ``;
-    let dmgType = wpn.dmgType || "Impact";
-    let isPiercing = dmgType === "Piercing";
-    let isHeat = dmgType === "Heat";
+    let dmgType = window.normalizeDamageType(wpn.dmgType || 'Impact');
 
     if (targetId) {
         targetShip = globalShipMarkersCache.find(m => m.id === targetId);
@@ -791,47 +855,32 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
             if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
             if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
 
-            let s_int = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
-            let h_int = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
-            let r_int = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
-            let a_int = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
-            
-            let remainingDmg = total;
-
-            let shieldDmg = Math.min(s_int, remainingDmg);
-            s_int -= shieldDmg;
-            remainingDmg -= shieldDmg;
-            if (shieldDmg > 0) combatLog += `Shields absorbed: ${shieldDmg}. `;
-
-            if (remainingDmg > 0) {
-                if (isPiercing && r_int > 0) {
-                    r_int -= 1;
-                    combatLog += `[REACTIVE ARMOR] charge expended. Hull breach negated! `;
-                    remainingDmg = 0;
-                } else if (isHeat && a_int > 0) {
-                    a_int -= 1;
-                    combatLog += `[ABLATIVE ARMOR] charge expended. Hull damage negated! `;
-                    remainingDmg = 0;
-                } else {
-                    let hullDmg = Math.min(h_int, remainingDmg);
-                    h_int -= hullDmg;
-                    remainingDmg -= hullDmg;
-                    combatLog += `Hull suffered: ${hullDmg} damage! `;
-                    if (h_int <= 0) combatLog += `**CRITICAL HULL BREACH!** `;
+            let categoryMult = 1;
+            if (dmgType !== 'Healing') {
+                if (targetShip.is_strike_craft) {
+                    categoryMult = (dmgType === 'Flak') ? 2 : 0.5;
+                    combatLog += `[TARGET: STRIKE CRAFT] ${dmgType} effectiveness x${categoryMult}. `;
+                } else if (dmgType === 'Flak') {
+                    categoryMult = 0.4;
+                    combatLog += `[TARGET: SHIP] Flak is a poor fit for capital-scale armor (x${categoryMult}). `;
                 }
             }
+            total = Math.ceil(total * categoryMult);
+
+            const result = window.resolveShipDamage(targetShip, dmgType, total);
+            combatLog += result.log;
 
             await db.from('ship_markers').update({
-                integrity_shields: s_int,
-                integrity_hull: h_int,
-                integrity_reactive: r_int,
-                integrity_ablative: a_int
+                integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
+                integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
+                integrity_hardened: result.integrity_hardened
             }).eq('id', targetShip.id);
-
-            targetShip.integrity_shields = s_int;
-            targetShip.integrity_hull = h_int;
-            targetShip.integrity_reactive = r_int;
-            targetShip.integrity_ablative = a_int;
+            Object.assign(targetShip, {
+                integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
+                integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
+                integrity_hardened: result.integrity_hardened
+            });
+            await syncSquadronHpToParent(targetShip);
         }
     }
 
@@ -939,6 +988,18 @@ window.rollShipWeapon = async function(vesselId, idx) {
             if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
             if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
 
+            let categoryMult = 1;
+            if (dmgType !== 'Healing') {
+                if (targetShip.is_strike_craft) {
+                    categoryMult = (dmgType === 'Flak') ? 2 : 0.5;
+                    combatLog += `[TARGET: STRIKE CRAFT] ${dmgType} effectiveness x${categoryMult}. `;
+                } else if (dmgType === 'Flak') {
+                    categoryMult = 0.4;
+                    combatLog += `[TARGET: SHIP] Flak is a poor fit for capital-scale armor (x${categoryMult}). `;
+                }
+            }
+            total = Math.ceil(total * categoryMult);
+
             const result = window.resolveShipDamage(targetShip, dmgType, total);
             combatLog += result.log;
 
@@ -952,6 +1013,7 @@ window.rollShipWeapon = async function(vesselId, idx) {
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
                 integrity_hardened: result.integrity_hardened
             });
+            await syncSquadronHpToParent(targetShip);
         }
     }
 
@@ -1049,7 +1111,7 @@ window.DAMAGE_TYPES = {
         desc: 'Armor-defeating penetrators engineered to punch through countermeasures.', shreds: 'Reactive & Ablative Armor — ignores both entirely', mitigatedBy: 'Hardened Armor, Hull' },
     'Explosive': { color: '#ff6b6b', blockedBy: ['reactive'], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Warheads detonating on impact for wide-area kinetic shock.', shreds: 'Unarmored hull, strike craft formations', mitigatedBy: 'Reactive Armor' },
-    'Flak':      { color: '#ffe066', blockedBy: [], bypassesLayers: [], hullMult: 0.4, shieldMode: 'normal',
+    'Flak':      { color: '#ffe066', blockedBy: [], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Proximity-fused shrapnel bursts built to shred small, fast, fragile targets.', shreds: 'Strike Craft — devastating vs fighters/bombers', mitigatedBy: 'Capital-scale Hull (weak vs Ships)' },
     'Energy':    { color: '#00e1ff', blockedBy: ['ablative'], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Directed-energy beams and pulses — lasers, particle cannons, plasma bolts.', shreds: 'Unarmored hull, exposed systems', mitigatedBy: 'Ablative Armor' },
@@ -1619,10 +1681,18 @@ window.renderCombatTracker = function() {
         html += '<div style="max-height:220px; overflow-y:auto;">';
         combatantsList.forEach(c => {
             const canRemove = currentUserRole === 'dm' || c.owner_id === currentUserId;
+            let fuelBadge = '';
+            if (c.is_strike_craft) {
+                const parent = globalShipMarkersCache.find(m => m.id === c.parent_id);
+                const sq = parent ? (parent.ship_deployed || []).find(s => s.id === c.squadron_id) : null;
+                const loiter = sq ? sq.loiter : 0;
+                const fuelColor = loiter <= 1 ? '#ff3333' : '#ffaa00';
+                fuelBadge = ` <span style="color:${fuelColor}; font-weight:bold;">[⛽ ${loiter}/4]</span>`;
+            }
             html += `
                 <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:6px;">
                     <div>
-                        <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${c.name}</strong>
+                        <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${c.name}${fuelBadge}</strong>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">HP/Status: ${c.hp}</p>
                     </div>
                     ${canRemove ? `<button class="layer-del" onclick="window.removeCombatant('${c.id}')" style="padding:2px 6px; font-size:9px;">${currentUserRole === 'dm' && c.owner_id !== currentUserId ? 'X' : 'LEAVE'}</button>` : ''}
@@ -1678,7 +1748,7 @@ window.removeCombatant = async function(id) {
 
 window.advanceCombatRound = async function() {
     if (currentUserRole !== 'dm') return;
-    if (!(await window.showConfirmModal("Advance combat round? This will process cooldowns, overheat, and strike craft fuel globally."))) return;
+    if (!(await window.showConfirmModal("Advance combat round? This will process cooldowns, overheat, and force-recall any strike craft that run out of fuel."))) return;
 
     let anyChanged = false;
     let klaxonTriggered = false;
@@ -1687,32 +1757,62 @@ window.advanceCombatRound = async function() {
         let changed = false;
         let weapons = vessel.ship_weapons || [];
         let deployed = vessel.ship_deployed || [];
+        let hangar = vessel.ship_hangar || [];
         let flightLog = [];
+        let recalledSquadronIds = [];
 
         weapons.forEach(w => {
             if (w.cooldown > 0) { w.cooldown -= 1; changed = true; }
             if (w.overheat > 0) { w.overheat -= 1; changed = true; }
         });
 
+        // System hazard effects: Pulsar Radiation was pure flavor text on star
+        // systems until now — this is what actually makes it "double weapon
+        // overheat" and apply minor continuous thermal damage, as originally
+        // described in the System Architect tool's own hazard dropdown.
+        let hullChanged = false;
+        const hazardHits = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(vessel) : [];
+        const pulsarHit = hazardHits.find(h => h.type === 'pulsar');
+        if (pulsarHit) {
+            const intensity = pulsarHit.intensity || 1;
+            weapons.forEach(w => { w.overheat = Math.min(10, (w.overheat || 0) + intensity); });
+            const thermalDmg = intensity;
+            let curHull = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
+            vessel.integrity_hull = Math.max(0, curHull - thermalDmg);
+            hullChanged = true;
+            changed = true;
+            flightLog.push(`☢️ Pulsar radiation cooked weapon systems (+${intensity} overheat) and hull plating (-${thermalDmg} Hull).`);
+        }
+
+        let stillDeployed = [];
         deployed.forEach(sq => {
-            if (sq.loiter > 0) { 
-                sq.loiter -= 1; 
-                changed = true; 
-                if (sq.loiter === 0) {
-                    flightLog.push(`⚠️ ${sq.name} is BINGO FUEL! Must return to hangar!`);
-                    klaxonTriggered = true;
-                }
+            if (sq.loiter > 0) { sq.loiter -= 1; changed = true; }
+            if (sq.loiter <= 0) {
+                flightLog.push(`⚠️ ${sq.name} hit BINGO FUEL — forced RTB to hangar!`);
+                klaxonTriggered = true;
+                sq.loiter = 4; // reset ready for next deployment
+                hangar.push(sq);
+                recalledSquadronIds.push(sq.id);
+                changed = true;
+            } else {
+                stillDeployed.push(sq);
             }
         });
+        deployed = stillDeployed;
 
         if (changed) {
             anyChanged = true;
-            await db.from('ship_markers').update({ 
-                ship_weapons: weapons, 
-                ship_deployed: deployed 
-            }).eq('id', vessel.id);
+            let updatePayload = { ship_weapons: weapons, ship_deployed: deployed, ship_hangar: hangar };
+            if (hullChanged) updatePayload.integrity_hull = vessel.integrity_hull;
+            await db.from('ship_markers').update(updatePayload).eq('id', vessel.id);
+            vessel.ship_deployed = deployed;
+            vessel.ship_hangar = hangar;
         }
-        
+
+        for (const sqId of recalledSquadronIds) {
+            await despawnSquadronToken(sqId);
+        }
+
         if (flightLog.length > 0) {
             await db.from('chat_logs').insert({
                 sender_id: 'system',
