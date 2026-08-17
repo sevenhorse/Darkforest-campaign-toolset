@@ -46,6 +46,7 @@ let globalDbSystemsCache = [];
 let globalTerritoriesCache = [];
 let globalCodexEntriesCache = [];
 let globalHyperlanesCache = [];
+window.globalSystemHazardsCache = [];
 
 let editingCodexId = null;
 let activeCargoSubtab = 'perishables';
@@ -113,6 +114,7 @@ async function fetchUserProfile(user) {
     initCombatTrackerRealtimeChannel();
     initColoniesRealtimeChannel();
     initShipTemplatesRealtimeChannel();
+    initSystemHazardsRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
@@ -122,6 +124,7 @@ async function fetchUserProfile(user) {
     if (typeof loadFleetGroups === 'function') loadFleetGroups();
     if (typeof loadShipTemplates === 'function') loadShipTemplates();
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
+    if (typeof loadSystemHazards === 'function') loadSystemHazards();
 }
 
 async function loadAllProfiles() {
@@ -227,6 +230,11 @@ async function loadTerritories() {
 async function loadHyperlanes() {
     const { data } = await db.from('hyperlanes').select('*');
     if (data) { globalHyperlanesCache = data; if (typeof renderHyperlaneList === 'function') renderHyperlaneList(); }
+}
+
+async function loadSystemHazards() {
+    const { data } = await db.from('system_hazards').select('*');
+    if (data) { window.globalSystemHazardsCache = data; if (typeof renderHazardZoneList === 'function') renderHazardZoneList(); }
 }
 
 async function loadCodexEntries() {
@@ -372,6 +380,16 @@ function initShipTemplatesRealtimeChannel() {
         .subscribe();
 }
 
+/* --- SYSTEM HAZARDS: REAL-TIME SYNC --- */
+let systemHazardsRealtimeChannel = null;
+function initSystemHazardsRealtimeChannel() {
+    systemHazardsRealtimeChannel = db.channel('system_hazards_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_hazards' }, () => {
+            if (typeof loadSystemHazards === 'function') loadSystemHazards();
+        })
+        .subscribe();
+}
+
 function renderPresenceTicker() {
     const listDiv = document.getElementById('presence-list');
     if (!listDiv) return;
@@ -438,6 +456,19 @@ window.jumpToActiveShip = async function() {
 
     let lastPos = ship.last_ftl_position || { x: ship.x, y: ship.y };
     let jumpDist = Math.hypot(ship.x - lastPos.x, ship.y - lastPos.y);
+
+    // Gravity Well hazard: harder to navigate/plot a clean jump vector near
+    // one, represented as inflated effective jump distance (and so, more
+    // rollback hours) rather than inventing a separate movement-points
+    // resource this app doesn't otherwise track.
+    let gravityWellHit = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(ship).find(h => h.type === 'gravity_well') : null;
+    let gravityWellNote = '';
+    if (gravityWellHit) {
+        const mult = 1 + (0.5 * (gravityWellHit.intensity || 1));
+        jumpDist = jumpDist * mult;
+        gravityWellNote = ` [GRAVITY WELL: jump vector distorted, effective distance x${mult}]`;
+    }
+
     let rollbackHours = Math.min(window.JUMP_TIME_INVERSION_MAX_HOURS, Math.round(jumpDist / 250));
 
     // Baseline the ship's next jump distance from wherever it is right now.
@@ -454,7 +485,7 @@ window.jumpToActiveShip = async function() {
         const cappedNote = jumpDist / 250 > window.JUMP_TIME_INVERSION_MAX_HOURS ? ' [CAPPED]' : '';
         await db.from('chat_logs').insert({
             sender_id: 'system',
-            content: `🌀 [TEMPORAL DESYNC] ${ship.name} completed an FTL jump (${jumpDist.toFixed(1)}u since last transit). Chronometer reads ${rollbackHours}h prior to departure per relativistic inversion.${cappedNote}`,
+            content: `🌀 [TEMPORAL DESYNC] ${ship.name} completed an FTL jump (${jumpDist.toFixed(1)}u since last transit). Chronometer reads ${rollbackHours}h prior to departure per relativistic inversion.${cappedNote}${gravityWellNote}`,
             message_type: 'text'
         });
         if (typeof loadChatLogs === 'function') loadChatLogs();
