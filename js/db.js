@@ -111,11 +111,14 @@ async function fetchUserProfile(user) {
     initPresenceChannel(data);
     initChatRealtimeChannel();
     initCombatTrackerRealtimeChannel();
+    initColoniesRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
     loadAllProfiles(); loadPlayerNotes(); loadCombatTracker(); loadCampaignObjectives();
     loadChatLogs(); loadPmPartnerList(); loadTerritories(); loadHyperlanes(); loadCodexEntries();
+    if (typeof loadColonies === 'function') loadColonies();
+    if (typeof loadFleetGroups === 'function') loadFleetGroups();
 }
 
 async function loadAllProfiles() {
@@ -329,6 +332,25 @@ function initCombatTrackerRealtimeChannel() {
     combatTrackerRealtimeChannel = db.channel('combat_tracker_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'combat_tracker' }, () => {
             if (typeof loadCombatTracker === 'function') loadCombatTracker();
+        })
+        .subscribe();
+}
+
+/* --- COLONIES & FLEET GROUPS: REAL-TIME SYNC ---
+   Same reasoning as combat_tracker above — without this, one player's
+   addColony()/addFleetGroup()/edits only update their own client. Requires
+   Realtime replication enabled for both tables (Database > Replication). */
+let coloniesRealtimeChannel = null;
+let fleetGroupsRealtimeChannel = null;
+function initColoniesRealtimeChannel() {
+    coloniesRealtimeChannel = db.channel('colonies_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'colonies' }, () => {
+            if (typeof loadColonies === 'function') loadColonies();
+        })
+        .subscribe();
+    fleetGroupsRealtimeChannel = db.channel('fleet_groups_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'fleet_groups' }, () => {
+            if (typeof loadFleetGroups === 'function') loadFleetGroups();
         })
         .subscribe();
 }
