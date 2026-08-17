@@ -184,11 +184,28 @@ function makePanelDraggable(panelId, handleId, storageKey) {
     if (!panel || !handle) return;
     const savedPos = localStorage.getItem(storageKey);
     if (savedPos) {
-        try { const { left, top } = JSON.parse(savedPos); panel.style.left = left; panel.style.top = top; panel.style.right = 'auto'; } catch(e) {}
+        try {
+            const { left, top } = JSON.parse(savedPos);
+            const leftNum = parseFloat(left); const topNum = parseFloat(top);
+            // Reject corrupted/invalid saved positions instead of applying them
+            // blindly — a position captured while the panel was hidden (e.g.
+            // pre-login, before #app-container is display:block) reads
+            // offsetLeft/offsetTop as 0, which then gets saved as the panel's
+            // permanent position and reloads at (0,0) every time until the
+            // user happens to drag it and the drag's own clamping shoves it
+            // back into view. Falling back to the CSS default position here
+            // makes that self-healing instead of a recurring "snap" on click.
+            if (isNaN(leftNum) || isNaN(topNum) || leftNum <= 0 || topNum <= 0) {
+                localStorage.removeItem(storageKey);
+            } else {
+                panel.style.left = left; panel.style.top = top; panel.style.right = 'auto';
+            }
+        } catch(e) { localStorage.removeItem(storageKey); }
     }
     let isDragging = false, startX, startY, initialLeft, initialTop;
     handle.addEventListener('mousedown', (e) => {
         if (['INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+        if (panel.offsetWidth === 0 && panel.offsetHeight === 0) return; // panel isn't actually laid out yet (e.g. hidden ancestor) — offsetLeft/Top would read as 0 and corrupt the saved position
         isDragging = true; startX = e.clientX; startY = e.clientY;
         initialLeft = panel.offsetLeft; initialTop = panel.offsetTop;
         panel.style.right = 'auto'; panel.style.bottom = 'auto';
@@ -279,6 +296,7 @@ window.toggleCharacterTerminal = function() {
     }
 };
 
+window.openFullDossierTerminal = function() { const term = document.getElementById('character-terminal'); term.style.display = 'block'; window.switchTermTab('stats'); };
 window.openFullCargoTerminal = function() { const term = document.getElementById('character-terminal'); term.style.display = 'block'; window.switchTermTab('cargo'); };
 window.openFullCodexTerminal = function() { const term = document.getElementById('character-terminal'); term.style.display = 'block'; window.switchTermTab('codex'); };
 window.openFullVesselTerminal = function(vesselId) { 
