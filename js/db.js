@@ -25,6 +25,12 @@ let playerNotesList = [];
 let combatantsList = [];
 let campaignObjectivesList = [];
 let chatLogsList = [];
+// Per-tab comms caches — General stays in chatLogsList (fetched fresh),
+// Dice and each PM thread are fetched on demand so a busy Dice Streamer
+// can't crowd General/PM history out of a shared row limit.
+window.diceLogsList = null;
+window.pmLogsCache = {};
+window.pmPartnerIds = new Set();
 let editingNoteId = null;
 
 let bookmarkedTargets = JSON.parse(localStorage.getItem('odyssey_bookmarks') || '[]');
@@ -103,11 +109,12 @@ async function fetchUserProfile(user) {
     }
 
     initPresenceChannel(data);
+    initChatRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
     loadAllProfiles(); loadPlayerNotes(); loadCombatTracker(); loadCampaignObjectives();
-    loadChatLogs(); loadTerritories(); loadHyperlanes(); loadCodexEntries();
+    loadChatLogs(); loadPmPartnerList(); loadTerritories(); loadHyperlanes(); loadCodexEntries();
 }
 
 async function loadAllProfiles() {
@@ -153,28 +160,56 @@ async function loadCampaignObjectives() {
     if (data) { campaignObjectivesList = data; if (typeof renderCampaignObjectives === 'function') renderCampaignObjectives(); }
 }
 
+window.checkSysScan = function(log) {
+    let match = log.content.match(/\[SYS_SCAN:(.+?)\]/);
+    if (match && !window.scannedSystems.includes(match[1])) {
+        window.scannedSystems.push(match[1]);
+        localStorage.setItem('odyssey_scanned', JSON.stringify(window.scannedSystems));
+        if (typeof renderCodexMatrix === 'function') renderCodexMatrix();
+        return true;
+    }
+    return false;
+};
+
 async function loadChatLogs() {
-    const { data } = await db.from('chat_logs').select('*').order('created_at', { ascending: false }).limit(50);
+    // "General Broadcast" channel only — dice rolls and PMs are fetched
+    // separately (loadDiceLogs / loadPmLogs), each with their own limit.
+    const { data } = await db.from('chat_logs').select('*')
+        .is('recipient_id', null).neq('message_type', 'roll')
+        .order('created_at', { ascending: false }).limit(75);
     if (data) { 
         chatLogsList = data.reverse(); 
         if (chatLogsList.length === 0) chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked.', message_type: 'text' }];
-        
-        // MODULE C: Parse DRADIS Scans to sync FOW across all players
-        let newScans = false;
-        chatLogsList.forEach(log => {
-            let match = log.content.match(/\[SYS_SCAN:(.+?)\]/);
-            if (match && !window.scannedSystems.includes(match[1])) {
-                window.scannedSystems.push(match[1]);
-                newScans = true;
-            }
-        });
-        if (newScans) {
-            localStorage.setItem('odyssey_scanned', JSON.stringify(window.scannedSystems));
-            if (typeof renderCodexMatrix === 'function') renderCodexMatrix();
-        }
-
+        chatLogsList.forEach(log => window.checkSysScan(log));
         if (typeof renderChatFeed === 'function') renderChatFeed(); 
     }
+}
+
+async function loadDiceLogs() {
+    const { data } = await db.from('chat_logs').select('*').eq('message_type', 'roll').order('created_at', { ascending: false }).limit(50);
+    if (data) window.diceLogsList = data.reverse();
+}
+
+async function loadPmLogs(partnerId) {
+    const { data } = await db.from('chat_logs').select('*')
+        .or(`and(sender_id.eq.${currentUserId},recipient_id.eq.${partnerId}),and(sender_id.eq.${partnerId},recipient_id.eq.${currentUserId})`)
+        .order('created_at', { ascending: false }).limit(50);
+    if (data) window.pmLogsCache[partnerId] = data.reverse();
+}
+
+async function loadPmPartnerList() {
+    // Lightweight metadata-only query (no message content) just to know which
+    // PM tabs should exist — actual thread content loads lazily via loadPmLogs
+    // the first time each tab is opened.
+    const { data } = await db.from('chat_logs').select('sender_id, recipient_id')
+        .or(`sender_id.eq.${currentUserId},recipient_id.eq.${currentUserId}`)
+        .not('recipient_id', 'is', null);
+    if (!data) return;
+    data.forEach(row => {
+        if (row.sender_id === currentUserId && row.recipient_id !== currentUserId) window.pmPartnerIds.add(row.recipient_id);
+        else if (row.recipient_id === currentUserId && row.sender_id !== currentUserId) window.pmPartnerIds.add(row.sender_id);
+    });
+    if (typeof window.renderCommsTabBar === 'function') window.renderCommsTabBar();
 }
 
 async function loadTerritories() {
@@ -238,6 +273,21 @@ window.refreshMyPresence = async function(userProfile) {
     await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role || currentUserRole, avatar_url: userProfile.avatar_url || '' });
 };
 
+/* --- COMMS: REAL-TIME chat_logs SUBSCRIPTION ---
+   Drives the multi-tab Comms Array — new PM tabs spawn/reopen and unread
+   highlights fire the moment a row lands, instead of only on the next
+   manual loadChatLogs() call. Requires Realtime replication to be enabled
+   on the chat_logs table in the Supabase dashboard (Database > Replication)
+   — without that, this channel connects but never receives INSERT events. */
+let chatRealtimeChannel = null;
+function initChatRealtimeChannel() {
+    chatRealtimeChannel = db.channel('chat_logs_stream')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_logs' }, (payload) => {
+            if (typeof window.handleIncomingChatLog === 'function') window.handleIncomingChatLog(payload.new);
+        })
+        .subscribe();
+}
+
 function renderPresenceTicker() {
     const listDiv = document.getElementById('presence-list');
     if (!listDiv) return;
@@ -267,13 +317,24 @@ window.snapToCommander = function(userId) {
 
 /* --- FEATURE: UNIVERSAL "JUMP TO SHIP" / SPACETIME INVERSION SHORTCUT ---
    Pans the canvas to the user's own vessel, opens the character terminal
-   straight to the Vessel Deck tab, and applies a small in-universe clock
-   rollback as an Expeditionary-Force-style FTL jump time-inversion flourish.
-   The rollback is intentionally small and always logged to Comms so a DM
-   watching the timeline isn't surprised by it — it's flavor, not a way for
-   players to freely rewind the shared campaign clock (that stays DM-gated
-   via window.adjustTime). */
-window.JUMP_TIME_INVERSION_HOURS = 3;
+   straight to the Vessel Deck tab, and applies an in-universe clock rollback
+   as an Expeditionary-Force-style FTL jump time-inversion flourish. Rollback
+   scales with distance since the ship's LAST recorded jump position (not
+   camera position), using the same world-units -> FTL-hours conversion as
+   the measuring tape tool for consistency, hard-capped at 72h. Only applies
+   to FTL-drive vessels by default — sublight vessels just advance time
+   normally — but a DM can flip window.jumpInversionFtlOnly off (checkbox in
+   the Chronology Control Deck panel) to apply it to every drive type.
+   Always logged to Comms so a DM watching the timeline isn't surprised by
+   it — it's flavor, not a way for players to freely rewind the clock at
+   will (that stays DM-gated via window.adjustTime). */
+window.JUMP_TIME_INVERSION_MAX_HOURS = 72;
+window.jumpInversionFtlOnly = localStorage.getItem('odyssey_jump_ftl_only') !== 'false'; // default ON
+window.setJumpInversionFtlOnly = function(checked) {
+    window.jumpInversionFtlOnly = !!checked;
+    localStorage.setItem('odyssey_jump_ftl_only', window.jumpInversionFtlOnly ? 'true' : 'false');
+};
+
 window.jumpToActiveShip = async function() {
     let ship = globalShipMarkersCache.find(m => m.owner_id === currentUserId);
     if (!ship) { alert("DRADIS Error: No active vessel found assigned to your callsign."); return; }
@@ -284,15 +345,28 @@ window.jumpToActiveShip = async function() {
     if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(ship.id);
     if (window.AudioEngine) window.AudioEngine.playPing();
 
-    if (typeof window.universeTimeHours === 'number') {
+    const isFtl = (ship.drive_type || 'ftl_class1') !== 'sublight';
+    if (window.jumpInversionFtlOnly && !isFtl) return; // Sublight vessel: time advances normally, no inversion.
+
+    let lastPos = ship.last_ftl_position || { x: ship.x, y: ship.y };
+    let jumpDist = Math.hypot(ship.x - lastPos.x, ship.y - lastPos.y);
+    let rollbackHours = Math.min(window.JUMP_TIME_INVERSION_MAX_HOURS, Math.round(jumpDist / 250));
+
+    // Baseline the ship's next jump distance from wherever it is right now.
+    const newLastPos = { x: ship.x, y: ship.y };
+    ship.last_ftl_position = newLastPos;
+    db.from('ship_markers').update({ last_ftl_position: newLastPos }).eq('id', ship.id);
+
+    if (typeof window.universeTimeHours === 'number' && rollbackHours > 0) {
         let oldTime = window.universeTimeHours;
-        window.universeTimeHours = Math.max(0, window.universeTimeHours - window.JUMP_TIME_INVERSION_HOURS);
+        window.universeTimeHours = Math.max(0, window.universeTimeHours - rollbackHours);
         localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
         if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
         if (typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+        const cappedNote = jumpDist / 250 > window.JUMP_TIME_INVERSION_MAX_HOURS ? ' [CAPPED]' : '';
         await db.from('chat_logs').insert({
             sender_id: 'system',
-            content: `🌀 [TEMPORAL DESYNC] ${ship.name} completed an FTL jump. Chronometer reads ${window.JUMP_TIME_INVERSION_HOURS}h prior to departure per relativistic inversion.`,
+            content: `🌀 [TEMPORAL DESYNC] ${ship.name} completed an FTL jump (${jumpDist.toFixed(1)}u since last transit). Chronometer reads ${rollbackHours}h prior to departure per relativistic inversion.${cappedNote}`,
             message_type: 'text'
         });
         if (typeof loadChatLogs === 'function') loadChatLogs();
