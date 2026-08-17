@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.2">
+    <link rel="stylesheet" href="style.css?v=3.6">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -874,6 +874,23 @@
                     
                     <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Trade Routes</h4>
                     <div id="hyperlane-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
+
+                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #ff3366;">Environmental Hazard Zones</h4>
+                    <p style="font-size: 9px; color: #6b826a; margin-top:0;">Places a zone at current DRADIS center. Systems with a hazard already set (Architect tool) apply it automatically without needing a zone here.</p>
+                    <div style="display: flex; gap: 6px; margin-top: 4px;">
+                        <label for="new-hazard-type" style="display:none;">Hazard Type</label>
+                        <select id="new-hazard-type" style="flex:1.4; font-size: 10px; margin: 0; background:#0a1410;">
+                            <option value="pulsar">Pulsar Radiation</option>
+                            <option value="nebula">Dense Nebula</option>
+                            <option value="gravity_well">Gravity Well</option>
+                        </select>
+                        <label for="new-hazard-radius" style="display:none;">Radius</label>
+                        <input type="number" id="new-hazard-radius" placeholder="Radius" value="300" min="10" style="flex:1; font-size: 10px; margin: 0; text-align:center;">
+                        <label for="new-hazard-intensity" style="display:none;">Intensity</label>
+                        <input type="number" id="new-hazard-intensity" placeholder="Intensity" value="1" min="1" max="5" style="flex:1; font-size: 10px; margin: 0; text-align:center;">
+                    </div>
+                    <button class="btn-remove" onclick="window.placeHazardZone()" style="margin-top: 6px; font-size:10px;">⚠️ PLACE HAZARD ZONE AT CENTER</button>
+                    <div id="hazard-zone-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;"></div>
                 </div>
 
                 <div id="dm-panel-repo" class="dm-subpanel">
@@ -922,13 +939,13 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.2"></script>
-    <script src="js/audio.js?v=3.2"></script>
-    <script src="js/ui.js?v=3.2"></script>
-    <script src="js/combat.js?v=3.2"></script>
-    <script src="js/colonies.js?v=3.2"></script>
-    <script src="js/ship-designer.js?v=3.2"></script>
-    <script src="js/map.js?v=3.2"></script>
+    <script src="js/db.js?v=3.6"></script>
+    <script src="js/audio.js?v=3.6"></script>
+    <script src="js/ui.js?v=3.6"></script>
+    <script src="js/combat.js?v=3.6"></script>
+    <script src="js/colonies.js?v=3.6"></script>
+    <script src="js/ship-designer.js?v=3.6"></script>
+    <script src="js/map.js?v=3.6"></script>
 
 </body>
 </html>
