@@ -122,6 +122,7 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-combat" onclick="window.switchTermTab('combat')"><span class="tab-text">Arsenal</span> <span class="tab-badge" id="badge-combat">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')"><span class="tab-text">Manifest</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-vessel" onclick="window.switchTermTab('vessel')"><span class="tab-text">Vessel Deck</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-colonies" onclick="window.switchTermTab('colonies')"><span class="tab-text">Colonies & Fleets</span> <span class="tab-badge" id="badge-colonies">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')"><span class="tab-text">Intel & Ops</span> <span class="tab-badge" id="badge-notes">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')"><span class="tab-text">Crew Roster</span> <span class="tab-badge" id="badge-roster">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff6b6b; color:#ff6b6b;"><span class="tab-text">Cloud Codex</span></button>
@@ -396,6 +397,87 @@
                                 <div id="vessel-deployed-container" style="max-height: 380px; overflow-y: auto;">
                                     <span style="font-size:10px; color:#6b826a;">No active flights in sector.</span>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- COLONIES & FLEETS TAB -->
+                <div id="term-panel-colonies" class="term-panel-content">
+                    <div class="cargo-subtabs" style="margin-bottom:12px;">
+                        <button class="cargo-subtab-btn active" id="colonies-subtab-colonies" onclick="window.switchColoniesSubtab('colonies')">Planetary Colonies</button>
+                        <button class="cargo-subtab-btn" id="colonies-subtab-fleets" onclick="window.switchColoniesSubtab('fleets')">Fleet Task Groups</button>
+                    </div>
+
+                    <div id="colonies-view">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div class="sheet-section" style="border-color:#ffaa00; background:rgba(255,170,0,0.04);">
+                                <h4 style="color:#ffaa00; border-bottom:1px solid #ffaa00; padding-bottom:4px;">+ Found New Colony</h4>
+                                <label for="new-colony-name" style="font-size:9px; color:#6b826a;">Colony Designation:</label>
+                                <input type="text" id="new-colony-name" placeholder="e.g. New Meridian Outpost" style="font-size:11px; margin:2px 0;">
+                                <div style="display:flex; gap:6px; margin-top:6px;">
+                                    <div style="flex:1;">
+                                        <label for="new-colony-pop" style="font-size:9px; color:#6b826a;">Population:</label>
+                                        <input type="number" id="new-colony-pop" value="0" min="0" style="font-size:11px; margin:2px 0; text-align:center;">
+                                    </div>
+                                    <div style="flex:1;">
+                                        <label for="new-colony-morale" style="font-size:9px; color:#6b826a;">Morale Tier:</label>
+                                        <select id="new-colony-morale" style="font-size:11px; margin:2px 0;">
+                                            <option value="Thriving">Thriving</option>
+                                            <option value="Stable" selected>Stable</option>
+                                            <option value="Unrest">Unrest</option>
+                                            <option value="Crisis">Crisis</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:6px; margin-top:6px;">
+                                    <div style="flex:1.5;">
+                                        <label for="new-colony-restype" style="font-size:9px; color:#6b826a;">Resource Output:</label>
+                                        <input type="text" id="new-colony-restype" placeholder="e.g. Refined Ore" style="font-size:11px; margin:2px 0;">
+                                    </div>
+                                    <div style="flex:1;">
+                                        <label for="new-colony-resqty" style="font-size:9px; color:#6b826a;">Qty / Cycle:</label>
+                                        <input type="number" id="new-colony-resqty" value="10" min="0" style="font-size:11px; margin:2px 0; text-align:center;">
+                                    </div>
+                                </div>
+                                <button class="btn-reveal" onclick="window.addColony()" style="margin-top:10px; border-color:#ffaa00; color:#ffaa00;">+ ESTABLISH COLONY</button>
+                            </div>
+                            <div class="sheet-section">
+                                <h4 style="border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#ffaa00;">Colonial Holdings</h4>
+                                <div id="colonies-list-container" style="max-height:400px; overflow-y:auto;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="fleets-view" style="display:none;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div class="sheet-section" style="border-color:#00e1ff; background:rgba(0,225,255,0.04);">
+                                <h4 style="color:#00e1ff; border-bottom:1px solid #00e1ff; padding-bottom:4px;">+ Commission Task Group</h4>
+                                <label for="new-fleet-name" style="font-size:9px; color:#6b826a;">Task Group Designation:</label>
+                                <input type="text" id="new-fleet-name" placeholder="e.g. Escort Wing Alpha" style="font-size:11px; margin:2px 0;">
+                                <label for="new-fleet-ship" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Linked Vessel Token:</label>
+                                <select id="new-fleet-ship" style="font-size:11px; margin:2px 0;"></select>
+                                <div style="display:flex; gap:6px; margin-top:6px;">
+                                    <div style="flex:1;">
+                                        <label for="new-fleet-status" style="font-size:9px; color:#6b826a;">Status:</label>
+                                        <select id="new-fleet-status" style="font-size:11px; margin:2px 0;">
+                                            <option value="Standby">Standby</option>
+                                            <option value="Patrolling">Patrolling</option>
+                                            <option value="Escorting">Escorting</option>
+                                            <option value="Mining Operations">Mining Operations</option>
+                                            <option value="RTB">RTB</option>
+                                        </select>
+                                    </div>
+                                    <div style="flex:1.3;">
+                                        <label for="new-fleet-route" style="font-size:9px; color:#6b826a;">Patrol Route:</label>
+                                        <select id="new-fleet-route" style="font-size:11px; margin:2px 0;"><option value="">No Assigned Route</option></select>
+                                    </div>
+                                </div>
+                                <button class="btn-reveal" onclick="window.addFleetGroup()" style="margin-top:10px; border-color:#00e1ff; color:#00e1ff;">+ COMMISSION TASK GROUP</button>
+                            </div>
+                            <div class="sheet-section">
+                                <h4 style="border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#00e1ff;">Active Task Groups</h4>
+                                <div id="fleets-list-container" style="max-height:400px; overflow-y:auto;"></div>
                             </div>
                         </div>
                     </div>
@@ -780,6 +862,7 @@
     <script src="js/audio.js?v=3.0"></script>
     <script src="js/ui.js?v=3.0"></script>
     <script src="js/combat.js?v=3.0"></script>
+    <script src="js/colonies.js?v=3.0"></script>
     <script src="js/map.js?v=3.0"></script>
 
 </body>
