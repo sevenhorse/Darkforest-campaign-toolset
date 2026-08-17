@@ -628,6 +628,14 @@
                         <button id="time-flow-btn" class="btn-deploy" onclick="window.toggleTimeFlow()" style="flex:1; font-size:10px; margin:0;">RESUME FLOW</button>
                         <button class="btn-remove" onclick="window.resetTimeline()" style="flex:1; font-size:10px; margin:0;">RESET YR 2800</button>
                     </div>
+
+                    <div style="background: #040605; border: 1px solid #3c4e36; padding: 6px; margin-top: 8px; border-radius: 2px;">
+                        <label for="jump-inversion-ftl-only" style="display:flex; align-items:center; gap:6px; font-size:10px; color:#ffaaaa; cursor:pointer; margin:0;">
+                            <input type="checkbox" id="jump-inversion-ftl-only" checked onchange="window.setJumpInversionFtlOnly(this.checked)" style="margin:0; width:auto;">
+                            Jump Time-Inversion: FTL Vessels Only
+                        </label>
+                        <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">When on, only FTL-drive vessels invert the chronometer on Jump-to-Ship — sublight vessels advance time normally. Disable to apply the inversion to every drive type.</p>
+                    </div>
                 </div>
                 <button onclick="window.toggleCalendarControls()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
             </div>
