@@ -1059,3 +1059,55 @@ window.deleteHyperlane = async function(id) {
     await db.from('hyperlanes').delete().eq('id', id);
     if (typeof loadHyperlanes === 'function') loadHyperlanes();
 };
+
+/* --- SYSTEM HAZARD ZONES (DM controls) ---
+   Explicit, precisely-placed zones — independent of the implicit per-system
+   hazard flavor field, which window.checkShipHazards() (map.js) already
+   folds in automatically. This is for a DM who wants a hazard NOT centered
+   on a star, multiple hazards in one system, or a hazard on a system that
+   was generated without one. */
+window.placeHazardZone = async function() {
+    if (currentUserRole !== 'dm') return;
+    const type = document.getElementById('new-hazard-type').value;
+    const radius = parseFloat(document.getElementById('new-hazard-radius').value) || 300;
+    const intensity = parseInt(document.getElementById('new-hazard-intensity').value) || 1;
+    const payload = {
+        system_id: null,
+        hazard_type: type,
+        x: -window.camera.x / window.camera.zoom,
+        y: -window.camera.y / window.camera.zoom,
+        radius, intensity
+    };
+    const { error } = await db.from('system_hazards').insert(payload);
+    if (error) { alert("Failed to place hazard zone: " + error.message); return; }
+    if (typeof loadSystemHazards === 'function') loadSystemHazards();
+};
+
+window.renderHazardZoneList = function() {
+    const container = document.getElementById('hazard-zone-list-container');
+    if (!container) return;
+    const hazardColors = { pulsar: '#ff3366', nebula: '#c778dd', gravity_well: '#7694ff' };
+    let html = '';
+    (window.globalSystemHazardsCache || []).forEach(hz => {
+        const color = hazardColors[hz.hazard_type] || '#ffaa00';
+        html += `
+            <div class="note-card" style="border-left: 3px solid ${color}; padding: 6px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong style="color: ${color}; font-size: 11px;">${hz.hazard_type.replace('_', ' ').toUpperCase()}</strong>
+                        <div style="font-size:9px; color:#6b826a;">Radius: ${hz.radius}u &nbsp;·&nbsp; Intensity: ${hz.intensity}</div>
+                    </div>
+                    <button class="layer-del" onclick="window.deleteHazardZone('${hz.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No explicit hazard zones placed.</span>';
+};
+
+window.deleteHazardZone = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!(await window.showConfirmModal("Remove this hazard zone?"))) return;
+    await db.from('system_hazards').delete().eq('id', id);
+    if (typeof loadSystemHazards === 'function') loadSystemHazards();
+};
