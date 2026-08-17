@@ -400,6 +400,7 @@ function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
 }
 
 function drawSingleHazard(ctx, x, y, radius, type, zoom, time) {
+    if (!(radius > 0)) return; // guard against zero/negative/NaN radius (bad data or malformed DM input)
     ctx.save();
     if (type === 'pulsar') {
         let pulse = 0.5 + Math.sin(time * 0.006) * 0.3;
@@ -407,9 +408,9 @@ function drawSingleHazard(ctx, x, y, radius, type, zoom, time) {
         ctx.strokeStyle = `rgba(255, 51, 102, ${pulse * 0.6})`;
         ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.stroke();
         ctx.strokeStyle = `rgba(255, 51, 102, ${pulse * 0.25})`;
-        ctx.beginPath(); ctx.arc(x, y, radius * 0.6, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, Math.max(0.01, radius * 0.6), 0, Math.PI * 2); ctx.stroke();
     } else if (type === 'nebula') {
-        let grd = ctx.createRadialGradient(x, y, radius * 0.1, x, y, radius);
+        let grd = ctx.createRadialGradient(x, y, Math.max(0.01, radius * 0.1), x, y, radius);
         grd.addColorStop(0, 'rgba(199, 120, 221, 0.16)');
         grd.addColorStop(0.6, 'rgba(120, 80, 200, 0.09)');
         grd.addColorStop(1, 'rgba(120, 80, 200, 0)');
@@ -420,7 +421,11 @@ function drawSingleHazard(ctx, x, y, radius, type, zoom, time) {
         ctx.lineWidth = 1 / zoom;
         for (let r = radius; r > radius * 0.15; r -= radius / 5) {
             let warp = Math.sin(time * 0.003 + r * 0.02) * (6 / zoom);
-            ctx.beginPath(); ctx.arc(x, y, r + warp, 0, Math.PI * 2); ctx.stroke();
+            // The oscillating warp offset can exceed a small ring's own radius at
+            // extreme zoom-out, which would otherwise push arc()'s radius negative
+            // and throw — clamp it to a tiny positive floor instead.
+            let ringR = Math.max(0.01, r + warp);
+            ctx.beginPath(); ctx.arc(x, y, ringR, 0, Math.PI * 2); ctx.stroke();
         }
     }
     ctx.restore();
