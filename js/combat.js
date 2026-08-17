@@ -1035,35 +1035,37 @@ window.deleteShipDeck = async function(vesselId, idx) {
    Single source of truth for every damage-type dropdown, tooltip, and the
    combat cascade resolution in rollShipWeapon(). Defense layer order is:
    Shields -> Reactive Armor -> Ablative Armor -> Hardened Armor -> Hull.
-   blockedBy: fully negates the hit at that layer (consumes a charge).
+   blockedBy: array of layers that fully negate the hit (consumes a charge
+   at whichever of those layers the damage reaches first). Empty array means
+   nothing blocks it outright.
    bypassesLayers: skips straight past those layers as if they weren't there.
    hullMult: multiplier applied once damage actually reaches Hull.
    shieldMode: 'normal' | 'antimatter' (partial bypass) | 'ion' (double dmg
    to shields, minimal hull dmg) | 'exotic' (only thing shields fully stop). */
 window.DAMAGE_TYPES = {
-    'Impact':    { color: '#d4c5a9', blockedBy: 'reactive', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+    'Impact':    { color: '#d4c5a9', blockedBy: ['reactive'], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Standard kinetic ordnance — the baseline most weapons default to.', shreds: 'Unarmored hull, light craft', mitigatedBy: 'Reactive Armor' },
-    'Piercing':  { color: '#ffaa00', blockedBy: null, bypassesLayers: ['reactive', 'ablative'], hullMult: 1, shieldMode: 'normal',
+    'Piercing':  { color: '#ffaa00', blockedBy: [], bypassesLayers: ['reactive', 'ablative'], hullMult: 1, shieldMode: 'normal',
         desc: 'Armor-defeating penetrators engineered to punch through countermeasures.', shreds: 'Reactive & Ablative Armor — ignores both entirely', mitigatedBy: 'Hardened Armor, Hull' },
-    'Explosive': { color: '#ff6b6b', blockedBy: 'reactive', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+    'Explosive': { color: '#ff6b6b', blockedBy: ['reactive'], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Warheads detonating on impact for wide-area kinetic shock.', shreds: 'Unarmored hull, strike craft formations', mitigatedBy: 'Reactive Armor' },
-    'Flak':      { color: '#ffe066', blockedBy: null, bypassesLayers: [], hullMult: 0.4, shieldMode: 'normal',
+    'Flak':      { color: '#ffe066', blockedBy: [], bypassesLayers: [], hullMult: 0.4, shieldMode: 'normal',
         desc: 'Proximity-fused shrapnel bursts built to shred small, fast, fragile targets.', shreds: 'Strike Craft — devastating vs fighters/bombers', mitigatedBy: 'Capital-scale Hull (weak vs Ships)' },
-    'Energy':    { color: '#00e1ff', blockedBy: 'ablative', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+    'Energy':    { color: '#00e1ff', blockedBy: ['ablative'], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Directed-energy beams and pulses — lasers, particle cannons, plasma bolts.', shreds: 'Unarmored hull, exposed systems', mitigatedBy: 'Ablative Armor' },
-    'Antimatter':{ color: '#c778dd', blockedBy: null, bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 2, shieldMode: 'antimatter',
+    'Antimatter':{ color: '#c778dd', blockedBy: [], bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 2, shieldMode: 'antimatter',
         desc: 'Exotic matter-antimatter warheads — among the most destructive ordnance in known space.', shreds: 'Hardened Armor & Hull — a genuine capital ship hull-melter', mitigatedBy: 'Shields (only partially)' },
-    'Exotic':    { color: '#33ff99', blockedBy: null, bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 1, shieldMode: 'exotic',
+    'Exotic':    { color: '#33ff99', blockedBy: [], bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 1, shieldMode: 'exotic',
         desc: 'Anomalous or poorly-understood physics effects with no established countermeasure.', shreds: 'All armor layers — ignored entirely', mitigatedBy: 'Shields only' },
-    'Ion':       { color: '#7694ff', blockedBy: null, bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 0.25, shieldMode: 'ion',
+    'Ion':       { color: '#7694ff', blockedBy: [], bypassesLayers: ['reactive', 'ablative', 'hardened'], hullMult: 0.25, shieldMode: 'ion',
         desc: 'Electromagnetic pulse weaponry designed to overload power systems, not breach hull.', shreds: 'Shields & reactor systems — bypasses all physical armor', mitigatedBy: 'Nothing stops it, but it barely scratches Hull' },
-    'Heat':      { color: '#ff3333', blockedBy: 'ablative', bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+    'Heat':      { color: '#ff3333', blockedBy: ['ablative'], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Thermal lances and incendiary ordnance that cooks through plating.', shreds: 'Unarmored hull, exposed systems', mitigatedBy: 'Ablative Armor' },
-    'Cold':      { color: '#66d9ff', blockedBy: null, bypassesLayers: [], hullMult: 1.25, shieldMode: 'normal',
+    'Cold':      { color: '#66d9ff', blockedBy: [], bypassesLayers: [], hullMult: 1.25, shieldMode: 'normal',
         desc: 'Cryogenic disruptors that embrittle plating rather than melting it outright.', shreds: 'Exposed Hull once armor is stripped — brittle-fracture bonus', mitigatedBy: 'Nothing specific; weak vs intact armor' },
-    'Corrosive': { color: '#7cbf3f', blockedBy: null, bypassesLayers: ['hardened'], hullMult: 1, shieldMode: 'normal',
+    'Corrosive': { color: '#7cbf3f', blockedBy: ['reactive', 'ablative'], bypassesLayers: ['hardened'], hullMult: 1, shieldMode: 'normal',
         desc: 'Acidic or nanite-based agents that eat through even hardened plating.', shreds: 'Hardened Armor specifically — ignores it entirely', mitigatedBy: 'Reactive Armor, Ablative Armor' },
-    'Healing':   { color: '#00e5a3', blockedBy: null, bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
+    'Healing':   { color: '#00e5a3', blockedBy: [], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Repair-drone swarms, nanite weaves, or damage-control beams — restores rather than harms.', shreds: 'Nothing — restores Shields first, then Hull', mitigatedBy: 'N/A' }
 };
 
@@ -1171,9 +1173,9 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
         const bypassesAblative = info.bypassesLayers.includes('ablative');
         const bypassesHardened = info.bypassesLayers.includes('hardened');
 
-        if (!bypassesReactive && info.blockedBy === 'reactive' && r > 0) {
+        if (!bypassesReactive && info.blockedBy.includes('reactive') && r > 0) {
             r -= 1; log += `[REACTIVE ARMOR] charge expended — ${dmgType} damage negated! `; remainingDmg = 0;
-        } else if (!bypassesAblative && info.blockedBy === 'ablative' && a > 0) {
+        } else if (!bypassesAblative && info.blockedBy.includes('ablative') && a > 0) {
             a -= 1; log += `[ABLATIVE ARMOR] charge expended — ${dmgType} damage negated! `; remainingDmg = 0;
         } else {
             if (bypassesHardened) {
