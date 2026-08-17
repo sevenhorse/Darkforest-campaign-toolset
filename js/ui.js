@@ -501,6 +501,7 @@ window.renderCodexMatrix = function() {
     entries.forEach(e => {
         let cleanSubtitle = (e.subtitle || '').replace(/\|\s*LINK:.+/, '').trim(); 
         let docHtml = (e.doc_data && e.doc_name) ? `<div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">📎 ATTACHMENT: ${e.doc_name} (${(e.doc_type || 'FILE').toUpperCase()})</div>` : '';
+        let authorName = allProfiles.find(p => p.id === e.created_by)?.username || 'Unknown';
         html += `
             <div class="codex-entry-card category-${e.category}">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -513,6 +514,7 @@ window.renderCodexMatrix = function() {
                 </div>
                 <p style="margin:8px 0 4px 0; font-size:11px; color:#d4c5a9; line-height:1.5; max-height:80px; overflow:hidden; text-overflow:ellipsis;">${e.content || ''}</p>
                 ${docHtml}
+                <span class="author-tag">author: ${authorName}</span>
             </div>
         `;
     });
@@ -551,10 +553,16 @@ window.saveNewCodexEntry = async function() {
     if (linkInput && linkInput.value.trim() !== '') subtitle += ` | LINK:${linkInput.value.trim()}`;
     if (!title) { alert("Please enter an entry title."); return; }
 
-    const payload = { category: cat, title: title, subtitle: subtitle, content: content, created_by: currentUserId };
-    if (window.editingCodexId) { await db.from('codex_entries').update(payload).eq('id', window.editingCodexId); } 
-    else { await db.from('codex_entries').insert(payload); }
-    
+    if (window.editingCodexId) {
+        // Never touch created_by on an edit — it should stay whoever
+        // originally authored the entry, not whoever most recently edited it.
+        const payload = { category: cat, title: title, subtitle: subtitle, content: content };
+        await db.from('codex_entries').update(payload).eq('id', window.editingCodexId);
+    } else {
+        const payload = { category: cat, title: title, subtitle: subtitle, content: content, created_by: currentUserId };
+        await db.from('codex_entries').insert(payload);
+    }
+
     window.cancelCodexEdit(); window.switchCodexCategory(cat); if (typeof loadCodexEntries === 'function') loadCodexEntries();
 };
 
@@ -579,7 +587,8 @@ window.deleteCodexEntry = async function(id) {
 window.openCodexFullscreen = function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry) return;
     const modal = document.getElementById('codex-fullscreen-reader');
-    document.getElementById('reader-category-badge').innerText = (entry.category || 'LORE').toUpperCase();
+    const authorName = allProfiles.find(p => p.id === entry.created_by)?.username || 'Unknown';
+    document.getElementById('reader-category-badge').innerText = `${(entry.category || 'LORE').toUpperCase()} // ${authorName.toUpperCase()}`;
     document.getElementById('reader-title').innerText = entry.title;
     document.getElementById('reader-subtitle').innerText = (entry.subtitle || '').replace(/\|\s*LINK:.+/, '').trim() || 'UNCLASSIFIED RECORD';
     document.getElementById('reader-body-content').innerText = entry.content || 'No narrative content recorded.';
@@ -710,7 +719,7 @@ window.renderTerminalNotes = function() {
                     </div>
                 </div>
                 <p style="margin:4px 0 2px 0; font-size:10px; color:#d4c5a9; white-space:pre-wrap; max-height:40px; overflow:hidden; text-overflow:ellipsis;">${n.content || ''}</p>
-                <span style="font-size:9px; color:#6b826a;">Scope: ${n.share_scope.toUpperCase()} | Author: ${allProfiles.find(p=>p.id===n.author_id)?.username || 'Unknown'}</span>
+                <span class="author-tag">scope: ${n.share_scope} · author: ${allProfiles.find(p=>p.id===n.author_id)?.username || 'Unknown'}</span>
             </div>
         `;
     });
