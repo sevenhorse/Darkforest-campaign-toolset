@@ -112,6 +112,7 @@ async function fetchUserProfile(user) {
     initChatRealtimeChannel();
     initCombatTrackerRealtimeChannel();
     initColoniesRealtimeChannel();
+    initShipTemplatesRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
@@ -119,6 +120,8 @@ async function fetchUserProfile(user) {
     loadChatLogs(); loadPmPartnerList(); loadTerritories(); loadHyperlanes(); loadCodexEntries();
     if (typeof loadColonies === 'function') loadColonies();
     if (typeof loadFleetGroups === 'function') loadFleetGroups();
+    if (typeof loadShipTemplates === 'function') loadShipTemplates();
+    if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
 }
 
 async function loadAllProfiles() {
@@ -351,6 +354,20 @@ function initColoniesRealtimeChannel() {
     fleetGroupsRealtimeChannel = db.channel('fleet_groups_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'fleet_groups' }, () => {
             if (typeof loadFleetGroups === 'function') loadFleetGroups();
+        })
+        .subscribe();
+}
+
+/* --- SHIP TEMPLATES: REAL-TIME SYNC ---
+   One table backs both the public Ship Designer and the DM Secret Repository
+   (is_secret flag), so a change to either needs both lists refreshed —
+   loadSecretShipTemplates() is a no-op for non-DM clients anyway. */
+let shipTemplatesRealtimeChannel = null;
+function initShipTemplatesRealtimeChannel() {
+    shipTemplatesRealtimeChannel = db.channel('ship_templates_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ship_templates' }, () => {
+            if (typeof loadShipTemplates === 'function') loadShipTemplates();
+            if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
         })
         .subscribe();
 }
