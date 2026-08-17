@@ -260,6 +260,7 @@ window.TERM_TAB_ACTIVITY_LABELS = {
     cargo: 'Managing Cargo Manifest',
     vessel: 'Inspecting Vessel Deck',
     colonies: 'Managing Colonial Assets',
+    shipdesigner: 'Designing Vessel Profiles',
     notes: 'Editing Tactical Notes',
     roster: 'Reviewing Crew Roster',
     codex: 'Reviewing Sector Lore'
@@ -274,6 +275,7 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'cargo' && typeof window.renderTerminalCargoDeck === 'function') { window.populateCargoVesselSelect(); window.renderTerminalCargoDeck(); }
     if (tabName === 'vessel' && typeof window.renderVesselDeck === 'function') { window.populateVesselDeckSelect(); window.renderVesselDeck(); }
     if (tabName === 'colonies') { if (typeof window.populateFleetFormSelects === 'function') window.populateFleetFormSelects(); if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel(); if (typeof window.renderFleetGroupsPanel === 'function') window.renderFleetGroupsPanel(); }
+    if (tabName === 'shipdesigner' && typeof window.renderShipDesignerPanel === 'function') window.renderShipDesignerPanel();
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
     if (tabName === 'roster' && typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
 
@@ -294,6 +296,17 @@ window.toggleCharacterTerminal = function() {
     } else {
         window.broadcastActivity('Monitoring DRADIS');
     }
+};
+
+// Was called from index.html but never actually defined anywhere — the
+// "COLLAPSE SIDEBAR" button did nothing. The CSS (.term-sidebar.collapsed)
+// already existed, just needed the toggle wired up.
+window.toggleSidebar = function() {
+    const sidebar = document.getElementById('term-sidebar');
+    const icon = document.getElementById('sidebar-toggle-icon');
+    if (!sidebar) return;
+    const collapsed = sidebar.classList.toggle('collapsed');
+    if (icon) icon.innerText = collapsed ? '»' : 'COLLAPSE SIDEBAR';
 };
 
 window.openFullDossierTerminal = function() { const term = document.getElementById('character-terminal'); term.style.display = 'block'; window.switchTermTab('stats'); };
