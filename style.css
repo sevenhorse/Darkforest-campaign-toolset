@@ -102,14 +102,37 @@ canvas { display: block; width: 100%; height: 100%; }
 .cic-telemetry-bl { bottom: 16px; left: 56px; }
 .cic-telemetry-br { bottom: 16px; right: 56px; color: rgba(255, 107, 107, 0.45); }
 
+/* --- DRADIS RADAR OVERLAY ---
+   A bounded circular dish, not a full-viewport wash — left/top/width/height
+   are driven every frame by JS (updateRadarSweepPosition in map.js) to track
+   the galactic core or a focused star system in screen space. Only width/
+   height transition smoothly (the dish resizing when the anchor mode
+   crosses the galaxy<->system-focus boundary); left/top update instantly
+   every frame so it stays perfectly locked to the camera during pan/zoom
+   instead of visibly lagging behind the cursor. */
 .radar-sweep {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none; z-index: 11; display: none;
-    background: conic-gradient(from 0deg, rgba(0, 229, 163, 0.16), rgba(0, 229, 163, 0) 22%, rgba(0, 229, 163, 0) 100%);
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 11;
+    display: none;
+    overflow: hidden;
+    border: 1px solid rgba(0, 229, 163, 0.45);
+    box-shadow: 0 0 24px rgba(0, 229, 163, 0.15), inset 0 0 30px rgba(0, 229, 163, 0.08);
+    background:
+        linear-gradient(to right, transparent calc(50% - 1px), rgba(0, 229, 163, 0.28) calc(50% - 1px), rgba(0, 229, 163, 0.28) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom, transparent calc(50% - 1px), rgba(0, 229, 163, 0.28) calc(50% - 1px), rgba(0, 229, 163, 0.28) calc(50% + 1px), transparent calc(50% + 1px)),
+        repeating-radial-gradient(circle at center, rgba(0, 229, 163, 0.3) 0, rgba(0, 229, 163, 0.3) 1px, transparent 1px, transparent 20%);
+    transition: width 0.4s ease, height 0.4s ease;
+}
+.radar-sweep.active { display: block; }
+.radar-sweep::after {
+    content: "";
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: conic-gradient(from 0deg, rgba(0, 229, 163, 0.4), rgba(0, 229, 163, 0.05) 16%, rgba(0, 229, 163, 0) 30%, rgba(0, 229, 163, 0) 100%);
     mix-blend-mode: screen;
     animation: radarSweepRotate 4s linear infinite;
 }
-.radar-sweep.active { display: block; }
 @keyframes radarSweepRotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* --- DRAGGABLE PANELS DEFAULT POSITIONS --- */
