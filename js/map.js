@@ -59,6 +59,40 @@ window.getSystemBodies = function(system) {
     generatedSystems[system.id] = bodies; return bodies;
 };
 
+/* --- SYSTEM HAZARD ENGINE ---
+   Checks a ship against BOTH explicit DM-placed hazard zones (system_hazards
+   table — precise x/y/radius/intensity, independent of any star) AND the
+   implicit hazard already carried on star systems themselves (the `hazard`
+   field set via the System Architect / procedural generation — Pulsar,
+   Nebula, Gravity Well — which existed purely as flavor text/a visual glow
+   before this, with none of its described effects actually applied). The
+   implicit check uses a default radius centered on the star so every
+   existing system's hazard flavor becomes mechanically real immediately,
+   without the DM needing to manually re-place a zone on each one. */
+window.HAZARD_IMPLICIT_RADIUS = 350;
+window.checkShipHazards = function(shipMarker) {
+    if (!shipMarker) return [];
+    let hits = [];
+
+    (window.globalSystemHazardsCache || []).forEach(hz => {
+        let dist = Math.hypot(shipMarker.x - hz.x, shipMarker.y - hz.y);
+        if (dist <= (hz.radius || 300)) {
+            hits.push({ type: hz.hazard_type, intensity: hz.intensity || 1, radius: hz.radius || 300, source: 'zone', distance: dist });
+        }
+    });
+
+    const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
+    allSystems.forEach(s => {
+        if (!s.hazard || s.hazard === 'None') return;
+        let dist = Math.hypot(shipMarker.x - s.x, shipMarker.y - s.y);
+        if (dist <= window.HAZARD_IMPLICIT_RADIUS) {
+            hits.push({ type: s.hazard.toLowerCase().replace(/\s+/g, '_'), intensity: 1, radius: window.HAZARD_IMPLICIT_RADIUS, source: 'system', systemName: s.name, distance: dist });
+        }
+    });
+
+    return hits;
+};
+
 /* FOW ENGINE */
 window.getFowTier = function(system) {
     if (window.scannedSystems && window.scannedSystems.includes(system.id)) return 3; // Tier 3
@@ -342,6 +376,56 @@ function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
     return spacing;
 }
 
+/* --- CIC OVERLAY: SYSTEM HAZARD ZONE VISUALS ---
+   Renders both explicit DM-placed zones (system_hazards table) and the
+   implicit hazard already carried by star systems themselves (see
+   window.checkShipHazards in the hazard engine section below) — so a
+   Pulsar-flagged system shows its danger ring on the map even if no DM
+   ever placed an explicit zone there. Bounded to visible viewport per
+   hazard, same pattern as everything else in this render loop. */
+function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
+    (window.globalSystemHazardsCache || []).forEach(hz => {
+        const r = hz.radius || 300;
+        if (Math.abs(hz.x - cx) > hw + r || Math.abs(hz.y - cy) > hh + r) return;
+        drawSingleHazard(ctx, hz.x, hz.y, r, hz.hazard_type, zoom, time);
+    });
+
+    const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
+    const implicitR = window.HAZARD_IMPLICIT_RADIUS;
+    allSystems.forEach(s => {
+        if (!s.hazard || s.hazard === 'None') return;
+        if (Math.abs(s.x - cx) > hw + implicitR || Math.abs(s.y - cy) > hh + implicitR) return;
+        drawSingleHazard(ctx, s.x, s.y, implicitR, s.hazard.toLowerCase().replace(/\s+/g, '_'), zoom, time);
+    });
+}
+
+function drawSingleHazard(ctx, x, y, radius, type, zoom, time) {
+    ctx.save();
+    if (type === 'pulsar') {
+        let pulse = 0.5 + Math.sin(time * 0.006) * 0.3;
+        ctx.lineWidth = 2 / zoom;
+        ctx.strokeStyle = `rgba(255, 51, 102, ${pulse * 0.6})`;
+        ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = `rgba(255, 51, 102, ${pulse * 0.25})`;
+        ctx.beginPath(); ctx.arc(x, y, radius * 0.6, 0, Math.PI * 2); ctx.stroke();
+    } else if (type === 'nebula') {
+        let grd = ctx.createRadialGradient(x, y, radius * 0.1, x, y, radius);
+        grd.addColorStop(0, 'rgba(199, 120, 221, 0.16)');
+        grd.addColorStop(0.6, 'rgba(120, 80, 200, 0.09)');
+        grd.addColorStop(1, 'rgba(120, 80, 200, 0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+    } else if (type === 'gravity_well') {
+        ctx.strokeStyle = 'rgba(118, 148, 255, 0.3)';
+        ctx.lineWidth = 1 / zoom;
+        for (let r = radius; r > radius * 0.15; r -= radius / 5) {
+            let warp = Math.sin(time * 0.003 + r * 0.02) * (6 / zoom);
+            ctx.beginPath(); ctx.arc(x, y, r + warp, 0, Math.PI * 2); ctx.stroke();
+        }
+    }
+    ctx.restore();
+}
+
 /* --- DRADIS RADAR: DYNAMIC ANCHOR TRACKING ---
    Converts a world-space anchor point (galactic core, or the currently
    focused system from the render loop above) into screen-space left/top
@@ -584,7 +668,32 @@ window.saveDMBodyProperties = function(id) {
     if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); alert("Celestial body updated locally.");
 };
 window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Destroy star system?"))) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
-window.deleteShipToken = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Decommission token?"))) return; await db.from('ship_markers').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
+window.deleteShipToken = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!(await window.showConfirmModal("Decommission token?"))) return;
+
+    const ship = globalShipMarkersCache.find(m => m.id === id);
+    // If this is a strike craft token, clean up its squadron record + initiative
+    // row too — otherwise decommissioning it directly (instead of using the
+    // proper "RECORD CASUALTY" button in the carrier's Hangar Bay panel) leaves
+    // an orphaned combat_tracker row and a dangling entry in the carrier's
+    // ship_deployed list that still thinks the squadron is out there.
+    if (ship && ship.is_strike_craft && ship.parent_id && ship.squadron_id) {
+        const parent = globalShipMarkersCache.find(m => m.id === ship.parent_id);
+        if (parent) {
+            let deployed = (parent.ship_deployed || []).filter(sq => sq.id !== ship.squadron_id);
+            await db.from('ship_markers').update({ ship_deployed: deployed }).eq('id', parent.id);
+            parent.ship_deployed = deployed;
+            if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+        }
+        await db.from('combat_tracker').delete().eq('squadron_id', ship.squadron_id);
+        if (typeof loadCombatTracker === 'function') loadCombatTracker();
+    }
+
+    await db.from('ship_markers').delete().eq('id', id);
+    window.clearSelectedTarget();
+    if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+};
 
 /* --- THE CANVAS ENGINE --- */
 window.initGalaxyEngine = function() {
@@ -831,7 +940,17 @@ window.initGalaxyEngine = function() {
                 </div>`;
             }
 
-            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${currentUserRole === 'dm' ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
+            const hazardHits = window.checkShipHazards(m);
+            let hazardBox = '';
+            if (hazardHits.length > 0) {
+                const hazardLabels = { pulsar: '☢️ PULSAR RADIATION — weapons overheating faster', nebula: '🌫️ DENSE NEBULA — sensor emissions masked', gravity_well: '🌀 GRAVITY WELL — FTL jump costs increased' };
+                hazardBox = `<div style="background:#1a0808; border:1px solid #ff3333; padding:6px; margin-top:6px; border-radius:2px;">
+                    <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">⚠️ ENVIRONMENTAL HAZARD</span>
+                    ${hazardHits.map(h => `<div style="font-size:9px; color:#ffaaaa; margin-top:2px;">${hazardLabels[h.type] || h.type.toUpperCase()}</div>`).join('')}
+                </div>`;
+            }
+
+            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${currentUserRole === 'dm' ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
             let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button></div>` : '';
@@ -850,6 +969,7 @@ window.initGalaxyEngine = function() {
 
         let _gridSpacing = null;
         if (window.tacticalGridEnabled !== false) { _gridSpacing = drawTacticalGrid(ctx, cx, cy, hw, hh, window.camera.zoom); }
+        drawHazardZones(ctx, cx, cy, hw, hh, window.camera.zoom, time);
 
         if (window.camera.zoom < 0.8) { let coreGrd = ctx.createRadialGradient(0, 0, 100, 0, 0, 1800); coreGrd.addColorStop(0, 'rgba(118, 148, 255, 0.12)'); coreGrd.addColorStop(0.5, 'rgba(0, 229, 163, 0.04)'); coreGrd.addColorStop(1, 'rgba(0, 0, 0, 0)'); ctx.fillStyle = coreGrd; ctx.beginPath(); ctx.arc(0, 0, 1800, 0, Math.PI * 2); ctx.fill(); }
 
@@ -1000,19 +1120,32 @@ window.initGalaxyEngine = function() {
             const isNpcAsset = !ownerProfile || ownerProfile.role === 'dm';
             let ringColor = isMine ? '#00e5a3' : (isNpcAsset ? '#ff6b6b' : '#4a7ab5');
 
+            // Dense Nebula EMCON: a non-owned, non-DM-viewed contact sitting inside a
+            // nebula reads as a vague sensor return rather than a clean IFF lock —
+            // rendered faded with its identity withheld, not hidden outright (you know
+            // something's there, just not what).
+            const nebulaObscured = !isMine && currentUserRole !== 'dm' && window.checkShipHazards(m).some(h => h.type === 'nebula');
+            let tokenAlpha = nebulaObscured ? 0.35 : 1;
+
             ctx.save();
+            ctx.globalAlpha = tokenAlpha;
             ctx.beginPath(); ctx.arc(m.x, m.y, size + (5 / window.camera.zoom), 0, Math.PI * 2);
             ctx.strokeStyle = ringColor; ctx.lineWidth = (isMine ? 2 : 1.5) / window.camera.zoom;
             if (isNpcAsset) ctx.setLineDash([4 / window.camera.zoom, 3 / window.camera.zoom]);
             ctx.stroke(); ctx.setLineDash([]);
             ctx.restore();
 
+            ctx.save();
+            ctx.globalAlpha = tokenAlpha;
             ctx.fillStyle = iffColor; ctx.beginPath(); ctx.moveTo(m.x, m.y - size); ctx.lineTo(m.x + size, m.y); ctx.lineTo(m.x, m.y + size); ctx.lineTo(m.x - size, m.y); ctx.closePath(); ctx.fill();
+            ctx.restore();
 
             // Persistent callout label: dark outline stroke behind the fill keeps it
             // legible over any canvas background (starfield, nebula haze, territory
             // fills), and font size is clamped so it scales gracefully with zoom
             // instead of vanishing when zoomed out or overwhelming the view zoomed in.
+            ctx.save();
+            ctx.globalAlpha = tokenAlpha;
             let labelSize = Math.max(9, Math.min(13, 11 / window.camera.zoom));
             ctx.font = `${labelSize}px Courier New`;
             ctx.textBaseline = 'middle';
@@ -1021,12 +1154,19 @@ window.initGalaxyEngine = function() {
             let ownerTag = isMine ? '' : (isNpcAsset ? ' [NPC]' : ` [${ownerProfile.username || 'ALLY'}]`);
             let dockedCount = globalShipMarkersCache.filter(d => d.docked_to === m.id).length;
             let dockTag = dockedCount > 0 ? ` 🔗${dockedCount}` : '';
-            let labelText = m.name + ownerTag + dockTag;
+            let fuelTag = '';
+            if (m.is_strike_craft) {
+                const parent = globalShipMarkersCache.find(p => p.id === m.parent_id);
+                const sq = parent ? (parent.ship_deployed || []).find(s => s.id === m.squadron_id) : null;
+                if (sq) fuelTag = ` ⛽${sq.loiter}`;
+            }
+            let labelText = nebulaObscured ? `UNKNOWN CONTACT` + dockTag : m.name + ownerTag + dockTag + fuelTag;
             ctx.lineWidth = 3 / window.camera.zoom;
             ctx.strokeStyle = 'rgba(3, 4, 6, 0.85)';
             ctx.strokeText(labelText, labelX, labelY);
             ctx.fillStyle = iffColor;
             ctx.fillText(labelText, labelX, labelY);
+            ctx.restore();
         }
 
         if (window.jumpPlottingActive && window.activeJumpShip) {
