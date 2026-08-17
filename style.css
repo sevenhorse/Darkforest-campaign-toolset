@@ -80,6 +80,38 @@ button:hover { background: #00e5a3; color: #030406; border-color: #ffffff; box-s
 #canvas-container:active { cursor: grabbing; }
 canvas { display: block; width: 100%; height: 100%; }
 
+/* --- CIC TACTICAL TABLE: STATIC FRAMING & RADAR SWEEP ---
+   All pointer-events:none so this overlay never intercepts map dragging,
+   panel clicks, or token selection underneath it. */
+.cic-frame, .cic-frame * { pointer-events: none; }
+.cic-frame { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 12; }
+
+.cic-corner { position: absolute; width: 34px; height: 34px; border-color: rgba(0, 229, 163, 0.5); }
+.cic-corner-tl { top: 12px; left: 12px; border-top: 2px solid; border-left: 2px solid; }
+.cic-corner-tr { top: 12px; right: 12px; border-top: 2px solid; border-right: 2px solid; }
+.cic-corner-bl { bottom: 12px; left: 12px; border-bottom: 2px solid; border-left: 2px solid; }
+.cic-corner-br { bottom: 12px; right: 12px; border-bottom: 2px solid; border-right: 2px solid; }
+
+.cic-telemetry {
+    position: absolute; font-size: 10px; letter-spacing: 1px; color: rgba(0, 229, 163, 0.6);
+    text-transform: uppercase; font-family: 'Courier New', monospace; text-shadow: 0 0 4px rgba(0, 229, 163, 0.25);
+    white-space: nowrap;
+}
+.cic-telemetry-tl { top: 16px; left: 56px; }
+.cic-telemetry-tr { top: 16px; right: 56px; }
+.cic-telemetry-bl { bottom: 16px; left: 56px; }
+.cic-telemetry-br { bottom: 16px; right: 56px; color: rgba(255, 107, 107, 0.45); }
+
+.radar-sweep {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none; z-index: 11; display: none;
+    background: conic-gradient(from 0deg, rgba(0, 229, 163, 0.16), rgba(0, 229, 163, 0) 22%, rgba(0, 229, 163, 0) 100%);
+    mix-blend-mode: screen;
+    animation: radarSweepRotate 4s linear infinite;
+}
+.radar-sweep.active { display: block; }
+@keyframes radarSweepRotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
 /* --- DRAGGABLE PANELS DEFAULT POSITIONS --- */
 #hud-overlay { top: 20px; left: 20px; width: 340px; max-height: 80vh; overflow-y: auto; }
 #combat-tracker-panel { top: 20px; right: 20px; width: 320px; max-height: 45vh; overflow-y: auto; display: none; }
@@ -294,6 +326,20 @@ canvas { display: block; width: 100%; height: 100%; }
 .hud-tab-btn { flex: 1; padding: 5px 2px; font-size: 9px; background: #040605; border: 1px solid #3c4e36; color: #6b826a; margin-top: 0; cursor: pointer; text-align: center; }
 .hud-tab-btn.active { background: #0a1410; border-color: #00e5a3; color: #00e5a3; font-weight: bold; }
 
+.comms-tab-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; font-size: 9px; background: #040605; border: 1px solid #3c4e36;
+    color: #6b826a; cursor: pointer; text-transform: uppercase; border-radius: 2px;
+    white-space: nowrap; transition: all 0.2s;
+}
+.comms-tab-btn:hover { border-color: #00e5a3; color: #00e5a3; }
+.comms-tab-btn.active { background: #0a1410; border-color: #00e5a3; color: #00e5a3; font-weight: bold; box-shadow: inset 0 0 8px rgba(0, 229, 163, 0.15); }
+.comms-tab-btn.unread { border-color: #ffaa00; color: #ffaa00; animation: commsTabPulse 1.2s ease-in-out infinite; }
+.comms-tab-btn.unread.active { animation: none; }
+.comms-tab-close { color: #ff6b6b; font-weight: bold; padding: 0 2px; }
+.comms-tab-close:hover { color: #ffffff; }
+@keyframes commsTabPulse { 0%, 100% { box-shadow: 0 0 0 rgba(255, 170, 0, 0); } 50% { box-shadow: 0 0 6px rgba(255, 170, 0, 0.6); } }
+
 .note-card { background: #060907; border: 1px solid #3c4e36; border-radius: 2px; padding: 10px; margin-bottom: 8px; }
 .layer-del { background: #3d0c0c; color: #ffaaaa; border: 1px solid #ff3333; padding: 2px 6px; border-radius: 2px; cursor: pointer; width: auto; margin: 0; transition: all 0.2s; }
 .layer-del:hover { background: #ff3333; color: #fff; }
@@ -327,6 +373,12 @@ canvas { display: block; width: 100%; height: 100%; }
 
 /* Target phones in Portrait (and smaller Landscape screens) */
 @media screen and (max-width: 768px) {
+    /* CIC framing/telemetry just eats viewport space on small screens without
+       much value there — keep phones uncluttered like the rest of this block does. */
+    .cic-frame, .radar-sweep {
+        display: none !important;
+    }
+
     /* Convert the terminal layout from Side-by-Side to Top-and-Bottom */
     .term-layout {
         display: flex !important;
