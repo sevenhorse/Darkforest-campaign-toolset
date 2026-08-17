@@ -11,6 +11,7 @@ window.pingModeActive = false; window.activePings = [];
 window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; window.selectedDriveSpeed = 250;
 window.territoryToolActive = false; window.territoryDrawActive = false; window.activeTerritoryVertices = [];
 window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = [];
+window.hyperlanesVisible = true; // was never initialized before — left routes invisible until manually toggled once
 
 function stringToHash(str) { let hash = 0; for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; } return Math.abs(hash); }
 function mulberry32(a) { return function() { var t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 8, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -229,7 +230,12 @@ window.triggerTacticalPing = function(x, y) {
     if (window.AudioEngine) window.AudioEngine.playPing();
     const username = allProfiles.find(p => p.id === currentUserId)?.username || 'Commander';
     const color = currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3';
-    realtimeChannel.send({ type: 'broadcast', event: 'tactical_ping', payload: { x, y, username, color } });
+    // httpSend() always delivers via REST regardless of WebSocket state — a ping
+    // is infrequent/low-volume, so there's no latency reason to prefer the
+    // WebSocket path, and this sidesteps supabase-js's "send() automatically
+    // falling back to REST" deprecation warning entirely by being explicit
+    // about the transport instead of relying on its automatic fallback.
+    realtimeChannel.httpSend('tactical_ping', { x, y, username, color });
     window.activePings.push({ x, y, color, user: username, startTime: Date.now() });
     if(window.pingModeActive) window.togglePingMode();
 
@@ -252,11 +258,23 @@ window.jumpToPingLocation = function(x, y) {
 };
 
 window.updateToolButtonStyles = function() {
-    const mBtn = document.getElementById('measuring-tape-toggle-btn'); const pBtn = document.getElementById('ping-tool-toggle-btn'); const tBtn = document.getElementById('territory-tool-toggle-btn'); const hBtn = document.getElementById('btn-start-hyperlane-draw');
+    const mBtn = document.getElementById('measuring-tape-toggle-btn'); const pBtn = document.getElementById('ping-tool-toggle-btn'); const tBtn = document.getElementById('territory-tool-toggle-btn'); const hBtn = document.getElementById('btn-start-hyperlane-draw'); const rBtn = document.getElementById('hyperlane-toggle-btn');
     if(mBtn) { mBtn.style.borderColor = window.measuringTapeActive ? '#00e5a3' : '#3c4e36'; mBtn.style.color = window.measuringTapeActive ? '#00e5a3' : '#6b826a'; }
     if(pBtn) { pBtn.style.borderColor = window.pingModeActive ? '#00e5a3' : '#3c4e36'; pBtn.style.color = window.pingModeActive ? '#00e5a3' : '#6b826a'; }
     if(tBtn) { tBtn.style.borderColor = window.territoryDrawActive ? '#00e5a3' : '#3c4e36'; tBtn.style.color = window.territoryDrawActive ? '#00e5a3' : '#6b826a'; }
     if(hBtn) { hBtn.style.borderColor = window.hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = window.hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
+    if(rBtn) { rBtn.style.borderColor = window.hyperlanesVisible ? '#00e1ff' : '#3c4e36'; rBtn.style.color = window.hyperlanesVisible ? '#00e1ff' : '#6b826a'; }
+};
+
+/* --- MAP CENTERING: LOCK ON GALACTIC CORE ---
+   Sagittarius Prime (the core black hole) is generated at exact world (0,0)
+   — see initGalaxyEngine's proceduralSystems seeding. Camera (0,0) at zoom 1
+   puts world (0,0) dead-center in the viewport (the render transform is
+   translate(cssWidth/2 + camera.x, ...), so camera.x/y = 0 means no offset). */
+window.recenterOnGalacticCore = function() {
+    window.camera.x = 0;
+    window.camera.y = 0;
+    window.camera.zoom = 1;
 };
 
 /* --- CIC TACTICAL TABLE: RADAR SWEEP TOGGLE ---
@@ -274,6 +292,7 @@ window.toggleRadarSweep = function() {
     window.radarSweepActive = !window.radarSweepActive;
     localStorage.setItem('odyssey_radar_sweep', window.radarSweepActive ? 'true' : 'false');
     applyRadarSweepState();
+    if (window.radarSweepActive) window.recenterOnGalacticCore();
 };
 
 /* --- CIC TACTICAL TABLE: DYNAMIC GRID ---
@@ -503,6 +522,7 @@ window.initGalaxyEngine = function() {
     function resize() { const dpr = window.devicePixelRatio || 1; canvas.width = container.clientWidth * dpr; canvas.height = container.clientHeight * dpr; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr); }
     window.addEventListener('resize', resize); resize();
     applyRadarSweepState();
+    window.updateToolButtonStyles();
     
     const proceduralSystems = []; const rng = mulberry32(1048596); 
     const coreRadius = 1400; const galaxyRadius = 11000;
@@ -813,6 +833,22 @@ window.initGalaxyEngine = function() {
             ctx.beginPath(); ctx.arc(p.x, p.y, pSize, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1.0;
         });
 
+        // Which system (if any) is "in focus" for full orbital detail — the
+        // one nearest the camera center. Without this, every system that
+        // happens to pass the zoom+viewport+scan gate below renders its full
+        // planet/orbit diagram simultaneously, which in dense clusters (the
+        // galactic core especially) makes neighboring systems visually bleed
+        // into each other instead of showing one system at a time.
+        let focusedSystemId = null;
+        if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD) {
+            let nearestDist = Infinity;
+            for (let s of allSystems) {
+                if (s.type === 'Nebula') continue;
+                let d = Math.hypot(s.x - cx, s.y - cy);
+                if (d < nearestDist) { nearestDist = d; focusedSystemId = s.id; }
+            }
+        }
+
         for (let s of allSystems) {
             if (Math.abs(s.x - cx) > hw + 200 || Math.abs(s.y - cy) > hh + 200) continue;
             let fowTier = window.getFowTier(s);
@@ -835,7 +871,7 @@ window.initGalaxyEngine = function() {
                 }
             }
 
-            if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD && s.type !== 'Nebula' && fowTier === 3) {
+            if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD && s.type !== 'Nebula' && fowTier === 3 && s.id === focusedSystemId) {
                 for (let b of window.getSystemBodies(s)) {
                     let angle = b.baseAngle + (time * b.speed); let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
                     ctx.beginPath(); ctx.arc(s.x, s.y, b.radius, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(0, 229, 163, 0.12)'; ctx.lineWidth = 1 / window.camera.zoom; ctx.stroke();
