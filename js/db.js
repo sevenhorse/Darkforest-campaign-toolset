@@ -249,7 +249,28 @@ async function checkAnomalyProximity(ship) {
     }
 }
 
+/* --- PRESENCE: ACTIVITY BLURB TRACKING ---
+   Supabase presence .track() replaces the ENTIRE payload for a key on every
+   call, it doesn't merge — so both the profile fields (username/role/avatar)
+   and the current activity string have to be re-sent together every time
+   either one changes, or the other silently disappears from presence state.
+   Everything routes through trackMyPresence() so that never happens. */
+window.myPresenceProfile = { username: '', role: '', avatar_url: '' };
+window.myCurrentActivity = 'Monitoring DRADIS';
+
+async function trackMyPresence() {
+    if (!presenceChannel) return;
+    await presenceChannel.track({
+        online_at: new Date().toISOString(),
+        username: window.myPresenceProfile.username || currentUserEmail.split('@')[0],
+        role: window.myPresenceProfile.role || currentUserRole,
+        avatar_url: window.myPresenceProfile.avatar_url || '',
+        activity: window.myCurrentActivity
+    });
+}
+
 function initPresenceChannel(userProfile) {
+    window.myPresenceProfile = { username: userProfile.username, role: userProfile.role, avatar_url: userProfile.avatar_url };
     presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
     realtimeChannel = presenceChannel;
     presenceChannel.on('presence', { event: 'sync' }, () => { 
@@ -261,17 +282,23 @@ function initPresenceChannel(userProfile) {
         if (window.AudioEngine) window.AudioEngine.playPing();
         if (typeof loadChatLogs === 'function') loadChatLogs();
     }).subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') { 
-            await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role, avatar_url: userProfile.avatar_url || '' }); 
-        }
+        if (status === 'SUBSCRIBED') { await trackMyPresence(); }
     });
 }
 
 // Re-track presence with fresh profile data (e.g. after a display handle change)
 // so the Active Commanders ticker updates immediately instead of only on reload.
 window.refreshMyPresence = async function(userProfile) {
-    if (!presenceChannel) return;
-    await presenceChannel.track({ online_at: new Date().toISOString(), username: userProfile.username || currentUserEmail.split('@')[0], role: userProfile.role || currentUserRole, avatar_url: userProfile.avatar_url || '' });
+    window.myPresenceProfile = { username: userProfile.username, role: userProfile.role || currentUserRole, avatar_url: userProfile.avatar_url };
+    await trackMyPresence();
+};
+
+// Called whenever the user switches terminal tabs, opens/closes the terminal,
+// etc. — see the TERM_TAB_ACTIVITY_LABELS hookup in ui.js.
+window.broadcastActivity = async function(activityLabel) {
+    if (!activityLabel || activityLabel === window.myCurrentActivity) return;
+    window.myCurrentActivity = activityLabel;
+    await trackMyPresence();
 };
 
 /* --- COMMS: REAL-TIME chat_logs SUBSCRIPTION ---
@@ -314,7 +341,11 @@ function renderPresenceTicker() {
         const presences = onlineUsersMap[userId];
         if (presences && presences.length > 0) {
             const p = presences[0];
-            html += `<div class="presence-pill" onclick="window.snapToCommander('${userId}')" style="cursor:pointer;" title="Click to locate vessel">🟢 ${p.username} ${p.role === 'dm' ? '[DM]' : ''}</div>`;
+            const activity = (p.activity || 'Monitoring DRADIS').toLowerCase();
+            html += `<div class="presence-pill" onclick="window.snapToCommander('${userId}')" title="Click to locate vessel">
+                <span class="presence-name">🟢 ${p.username} ${p.role === 'dm' ? '[DM]' : ''}</span>
+                <span class="presence-activity">${activity}</span>
+            </div>`;
         }
     });
     listDiv.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active commanders</span>';
