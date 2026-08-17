@@ -237,6 +237,16 @@ window.switchDmSubtab = function(subtab) {
     const panel = document.getElementById(`dm-panel-${subtab}`); if (panel) panel.classList.add('active');
 };
 
+window.TERM_TAB_ACTIVITY_LABELS = {
+    stats: 'Viewing Character Dossier',
+    combat: 'Managing Arsenal',
+    cargo: 'Managing Cargo Manifest',
+    vessel: 'Inspecting Vessel Deck',
+    notes: 'Editing Tactical Notes',
+    roster: 'Reviewing Crew Roster',
+    codex: 'Reviewing Sector Lore'
+};
+
 window.switchTermTab = function(tabName) {
     document.querySelectorAll('.term-tab-btn-vert').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.term-panel-content').forEach(p => p.classList.remove('active'));
@@ -247,11 +257,24 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'vessel' && typeof window.renderVesselDeck === 'function') { window.populateVesselDeckSelect(); window.renderVesselDeck(); }
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
     if (tabName === 'roster' && typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
+
+    const activityLabel = window.TERM_TAB_ACTIVITY_LABELS[tabName];
+    if (activityLabel && typeof window.broadcastActivity === 'function') window.broadcastActivity(activityLabel);
 };
 
 window.toggleCharacterTerminal = function() {
     const term = document.getElementById('character-terminal');
-    term.style.display = term.style.display === 'block' ? 'none' : 'block';
+    const opening = term.style.display !== 'block';
+    term.style.display = opening ? 'block' : 'none';
+
+    if (typeof window.broadcastActivity !== 'function') return;
+    if (opening) {
+        const activeBtn = document.querySelector('.term-tab-btn-vert.active');
+        const tabName = activeBtn ? activeBtn.id.replace('term-tab-btn-', '') : 'stats';
+        window.broadcastActivity(window.TERM_TAB_ACTIVITY_LABELS[tabName] || 'Reviewing Command Terminal');
+    } else {
+        window.broadcastActivity('Monitoring DRADIS');
+    }
 };
 
 window.openFullCargoTerminal = function() { const term = document.getElementById('character-terminal'); term.style.display = 'block'; window.switchTermTab('cargo'); };
