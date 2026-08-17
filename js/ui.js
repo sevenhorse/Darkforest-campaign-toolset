@@ -115,6 +115,8 @@ window.toggleCalendarControls = function() {
     const panel = document.getElementById('calendar-control-panel');
     panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
     window.updateCalendarDisplay();
+    const ftlOnlyCb = document.getElementById('jump-inversion-ftl-only');
+    if (ftlOnlyCb) ftlOnlyCb.checked = window.jumpInversionFtlOnly;
 };
 
 window.adjustTime = async function(amount, unit) {
@@ -684,24 +686,150 @@ window.openNoteFullscreen = function(id) {
     modal.style.display = 'block';
 };
 
-/* --- COMMS & CHAT --- */
+/* --- COMMS & CHAT: MULTI-TAB ARCHITECTURE WITH PER-TAB PAGINATION ---
+   Two persistent tabs (General Broadcast, Dice Streamer) plus one dynamic
+   tab per DM conversation partner. Tab keys: 'general', 'dice', 'pm:<userId>'.
+   Each channel has its OWN row limit fetched separately (see loadChatLogs /
+   loadDiceLogs / loadPmLogs in db.js) so a busy Dice Streamer can't crowd
+   General or PM history out of a shared cap. Dice and PM threads lazy-load
+   the first time their tab is opened. Closing a PM tab is a local-only
+   preference — it never touches the underlying conversation, and the tab
+   auto-reopens the moment a new incoming message arrives on it. */
+window.activeCommsTab = 'general';
+window.closedPmTabs = new Set(JSON.parse(localStorage.getItem('odyssey_closed_pm_tabs') || '[]'));
+window.commsUnread = {};
+
+function persistClosedPmTabs() {
+    localStorage.setItem('odyssey_closed_pm_tabs', JSON.stringify(Array.from(window.closedPmTabs)));
+}
+
+window.renderCommsTabBar = function() {
+    const bar = document.getElementById('comms-tabs-bar'); if (!bar) return;
+    let html = '';
+    html += `<button class="comms-tab-btn ${window.activeCommsTab === 'general' ? 'active' : ''} ${window.commsUnread['general'] ? 'unread' : ''}" onclick="window.switchCommsTab('general')">General</button>`;
+    html += `<button class="comms-tab-btn ${window.activeCommsTab === 'dice' ? 'active' : ''} ${window.commsUnread['dice'] ? 'unread' : ''}" onclick="window.switchCommsTab('dice')">🎲 Dice Streamer</button>`;
+
+    window.pmPartnerIds.forEach(uid => {
+        if (window.closedPmTabs.has(uid)) return;
+        const key = `pm:${uid}`;
+        const prof = allProfiles.find(p => p.id === uid);
+        const name = prof ? (prof.username || 'Commander') : 'Unknown';
+        html += `<button class="comms-tab-btn ${window.activeCommsTab === key ? 'active' : ''} ${window.commsUnread[key] ? 'unread' : ''}" onclick="window.switchCommsTab('${key}')">🔒 ${name}<span class="comms-tab-close" title="Close (keeps the conversation, just hides the tab)" onclick="event.stopPropagation(); window.closePmTab('${uid}')">✕</span></button>`;
+    });
+
+    bar.innerHTML = html;
+};
+
+window.switchCommsTab = async function(tabKey) {
+    window.activeCommsTab = tabKey;
+    window.commsUnread[tabKey] = false;
+    window.renderCommsTabBar();
+
+    // Lazy-load this channel's own history the first time it's opened.
+    if (tabKey === 'dice' && !window.diceLogsList) { await loadDiceLogs(); }
+    else if (tabKey.startsWith('pm:')) {
+        const pid = tabKey.slice(3);
+        if (!window.pmLogsCache[pid]) { await loadPmLogs(pid); }
+    }
+
+    window.renderChatFeed();
+    const input = document.getElementById('comms-message-input');
+    if (input) {
+        const isDice = tabKey === 'dice';
+        input.disabled = isDice;
+        input.placeholder = isDice ? 'Dice Streamer is a read-only log...' : 'Transmit message...';
+    }
+};
+
+window.closePmTab = function(userId) {
+    window.closedPmTabs.add(userId);
+    persistClosedPmTabs();
+    if (window.activeCommsTab === `pm:${userId}`) window.switchCommsTab('general');
+    else window.renderCommsTabBar();
+};
+
+window.startNewPmTab = function(userId) {
+    if (!userId) return;
+    window.pmPartnerIds.add(userId);
+    window.closedPmTabs.delete(userId);
+    persistClosedPmTabs();
+    window.switchCommsTab(`pm:${userId}`);
+    const select = document.getElementById('comms-recipient');
+    if (select) select.value = '';
+};
+
+// Single choke point for adding a message into local state, used both for
+// optimistic updates right after sending and for realtime-delivered rows.
+// Dedupes by row id so a message never gets double-appended if both paths
+// see it (e.g. Realtime not enabled yet, or a slow round trip).
+window.appendLocalChatLog = function(log) {
+    if (!log || log.id === undefined) return;
+    const alreadyIn = (arr) => arr && arr.some(l => l.id === log.id);
+
+    let tabKey = 'general';
+    if (log.message_type === 'roll') {
+        tabKey = 'dice';
+        if (window.diceLogsList && !alreadyIn(window.diceLogsList)) window.diceLogsList.push(log);
+    } else if (log.recipient_id) {
+        const partnerId = log.sender_id === currentUserId ? log.recipient_id : log.sender_id;
+        tabKey = `pm:${partnerId}`;
+        window.pmPartnerIds.add(partnerId);
+        if (log.sender_id !== currentUserId && window.closedPmTabs.has(partnerId)) {
+            window.closedPmTabs.delete(partnerId); // an incoming message reopens a closed tab
+            persistClosedPmTabs();
+        }
+        if (window.pmLogsCache[partnerId] && !alreadyIn(window.pmLogsCache[partnerId])) window.pmLogsCache[partnerId].push(log);
+    } else {
+        if (!alreadyIn(chatLogsList)) { chatLogsList.push(log); window.checkSysScan(log); }
+    }
+
+    if (tabKey === window.activeCommsTab) {
+        window.renderChatFeed();
+    } else {
+        if (log.sender_id !== currentUserId) {
+            window.commsUnread[tabKey] = true;
+            if (window.AudioEngine) window.AudioEngine.playPing();
+        }
+        window.renderCommsTabBar();
+    }
+};
+
+// Realtime handler — see initChatRealtimeChannel() in db.js.
+window.handleIncomingChatLog = function(newLog) {
+    if (!newLog) return;
+    // Only messages I'm actually party to: global (no recipient), or ones
+    // where I'm the sender or the recipient.
+    if (newLog.recipient_id && newLog.recipient_id !== currentUserId && newLog.sender_id !== currentUserId) return;
+    window.appendLocalChatLog(newLog);
+};
+
 window.sendChatMessage = async function() {
     const input = document.getElementById('comms-message-input'); const content = input.value.trim(); if (!content) return;
-    const recipientId = document.getElementById('comms-recipient').value;
-    await db.from('chat_logs').insert({ sender_id: currentUserId, content: content, message_type: 'text', recipient_id: recipientId === 'global' ? null : recipientId });
-    input.value = ''; if (typeof loadChatLogs === 'function') loadChatLogs();
+    const tab = window.activeCommsTab;
+    if (tab === 'dice') return; // read-only stream, not a chat room
+
+    const recipientId = tab.startsWith('pm:') ? tab.slice(3) : null;
+    const { data, error } = await db.from('chat_logs').insert({ sender_id: currentUserId, content: content, message_type: 'text', recipient_id: recipientId }).select().single();
+    input.value = '';
+    if (!error && data) window.appendLocalChatLog(data);
 };
 
 window.broadcastRoll = async function(title, breakdownText, totalSum) {
-    await db.from('chat_logs').insert({ sender_id: currentUserId, content: `Rolled ${title}: ${totalSum}`, message_type: 'roll', recipient_id: null, roll_data: { breakdown: breakdownText } });
-    if (typeof loadChatLogs === 'function') loadChatLogs();
+    const { data, error } = await db.from('chat_logs').insert({ sender_id: currentUserId, content: `Rolled ${title}: ${totalSum}`, message_type: 'roll', recipient_id: null, roll_data: { breakdown: breakdownText } }).select().single();
+    if (!error && data) window.appendLocalChatLog(data);
 };
 
 window.renderChatFeed = function() {
     const feed = document.getElementById('comms-chat-feed'); if (!feed) return;
+    window.renderCommsTabBar();
+    const tab = window.activeCommsTab;
+    let source = [];
+    if (tab === 'general') source = chatLogsList;
+    else if (tab === 'dice') source = window.diceLogsList || [];
+    else if (tab.startsWith('pm:')) source = window.pmLogsCache[tab.slice(3)] || [];
+
     let html = '';
-    chatLogsList.forEach(log => {
-        if (log.recipient_id && log.recipient_id !== currentUserId && log.sender_id !== currentUserId) return;
+    source.forEach(log => {
         const sender = allProfiles.find(p => p.id === log.sender_id); const senderName = sender ? (sender.username || 'Commander') : 'Unknown';
         const isDM = !!log.recipient_id; let headerColor = isDM ? '#c778dd' : '#00e5a3'; let prefix = isDM ? '🔒 [PRIVATE]' : '🌐';
         if (log.sender_id === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
@@ -712,14 +840,15 @@ window.renderChatFeed = function() {
         if (log.message_type === 'ping' && log.roll_data) { contentHTML = `${log.content} <button class="layer-edit" onclick="window.jumpToPingLocation(${log.roll_data.x}, ${log.roll_data.y})" style="padding:2px 8px; font-size:9px; margin-left:6px;">JUMP TO LOCATION</button>`; }
         html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.sender_id === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;">${contentHTML}</div></div>`;
     });
-    feed.innerHTML = html; feed.scrollTop = feed.scrollHeight;
+    feed.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No messages in this channel yet.</span>';
+    feed.scrollTop = feed.scrollHeight;
 };
 
 window.populateCommsRecipients = function() {
     const select = document.getElementById('comms-recipient'); if (!select) return;
-    let currentVal = select.value; let html = '<option value="global">🌐 Global Broadcast</option>';
-    allProfiles.forEach(p => { if (p.id !== currentUserId) { html += `<option value="${p.id}">🔒 DM: ${p.username || 'Commander'}</option>`; } });
-    select.innerHTML = html; if (select.querySelector(`option[value="${currentVal}"]`)) select.value = currentVal;
+    let html = '<option value="">+ New DM...</option>';
+    allProfiles.forEach(p => { if (p.id !== currentUserId) { html += `<option value="${p.id}">${p.username || 'Commander'}</option>`; } });
+    select.innerHTML = html;
 };
 
 /* --- FILE UPLOAD ENGINE --- */
