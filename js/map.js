@@ -64,6 +64,7 @@ window.getFowTier = function(system) {
     if (window.scannedSystems && window.scannedSystems.includes(system.id)) return 3; // Tier 3
     let inRange = false;
     for (let m of globalShipMarkersCache) {
+        if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
         if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied') || currentUserRole === 'dm') {
             if (Math.hypot(m.x - system.x, m.y - system.y) <= 300) { inRange = true; break; }
         }
@@ -147,19 +148,20 @@ window.spawnTokenAtCenter = async function() {
         payload.integrity_hull = 300; payload.max_hull = 300;
         payload.integrity_reactive = 10; payload.max_reactive = 10;
         payload.integrity_ablative = 10; payload.max_ablative = 10;
+        payload.integrity_hardened = 15; payload.max_hardened = 15;
         payload.ship_weapons = [
-            { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-            { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0 },
-            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0 },
-            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
-            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0 },
-            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-            { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0 },
-            { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 },
-            { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0 }
+            { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Piercing" },
+            { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 2, damage_type: "Piercing" },
+            { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Energy" },
+            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0, gun_count: 8, damage_type: "Explosive" },
+            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Antimatter" },
+            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak" },
+            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak" },
+            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak" },
+            { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Flak" },
+            { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 3, damage_type: "Heat" },
+            { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Antimatter" },
+            { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Ion" }
         ];
         payload.ship_decks = [
             { name: "Bridge / CIC", hp: 100, max_hp: 100 },
@@ -497,6 +499,41 @@ window.setDriveSpeedKey = function(key) { if (driveSpeeds[key]) { window.selecte
 window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId) { window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; let cargo = ship.cargo_inventory || {}; cargo.iff = newIff; await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', shipId); ship.cargo_inventory = cargo; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 
+/* --- MASTER-TO-SUB-TOKEN DOCKING ---
+   A docked craft stops rendering/being independently selectable on the map
+   (see the docked_to skip-checks in the render loop and click handler above)
+   and instead shows up as a "🔗 count" tag on its master's label. Only one
+   level of nesting is supported — you can't dock a ship to something that's
+   itself docked — to keep the map's notion of "independent tokens" simple. */
+window.dockShipToMaster = async function(subShipId, masterShipId) {
+    if (!masterShipId) { alert("Select a master vessel to dock to."); return; }
+    if (subShipId === masterShipId) return;
+    const sub = globalShipMarkersCache.find(m => m.id === subShipId);
+    if (sub && currentUserRole !== 'dm' && sub.owner_id !== currentUserId) { alert("You can only dock vessels you control."); return; }
+    const master = globalShipMarkersCache.find(m => m.id === masterShipId);
+    if (master && master.docked_to) { alert("That vessel is itself docked to another master — only one level of docking is supported."); return; }
+    const { error } = await db.from('ship_markers').update({ docked_to: masterShipId }).eq('id', subShipId);
+    if (error) { alert("Failed to dock: " + error.message); return; }
+    if (sub) sub.docked_to = masterShipId;
+    window.clearSelectedTarget(); // it's no longer an independently selectable token
+    if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+};
+
+window.undockShip = async function(shipId) {
+    const ship = globalShipMarkersCache.find(m => m.id === shipId);
+    if (!ship) return;
+    if (currentUserRole !== 'dm' && ship.owner_id !== currentUserId) { alert("You can only undock vessels you control."); return; }
+    // Detach near wherever its master currently is, not the sub-craft's own
+    // stale pre-dock coordinates, so it doesn't reappear somewhere unrelated.
+    const master = globalShipMarkersCache.find(m => m.id === ship.docked_to);
+    let updates = { docked_to: null };
+    if (master) { updates.x = master.x + (Math.random() * 60 - 30); updates.y = master.y + (Math.random() * 60 - 30); }
+    const { error } = await db.from('ship_markers').update(updates).eq('id', shipId);
+    if (error) { alert("Failed to undock: " + error.message); return; }
+    Object.assign(ship, updates);
+    if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+};
+
 window.executePlottedJump = async function() {
     if (!window.activeJumpShip || !window.jumpTargetPoint) return;
     let ship = window.activeJumpShip; let target = window.jumpTargetPoint;
@@ -647,6 +684,7 @@ window.initGalaxyEngine = function() {
         }
 
         for (let m of globalShipMarkersCache) {
+            if (m.docked_to) continue; // docked craft aren't independently selectable — they're part of their master
             if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < tokenHitRadius && (currentUserRole === 'dm' || m.owner_id === currentUserId)) {
                 window.draggedMarker = m; window.selectedTarget = { type: 'ship', data: m }; window.addRecentTarget(window.selectedTarget);
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
@@ -763,7 +801,37 @@ window.initGalaxyEngine = function() {
                 jumpPlotterBox = `<div style="background:#040605; border:1px solid #00e1ff; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#00e1ff; font-weight:bold;">🌌 JUMP VECTOR PLOTTER</span><div style="font-size:10px; color:#d4c5a9; margin:4px 0;">${targetInfo}</div><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Drive System Override:</label><select onchange="window.setDriveSpeedKey(this.value)" style="font-size:9px; margin:2px 0; background:#0a1410; color:#00e1ff;">${driveOptionsHtml}</select>${calcTimeStr}<div style="display:flex; gap:6px; margin-top:6px;"><button class="btn-reveal" onclick="window.executePlottedJump()" ${!window.jumpTargetPoint ? 'disabled style="opacity:0.5;"' : ''} style="flex:2; font-size:9px; padding:6px;">🚀 EXECUTE JUMP & ADVANCE TIME</button><button class="btn-remove" onclick="window.cancelJumpPlotting()" style="flex:1; font-size:9px; padding:6px;">CANCEL</button></div></div>`;
             } else if (isLocked) { jumpPlotterBox = `<button class="btn-deploy" onclick="window.startJumpPlottingMode()" style="font-size:9px; padding:6px; margin-top:6px;">🌌 PLOT JUMP VECTOR</button>`; }
 
-            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${currentUserRole === 'dm' ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
+            // DOCKING BAY: undock button if this ship IS a docked sub-craft (reachable
+            // here via search/bookmarks/recents even though it's no longer clickable
+            // on the map directly), or a docking-bay manager if it's an independent
+            // ship — list of what's currently docked to it, plus a dock-new control.
+            let dockingBox = '';
+            if (m.docked_to) {
+                const master = globalShipMarkersCache.find(s => s.id === m.docked_to);
+                dockingBox = `<div style="background:#040605; border:1px solid #4a7ab5; padding:8px; margin-top:8px; border-radius:2px;">
+                    <span style="font-size:9px; color:#a2c4f5; font-weight:bold;">🔗 DOCKED</span>
+                    <div style="font-size:10px; color:#d4c5a9; margin:4px 0;">Attached to <strong>${master ? master.name : 'Unknown'}</strong> — not an independent map token while docked.</div>
+                    <button class="btn-remove" onclick="window.undockShip('${m.id}')" style="font-size:9px; padding:4px; width:100%;">DETACH & OPERATE INDEPENDENTLY</button>
+                </div>`;
+            } else {
+                const dockedHere = globalShipMarkersCache.filter(s => s.docked_to === m.id);
+                const otherIndependentShips = globalShipMarkersCache.filter(s => s.id !== m.id && !s.docked_to);
+                let dockedListHtml = dockedHere.length === 0
+                    ? `<span style="font-size:9px; color:#6b826a;">No craft currently docked.</span>`
+                    : dockedHere.map(s => `<div style="display:flex; justify-content:space-between; align-items:center; font-size:9px; color:#d4c5a9; margin-bottom:3px;"><span>${s.name}</span><button class="layer-del" onclick="window.undockShip('${s.id}')" style="padding:1px 6px; font-size:8px;">DETACH</button></div>`).join('');
+                let dockOptionsHtml = otherIndependentShips.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+                dockingBox = `<div style="background:#040605; border:1px solid #4a7ab5; padding:8px; margin-top:8px; border-radius:2px;">
+                    <span style="font-size:9px; color:#a2c4f5; font-weight:bold;">🔗 DOCKING BAY</span>
+                    <div style="margin:4px 0;">${dockedListHtml}</div>
+                    ${otherIndependentShips.length > 0 ? `<div style="display:flex; gap:4px; margin-top:4px;">
+                        <label for="dock-select-${m.id}" style="display:none;">Dock Vessel</label>
+                        <select id="dock-select-${m.id}" style="flex:1; margin:0; font-size:9px; padding:3px;">${dockOptionsHtml}</select>
+                        <button class="btn-reveal" onclick="window.dockShipToMaster(document.getElementById('dock-select-${m.id}').value, '${m.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">DOCK</button>
+                    </div>` : ''}
+                </div>`;
+            }
+
+            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${currentUserRole === 'dm' ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
             let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button></div>` : '';
@@ -919,6 +987,7 @@ window.initGalaxyEngine = function() {
         }
 
         for (let m of globalShipMarkersCache) {
+            if (m.docked_to) continue; // docked craft render as part of their master, not as their own token
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             const size = 10 / window.camera.zoom; let iffColor = (m.cargo_inventory && m.cargo_inventory.iff === 'hostile') ? '#ff3333' : '#00e5a3';
 
@@ -950,7 +1019,9 @@ window.initGalaxyEngine = function() {
             let labelX = m.x + size + (6 / window.camera.zoom);
             let labelY = m.y;
             let ownerTag = isMine ? '' : (isNpcAsset ? ' [NPC]' : ` [${ownerProfile.username || 'ALLY'}]`);
-            let labelText = m.name + ownerTag;
+            let dockedCount = globalShipMarkersCache.filter(d => d.docked_to === m.id).length;
+            let dockTag = dockedCount > 0 ? ` 🔗${dockedCount}` : '';
+            let labelText = m.name + ownerTag + dockTag;
             ctx.lineWidth = 3 / window.camera.zoom;
             ctx.strokeStyle = 'rgba(3, 4, 6, 0.85)';
             ctx.strokeText(labelText, labelX, labelY);
