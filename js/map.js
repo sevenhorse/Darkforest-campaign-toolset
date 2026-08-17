@@ -259,6 +259,86 @@ window.updateToolButtonStyles = function() {
     if(hBtn) { hBtn.style.borderColor = window.hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = window.hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
 };
 
+/* --- CIC TACTICAL TABLE: RADAR SWEEP TOGGLE ---
+   Pure CSS conic-gradient + animation (see .radar-sweep in style.css) — no
+   canvas redraw or per-frame JS cost at all, so it can't touch render-loop
+   or drag performance. Only the on/off state lives here. */
+window.radarSweepActive = localStorage.getItem('odyssey_radar_sweep') === 'true';
+function applyRadarSweepState() {
+    const overlay = document.getElementById('radar-sweep-overlay');
+    if (overlay) overlay.classList.toggle('active', window.radarSweepActive);
+    const btn = document.getElementById('radar-sweep-toggle-btn');
+    if (btn) { btn.style.borderColor = window.radarSweepActive ? '#00e5a3' : '#3c4e36'; btn.style.color = window.radarSweepActive ? '#00e5a3' : '#6b826a'; }
+}
+window.toggleRadarSweep = function() {
+    window.radarSweepActive = !window.radarSweepActive;
+    localStorage.setItem('odyssey_radar_sweep', window.radarSweepActive ? 'true' : 'false');
+    applyRadarSweepState();
+};
+
+/* --- CIC TACTICAL TABLE: DYNAMIC GRID ---
+   Drawn in world-space (inside the camera transform) so it pans/scales with
+   the map. Spacing snaps to a "1-2-5" sequence so on-screen cell size stays
+   in a readable band at any zoom instead of becoming a solid wall of lines
+   zoomed in or invisible zoomed out. Bounded to the visible viewport only
+   (cx/cy/hw/hh, already computed once per frame by the caller) so cost stays
+   flat regardless of total map size. Returns the spacing used, for the
+   telemetry readout. */
+function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
+    const targetPx = 90;
+    const rawSpacing = targetPx / zoom;
+    const pow10 = Math.pow(10, Math.floor(Math.log10(rawSpacing)));
+    const norm = rawSpacing / pow10;
+    const mult = norm < 2 ? 1 : (norm < 5 ? 2 : 5);
+    const spacing = mult * pow10;
+
+    let alpha = Math.min(0.10, Math.max(0.015, zoom * 0.05));
+
+    const startX = Math.floor((cx - hw) / spacing) * spacing;
+    const endX = Math.ceil((cx + hw) / spacing) * spacing;
+    const startY = Math.floor((cy - hh) / spacing) * spacing;
+    const endY = Math.ceil((cy + hh) / spacing) * spacing;
+
+    ctx.save();
+    ctx.strokeStyle = `rgba(0, 229, 163, ${alpha})`;
+    ctx.lineWidth = 1 / zoom;
+    ctx.beginPath();
+    for (let x = startX; x <= endX; x += spacing) { ctx.moveTo(x, cy - hh); ctx.lineTo(x, cy + hh); }
+    for (let y = startY; y <= endY; y += spacing) { ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y); }
+    ctx.stroke();
+
+    // Brighter major lines every 5th cell for a bit of structure.
+    const majorSpacing = spacing * 5;
+    ctx.strokeStyle = `rgba(0, 229, 163, ${Math.min(0.16, alpha * 1.8)})`;
+    ctx.beginPath();
+    const startXM = Math.floor((cx - hw) / majorSpacing) * majorSpacing;
+    const startYM = Math.floor((cy - hh) / majorSpacing) * majorSpacing;
+    for (let x = startXM; x <= endX; x += majorSpacing) { ctx.moveTo(x, cy - hh); ctx.lineTo(x, cy + hh); }
+    for (let y = startYM; y <= endY; y += majorSpacing) { ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y); }
+    ctx.stroke();
+    ctx.restore();
+
+    return spacing;
+}
+
+/* --- CIC TACTICAL TABLE: TELEMETRY READOUT ---
+   Corner brackets are static CSS (see .cic-frame), zero runtime cost. This
+   just updates the handful of text values (sector coords, zoom%, grid
+   scale) — throttled well below frame rate since a coordinate readout
+   doesn't need 60 DOM writes/sec. */
+let lastCicTelemetryUpdate = 0;
+function updateCicTelemetry(cx, cy, zoom, gridSpacing) {
+    const now = Date.now();
+    if (now - lastCicTelemetryUpdate < 150) return;
+    lastCicTelemetryUpdate = now;
+    const coordsEl = document.getElementById('cic-sector-coords');
+    const zoomEl = document.getElementById('cic-zoom-pct');
+    const gridEl = document.getElementById('cic-grid-scale');
+    if (coordsEl) coordsEl.textContent = `${Math.round(cx)} / ${Math.round(cy)}`;
+    if (zoomEl) zoomEl.textContent = `${Math.round(zoom * 100)}%`;
+    if (gridEl) gridEl.textContent = gridSpacing ? `${gridSpacing}u` : '—';
+}
+
 /* --- GLOBAL SYSTEM SEARCH --- */
 window._globalSearchResults = [];
 let _searchDropdownEscaped = false;
@@ -422,6 +502,7 @@ window.initGalaxyEngine = function() {
 
     function resize() { const dpr = window.devicePixelRatio || 1; canvas.width = container.clientWidth * dpr; canvas.height = container.clientHeight * dpr; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr); }
     window.addEventListener('resize', resize); resize();
+    applyRadarSweepState();
     
     const proceduralSystems = []; const rng = mulberry32(1048596); 
     const coreRadius = 1400; const galaxyRadius = 11000;
@@ -643,6 +724,9 @@ window.initGalaxyEngine = function() {
         const hw = cssWidth / (2 * window.camera.zoom); const hh = cssHeight / (2 * window.camera.zoom);
         const cx = -window.camera.x / window.camera.zoom; const cy = -window.camera.y / window.camera.zoom;
 
+        let _gridSpacing = null;
+        if (window.tacticalGridEnabled !== false) { _gridSpacing = drawTacticalGrid(ctx, cx, cy, hw, hh, window.camera.zoom); }
+
         if (window.camera.zoom < 0.8) { let coreGrd = ctx.createRadialGradient(0, 0, 100, 0, 0, 1800); coreGrd.addColorStop(0, 'rgba(118, 148, 255, 0.12)'); coreGrd.addColorStop(0.5, 'rgba(0, 229, 163, 0.04)'); coreGrd.addColorStop(1, 'rgba(0, 0, 0, 0)'); ctx.fillStyle = coreGrd; ctx.beginPath(); ctx.arc(0, 0, 1800, 0, Math.PI * 2); ctx.fill(); }
 
         let allSystems = proceduralSystems.concat(globalDbSystemsCache);
@@ -830,7 +914,9 @@ window.initGalaxyEngine = function() {
             ctx.beginPath(); ctx.arc(ox, oy, pulseSize / window.camera.zoom, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
         }
 
-        ctx.restore(); requestAnimationFrame(render);
+        ctx.restore();
+        updateCicTelemetry(cx, cy, window.camera.zoom, _gridSpacing);
+        requestAnimationFrame(render);
     }
     render();
 };
