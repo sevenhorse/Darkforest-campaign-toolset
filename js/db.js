@@ -110,6 +110,7 @@ async function fetchUserProfile(user) {
 
     initPresenceChannel(data);
     initChatRealtimeChannel();
+    initCombatTrackerRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
@@ -284,6 +285,23 @@ function initChatRealtimeChannel() {
     chatRealtimeChannel = db.channel('chat_logs_stream')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_logs' }, (payload) => {
             if (typeof window.handleIncomingChatLog === 'function') window.handleIncomingChatLog(payload.new);
+        })
+        .subscribe();
+}
+
+/* --- COMBAT INITIATIVE TRACKER: REAL-TIME SYNC ---
+   Without this, a player's addCombatant()/removeCombatant() only ever
+   updates their OWN client's combatantsList — nobody else, including the
+   DM, finds out until something else on their end happens to re-trigger
+   loadCombatTracker() (or they reload the page). Subscribing to every
+   change on the table and just refetching keeps everyone's tracker in
+   sync live. Same Supabase Realtime replication requirement as chat_logs
+   (Database > Replication) — enable it for combat_tracker too. */
+let combatTrackerRealtimeChannel = null;
+function initCombatTrackerRealtimeChannel() {
+    combatTrackerRealtimeChannel = db.channel('combat_tracker_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'combat_tracker' }, () => {
+            if (typeof loadCombatTracker === 'function') loadCombatTracker();
         })
         .subscribe();
 }
