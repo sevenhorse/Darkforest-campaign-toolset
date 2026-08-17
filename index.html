@@ -528,6 +528,7 @@
                 <button id="ping-tool-toggle-btn" onclick="window.togglePingMode()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">PING</button>
                 <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">ROUTES</button>
                 <button id="territory-tool-toggle-btn" onclick="window.toggleTerritoryTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px; display: none;">TERRITORIES</button>
+                <button id="radar-sweep-toggle-btn" onclick="window.toggleRadarSweep()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RADAR</button>
                 <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 8px; border-radius: 2px; font-size: 10px; color: #00e5a3; cursor: pointer; white-space: nowrap;" onclick="window.toggleCalendarControls()">
                     <span id="clock-ticker-text">YR 2800.01.01 // 00:00</span>
                 </div>
@@ -550,6 +551,19 @@
         <div id="canvas-wrapper">
             <div id="canvas-container">
                 <canvas id="galaxyCanvas"></canvas>
+            </div>
+
+            <!-- CIC TACTICAL TABLE: STATIC FRAMING (pure CSS, no per-frame cost) -->
+            <div id="radar-sweep-overlay" class="radar-sweep"></div>
+            <div id="cic-frame" class="cic-frame">
+                <div class="cic-corner cic-corner-tl"></div>
+                <div class="cic-corner cic-corner-tr"></div>
+                <div class="cic-corner cic-corner-bl"></div>
+                <div class="cic-corner cic-corner-br"></div>
+                <div class="cic-telemetry cic-telemetry-tl">SECTOR <span id="cic-sector-coords">0 / 0</span></div>
+                <div class="cic-telemetry cic-telemetry-tr">ZOOM <span id="cic-zoom-pct">100%</span></div>
+                <div class="cic-telemetry cic-telemetry-bl">GRID <span id="cic-grid-scale">—</span></div>
+                <div class="cic-telemetry cic-telemetry-br">DRADIS ACTIVE</div>
             </div>
             
             <div id="territory-control-panel" class="panel">
@@ -645,13 +659,14 @@
                     <h4 style="margin:0;">Secure Comms Array</h4>
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
-                <div id="comms-chat-feed" style="height: 250px; overflow-y: auto; background: #030403; border: 1px solid #3c4e36; padding: 8px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
-                <div style="display: flex; gap: 6px; margin-bottom: 6px;">
-                    <label for="comms-recipient" style="display:none;">Recipient</label>
-                    <select id="comms-recipient" style="flex: 1; margin: 0; font-size: 10px; padding: 4px; background: #0a1410;">
-                        <option value="global">Global Broadcast</option>
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+                    <div id="comms-tabs-bar" style="display:flex; gap:4px; flex-wrap:wrap; flex-grow:1;"></div>
+                    <label for="comms-recipient" style="display:none;">Start New DM</label>
+                    <select id="comms-recipient" onchange="window.startNewPmTab(this.value)" style="width:110px; margin:0; font-size:9px; padding:4px; background:#0a1410;">
+                        <option value="">+ New DM...</option>
                     </select>
                 </div>
+                <div id="comms-chat-feed" style="height: 250px; overflow-y: auto; background: #030403; border: 1px solid #3c4e36; padding: 8px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
                 <div style="display: flex; gap: 6px;">
                     <label for="comms-message-input" style="display:none;">Message</label>
                     <input type="text" id="comms-message-input" placeholder="Transmit message..." style="flex: 2; margin: 0; padding: 6px;" onkeypress="if(event.key === 'Enter') window.sendChatMessage()">
