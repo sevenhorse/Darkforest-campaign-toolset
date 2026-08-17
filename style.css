@@ -262,6 +262,22 @@ canvas { display: block; width: 100%; height: 100%; }
     margin-top: 4px;
 }
 
+/* Author metadata badge — notes, Codex entries, anywhere authorship needs
+   a small, unobtrusive credit line rather than competing with the content. */
+.author-tag {
+    display: inline-block;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 9px;
+    text-transform: lowercase;
+    letter-spacing: 0.3px;
+    color: #6b826a;
+    background: #040605;
+    border: 1px solid #3c4e36;
+    padding: 1px 6px;
+    border-radius: 2px;
+    margin-top: 8px;
+}
+
 /* FULLSCREEN CODEX READER MODAL */
 #codex-fullscreen-reader {
     display: none;
