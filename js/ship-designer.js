@@ -143,7 +143,8 @@ window.deployShipTemplate = async function(id) {
     if (error) { alert("Failed to deploy vessel: " + error.message); return; }
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
     if (window.AudioEngine) window.AudioEngine.playPing();
-    alert(`${t.name} deployed to your current DRADIS position.`);
+    if (typeof window.showToast === 'function') window.showToast(`${t.name} deployed to your current DRADIS position.`);
+    else alert(`${t.name} deployed to your current DRADIS position.`);
 };
 
 /* --- EDIT STATS MODAL --- */
@@ -225,7 +226,8 @@ window.deployShipTemplate = async function(id) {
     };
 })();
 
-/* --- LOADOUT MODAL (weapon list, reuses the shared 12-type damage matrix) --- */
+/* --- LOADOUT & DECKS MODAL (weapons + internal decks, reuses the shared
+   12-type damage matrix) --- */
 (function() {
     let overlay, currentId;
     function renderLoadoutList() {
@@ -239,13 +241,25 @@ window.deployShipTemplate = async function(id) {
             const dt = window.normalizeDamageType(w.damage_type || 'Impact');
             const info = window.DAMAGE_TYPES[dt];
             html += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
-                <span style="font-size:10px; color:#d4c5a9;">${w.name} — ${w.dice}${w.modifier} · <span style="color:${info.color};">${dt}</span> · ${w.gun_count || 1}x guns</span>
+                <span style="font-size:10px; color:#d4c5a9;">${w.name} — ${w.dice}${w.modifier} ${w.explodes ? '💥' : ''} · <span style="color:${info.color};">${dt}</span> · ${w.gun_count || 1}x guns</span>
                 <button class="layer-del" onclick="window.removeTemplateWeapon(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
             </div>`;
         });
         listEl.innerHTML = html;
         const slots = t.hardpoint_slots || 4;
         document.getElementById('tmpl-loadout-slots-label').innerText = `${weapons.length} / ${slots} hardpoints used`;
+
+        const deckListEl = document.getElementById('tmpl-decks-list');
+        const decks = t.ship_decks || [];
+        let deckHtml = '';
+        if (decks.length === 0) deckHtml = '<span style="font-size:10px; color:#6b826a;">No internal decks configured.</span>';
+        decks.forEach((d, idx) => {
+            deckHtml += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
+                <span style="font-size:10px; color:#d4c5a9;">${d.name} — ${d.hp}/${d.max_hp} HP</span>
+                <button class="layer-del" onclick="window.removeTemplateDeck(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
+            </div>`;
+        });
+        deckListEl.innerHTML = deckHtml;
     }
 
     function ensureModal() {
@@ -255,7 +269,7 @@ window.deployShipTemplate = async function(id) {
         overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
         overlay.innerHTML = `<div class="panel" style="position:relative; width:440px; max-width:94vw; max-height:88vh; overflow-y:auto; border-color:#ff6b6b;">
             <h4 style="color:#ff6b6b; margin-top:0;">Weapon Loadout <span id="tmpl-loadout-slots-label" style="font-size:9px; color:#6b826a; font-weight:normal;"></span></h4>
-            <div id="tmpl-loadout-list" style="max-height:220px; overflow-y:auto; margin-bottom:10px;"></div>
+            <div id="tmpl-loadout-list" style="max-height:180px; overflow-y:auto; margin-bottom:10px;"></div>
             <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
                 <label for="tmpl-loadout-name" style="font-size:9px; color:#ffaaaa;">Add Weapon</label>
                 <input type="text" id="tmpl-loadout-name" placeholder="Weapon Name" style="border-color:#ff3333;">
@@ -265,8 +279,23 @@ window.deployShipTemplate = async function(id) {
                     <input type="number" id="tmpl-loadout-guns" placeholder="Guns" min="1" value="1" style="flex:1; border-color:#ff3333; text-align:center;">
                 </div>
                 <select id="tmpl-loadout-dmgtype" style="border-color:#ff3333;">${window.buildDamageTypeOptionsHtml('Impact')}</select>
+                <label for="tmpl-loadout-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:6px;">
+                    <input type="checkbox" id="tmpl-loadout-explodes" checked style="margin:0;"> Exploding Dice
+                </label>
                 <button class="btn-remove" onclick="window.addTemplateWeapon()" style="width:100%; margin-top:6px; font-size:10px;">+ ADD HARDPOINT</button>
             </div>
+
+            <h4 style="color:#00e1ff; margin-top:14px; border-top:1px solid #3c4e36; padding-top:10px;">Internal Decks</h4>
+            <div id="tmpl-decks-list" style="max-height:140px; overflow-y:auto; margin-bottom:10px;"></div>
+            <div style="background:#030403; padding:8px; border:1px solid #00e1ff; border-radius:2px;">
+                <label for="tmpl-deck-name" style="font-size:9px; color:#6b826a;">Add Deck / Subsystem</label>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="tmpl-deck-name" placeholder="e.g. Engineering, Bridge..." style="flex:2; border-color:#00e1ff;">
+                    <input type="number" id="tmpl-deck-hp" placeholder="Max HP" value="50" style="flex:1; border-color:#00e1ff; text-align:center;">
+                </div>
+                <button class="btn-reveal" onclick="window.addTemplateDeck()" style="width:100%; margin-top:6px; font-size:10px; border-color:#00e1ff; color:#00e1ff;">+ ADD DECK</button>
+            </div>
+
             <button id="tmpl-loadout-close-btn" style="width:100%; margin-top:12px;">CLOSE</button>
         </div>`;
         document.body.appendChild(overlay);
@@ -297,8 +326,9 @@ window.deployShipTemplate = async function(id) {
         if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
         const gunCount = parseInt(document.getElementById('tmpl-loadout-guns').value) || 1;
         const dmgType = document.getElementById('tmpl-loadout-dmgtype').value;
+        const explodes = document.getElementById('tmpl-loadout-explodes').checked;
 
-        weapons.push({ loc: 'Hardpoint', name, dice, modifier: mod, explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: gunCount, damage_type: dmgType });
+        weapons.push({ loc: 'Hardpoint', name, dice, modifier: mod, explodes, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: gunCount, damage_type: dmgType });
         const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', currentId);
         if (error) { alert("Failed to add weapon: " + error.message); return; }
         t.ship_weapons = weapons;
@@ -313,6 +343,31 @@ window.deployShipTemplate = async function(id) {
         weapons.splice(idx, 1);
         await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', currentId);
         t.ship_weapons = weapons;
+        renderLoadoutList();
+    };
+
+    window.addTemplateDeck = async function() {
+        const t = findAnyTemplateById(currentId);
+        if (!t) return;
+        const name = document.getElementById('tmpl-deck-name').value.trim();
+        if (!name) { alert("Enter a deck or subsystem name."); return; }
+        const maxHp = parseInt(document.getElementById('tmpl-deck-hp').value) || 50;
+        const decks = t.ship_decks || [];
+        decks.push({ name, hp: maxHp, max_hp: maxHp });
+        const { error } = await db.from('ship_templates').update({ ship_decks: decks }).eq('id', currentId);
+        if (error) { alert("Failed to add deck: " + error.message); return; }
+        t.ship_decks = decks;
+        document.getElementById('tmpl-deck-name').value = '';
+        renderLoadoutList();
+    };
+
+    window.removeTemplateDeck = async function(idx) {
+        const t = findAnyTemplateById(currentId);
+        if (!t) return;
+        const decks = t.ship_decks || [];
+        decks.splice(idx, 1);
+        await db.from('ship_templates').update({ ship_decks: decks }).eq('id', currentId);
+        t.ship_decks = decks;
         renderLoadoutList();
     };
 })();
