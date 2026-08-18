@@ -72,10 +72,17 @@ const driveSpeeds = {
 
 window.handleLogin = async function() {
     if (!db) { alert("Database connection failed."); return; }
+    // Guards against a double-click firing two concurrent login flows — each
+    // one independently created its own presence channel (and its own ping
+    // listener), so a single ping would fire audio/visual twice until one of
+    // the duplicate channels eventually dropped.
+    if (window._loginInProgress) return;
+    window._loginInProgress = true;
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     const { data, error } = await db.auth.signInWithPassword({ email, password });
     if (error) {
+        window._loginInProgress = false;
         const errorDiv = document.getElementById('error-message');
         if (errorDiv) { errorDiv.innerText = "Access Denied: " + error.message; errorDiv.style.display = 'block'; }
         return;
@@ -284,6 +291,7 @@ async function trackMyPresence() {
 }
 
 function initPresenceChannel(userProfile) {
+    if (presenceChannel) { try { presenceChannel.unsubscribe(); } catch (e) {} } // defends against duplicate channels if this ever gets called twice
     window.myPresenceProfile = { username: userProfile.username, role: userProfile.role, avatar_url: userProfile.avatar_url };
     presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
     realtimeChannel = presenceChannel;
