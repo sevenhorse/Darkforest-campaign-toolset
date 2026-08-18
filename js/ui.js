@@ -44,6 +44,38 @@
     };
 })();
 
+/* --- TOAST NOTIFICATIONS ---
+   Same reasoning as the confirm modal above: a plain alert() for "save
+   succeeded" messages has the identical browser-disable-dialogs
+   vulnerability confirm() had — once a user checks "Prevent this page from
+   creating additional dialogs," every subsequent alert() silently no-ops,
+   and a save action that ends in a swallowed alert() can look like it did
+   nothing. This is a non-blocking, self-dismissing notification that can't
+   be disabled the same way. */
+(function() {
+    let container;
+    function ensureContainer() {
+        if (container) return;
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.style.cssText = 'position:fixed; bottom:24px; right:24px; z-index:6000; display:flex; flex-direction:column; gap:8px; pointer-events:none;';
+        document.body.appendChild(container);
+    }
+    window.showToast = function(message, tone) {
+        ensureContainer();
+        const color = tone === 'error' ? '#ff3333' : '#00e5a3';
+        const toast = document.createElement('div');
+        toast.style.cssText = `background:#040605; border:1px solid ${color}; color:${color}; padding:10px 16px; border-radius:2px; font-size:11px; box-shadow:0 0 12px rgba(0,229,163,0.15); opacity:0; transition:opacity 0.25s ease; max-width:320px;`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        requestAnimationFrame(() => { toast.style.opacity = '1'; });
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+        }, 3200);
+    };
+})();
+
 /* --- CALENDAR & TIME ENGINE --- */
 window.universeTimeHours = parseInt(localStorage.getItem('odyssey_universe_time') || '24192000'); 
 window.timeFlowActive = false;
@@ -274,6 +306,7 @@ window.switchTermTab = function(tabName) {
 
     if (tabName === 'cargo' && typeof window.renderTerminalCargoDeck === 'function') { window.populateCargoVesselSelect(); window.renderTerminalCargoDeck(); }
     if (tabName === 'vessel' && typeof window.renderVesselDeck === 'function') { window.populateVesselDeckSelect(); window.renderVesselDeck(); }
+    if (tabName === 'combat') { (async () => { if (!window.diceLogsList) { window.diceLogsList = []; if (typeof loadDiceLogs === 'function') await loadDiceLogs(); } if (typeof window.renderArsenalDiceFeed === 'function') window.renderArsenalDiceFeed(); })(); }
     if (tabName === 'colonies') { if (typeof window.populateFleetFormSelects === 'function') window.populateFleetFormSelects(); if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel(); if (typeof window.renderFleetGroupsPanel === 'function') window.renderFleetGroupsPanel(); }
     if (tabName === 'shipdesigner' && typeof window.renderShipDesignerPanel === 'function') window.renderShipDesignerPanel();
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
@@ -353,8 +386,8 @@ function renderSkillInputs() {
     let html = '';
     skillList.forEach(skill => {
         const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        html += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:4px 6px; border-radius:2px; border:1px solid #3c4e36;">
-                <span style="font-size:10px; color:#d4c5a9;">${skill}</span><input type="number" id="skill-${safeKey}" min="-100" max="100" value="0" style="width:65px; margin:0; text-align:right; font-size:10px; padding:2px;"></div>`;
+        html += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px 8px; border-radius:2px; border:1px solid #3c4e36;">
+                <span style="font-size:11px; color:#d4c5a9;">${skill}</span><input type="number" id="skill-${safeKey}" min="-100" max="100" value="0" style="width:74px; margin:0; text-align:right; font-size:13px; padding:4px 8px 4px 4px;"></div>`;
     });
     container.innerHTML = html;
     
@@ -420,7 +453,8 @@ window.saveTerminalProfile = async function() {
     if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
     if (typeof window.populateCommsRecipients === 'function') window.populateCommsRecipients();
 
-    alert("Character dossier & stats secured to database.");
+    if (typeof window.showToast === 'function') window.showToast("Character dossier & stats secured to database.");
+    else alert("Character dossier & stats secured to database.");
     if (typeof loadAllProfiles === 'function') loadAllProfiles();
 };
 
@@ -835,6 +869,7 @@ window.appendLocalChatLog = function(log) {
     if (log.message_type === 'roll') {
         tabKey = 'dice';
         if (window.diceLogsList && !alreadyIn(window.diceLogsList)) window.diceLogsList.push(log);
+        if (typeof window.renderArsenalDiceFeed === 'function') window.renderArsenalDiceFeed();
     } else if (log.recipient_id) {
         const partnerId = log.sender_id === currentUserId ? log.recipient_id : log.sender_id;
         tabKey = `pm:${partnerId}`;
