@@ -293,6 +293,7 @@ window.TERM_TAB_ACTIVITY_LABELS = {
     vessel: 'Inspecting Vessel Deck',
     colonies: 'Managing Colonial Assets',
     shipdesigner: 'Designing Vessel Profiles',
+    perkdesigner: 'Designing Specializations',
     notes: 'Editing Tactical Notes',
     roster: 'Reviewing Crew Roster',
     codex: 'Reviewing Sector Lore'
@@ -309,6 +310,7 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'combat') { (async () => { if (!window.diceLogsList) { window.diceLogsList = []; if (typeof loadDiceLogs === 'function') await loadDiceLogs(); } if (typeof window.renderArsenalDiceFeed === 'function') window.renderArsenalDiceFeed(); })(); }
     if (tabName === 'colonies') { if (typeof window.populateFleetFormSelects === 'function') window.populateFleetFormSelects(); if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel(); if (typeof window.renderFleetGroupsPanel === 'function') window.renderFleetGroupsPanel(); }
     if (tabName === 'shipdesigner' && typeof window.renderShipDesignerPanel === 'function') window.renderShipDesignerPanel();
+    if (tabName === 'perkdesigner' && typeof window.renderPerkDesignerPanel === 'function') window.renderPerkDesignerPanel();
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
     if (tabName === 'roster' && typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
 
@@ -380,7 +382,7 @@ window.toggleDmScratchpad = function() { if (currentUserRole !== 'dm') return; c
 window.saveDmScratchpad = function() { if (currentUserRole !== 'dm') return; const val = document.getElementById('dm-scratchpad-input').value; localStorage.setItem('odyssey_dm_scratchpad', val); };
 
 /* --- SKILLS & CHARACTER TERMINAL --- */
-const skillList = [ "Athletics", "Stealth", "Survival", "Ballistic Weapons", "Energy Weapons", "Explosives", "Computers", "Engineering", "Sciences", "Mechanics", "Medical", "Speechcraft", "Melee", "Pilot" ];
+const skillList = [ "Athletics", "Stealth", "Survival", "Ballistic Weapons", "Energy Weapons", "Explosives", "Computers", "Engineering", "Sciences", "Mechanics", "Medical", "Speechcraft" ];
 function renderSkillInputs() {
     const container = document.getElementById('skills-input-container'); if (!container) return;
     let html = '';
@@ -410,12 +412,92 @@ window.renderCharacterTerminalData = function() {
     setVal('stat-charisma', c.stat_charisma || 'd4'); setVal('stat-dexterity', c.stat_dexterity || 'd4'); setVal('stat-intelligence', c.stat_intelligence || 'd4');
     setVal('stat-strength', c.stat_strength || 'd4'); setVal('stat-toughness', c.stat_toughness || 'd4'); setVal('stat-willpower', c.stat_willpower || 'd4');
     setVal('term-vitality', c.vitality || 0); setVal('term-stress', c.stress || 0); setVal('term-adversity', c.adversity_tokens || 0);
-    setVal('term-specialties', c.specialties || ''); setVal('term-assets', c.assets || ''); setVal('term-history', c.history || '');
+    setVal('term-specialties', c.specialties || ''); setVal('term-assets', c.assets || ''); setVal('term-history', c.history || ''); setVal('term-personal-history', c.personal_history || '');
     setVal('aug-head', c.aug_head || ''); setVal('aug-torso', c.aug_torso || ''); setVal('aug-larm', c.aug_larm || '');
-    setVal('aug-rarm', c.aug_rarm || ''); setVal('aug-lleg', c.aug_lleg || ''); setVal('aug-rleg', c.aug_rleg || '');
+    setVal('aug-rarm', c.aug_rarm || ''); setVal('aug-lleg', c.aug_lleg || ''); setVal('aug-rleg', c.aug_rleg || ''); setVal('aug-internal', c.aug_internal || '');
     
     skillList.forEach(skill => { const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_'); setVal(`skill-${safeKey}`, s[safeKey] || 0); });
+    window.updateInjuryMax();
     if (typeof window.renderArsenal === 'function') window.renderArsenal();
+    if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
+};
+
+// Injuries max = half the face value of whichever die is assigned to
+// Toughness (per the tabletop rules), recalculating live if that die ever
+// changes — was a flat 0-10 "Vitality" field that didn't track the actual
+// rule at all.
+window.updateInjuryMax = function() {
+    const toughnessSel = document.getElementById('stat-toughness');
+    const injuryInput = document.getElementById('term-vitality');
+    const injuryLabel = document.getElementById('term-vitality-label');
+    if (!toughnessSel || !injuryInput) return;
+    const faces = parseInt((toughnessSel.value || 'd4').replace('d', '')) || 4;
+    const max = Math.floor(faces / 2);
+    injuryInput.max = max;
+    if (parseInt(injuryInput.value) > max) injuryInput.value = max;
+    if (injuryLabel) injuryLabel.innerText = `Injuries (0-${max}):`;
+};
+
+/* --- PERKS PANEL (Dossier tab) ---
+   Section 1 is self-selected, editable anytime (honor-system table, matches
+   how skill tracking already works — no hard lock). Section 2 is DM-awarded
+   only, from the Crew Roster tab (see window.awardSection2Perk in that
+   render function) — a player can't grant it to themselves. */
+window.renderPerksPanel = function() {
+    const container = document.getElementById('perks-panel-container');
+    if (!container) return;
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    const perks = myProf.perks || [];
+    const section1 = perks.find(p => p.section === 1);
+    const section2 = perks.filter(p => p.section === 2);
+
+    const sec1Choices = typeof window.getApprovedPerksBySection === 'function' ? window.getApprovedPerksBySection(1) : [];
+    let sec1Options = '<option value="">— None Selected —</option>';
+    sec1Choices.forEach(p => {
+        sec1Options += `<option value="${p.id}" ${section1 && section1.perk_definition_id === p.id ? 'selected' : ''}>${p.name}</option>`;
+    });
+    const sec1Def = section1 ? window.findPerkDefinition(section1.perk_definition_id) : null;
+    const sec1Desc = sec1Def ? sec1Def.description : '';
+
+    let sec2Html = section2.length === 0 ? '<span style="font-size:10px; color:#6b826a;">None awarded yet.</span>' : '';
+    section2.forEach(p => {
+        const def = window.findPerkDefinition(p.perk_definition_id);
+        if (!def) return;
+        sec2Html += `<div style="background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
+            <strong style="color:#ffaa00; font-size:11px;">${def.name}</strong>
+            <div style="font-size:9px; color:#6b826a;">${def.description || ''}</div>
+        </div>`;
+    });
+
+    container.innerHTML = `
+        <div style="margin-top:10px; border-top:1px solid #3c4e36; padding-top:8px;">
+            <label for="perk-section1-select" style="font-size:9px; color:#6b826a;">Section 1 Specialization (character creation pick):</label>
+            <select id="perk-section1-select" onchange="window.setSection1Perk(this.value)" style="font-size:11px; margin:2px 0;">${sec1Options}</select>
+            ${sec1Desc ? `<div style="font-size:9px; color:#00e5a3; margin-top:2px;">${sec1Desc}</div>` : ''}
+        </div>
+        <div style="margin-top:10px;">
+            <label style="font-size:9px; color:#6b826a;">Section 2 Perks (DM-awarded, no cap):</label>
+            <div style="margin-top:4px;">${sec2Html}</div>
+        </div>
+    `;
+};
+
+window.setSection1Perk = async function(perkDefId) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first before selecting a specialization."); return; }
+    const existing = (myProf.perks || []).find(p => p.section === 1);
+    if (existing) {
+        await db.from('character_perks').delete().eq('id', existing.id);
+        myProf.perks = (myProf.perks || []).filter(p => p.id !== existing.id);
+    }
+    if (perkDefId) {
+        const { data, error } = await db.from('character_perks').insert({ character_id: myProf.character.id, perk_definition_id: perkDefId, section: 1 }).select().single();
+        if (error) { alert("Failed to save specialization: " + error.message); return; }
+        myProf.perks = myProf.perks || [];
+        myProf.perks.push(data);
+    }
+    if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
 };
 
 window.saveTerminalProfile = async function() {
@@ -433,8 +515,8 @@ window.saveTerminalProfile = async function() {
         profile_id: currentUserId, name: safeGet('term-sheet-name'),
         stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'), stat_intelligence: safeGet('stat-intelligence'), stat_strength: safeGet('stat-strength'), stat_toughness: safeGet('stat-toughness'), stat_willpower: safeGet('stat-willpower'),
         vitality: parseInt(safeGet('term-vitality')) || 0, stress: parseInt(safeGet('term-stress')) || 0, adversity_tokens: parseInt(safeGet('term-adversity')) || 0,
-        specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'),
-        aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'), aug_larm: safeGet('aug-larm'), aug_rarm: safeGet('aug-rarm'), aug_lleg: safeGet('aug-lleg'), aug_rleg: safeGet('aug-rleg')
+        specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'), personal_history: safeGet('term-personal-history'),
+        aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'), aug_larm: safeGet('aug-larm'), aug_rarm: safeGet('aug-rarm'), aug_lleg: safeGet('aug-lleg'), aug_rleg: safeGet('aug-rleg'), aug_internal: safeGet('aug-internal')
     };
     const { data: charData, error: charErr } = await db.from('characters').upsert(charPayload, { onConflict: 'profile_id' }).select().single();
     if (charErr) return;
@@ -475,13 +557,18 @@ window.renderCrewRoster = function() {
                                 <button class="btn-reveal" onclick="window.snapToCommander('${p.id}')" style="font-size:9px; padding:2px 6px;">LOCATE VESSEL</button>
                             </div>
                             <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-top:8px;">
-                                <div><label style="font-size:9px; color:#ff6b6b;">Vitality</label><input type="number" id="dm-edit-vit-${p.id}" value="${char.vitality || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
+                                <div><label style="font-size:9px; color:#ff6b6b;">Injuries</label><input type="number" id="dm-edit-vit-${p.id}" value="${char.vitality || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
                                 <div><label style="font-size:9px; color:#ffaa00;">Stress</label><input type="number" id="dm-edit-str-${p.id}" value="${char.stress || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
                                 <div><label style="font-size:9px; color:#00e5a3;">Adversity</label><input type="number" id="dm-edit-adv-${p.id}" value="${char.adversity_tokens || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
                             </div>
                             <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Gear Override:</label>
                             <textarea id="dm-edit-assets-${p.id}" rows="2" style="font-size:10px; margin:2px 0;">${char.assets || ''}</textarea>
                             <button class="btn-reveal" onclick="window.dmUpdatePlayerStats('${p.id}')" style="width:100%; font-size:9px; margin-top:4px; border-color:#ff6b6b; color:#ff6b6b;">APPLY OVERRIDE</button>
+                            <div style="display:flex; gap:4px; margin-top:8px; border-top:1px solid #3c4e36; padding-top:6px;">
+                                <label for="dm-award-perk-${p.id}" style="display:none;">Award Perk</label>
+                                <select id="dm-award-perk-${p.id}" style="flex:1; margin:0; font-size:9px; padding:3px;">${(typeof window.getApprovedPerksBySection === 'function' ? window.getApprovedPerksBySection(2) : []).map(pk => `<option value="${pk.id}">${pk.name}</option>`).join('')}</select>
+                                <button class="btn-deploy" onclick="window.awardSection2Perk('${p.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">AWARD</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -493,7 +580,7 @@ window.renderCrewRoster = function() {
                         <img src="${p.avatar_url || ''}" style="width:40px; height:40px; border:1px solid #3c4e36; background:#040605; object-fit:cover;">
                         <div style="flex:1;">
                             <strong style="color:#00e5a3; font-size:14px;">${char.name || p.username || 'Unknown'}</strong><br>
-                            <span style="color:#6b826a; font-size:10px;">Vitality: ${char.vitality || 0} | Stress: ${char.stress || 0}</span>
+                            <span style="color:#6b826a; font-size:10px;">Injuries: ${char.vitality || 0} | Stress: ${char.stress || 0}</span>
                         </div>
                     </div>
                 </div>
@@ -513,7 +600,32 @@ window.dmUpdatePlayerStats = async function(profileId) {
     if (!prof || !prof.character) return;
     await db.from('characters').update({ vitality: vit, stress: str, adversity_tokens: adv, assets: assets }).eq('id', prof.character.id);
     db.from('chat_logs').insert({ sender_id: 'system', content: `⚙️ [OVERSEER] System parameters overridden for Commander ${prof.username}.`, message_type: 'text' });
-    alert("Player metrics overridden and saved to cloud.");
+    if (typeof window.showToast === 'function') window.showToast("Player metrics overridden and saved to cloud.");
+    else alert("Player metrics overridden and saved to cloud.");
+};
+
+window.awardSection2Perk = async function(profileId) {
+    if (currentUserRole !== 'dm') return;
+    const select = document.getElementById(`dm-award-perk-${profileId}`);
+    const perkDefId = select ? select.value : null;
+    if (!perkDefId) return;
+    const perkDef = window.findPerkDefinition(perkDefId);
+    if (!perkDef) return;
+    const prof = allProfiles.find(p => p.id === profileId);
+    if (!prof || !prof.character || !prof.character.id) { alert("This player hasn't saved a character sheet yet — nothing to award the perk to."); return; }
+
+    const { data, error } = await db.from('character_perks').insert({ character_id: prof.character.id, perk_definition_id: perkDefId, section: 2 }).select().single();
+    if (error) { alert("Failed to award perk: " + error.message); return; }
+    prof.perks = prof.perks || [];
+    prof.perks.push(data);
+
+    await db.from('chat_logs').insert({
+        sender_id: 'system',
+        content: `🎖️ [OVERSEER] ${prof.username || 'Commander'} was awarded the specialization: ${perkDef.name}.`,
+        message_type: 'text'
+    });
+    if (typeof window.showToast === 'function') window.showToast(`Awarded ${perkDef.name} to ${prof.username || 'Commander'}.`);
+    if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
 };
 
 /* --- MODULE C: CODEX, LORE & FOW --- */
