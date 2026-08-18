@@ -674,10 +674,12 @@ window.saveDMBodyProperties = function(id) {
 };
 window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Destroy star system?"))) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
 window.deleteShipToken = async function(id) {
-    if (currentUserRole !== 'dm') return;
-    if (!(await window.showConfirmModal("Decommission token?"))) return;
-
     const ship = globalShipMarkersCache.find(m => m.id === id);
+    // Was DM-only with no ownership carve-out, unlike every other decommission/
+    // delete action in this app (weapons, colonies, fleet groups, templates) —
+    // a player couldn't remove even their own deployed ship.
+    if (ship && currentUserRole !== 'dm' && ship.owner_id !== currentUserId) return;
+    if (!(await window.showConfirmModal("Decommission token?"))) return;
     // If this is a strike craft token, clean up its squadron record + initiative
     // row too — otherwise decommissioning it directly (instead of using the
     // proper "RECORD CASUALTY" button in the carrier's Hangar Bay panel) leaves
@@ -955,7 +957,7 @@ window.initGalaxyEngine = function() {
                 </div>`;
             }
 
-            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${currentUserRole === 'dm' ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
+            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${(currentUserRole === 'dm' || m.owner_id === currentUserId) ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
             let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button></div>` : '';
@@ -979,18 +981,6 @@ window.initGalaxyEngine = function() {
         if (window.camera.zoom < 0.8) { let coreGrd = ctx.createRadialGradient(0, 0, 100, 0, 0, 1800); coreGrd.addColorStop(0, 'rgba(118, 148, 255, 0.12)'); coreGrd.addColorStop(0.5, 'rgba(0, 229, 163, 0.04)'); coreGrd.addColorStop(1, 'rgba(0, 0, 0, 0)'); ctx.fillStyle = coreGrd; ctx.beginPath(); ctx.arc(0, 0, 1800, 0, Math.PI * 2); ctx.fill(); }
 
         let allSystems = proceduralSystems.concat(globalDbSystemsCache);
-
-        if (window.hyperlanesVisible && window.camera.zoom < 2.0) {
-            ctx.strokeStyle = 'rgba(0, 229, 163, 0.12)'; ctx.lineWidth = 1 / window.camera.zoom; ctx.setLineDash([4, 12]);
-            ctx.beginPath();
-            for (let i = 0; i < allSystems.length; i += 3) {
-                let s1 = allSystems[i]; if (Math.abs(s1.x - cx) > hw + 300 || Math.abs(s1.y - cy) > hh + 300) continue;
-                for (let j = i + 1; j < i + 3 && j < allSystems.length; j++) {
-                    let s2 = allSystems[j]; if (Math.hypot(s2.x - s1.x, s2.y - s1.y) < 800) { ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); }
-                }
-            }
-            ctx.stroke(); ctx.setLineDash([]);
-        }
 
         if (window.hyperlanesVisible) {
             globalHyperlanesCache.forEach(route => {
