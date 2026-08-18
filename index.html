@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.8">
+    <link rel="stylesheet" href="style.css?v=3.10">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -124,6 +124,7 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-vessel" onclick="window.switchTermTab('vessel')"><span class="tab-text">Vessel Deck</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-colonies" onclick="window.switchTermTab('colonies')"><span class="tab-text">Colonies & Fleets</span> <span class="tab-badge" id="badge-colonies">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-shipdesigner" onclick="window.switchTermTab('shipdesigner')"><span class="tab-text">Ship Designer</span> <span class="tab-badge" id="badge-shipdesigner">0</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-perkdesigner" onclick="window.switchTermTab('perkdesigner')"><span class="tab-text">Perk Designer</span> <span class="tab-badge" id="badge-perkdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')"><span class="tab-text">Intel & Ops</span> <span class="tab-badge" id="badge-notes">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-roster" onclick="window.switchTermTab('roster')"><span class="tab-text">Crew Roster</span> <span class="tab-badge" id="badge-roster">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-codex" onclick="window.switchTermTab('codex')" style="border-color:#ff6b6b; color:#ff6b6b;"><span class="tab-text">Cloud Codex</span></button>
@@ -161,11 +162,11 @@
                                     <div><label for="stat-dexterity" style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                     <div><label for="stat-intelligence" style="font-size: 9px; color: #6b826a;">Intelligence:</label><select id="stat-intelligence" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                     <div><label for="stat-strength" style="font-size: 9px; color: #6b826a;">Strength:</label><select id="stat-strength" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label for="stat-toughness" style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-toughness" style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness" class="stat-die-select" onchange="window.updateInjuryMax()"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                     <div><label for="stat-willpower" style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                 </div>
                                 <div style="display: flex; gap: 10px; margin-top: 10px;">
-                                    <div style="flex: 1;"><label for="term-vitality" style="font-size: 10px; color: #ff6b6b;">Vitality (0-10):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
+                                    <div style="flex: 1;"><label for="term-vitality" id="term-vitality-label" style="font-size: 10px; color: #ff6b6b;">Injuries (0-?):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
                                     <div style="flex: 1;"><label for="term-stress" style="font-size: 10px; color: #ffaa00;">Stress (0-20):</label><input type="number" id="term-stress" min="0" max="20" value="0"></div>
                                     <div style="flex: 1;"><label for="term-adversity" style="font-size: 10px; color: #00e5a3;">Adversity (+/-):</label><input type="number" id="term-adversity" value="0"></div>
                                 </div>
@@ -175,6 +176,12 @@
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 3: Specialties & Perks</h4>
                                 <label for="term-specialties" style="display:none;">Specialties</label>
                                 <textarea id="term-specialties" rows="4" placeholder="Record character specialties, strengths, and background perks..."></textarea>
+                                <div id="perks-panel-container"></div>
+                            </div>
+                            <div class="sheet-section">
+                                <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Personal History</h4>
+                                <label for="term-personal-history" style="display:none;">Personal History</label>
+                                <textarea id="term-personal-history" rows="4" placeholder="Backstory, career, hobbies, passions, and reason for enlisting..."></textarea>
                             </div>
                         </div>
 
@@ -195,12 +202,13 @@
                             <div class="sheet-section">
                                 <h4 style="border-bottom: 1px solid #3c4e36; padding-bottom: 4px;">Section 5: Body Augmentations</h4>
                                 <div class="augment-grid" style="margin-top: 6px;">
-                                    <div><label for="aug-head" style="font-size: 9px; color: #6b826a;">Head / Neural:</label><input type="text" id="aug-head" placeholder="None" style="margin:2px 0;"></div>
-                                    <div><label for="aug-torso" style="font-size: 9px; color: #6b826a;">Torso / Internal:</label><input type="text" id="aug-torso" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-head" style="font-size: 9px; color: #6b826a;">Head:</label><input type="text" id="aug-head" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-torso" style="font-size: 9px; color: #6b826a;">Torso:</label><input type="text" id="aug-torso" placeholder="None" style="margin:2px 0;"></div>
                                     <div><label for="aug-larm" style="font-size: 9px; color: #6b826a;">Left Arm:</label><input type="text" id="aug-larm" placeholder="None" style="margin:2px 0;"></div>
                                     <div><label for="aug-rarm" style="font-size: 9px; color: #6b826a;">Right Arm:</label><input type="text" id="aug-rarm" placeholder="None" style="margin:2px 0;"></div>
                                     <div><label for="aug-lleg" style="font-size: 9px; color: #6b826a;">Left Leg:</label><input type="text" id="aug-lleg" placeholder="None" style="margin:2px 0;"></div>
                                     <div><label for="aug-rleg" style="font-size: 9px; color: #6b826a;">Right Leg:</label><input type="text" id="aug-rleg" placeholder="None" style="margin:2px 0;"></div>
+                                    <div><label for="aug-internal" style="font-size: 9px; color: #6b826a;">Internal:</label><input type="text" id="aug-internal" placeholder="None" style="margin:2px 0;"></div>
                                 </div>
                             </div>
                         </div>
@@ -533,6 +541,15 @@
                             <div id="ship-templates-list-container" style="max-height:480px; overflow-y:auto;"></div>
                         </div>
                     </div>
+                </div>
+
+                <!-- PERK DESIGNER TAB -->
+                <div id="term-panel-perkdesigner" class="term-panel-content">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; background:#040605; padding:10px; border:1px solid #3c4e36; border-radius:2px;">
+                        <p style="font-size:10px; color:#6b826a; margin:0;">Anyone can propose a perk — it starts as a draft. Only the Overseer can approve it into the active roster, or edit/delete anything.</p>
+                        <button class="btn-reveal" onclick="window.openNewPerkModal()" style="width:auto; margin:0; padding:8px 16px; font-size:10px; border-color:#c778dd; color:#c778dd;">+ PROPOSE PERK</button>
+                    </div>
+                    <div id="perk-designer-list-container" style="max-height:600px; overflow-y:auto;"></div>
                 </div>
 
                 <!-- CODEX TAB WITH MODULE C SYSTEM LINKER -->
@@ -948,13 +965,14 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.8"></script>
-    <script src="js/audio.js?v=3.8"></script>
-    <script src="js/ui.js?v=3.8"></script>
-    <script src="js/combat.js?v=3.8"></script>
-    <script src="js/colonies.js?v=3.8"></script>
-    <script src="js/ship-designer.js?v=3.8"></script>
-    <script src="js/map.js?v=3.8"></script>
+    <script src="js/db.js?v=3.10"></script>
+    <script src="js/audio.js?v=3.10"></script>
+    <script src="js/ui.js?v=3.10"></script>
+    <script src="js/combat.js?v=3.10"></script>
+    <script src="js/colonies.js?v=3.10"></script>
+    <script src="js/ship-designer.js?v=3.10"></script>
+    <script src="js/perk-designer.js?v=3.10"></script>
+    <script src="js/map.js?v=3.10"></script>
 
 </body>
 </html>
