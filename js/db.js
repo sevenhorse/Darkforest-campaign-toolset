@@ -122,6 +122,7 @@ async function fetchUserProfile(user) {
     initColoniesRealtimeChannel();
     initShipTemplatesRealtimeChannel();
     initSystemHazardsRealtimeChannel();
+    initPerkDefinitionsRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
@@ -132,6 +133,7 @@ async function fetchUserProfile(user) {
     if (typeof loadShipTemplates === 'function') loadShipTemplates();
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
     if (typeof loadSystemHazards === 'function') loadSystemHazards();
+    if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
 }
 
 async function loadAllProfiles() {
@@ -139,13 +141,15 @@ async function loadAllProfiles() {
     const { data: charData } = await db.from('characters').select('*');
     const { data: skillData } = await db.from('character_skills').select('*');
     const { data: arsenalData } = await db.from('character_arsenal').select('*');
+    const { data: perkData } = await db.from('character_perks').select('*');
 
     if (profData) {
         allProfiles = profData.map(p => {
             const c = charData?.find(char => char.profile_id === p.id) || {};
             const s = skillData?.find(sk => sk.character_id === c.id) || {};
             const a = arsenalData?.filter(ars => ars.profile_id === p.id || ars.character_id === c.id) || [];
-            return { ...p, character: c, skills: s, arsenal: a };
+            const pk = perkData?.filter(perk => perk.character_id === c.id) || [];
+            return { ...p, character: c, skills: s, arsenal: a, perks: pk };
         });
         
         const myProf = allProfiles.find(p => p.id === currentUserId);
@@ -394,6 +398,18 @@ function initSystemHazardsRealtimeChannel() {
     systemHazardsRealtimeChannel = db.channel('system_hazards_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'system_hazards' }, () => {
             if (typeof loadSystemHazards === 'function') loadSystemHazards();
+        })
+        .subscribe();
+}
+
+/* --- PERK DEFINITIONS: REAL-TIME SYNC ---
+   Matters more here than most tables — a player proposing a draft needs the
+   DM's client to actually see it show up, and vice versa for approvals. */
+let perkDefinitionsRealtimeChannel = null;
+function initPerkDefinitionsRealtimeChannel() {
+    perkDefinitionsRealtimeChannel = db.channel('perk_definitions_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'perk_definitions' }, () => {
+            if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
         })
         .subscribe();
 }
