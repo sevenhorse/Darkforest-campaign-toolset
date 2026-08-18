@@ -376,7 +376,7 @@ window.renderVesselDeck = function() {
             </div>
         `;
         
-        let resetBtn = `<button class="btn-reveal" onclick="window.resetShipStats('${vessel.id}')" style="width:100%; font-size:10px; margin-bottom:10px; border-color:#00e5a3;">↺ RESET COMBAT STATS</button>`;
+        let resetBtn = `<div style="display:flex; gap:6px; margin-bottom:10px;"><button class="btn-reveal" onclick="window.resetShipStats('${vessel.id}')" style="flex:1; font-size:10px; margin:0; border-color:#00e5a3;">↺ RESET COMBAT STATS</button><button class="layer-edit" onclick="window.openEditMaxStatsModal('${vessel.id}')" style="flex:1; font-size:10px; margin:0; border-color:#c9962f; color:#c9962f;">✎ EDIT BASE STATS</button></div>`;
 
         healthContainer.innerHTML = stanceHtml + resetBtn + makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('REACTIVE ARMOR (IMPACT/EXPLOSIVE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT/ENERGY)', a_int, a_max, '#ffaa00', 'ablative') + makeBar('HARDENED ARMOR', hd_int, Math.max(1, hd_max), '#c9962f', 'hardened') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
     }
@@ -560,7 +560,11 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     let dbKey = 'integrity_' + key;
     let maxKey = 'max_' + key;
     let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
-    let max = vessel[maxKey] || 100;
+    // Was `vessel[maxKey] || 100` — but max_hardened is legitimately 0 for most
+    // ships (no hardened plating installed by default), and 0 is falsy, so that
+    // fallback silently let Hardened Armor climb to 100 via the +/- buttons
+    // regardless of the ship's actual (often zero) capacity.
+    let max = vessel[maxKey] !== undefined ? vessel[maxKey] : 100;
 
     current = Math.max(0, Math.min(max, current + delta));
     let payload = {}; payload[dbKey] = current;
@@ -796,8 +800,80 @@ window.resetShipStats = async function(vesselId) {
     
     await db.from('ship_markers').update(payload).eq('id', vesselId);
     window.renderVesselDeck();
-    alert("Vessel combat stats reset to maximums.");
+    if (typeof window.showToast === 'function') window.showToast("Vessel combat stats reset to maximums.");
+    else alert("Vessel combat stats reset to maximums.");
 };
+
+/* --- EDIT VESSEL BASE STATS ---
+   There was no way to set a deployed ship's MAX stats at all — only current
+   values via the +/- buttons, which are clamped TO the max but never let you
+   change what that max actually is. Every ship not spawned from the Jupiter
+   preset or a Ship Designer template had max_hardened stuck at 0 with no way
+   to give it real Hardened Armor capacity post-deployment. */
+(function() {
+    let overlay, currentId;
+    function ensureModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'maxstats-edit-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:360px; max-width:92vw; border-color:#c9962f;">
+            <h4 style="color:#c9962f; margin-top:0;">Edit Vessel Base Stats</h4>
+            <p style="font-size:9px; color:#6b826a; margin-top:0;">Changes the ship's maximum values. Current values are clamped down if they'd otherwise exceed the new max.</p>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="maxstats-shields" style="font-size:9px; color:#6b826a;">Shields</label><input type="number" id="maxstats-shields" min="0" style="border-color:#c9962f; text-align:center;"></div>
+                <div style="flex:1;"><label for="maxstats-hull" style="font-size:9px; color:#6b826a;">Hull</label><input type="number" id="maxstats-hull" min="0" style="border-color:#c9962f; text-align:center;"></div>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="maxstats-reactive" style="font-size:9px; color:#6b826a;">Reactive</label><input type="number" id="maxstats-reactive" min="0" style="border-color:#c9962f; text-align:center;"></div>
+                <div style="flex:1;"><label for="maxstats-ablative" style="font-size:9px; color:#6b826a;">Ablative</label><input type="number" id="maxstats-ablative" min="0" style="border-color:#c9962f; text-align:center;"></div>
+                <div style="flex:1;"><label for="maxstats-hardened" style="font-size:9px; color:#6b826a;">Hardened</label><input type="number" id="maxstats-hardened" min="0" style="border-color:#c9962f; text-align:center;"></div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button id="maxstats-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
+                <button id="maxstats-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#c9962f; color:#c9962f;">SAVE CHANGES</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('maxstats-cancel-btn').addEventListener('click', () => { overlay.style.display = 'none'; });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+        document.getElementById('maxstats-save-btn').addEventListener('click', async () => {
+            const vessel = globalShipMarkersCache.find(m => m.id === currentId);
+            if (!vessel) { overlay.style.display = 'none'; return; }
+            const newMax = {
+                max_shields: parseInt(document.getElementById('maxstats-shields').value) || 0,
+                max_hull: parseInt(document.getElementById('maxstats-hull').value) || 0,
+                max_reactive: parseInt(document.getElementById('maxstats-reactive').value) || 0,
+                max_ablative: parseInt(document.getElementById('maxstats-ablative').value) || 0,
+                max_hardened: parseInt(document.getElementById('maxstats-hardened').value) || 0
+            };
+            const clamped = {
+                integrity_shields: Math.min(vessel.integrity_shields !== undefined ? vessel.integrity_shields : newMax.max_shields, newMax.max_shields),
+                integrity_hull: Math.min(vessel.integrity_hull !== undefined ? vessel.integrity_hull : newMax.max_hull, newMax.max_hull),
+                integrity_reactive: Math.min(vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : newMax.max_reactive, newMax.max_reactive),
+                integrity_ablative: Math.min(vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : newMax.max_ablative, newMax.max_ablative),
+                integrity_hardened: Math.min(vessel.integrity_hardened !== undefined ? vessel.integrity_hardened : newMax.max_hardened, newMax.max_hardened)
+            };
+            const { error } = await db.from('ship_markers').update({ ...newMax, ...clamped }).eq('id', currentId);
+            if (error) { alert("Failed to save base stats: " + error.message); return; }
+            Object.assign(vessel, newMax, clamped);
+            overlay.style.display = 'none';
+            window.renderVesselDeck();
+        });
+    }
+    window.openEditMaxStatsModal = function(vesselId) {
+        const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+        if (!vessel) return;
+        ensureModal();
+        currentId = vesselId;
+        document.getElementById('maxstats-shields').value = vessel.max_shields || 0;
+        document.getElementById('maxstats-hull').value = vessel.max_hull || 0;
+        document.getElementById('maxstats-reactive').value = vessel.max_reactive || 0;
+        document.getElementById('maxstats-ablative').value = vessel.max_ablative || 0;
+        document.getElementById('maxstats-hardened').value = vessel.max_hardened || 0;
+        overlay.style.display = 'flex';
+    };
+})();
 
 window.rollSquadronWeapon = async function(vesselId, sqIdx) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
@@ -1136,9 +1212,20 @@ window.buildDamageTypeOptionsHtml = function(selected) {
 };
 
 // Native title tooltips (reliable, no extra markup) built from the shared table.
-window.getDamageTypeTooltip = function(dmgType) {
+window.getDamageTypeTooltip = function(dmgType, context) {
     const info = window.DAMAGE_TYPES[dmgType];
-    if (!info) return '';
+    if (!info) {
+        console.warn(`getDamageTypeTooltip: no entry for damage type "${dmgType}" — falling back to generic text instead of a blank tooltip.`);
+        return `${dmgType || 'Unknown'}\nNo tactical data on file for this damage type.`;
+    }
+    if (context === 'arsenal') {
+        // Personal Arsenal weapons don't interact with the ship armor cascade
+        // (Shields/Reactive/Ablative/Hardened/Hull) — that's a ship-to-ship
+        // mechanic. Showing the full "shreds/mitigated by" breakdown here
+        // would imply a mechanical effect that doesn't actually apply to
+        // personal combat, so this stays flavor-only.
+        return `${dmgType}\n${info.desc}`;
+    }
     return `${dmgType}\n${info.desc}\n\nSHREDS: ${info.shreds}\nMITIGATED BY: ${info.mitigatedBy}`;
 };
 
@@ -1456,20 +1543,25 @@ window.renderArsenal = function() {
             if (w.damage_type && window.DAMAGE_TYPES[window.normalizeDamageType(w.damage_type)]) {
                 let dt = window.normalizeDamageType(w.damage_type);
                 let info = window.DAMAGE_TYPES[dt];
-                dmgBadge = `<span class="dmg-tooltip" style="font-size:9px; color:${info.color}; text-align:center; cursor:help;" title="${window.getDamageTypeTooltip(dt)}">${dt} ⓘ</span>`;
+                dmgBadge = `<span class="dmg-tooltip" style="font-size:9px; color:${info.color}; text-align:center; cursor:help;" title="${window.getDamageTypeTooltip(dt, 'arsenal')}">${dt} ⓘ</span>`;
             } else {
                 dmgBadge = `<span style="font-size:9px; color:#6b826a; text-align:center;">—</span>`;
             }
+            let ammoLabel = '';
+            if (w.ammo !== null && w.ammo !== undefined) {
+                ammoLabel = `<div style="font-size:9px; color:${w.ammo <= 0 ? '#ff3333' : '#6b826a'};">Ammo: ${w.ammo}/${w.max_ammo !== null && w.max_ammo !== undefined ? w.max_ammo : '∞'}</div>`;
+            }
             html += `
                 <div class="arsenal-row">
-                    <strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>
-                    <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.dice}</span>
+                    <div><strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>${ammoLabel}</div>
+                    <span style="font-size:13px; font-weight:bold; color:#d4c5a9; text-align:center;">${w.dice}</span>
                     <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.modifier}</span>
                     <span style="font-size:10px; text-align:center;" title="Explodes">${w.explodes ? '💥' : ''}</span>
                     ${dmgBadge}
                     <div style="display:flex; gap:4px;">
-                        <button class="layer-edit" onclick="window.rollArsenalWeapon(${idx})" style="padding:2px 8px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">ROLL</button>
-                        <button class="layer-del" onclick="window.deleteArsenalItem('${w.id}')" style="padding:2px 6px; font-size:9px;">✕</button>
+                        <button class="layer-edit" onclick="window.rollArsenalWeapon(${idx})" style="padding:2px 6px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">ROLL</button>
+                        <button class="layer-edit" onclick="window.openEditArsenalModal('${w.id}')" style="padding:2px 5px; font-size:9px;">✎</button>
+                        <button class="layer-del" onclick="window.deleteArsenalItem('${w.id}')" style="padding:2px 5px; font-size:9px;">✕</button>
                     </div>
                 </div>
             `;
@@ -1491,6 +1583,8 @@ window.addArsenalItem = async function() {
     const explodes = document.getElementById('new-wpn-explodes').checked;
     const dmgTypeSelect = document.getElementById('new-wpn-dmgtype');
     const damageType = dmgTypeSelect ? dmgTypeSelect.value : ''; // optional — blank is valid
+    const ammoInput = document.getElementById('new-wpn-ammo');
+    const ammoVal = (ammoInput && ammoInput.value.trim() !== '') ? Math.max(0, parseInt(ammoInput.value) || 0) : null; // null = untracked/infinite
 
     if (!name) { alert("Enter a weapon/power name."); return; }
     if (!dice) dice = '1d20';
@@ -1504,7 +1598,9 @@ window.addArsenalItem = async function() {
         dice: dice,
         modifier: mod,
         explodes: explodes,
-        damage_type: damageType || null
+        damage_type: damageType || null,
+        ammo: ammoVal,
+        max_ammo: ammoVal
     };
 
     const { error } = await db.from('character_arsenal').insert(payload);
@@ -1513,8 +1609,30 @@ window.addArsenalItem = async function() {
     document.getElementById('new-wpn-name').value = '';
     document.getElementById('new-wpn-dice').value = '';
     document.getElementById('new-wpn-mod').value = '';
+    if (ammoInput) ammoInput.value = '';
     if (dmgTypeSelect) dmgTypeSelect.value = '';
     if(typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
+};
+
+// Reuses the same lazy-loaded window.diceLogsList the Comms "Dice Streamer"
+// tab already maintains — no separate query/cache needed, just a second
+// place that renders the same data so you don't have to leave this screen
+// to see what you just rolled.
+window.renderArsenalDiceFeed = function() {
+    const container = document.getElementById('arsenal-dice-feed');
+    if (!container) return;
+    const rolls = window.diceLogsList || [];
+    if (rolls.length === 0) { container.innerHTML = '<span style="font-size:10px; color:#6b826a;">No rolls yet this session.</span>'; return; }
+    let html = '';
+    rolls.slice(-8).reverse().forEach(log => {
+        const sender = allProfiles.find(p => p.id === log.sender_id);
+        const senderName = sender ? (sender.username || 'Commander') : 'Unknown';
+        html += `<div style="background:rgba(6,9,7,0.6); padding:6px; border-left:2px solid #ff6b6b; border-radius:2px; margin-bottom:4px;">
+            <div style="font-size:9px; color:#ff6b6b; margin-bottom:2px;">🎲 <strong>${senderName}</strong></div>
+            <div style="font-size:10px; color:#d4c5a9;"><strong>${log.content}</strong>${log.roll_data ? `<br><span style="font-size:9px; color:#6b826a;">${log.roll_data.breakdown}</span>` : ''}</div>
+        </div>`;
+    });
+    container.innerHTML = html;
 };
 
 window.deleteArsenalItem = async function(id) {
@@ -1523,11 +1641,88 @@ window.deleteArsenalItem = async function(id) {
     if(typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
 };
 
+/* --- EDIT ARSENAL ITEM MODAL --- */
+(function() {
+    let overlay, currentId;
+    function ensureModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'arsenal-edit-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:360px; max-width:92vw; border-color:#ffaa00;">
+            <h4 style="color:#ffaa00; margin-top:0;">Edit Arsenal Item</h4>
+            <label for="arsenal-edit-name" style="font-size:9px; color:#6b826a;">Weapon / Power Name</label>
+            <input type="text" id="arsenal-edit-name" style="border-color:#ffaa00;">
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="arsenal-edit-dice" style="font-size:9px; color:#6b826a;">Dice</label><input type="text" id="arsenal-edit-dice" style="border-color:#ffaa00; text-align:center;"></div>
+                <div style="flex:1;"><label for="arsenal-edit-mod" style="font-size:9px; color:#6b826a;">Mod</label><input type="text" id="arsenal-edit-mod" style="border-color:#ffaa00; text-align:center;"></div>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="arsenal-edit-ammo" style="font-size:9px; color:#6b826a;">Ammo (blank=∞)</label><input type="number" id="arsenal-edit-ammo" min="0" style="border-color:#ffaa00; text-align:center;"></div>
+                <div style="flex:1;"><label for="arsenal-edit-maxammo" style="font-size:9px; color:#6b826a;">Max Ammo</label><input type="number" id="arsenal-edit-maxammo" min="0" style="border-color:#ffaa00; text-align:center;"></div>
+            </div>
+            <label for="arsenal-edit-dmgtype" style="font-size:9px; color:#6b826a;">Damage Type (optional)</label>
+            <select id="arsenal-edit-dmgtype" style="border-color:#ffaa00;"><option value="">None</option></select>
+            <label for="arsenal-edit-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;">
+                <input type="checkbox" id="arsenal-edit-explodes" style="margin:0;"> Exploding Dice
+            </label>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button id="arsenal-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
+                <button id="arsenal-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#ffaa00; color:#ffaa00;">SAVE CHANGES</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('arsenal-edit-dmgtype').insertAdjacentHTML('beforeend', window.buildDamageTypeOptionsHtml(''));
+        document.getElementById('arsenal-edit-cancel-btn').addEventListener('click', () => { overlay.style.display = 'none'; });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+        document.getElementById('arsenal-edit-save-btn').addEventListener('click', async () => {
+            let mod = document.getElementById('arsenal-edit-mod').value.trim();
+            if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
+            const ammoStr = document.getElementById('arsenal-edit-ammo').value.trim();
+            const maxAmmoStr = document.getElementById('arsenal-edit-maxammo').value.trim();
+            const updates = {
+                name: document.getElementById('arsenal-edit-name').value.trim() || 'Unnamed Item',
+                dice: document.getElementById('arsenal-edit-dice').value.trim() || '1d20',
+                modifier: mod || '+0',
+                explodes: document.getElementById('arsenal-edit-explodes').checked,
+                damage_type: document.getElementById('arsenal-edit-dmgtype').value || null,
+                ammo: ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0),
+                max_ammo: maxAmmoStr === '' ? (ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0)) : Math.max(0, parseInt(maxAmmoStr) || 0)
+            };
+            const { error } = await db.from('character_arsenal').update(updates).eq('id', currentId);
+            if (error) { alert("Failed to save changes: " + error.message); return; }
+            overlay.style.display = 'none';
+            if (typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
+        });
+    }
+    window.openEditArsenalModal = function(id) {
+        const myProf = allProfiles.find(p => p.id === currentUserId);
+        const wpn = myProf ? (myProf.arsenal || []).find(w => w.id === id) : null;
+        if (!wpn) return;
+        ensureModal();
+        currentId = id;
+        document.getElementById('arsenal-edit-name').value = wpn.name || '';
+        document.getElementById('arsenal-edit-dice').value = wpn.dice || '';
+        document.getElementById('arsenal-edit-mod').value = wpn.modifier || '+0';
+        document.getElementById('arsenal-edit-ammo').value = (wpn.ammo === null || wpn.ammo === undefined) ? '' : wpn.ammo;
+        document.getElementById('arsenal-edit-maxammo').value = (wpn.max_ammo === null || wpn.max_ammo === undefined) ? '' : wpn.max_ammo;
+        document.getElementById('arsenal-edit-dmgtype').value = wpn.damage_type || '';
+        document.getElementById('arsenal-edit-explodes').checked = !!wpn.explodes;
+        overlay.style.display = 'flex';
+    };
+})();
+
 window.rollArsenalWeapon = async function(idx) {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
     let wpn = (myProf.arsenal || [])[idx];
     if (!wpn) return;
+
+    if (wpn.ammo !== null && wpn.ammo !== undefined && wpn.ammo <= 0) {
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`${wpn.name} is out of ammo! Reload or edit it to restock before firing again.`);
+        return;
+    }
 
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = wpn.dice.trim().match(diceRegex);
@@ -1565,6 +1760,12 @@ window.rollArsenalWeapon = async function(idx) {
     `;
     
     if (window.AudioEngine) window.AudioEngine.playShoot();
+
+    if (wpn.ammo !== null && wpn.ammo !== undefined) {
+        wpn.ammo = Math.max(0, wpn.ammo - 1);
+        await db.from('character_arsenal').update({ ammo: wpn.ammo }).eq('id', wpn.id);
+        if (typeof window.renderArsenal === 'function') window.renderArsenal();
+    }
 
     if(typeof window.broadcastRoll === 'function') {
         await window.broadcastRoll(`[${myProf.username || 'Commander'}] FIRES ${wpn.name}`, breakdownString, total);
