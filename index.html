@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.6">
+    <link rel="stylesheet" href="style.css?v=3.8">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -157,12 +157,12 @@
                                 <label for="term-sheet-name" style="font-size: 10px; color: #6b826a;">Character Name:</label>
                                 <input type="text" id="term-sheet-name">
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;">
-                                    <div><label for="stat-charisma" style="font-size: 9px; color: #6b826a;">Charisma:</label><select id="stat-charisma"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label for="stat-dexterity" style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label for="stat-intelligence" style="font-size: 9px; color: #6b826a;">Intelligence:</label><select id="stat-intelligence"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label for="stat-strength" style="font-size: 9px; color: #6b826a;">Strength:</label><select id="stat-strength"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label for="stat-toughness" style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
-                                    <div><label for="stat-willpower" style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-charisma" style="font-size: 9px; color: #6b826a;">Charisma:</label><select id="stat-charisma" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-dexterity" style="font-size: 9px; color: #6b826a;">Dexterity:</label><select id="stat-dexterity" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-intelligence" style="font-size: 9px; color: #6b826a;">Intelligence:</label><select id="stat-intelligence" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-strength" style="font-size: 9px; color: #6b826a;">Strength:</label><select id="stat-strength" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-toughness" style="font-size: 9px; color: #6b826a;">Toughness:</label><select id="stat-toughness" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
+                                    <div><label for="stat-willpower" style="font-size: 9px; color: #6b826a;">Willpower:</label><select id="stat-willpower" class="stat-die-select"><option value="d4">d4</option><option value="d6">d6</option><option value="d8">d8</option><option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option></select></div>
                                 </div>
                                 <div style="display: flex; gap: 10px; margin-top: 10px;">
                                     <div style="flex: 1;"><label for="term-vitality" style="font-size: 10px; color: #ff6b6b;">Vitality (0-10):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
@@ -229,10 +229,14 @@
                                             <option value="">Damage Type (optional)</option>
                                         </select>
                                     </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
+                                        <label for="new-wpn-ammo" style="display:none;">Ammo</label>
+                                        <input type="number" id="new-wpn-ammo" min="0" placeholder="Ammo (blank = ∞)" style="flex:1; margin:0; font-size:10px; text-align:center;">
                                         <label for="new-wpn-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;">
                                             <input type="checkbox" id="new-wpn-explodes" checked style="margin:0;"> Exploding Dice
                                         </label>
+                                    </div>
+                                    <div style="display:flex; justify-content:flex-end;">
                                         <button class="btn-reveal" onclick="window.addArsenalItem()" style="width:auto; padding:4px 12px; margin:0; font-size:10px;">+ ADD TO ARSENAL</button>
                                     </div>
                                 </div>
@@ -245,10 +249,15 @@
                                 <h4 style="color:#00e5a3; margin:0;">Multi-Stat & Skill Pool Roller</h4>
                                 <div id="dice-roller-stats" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 8px 0;"></div>
                                 <div id="dice-roller-skills" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-height: 110px; overflow-y: auto; margin-bottom: 8px;"></div>
-                                <label for="roll-extra-mod" style="display:none;">Extra Mod</label>
-                                <input type="number" id="roll-extra-mod" value="0" style="margin:2px 0;" placeholder="Extra Mod">
+                                <label for="roll-extra-mod" style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Additional Modifier (added to the final roll total):</label>
+                                <input type="number" id="roll-extra-mod" value="0" style="margin:2px 0;" placeholder="e.g. +2 or -1">
                                 <button class="btn-reveal" onclick="window.executeDicePoolRoll()" style="width:100%; font-size:12px;">ROLL COMBINED POOL</button>
                                 <div id="dice-roll-result-box" style="margin-top: 12px; display:none; color:#00e5a3; background:#030403; padding:8px; border:1px solid #00e5a3;"></div>
+                            </div>
+                            <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(255,107,107,0.05);">
+                                <h4 style="color:#ff6b6b; margin:0; border-bottom:1px solid #ff3333; padding-bottom:4px;">🎲 Dice Streamer (Live)</h4>
+                                <p style="font-size:9px; color:#6b826a; margin:4px 0 0 0;">Every roll app-wide, most recent first — no need to leave this screen to check the chat log.</p>
+                                <div id="arsenal-dice-feed" style="max-height:180px; overflow-y:auto; margin-top:6px;"></div>
                             </div>
                             <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.15);">
                                 <h4 style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px;">Combat Initiative Tracker</h4>
@@ -939,13 +948,13 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.6"></script>
-    <script src="js/audio.js?v=3.6"></script>
-    <script src="js/ui.js?v=3.6"></script>
-    <script src="js/combat.js?v=3.6"></script>
-    <script src="js/colonies.js?v=3.6"></script>
-    <script src="js/ship-designer.js?v=3.6"></script>
-    <script src="js/map.js?v=3.6"></script>
+    <script src="js/db.js?v=3.8"></script>
+    <script src="js/audio.js?v=3.8"></script>
+    <script src="js/ui.js?v=3.8"></script>
+    <script src="js/combat.js?v=3.8"></script>
+    <script src="js/colonies.js?v=3.8"></script>
+    <script src="js/ship-designer.js?v=3.8"></script>
+    <script src="js/map.js?v=3.8"></script>
 
 </body>
 </html>
