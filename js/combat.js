@@ -30,7 +30,15 @@ const STRIKE_CRAFT_DB = {
     }
 };
 
-/* --- CARGO HUB & LOGISTICS LOOP --- */
+/* --- PERKS & SPECIALIZATIONS ---
+   The perk catalog and lookup logic moved to js/perk-designer.js — perks are
+   now a real DB-backed catalog (perk_definitions table) instead of a
+   hardcoded object here, so DM and players can design/propose new ones
+   instead of being limited to whatever's written into this file. See that
+   file for window.PERKS_DATA's replacement (perkDefinitionsList) and
+   window.getPerkBonusFor's new DB-driven implementation. */
+
+
 window.sanitizeCargo = function(inv) {
     if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
         inv = {
@@ -1807,6 +1815,12 @@ window.executeDicePoolRoll = async function() {
         
         total += rollTotal;
         breakdown.push(`${statName} (d${faces}: ${subRolls.join('💥')})`);
+
+        const perkBonus = window.getPerkBonusFor(myProf.perks, 'stat', statName);
+        if (perkBonus.total !== 0) {
+            total += perkBonus.total;
+            breakdown.push(`[${statName} Perks: ${perkBonus.sources.join(', ')}]`);
+        }
     });
 
     skillCheckboxes.forEach(cb => {
@@ -1815,6 +1829,12 @@ window.executeDicePoolRoll = async function() {
         let skillMod = skills[safeKey] || 0;
         total += skillMod;
         breakdown.push(`[${skillName} Mod: ${skillMod >= 0 ? '+' : ''}${skillMod}]`);
+
+        const perkBonus = window.getPerkBonusFor(myProf.perks, 'skill', skillName);
+        if (perkBonus.total !== 0) {
+            total += perkBonus.total;
+            breakdown.push(`[${skillName} Perks: ${perkBonus.sources.join(', ')}]`);
+        }
     });
 
     if (extraMod !== 0) {
