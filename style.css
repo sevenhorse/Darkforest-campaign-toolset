@@ -38,6 +38,11 @@ input[type="text"], input[type="number"], input[type="email"], input[type="passw
 }
 input:focus, textarea:focus { outline: none; border-color: #00e5a3; box-shadow: 0 0 6px rgba(0, 229, 163, 0.3); }
 
+/* Core Stats die selects (d4-d20) — plain 12px Courier New made d6/d8 easy to
+   mix up at a glance; bigger + bolder + spaced out fixes that without
+   touching every other select in the app. */
+.stat-die-select { font-size: 15px; font-weight: bold; letter-spacing: 1px; padding: 8px 6px; }
+
 input[type="color"] {
     border: 1px solid #3c4e36; border-radius: 2px; padding: 0;
     background: #040605; cursor: pointer; height: 28px; width: 36px;
@@ -401,7 +406,7 @@ canvas { display: block; width: 100%; height: 100%; }
 .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .augment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-.arsenal-row { display: grid; grid-template-columns: 2fr 1fr 1fr 20px 1fr 85px; gap: 6px; align-items: center; margin-bottom: 6px; background: #030403; padding: 6px; border: 1px solid #3c4e36; border-radius: 2px; }
+.arsenal-row { display: grid; grid-template-columns: 2fr 1fr 1fr 20px 1fr 115px; gap: 6px; align-items: center; margin-bottom: 6px; background: #030403; padding: 6px; border: 1px solid #3c4e36; border-radius: 2px; }
 
 #search-results-dropdown {
     position: absolute; top: 45px; left: 0; width: 100%; background: #060907;
