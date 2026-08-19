@@ -367,8 +367,22 @@
                                             <label for="new-deck-hp" style="display:none;">Deck HP</label>
                                             <input type="number" id="new-deck-hp" placeholder="Max HP" value="50" style="flex:1; margin:0; text-align:center; border-color:#00e1ff;">
                                         </div>
+                                        <label for="new-deck-type" style="font-size: 9px; color: #00e1ff;">Deck Type (mechanical — separate from the display name above):</label>
+                                        <select id="new-deck-type" style="margin:2px 0 6px 0; border-color:#00e1ff;">
+                                            <option value="bridge">Bridge / CIC</option>
+                                            <option value="engineering">Engineering</option>
+                                            <option value="manufacturing">Manufacturing</option>
+                                            <option value="life_support">Life Support</option>
+                                            <option value="hangar">Hangar / Flight Deck</option>
+                                            <option value="weapons">Weapons / Armory</option>
+                                            <option value="medical">Medical</option>
+                                            <option value="quarters">Crew Quarters</option>
+                                            <option value="cargo">Cargo</option>
+                                            <option value="other" selected>Other / Unclassified</option>
+                                        </select>
                                         <button class="btn-reveal" onclick="window.addShipDeck()" style="width:100%; font-size:10px; margin:0; padding: 4px 12px; border-color:#00e1ff; color:#00e1ff;">+ BUILD DECK</button>
                                     </div>
+                                    <div id="vessel-ownership-container"></div>
                                 </div>
                             </div>
                             <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
@@ -508,6 +522,19 @@
                                     <div style="flex:1.3;">
                                         <label for="new-fleet-route" style="font-size:9px; color:#6b826a;">Patrol Route:</label>
                                         <select id="new-fleet-route" style="font-size:11px; margin:2px 0;"><option value="">No Assigned Route</option></select>
+                                    </div>
+                                </div>
+                                <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:8px;">
+                                    <label style="font-size:9px; color:#c9962f; display:block; margin-bottom:4px;">⚙ Production (optional — set here, ticks automatically each day until changed):</label>
+                                    <div style="display:flex; gap:6px;">
+                                        <div style="flex:1.5;">
+                                            <label for="new-fleet-production-type" style="font-size:9px; color:#6b826a;">Resource Type:</label>
+                                            <input type="text" id="new-fleet-production-type" placeholder="e.g. Ordnance, Alloys..." style="font-size:11px; margin:2px 0;">
+                                        </div>
+                                        <div style="flex:1;">
+                                            <label for="new-fleet-production-output" style="font-size:9px; color:#6b826a;">Base Output / Day:</label>
+                                            <input type="number" id="new-fleet-production-output" value="0" min="0" style="font-size:11px; margin:2px 0; text-align:center;">
+                                        </div>
                                     </div>
                                 </div>
                                 <button class="btn-reveal" onclick="window.addFleetGroup()" style="margin-top:10px; border-color:#00e1ff; color:#00e1ff;">+ COMMISSION TASK GROUP</button>
@@ -904,13 +931,26 @@
                     <button class="btn-reveal" onclick="window.toggleHyperlanes()" style="margin-top: 6px;">⚡ TOGGLE PROCEDURAL ROUTES</button>
                     
                     <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #00e1ff;">Trade Route Plotter</h4>
+                    <label for="hyperlane-name-input" style="font-size: 10px; color: #6b826a;">Route Name:</label>
+                    <input type="text" id="hyperlane-name-input" placeholder="e.g. Coreward Supply Line" style="font-size: 11px; margin: 2px 0;">
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                        <div style="flex:1;">
+                            <label for="hyperlane-faction-select" style="font-size: 10px; color: #6b826a;">Faction Assignment:</label>
+                            <select id="hyperlane-faction-select" style="font-size: 10px; margin: 2px 0; background: #0a1410;"></select>
+                        </div>
+                        <div>
+                            <label for="hyperlane-color-input" style="font-size: 10px; color: #6b826a;">Line Color:</label>
+                            <input type="color" id="hyperlane-color-input" value="#00e1ff" style="margin: 2px auto; display: block;">
+                        </div>
+                    </div>
                     <div style="display: flex; gap: 6px; margin-top: 8px;">
                         <button id="btn-start-hyperlane-draw" class="btn-deploy" onclick="window.startDrawingHyperlane()" style="flex:1; font-size:10px; margin:0;">✏️ PLOT ROUTE</button>
                         <button id="btn-finish-hyperlane-draw" class="btn-deploy" onclick="window.finishActiveHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✓ SAVE ROUTE</button>
                         <button id="btn-cancel-hyperlane-draw" class="btn-remove" onclick="window.cancelDrawingHyperlane()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
                     </div>
+                    <button id="btn-undo-hyperlane-node" class="layer-edit" onclick="window.undoLastHyperlaneNode()" style="width:100%; font-size:10px; margin-top:4px; display:none;">↩ UNDO LAST NODE</button>
                     <div id="hyperlane-drawing-status" style="font-size: 10px; color: #00e1ff; margin-top: 6px; display: none;">Route Active...</div>
-                    
+
                     <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Trade Routes</h4>
                     <div id="hyperlane-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
 
@@ -1011,14 +1051,14 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.12"></script>
+    <script src="js/db.js?v=3.14"></script>
     <script src="js/audio.js?v=3.11"></script>
-    <script src="js/ui.js?v=3.13"></script>
-    <script src="js/combat.js?v=3.12"></script>
-    <script src="js/colonies.js?v=3.12"></script>
+    <script src="js/ui.js?v=3.16"></script>
+    <script src="js/combat.js?v=3.13"></script>
+    <script src="js/colonies.js?v=3.13"></script>
     <script src="js/ship-designer.js?v=3.12"></script>
     <script src="js/perk-designer.js?v=3.12"></script>
-    <script src="js/map.js?v=3.13"></script>
+    <script src="js/map.js?v=3.17"></script>
 
 </body>
 </html>
