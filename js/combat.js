@@ -421,6 +421,7 @@ window.renderVesselDeck = function() {
         const decks = vessel.ship_decks || [];
         if (decks.length === 0) dHtml = '<span style="font-size:10px; color:#6b826a;">No internal decks designated.</span>';
         else {
+            const DECK_TYPE_LABELS = { bridge: 'BRIDGE / CIC', engineering: 'ENGINEERING', manufacturing: 'MANUFACTURING', life_support: 'LIFE SUPPORT', hangar: 'HANGAR', weapons: 'WEAPONS', medical: 'MEDICAL', quarters: 'QUARTERS', cargo: 'CARGO', other: 'UNCLASSIFIED' };
             decks.forEach((d, idx) => {
                 // Ship decks are a plain JSONB array with no stable per-item
                 // id, same situation as cargo — reorder swaps array entries
@@ -428,12 +429,22 @@ window.renderVesselDeck = function() {
                 // localStorage helper used for id-backed lists.
                 const upDisabled = idx === 0 ? 'disabled' : '';
                 const downDisabled = idx === decks.length - 1 ? 'disabled' : '';
+                const deckType = d.type || 'other';
+                const typeLabel = DECK_TYPE_LABELS[deckType] || 'UNCLASSIFIED';
+                const bStatus = d.boarding_status || 'secure';
+                const bLabel = window.BOARDING_STATUS_LABELS[bStatus] || 'SECURE';
+                const bColor = window.BOARDING_STATUS_COLORS[bStatus] || '#00e5a3';
+                // Boarding status is DM-adjudicated only — the app tracks the
+                // status label, it does not enforce any dice/rules resolution.
+                const boardingControl = currentUserRole === 'dm'
+                    ? `<button onclick="window.cycleShipDeckBoardingStatus('${vessel.id}', ${idx})" title="Cycle boarding status (DM only)" style="font-size:9px; padding:2px 6px; margin:0; background:#030403; border-color:${bColor}; color:${bColor};">⚔ ${bLabel}</button>`
+                    : `<span style="font-size:9px; padding:2px 6px; border:1px solid ${bColor}; color:${bColor}; border-radius:2px;">⚔ ${bLabel}</span>`;
                 dHtml += `
                 <div style="margin-bottom: 8px; background: #030403; padding: 6px; border: 1px solid #00e1ff; border-radius: 2px;">
                     <div style="display:flex; justify-content:space-between; font-size:10px; color:#00e1ff; margin-bottom:2px;">
-                        <strong>${d.name}</strong><span>${d.hp} / ${d.max_hp}</span>
+                        <strong>${d.name} <span style="font-size:8px; color:#6b826a; font-weight:normal;">[${typeLabel}]</span></strong><span>${d.hp} / ${d.max_hp}</span>
                     </div>
-                    <div style="display:flex; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                         <span class="reorder-arrows">
                             <button type="button" class="reorder-btn" ${upDisabled} onclick="window.moveShipDeckOrder('${vessel.id}', ${idx}, 'up')" title="Move up">▲</button>
                             <button type="button" class="reorder-btn" ${downDisabled} onclick="window.moveShipDeckOrder('${vessel.id}', ${idx}, 'down')" title="Move down">▼</button>
@@ -447,10 +458,34 @@ window.renderVesselDeck = function() {
                         <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, 5)" style="width:24px; padding:2px; font-size:10px; margin:0;">+5</button>
                         <button class="layer-del" onclick="window.deleteShipDeck('${vessel.id}', ${idx})" style="padding:2px 6px; font-size:10px; margin:0; margin-left:4px;">✕</button>
                     </div>
+                    <div style="display:flex; justify-content:flex-end;">${boardingControl}</div>
                 </div>`;
             });
         }
         decksContainer.innerHTML = dHtml;
+
+        // Whole-ship ownership reassignment — DM-only, NOT gated by any
+        // specific deck's boarding_status (the DM adjudicates narratively
+        // when a boarding action actually culminates in a hull capture).
+        const ownershipContainer = document.getElementById('vessel-ownership-container');
+        if (ownershipContainer) {
+            if (currentUserRole === 'dm') {
+                let ownerOptions = '';
+                allProfiles.forEach(p => {
+                    ownerOptions += `<option value="${p.id}" ${p.id === vessel.owner_id ? 'selected' : ''}>${p.username || 'Commander'}${p.id === vessel.owner_id ? ' (current)' : ''}</option>`;
+                });
+                ownershipContainer.innerHTML = `
+                <div style="background:#030403; padding:8px; border:1px solid #ff6b6b; border-radius:2px; margin-top:10px;">
+                    <label for="vessel-ownership-select-${vessel.id}" style="font-size: 9px; color: #ff6b6b;">⚔ BOARDING CAPTURE — Reassign Vessel Ownership (DM only):</label>
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                        <select id="vessel-ownership-select-${vessel.id}" style="flex:1; margin:0; border-color:#ff6b6b;">${ownerOptions}</select>
+                        <button class="layer-del" onclick="window.reassignVesselOwnership('${vessel.id}')" style="flex:0 0 auto; font-size:10px; margin:0;">TRANSFER</button>
+                    </div>
+                </div>`;
+            } else {
+                ownershipContainer.innerHTML = '';
+            }
+        }
     }
 
     if (weaponsContainer) {
@@ -1161,21 +1196,24 @@ window.addShipDeck = async function() {
     const select = document.getElementById('vessel-deck-select');
     const name = document.getElementById('new-deck-name').value.trim();
     let maxHp = parseInt(document.getElementById('new-deck-hp').value) || 50;
+    const typeSelect = document.getElementById('new-deck-type');
+    const type = typeSelect ? typeSelect.value : 'other';
 
     if (!select || !select.value) { alert("Select a diagnostic target vessel first."); return; }
     if (!name) { alert("Please enter a deck or system name."); return; }
-    
+
     let vessel = globalShipMarkersCache.find(m => m.id === select.value);
     if (!vessel) return;
 
     let decks = vessel.ship_decks || [];
-    decks.push({ name: name, hp: maxHp, max_hp: maxHp });
+    decks.push({ name: name, hp: maxHp, max_hp: maxHp, type: type, boarding_status: 'secure' });
 
     await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vessel.id);
     vessel.ship_decks = decks;
 
     document.getElementById('new-deck-name').value = '';
     document.getElementById('new-deck-hp').value = '50';
+    if (typeSelect) typeSelect.value = 'other';
     window.renderVesselDeck();
 };
 
@@ -1218,6 +1256,62 @@ window.moveShipDeckOrder = async function(vesselId, idx, direction) {
     await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
     vessel.ship_decks = decks;
     window.renderVesselDeck();
+};
+
+/* --- BOARDING ACTION SYSTEM (prototype) ---
+   DM-narrated, app-tracked-only: no automated dice or rules enforcement.
+   Per-deck boarding_status cycles Secure -> Contested -> Captured -> Secure.
+   Whole-ship ownership transfer is a SEPARATE, DM-only action below —
+   it is not gated by any specific deck's boarding_status, since the DM
+   adjudicates when a boarding action actually results in a hull capture. */
+window.BOARDING_STATUS_CYCLE = ['secure', 'contested', 'captured'];
+window.BOARDING_STATUS_LABELS = { secure: 'SECURE', contested: 'CONTESTED', captured: 'CAPTURED' };
+window.BOARDING_STATUS_COLORS = { secure: '#00e5a3', contested: '#ffaa00', captured: '#ff3333' };
+
+window.cycleShipDeckBoardingStatus = async function(vesselId, idx) {
+    if (currentUserRole !== 'dm') return;
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let decks = vessel.ship_decks || [];
+    if (!decks[idx]) return;
+
+    const cycle = window.BOARDING_STATUS_CYCLE;
+    const current = decks[idx].boarding_status || 'secure';
+    const next = cycle[(cycle.indexOf(current) + 1) % cycle.length];
+    decks[idx].boarding_status = next;
+
+    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+    vessel.ship_decks = decks;
+    window.renderVesselDeck();
+};
+
+window.reassignVesselOwnership = async function(vesselId) {
+    if (currentUserRole !== 'dm') return;
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    const select = document.getElementById(`vessel-ownership-select-${vesselId}`);
+    if (!select || !select.value) { alert("Select a new owner first."); return; }
+    const newOwnerId = select.value;
+    if (newOwnerId === vessel.owner_id) return;
+
+    const newOwnerName = allProfiles.find(p => p.id === newOwnerId)?.username || 'Commander';
+
+    if (!(await window.showConfirmModal(`Transfer ownership of "${vessel.name}" to ${newOwnerName}? This represents a completed boarding capture.`))) return;
+
+    await db.from('ship_markers').update({ owner_id: newOwnerId }).eq('id', vesselId);
+    vessel.owner_id = newOwnerId;
+
+    try {
+        await db.from('chat_logs').insert({
+            sender_id: 'system',
+            content: `⚔️ BOARDING RESOLVED: "${vessel.name}" has been captured — ownership transferred to ${newOwnerName}.`,
+            message_type: 'text'
+        });
+    } catch (e) { /* chat log is best-effort, don't block the transfer on it */ }
+
+    window.renderVesselDeck();
+    if (typeof window.showToast === 'function') window.showToast(`Ownership of ${vessel.name} transferred.`);
 };
 
 /* Inject Ammo / Gun Count / Damage Type fields into the "Mount New Weapon System"
