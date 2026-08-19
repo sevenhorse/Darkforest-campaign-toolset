@@ -412,7 +412,7 @@ canvas { display: block; width: 100%; height: 100%; }
 .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .augment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-.arsenal-row { display: grid; grid-template-columns: 2fr 1fr 1fr 20px 1fr 145px; gap: 6px; align-items: center; margin-bottom: 6px; background: #030403; padding: 6px; border: 1px solid #3c4e36; border-radius: 2px; }
+.arsenal-row { display: grid; grid-template-columns: 2fr 1fr 1fr 20px 1fr 175px; gap: 6px; align-items: center; margin-bottom: 6px; background: #030403; padding: 6px; border: 1px solid #3c4e36; border-radius: 2px; }
 
 #search-results-dropdown {
     position: absolute; top: 45px; left: 0; width: 100%; background: #060907;
