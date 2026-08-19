@@ -36,7 +36,27 @@ function getPlanetResources(type, prng) {
 }
 
 let generatedSystems = {};
-window.getSystemBodies = function(system) {
+// getSystemBodies is memoized per-system (generatedSystems{}) for procedural
+// bodies and reads star_systems.custom_bodies directly for custom ones — the
+// override merge below happens OUTSIDE both of those, on every call, so a
+// DM's saved edit (window.globalPlanetaryModifiersCache) always reflects the
+// latest DB state even against a stale cached/shared base array, and so we
+// never mutate the cached objects themselves (new objects are returned).
+function applyPlanetaryOverrides(bodies) {
+    const overrides = window.globalPlanetaryModifiersCache || {};
+    return bodies.map(b => {
+        const o = overrides[b.id];
+        if (!o) return b;
+        return { ...b,
+            name: o.custom_name ?? b.name,
+            type: o.custom_type ?? b.type,
+            gravity: o.custom_gravity ?? b.gravity,
+            atmosphere: o.custom_atmosphere ?? b.atmosphere,
+            resources: o.custom_resources ?? b.resources };
+    });
+}
+window.getSystemBodies = function(system) { return applyPlanetaryOverrides(getSystemBodiesRaw(system)); };
+function getSystemBodiesRaw(system) {
     if(system.type === 'Nebula') return [];
     if (system.custom_bodies && Array.isArray(system.custom_bodies) && system.custom_bodies.length > 0) { return system.custom_bodies.map((b, idx) => ({ ...b, id: b.id || `${system.id}-custom-${idx}`, baseAngle: b.baseAngle || (idx * 1.2), speed: b.speed || (0.0002 / (idx + 1)), parentSystem: system })); }
     if(generatedSystems[system.id]) return generatedSystems[system.id];
@@ -59,16 +79,15 @@ window.getSystemBodies = function(system) {
     generatedSystems[system.id] = bodies; return bodies;
 };
 
-/* --- SYSTEM HAZARD ENGINE ---
-   Checks a ship against BOTH explicit DM-placed hazard zones (system_hazards
-   table — precise x/y/radius/intensity, independent of any star) AND the
-   implicit hazard already carried on star systems themselves (the `hazard`
-   field set via the System Architect / procedural generation — Pulsar,
-   Nebula, Gravity Well — which existed purely as flavor text/a visual glow
-   before this, with none of its described effects actually applied). The
-   implicit check uses a default radius centered on the star so every
-   existing system's hazard flavor becomes mechanically real immediately,
-   without the DM needing to manually re-place a zone on each one. */
+/* Both explicit DM-placed hazard zones (system_hazards table — precise
+   x/y/radius/intensity, independent of any star) and the implicit hazard
+   already carried on star systems themselves (the `hazard` field set via
+   the System Architect / procedural generation — Pulsar, Nebula, Gravity
+   Well) mechanically affect ships — see window.checkShipHazards below (past
+   getFowTier/isPositionSensorVisible, which it depends on). The implicit
+   check uses a default radius centered on the star so every existing
+   system's hazard flavor is mechanically real without the DM needing to
+   manually re-place a zone on each one. */
 window.HAZARD_IMPLICIT_RADIUS = 350;
 // Explicit DM-placed zones (system_hazards) used to accept any radius the
 // DM typed, unbounded relative to the star it was near — a zone could
@@ -77,11 +96,87 @@ window.HAZARD_IMPLICIT_RADIUS = 350;
 // range) and in drawHazardZones below (visual ring) so what you see and
 // what actually affects your ship always agree.
 window.SYSTEM_HAZARD_MAX_RADIUS = window.HAZARD_IMPLICIT_RADIUS;
+
+/* FOW ENGINE
+   isPositionSensorVisible is the shared "is this point on the map within
+   sensor range of any allied asset (or the DM, who sees everything)" check —
+   pulled out of getFowTier so hazards can use the exact same rule against
+   their own real x/y instead of borrowing a system's. Note this is evaluated
+   against the CURRENT CLIENT's own/allied ships, same as every other FOW
+   check in this app (stars, planets) — it's viewer-relative, not a single
+   shared truth. That's fine for the display/telemetry call sites (each
+   client already sees stars/planets at their own FOW tier); for the one
+   mechanical call site with a real consequence (gravity-well jump-distance
+   inflation in js/db.js), it's always evaluated against the jumping ship's
+   OWNER's own client, so viewer and ship-owner are always the same person
+   there — no cross-client divergence in practice. */
+window.isPositionSensorVisible = function(x, y) {
+    for (let m of globalShipMarkersCache) {
+        if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
+        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied') || currentUserRole === 'dm') {
+            if (Math.hypot(m.x - x, m.y - y) <= 300) return true;
+        }
+    }
+    return false;
+};
+window.getFowTier = function(system) {
+    if (window.scannedSystems && window.scannedSystems.includes(system.id)) return 3; // Tier 3
+    return window.isPositionSensorVisible(system.x, system.y) ? 2 : 1;
+};
+
+/* --- HYPERLANE DISCOVERY (persistent Fog of War for trade routes) ---
+   Deliberately a different FOW model from hazards/stars: this session's
+   design call was "once discovered, stays revealed" (matching how a fully
+   DRADIS-scanned star system stays known via window.scannedSystems) rather
+   than "live sensor range only" (how hazards/tier-2 systems work — visible
+   only while an allied ship is currently nearby, gone again once it
+   leaves). There's no manual "scan" action for a route node the way there
+   is for a star, though — discovery here is automatic: the first render
+   pass where a node is within sensor range (isPositionSensorVisible) marks
+   it permanently discovered for this browser. Same localStorage-per-
+   browser pattern as window.scannedSystems — not DB-synced, so each player
+   (and the DM) tracks their own discovered nodes independently. */
+window.discoveredHyperlaneNodes = new Set(JSON.parse(localStorage.getItem('odyssey_discovered_hyperlane_nodes') || '[]'));
+// Every node created from this session onward carries its own stable id
+// (see genHyperlaneNodeId / the hyperlane click handler further down), so
+// node.id is normally all this needs. Older routes drawn before this
+// session may have nodes with no id at all (deep-space nodes specifically —
+// system-snapped nodes always had the system's own id). For those, fall
+// back to a route+index-derived key — stable as long as that route's path
+// isn't later edited/reordered (the same index-based fragility already
+// accepted elsewhere in this app, e.g. custom system body ids). Editing and
+// re-saving a legacy route bakes a real id into every node going forward
+// (see startEditHyperlane), so this fallback is self-healing over time.
+function hyperlaneNodeKey(route, node, index) { return node.id || (route.id + '-n' + index); }
+function updateHyperlaneDiscovery() {
+    let changed = false;
+    globalHyperlanesCache.forEach(route => {
+        (route.nodes || []).forEach((node, idx) => {
+            const key = hyperlaneNodeKey(route, node, idx);
+            if (!window.discoveredHyperlaneNodes.has(key) && window.isPositionSensorVisible(node.x, node.y)) {
+                window.discoveredHyperlaneNodes.add(key);
+                changed = true;
+            }
+        });
+    });
+    if (changed) localStorage.setItem('odyssey_discovered_hyperlane_nodes', JSON.stringify([...window.discoveredHyperlaneNodes]));
+}
+
+/* --- SYSTEM HAZARD ENGINE ---
+   Both hazard sources below now respect Fog of War: a hazard zone or a
+   system's implicit hazard flavor only mechanically affects a ship if that
+   zone/system's own location is within sensor range (see
+   isPositionSensorVisible above) — previously this check didn't exist at
+   all here, only on the map's visual ring, so ships were taking hazard
+   effects from space nobody had discovered yet. Reversed deliberately this
+   session (was previously "physics don't care about sensors" on purpose;
+   see the architecture reference doc's prior checkpoint notes). */
 window.checkShipHazards = function(shipMarker) {
     if (!shipMarker) return [];
     let hits = [];
 
     (window.globalSystemHazardsCache || []).forEach(hz => {
+        if (!window.isPositionSensorVisible(hz.x, hz.y)) return;
         const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
         let dist = Math.hypot(shipMarker.x - hz.x, shipMarker.y - hz.y);
         if (dist <= r) {
@@ -92,6 +187,7 @@ window.checkShipHazards = function(shipMarker) {
     const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
     allSystems.forEach(s => {
         if (!s.hazard || s.hazard === 'None') return;
+        if (!window.isPositionSensorVisible(s.x, s.y)) return;
         let dist = Math.hypot(shipMarker.x - s.x, shipMarker.y - s.y);
         if (dist <= window.HAZARD_IMPLICIT_RADIUS) {
             hits.push({ type: s.hazard.toLowerCase().replace(/\s+/g, '_'), intensity: 1, radius: window.HAZARD_IMPLICIT_RADIUS, source: 'system', systemName: s.name, distance: dist });
@@ -99,19 +195,6 @@ window.checkShipHazards = function(shipMarker) {
     });
 
     return hits;
-};
-
-/* FOW ENGINE */
-window.getFowTier = function(system) {
-    if (window.scannedSystems && window.scannedSystems.includes(system.id)) return 3; // Tier 3
-    let inRange = false;
-    for (let m of globalShipMarkersCache) {
-        if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
-        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied') || currentUserRole === 'dm') {
-            if (Math.hypot(m.x - system.x, m.y - system.y) <= 300) { inRange = true; break; }
-        }
-    }
-    return inRange ? 2 : 1;
 };
 
 /* DB SYNC & WIPES */
@@ -206,11 +289,11 @@ window.spawnTokenAtCenter = async function() {
             { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Ion" }
         ];
         payload.ship_decks = [
-            { name: "Bridge / CIC", hp: 100, max_hp: 100 },
-            { name: "Engineering / Core", hp: 150, max_hp: 150 },
-            { name: "Life Support", hp: 100, max_hp: 100 },
-            { name: "Flight Deck / Hangars", hp: 120, max_hp: 120 },
-            { name: "Manufacturing", hp: 100, max_hp: 100 }
+            { name: "Bridge / CIC", hp: 100, max_hp: 100, type: "bridge", boarding_status: "secure" },
+            { name: "Engineering / Core", hp: 150, max_hp: 150, type: "engineering", boarding_status: "secure" },
+            { name: "Life Support", hp: 100, max_hp: 100, type: "life_support", boarding_status: "secure" },
+            { name: "Flight Deck / Hangars", hp: 120, max_hp: 120, type: "hangar", boarding_status: "secure" },
+            { name: "Manufacturing", hp: 100, max_hp: 100, type: "manufacturing", boarding_status: "secure" }
         ];
     }
     await db.from('ship_markers').insert(payload); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
@@ -261,13 +344,68 @@ window.toggleHyperlanes = function() {
     window.updateToolButtonStyles();
 };
 
-window.startDrawingHyperlane = function() { window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+// Every hyperlane node carries a stable id: the underlying system's own id
+// for a snapped node, or a freshly generated one for a deep-space node (see
+// the click handler below). This id is what Fog-of-War discovery tracking
+// keys off (window.discoveredHyperlaneNodes) — it has to survive edits, so
+// re-plotting a route's path must preserve existing nodes' ids rather than
+// regenerating them (see startEditHyperlane / finishActiveHyperlane).
+function genHyperlaneNodeId() { return (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : ('node-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)); }
+
+window.editingHyperlaneId = null; // set by startEditHyperlane; null = finishActiveHyperlane inserts a new route instead of updating one
+
+function resetHyperlaneFormFields() {
+    const nameEl = document.getElementById('hyperlane-name-input'); if (nameEl) nameEl.value = '';
+    const colorEl = document.getElementById('hyperlane-color-input'); if (colorEl) colorEl.value = '#00e1ff';
+    const factionEl = document.getElementById('hyperlane-faction-select'); if (factionEl) factionEl.value = '';
+}
+
+window.startDrawingHyperlane = function() { window.editingHyperlaneId = null; resetHyperlaneFormFields(); window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('btn-undo-hyperlane-node').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+
+// Loads an existing route's nodes/name/color/faction back into the drawing
+// state so the DM can add/remove waypoints and save in place (an UPDATE,
+// not a new route) rather than the old delete-and-redraw-from-scratch-only
+// workflow. Existing node ids are preserved untouched; only brand-new nodes
+// added during this edit get a fresh id (see the click handler below) —
+// this also self-heals any legacy node that never had a stable id (older
+// routes drawn before this session): the fallback id assigned for display
+// purposes (see updateHyperlaneDiscovery) gets baked in for real the next
+// time the route is saved.
+window.startEditHyperlane = function(routeId) {
+    if (currentUserRole !== 'dm') return;
+    const route = globalHyperlanesCache.find(h => h.id === routeId);
+    if (!route) return;
+    window.editingHyperlaneId = routeId;
+    window.activeHyperlaneNodes = (route.nodes || []).map((n, idx) => ({ ...n, id: n.id || (routeId + '-n' + idx) }));
+    const nameEl = document.getElementById('hyperlane-name-input'); if (nameEl) nameEl.value = route.name || '';
+    const colorEl = document.getElementById('hyperlane-color-input'); if (colorEl) colorEl.value = route.color || '#00e1ff';
+    const factionEl = document.getElementById('hyperlane-faction-select'); if (factionEl) factionEl.value = route.faction_name || '';
+    window.hyperlaneDrawActive = true;
+    document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('btn-undo-hyperlane-node').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block';
+    document.getElementById('hyperlane-drawing-status').innerText = `Editing "${route.name || 'Trade Route'}" — Nodes: ${window.activeHyperlaneNodes.length}`;
+    window.updateToolButtonStyles();
+};
+
+window.undoLastHyperlaneNode = function() { if (window.activeHyperlaneNodes.length > 0) { window.activeHyperlaneNodes.pop(); const statusEl = document.getElementById('hyperlane-drawing-status'); if (statusEl) statusEl.innerText = (window.editingHyperlaneId ? 'Editing — ' : '') + `Nodes: ${window.activeHyperlaneNodes.length}`; } };
+
 window.finishActiveHyperlane = async function() {
     if (window.activeHyperlaneNodes.length < 2) { alert("Requires at least 2 nodes."); return; }
-    await db.from('hyperlanes').insert({ name: 'Trade Route', color: '#00e1ff', nodes: window.activeHyperlaneNodes });
+    // Every node must have a stable id before this saves — brand-new nodes
+    // added via the map click handler already get one at creation time, but
+    // this is a defensive backstop (e.g. very old cached node shapes).
+    const nodes = window.activeHyperlaneNodes.map(n => n.id ? n : { ...n, id: genHyperlaneNodeId() });
+    const name = document.getElementById('hyperlane-name-input').value || 'Trade Route';
+    const color = document.getElementById('hyperlane-color-input').value || '#00e1ff';
+    const factionEl = document.getElementById('hyperlane-faction-select');
+    const faction_name = (factionEl && factionEl.value) ? factionEl.value : null;
+    const payload = { name, color, nodes, faction_name };
+    const { error } = window.editingHyperlaneId
+        ? await db.from('hyperlanes').update(payload).eq('id', window.editingHyperlaneId)
+        : await db.from('hyperlanes').insert(payload);
+    if (error) { alert("Failed to save trade route: " + error.message); return; }
     window.cancelDrawingHyperlane(); if (typeof loadHyperlanes === 'function') loadHyperlanes();
 };
-window.cancelDrawingHyperlane = function() { window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'block'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'none'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'none'; document.getElementById('hyperlane-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
+window.cancelDrawingHyperlane = function() { window.editingHyperlaneId = null; resetHyperlaneFormFields(); window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'block'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'none'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'none'; document.getElementById('btn-undo-hyperlane-node').style.display = 'none'; document.getElementById('hyperlane-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
 
 window.triggerTacticalPing = function(x, y) {
     if (!realtimeChannel) return;
@@ -387,24 +525,30 @@ function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
 /* --- CIC OVERLAY: SYSTEM HAZARD ZONE VISUALS ---
    Renders both explicit DM-placed zones (system_hazards table) and the
    implicit hazard already carried by star systems themselves (see
-   window.checkShipHazards in the hazard engine section below) — so a
-   Pulsar-flagged system shows its danger ring on the map even if no DM
-   ever placed an explicit zone there. Bounded to visible viewport per
-   hazard, same pattern as everything else in this render loop.
-   Explicit zones tied to a system (hz.system_id) are hidden entirely at
-   FOW tier 1 (undiscovered/out of sensor range) — same rule stars/planets
-   already follow via window.getFowTier. Untied zones (no system_id) keep
-   the original always-visible behavior. Radius is always clamped to
-   window.SYSTEM_HAZARD_MAX_RADIUS regardless of tie. */
+   window.checkShipHazards above) — so a Pulsar-flagged system shows its
+   danger ring on the map even if no DM ever placed an explicit zone there.
+   Bounded to visible viewport per hazard, same pattern as everything else
+   in this render loop.
+
+   FOW gating (reworked this session): every hazard — explicit zone or
+   implicit per-star ring — is hidden at FOW tier 1 based on ITS OWN x/y via
+   isPositionSensorVisible, not a "tied system." Previously an explicit
+   zone's visibility was gated by whichever system it was tied to
+   (hz.system_id) even though that tie has no enforced relationship to the
+   zone's actual placement (js/ui.js's placeHazardZone drops a new zone at
+   wherever the camera happened to be centered, independent of the tied
+   system's coordinates) — a zone tied to a discovered system could sit
+   physically on top of an undiscovered one and still render, or vice
+   versa. Checking the zone's own position sidesteps that mismatch entirely.
+   One behavior change from this: untied zones used to always render
+   regardless of FOW ("hazard NOT centered on a star" flexibility) — now
+   they're gated like everything else, since we no longer need a tie to
+   know where to check. system_id is still stored and still shown in the
+   DM's hazard zone list (js/ui.js) — it's just informational now, not a
+   FOW input. Radius is always clamped to window.SYSTEM_HAZARD_MAX_RADIUS. */
 function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
     (window.globalSystemHazardsCache || []).forEach(hz => {
-        if (hz.system_id) {
-            // system_id is untyped text (no FK) — it can point at a custom
-            // (DB) system OR a procedural one, so both caches get checked
-            // (matches js/ui.js's window.handleHazardSystemSearch).
-            const tiedSystem = (globalProceduralSystemsCache || []).find(s => s.id === hz.system_id) || (globalDbSystemsCache || []).find(s => s.id === hz.system_id);
-            if (tiedSystem && window.getFowTier(tiedSystem) === 1) return;
-        }
+        if (!window.isPositionSensorVisible(hz.x, hz.y)) return;
         const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
         if (Math.abs(hz.x - cx) > hw + r || Math.abs(hz.y - cy) > hh + r) return;
         drawSingleHazard(ctx, hz.x, hz.y, r, hz.hazard_type, zoom, time);
@@ -414,6 +558,7 @@ function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
     const implicitR = window.HAZARD_IMPLICIT_RADIUS;
     allSystems.forEach(s => {
         if (!s.hazard || s.hazard === 'None') return;
+        if (!window.isPositionSensorVisible(s.x, s.y)) return;
         if (Math.abs(s.x - cx) > hw + implicitR || Math.abs(s.y - cy) > hh + implicitR) return;
         drawSingleHazard(ctx, s.x, s.y, implicitR, s.hazard.toLowerCase().replace(/\s+/g, '_'), zoom, time);
     });
@@ -687,10 +832,40 @@ window.saveDMStarProperties = async function(id) {
     const name = document.getElementById('edit-star-name').value; const ownership = document.getElementById('edit-star-ownership').value; const luminosity = document.getElementById('edit-star-luminosity').value; const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
     await db.from('star_systems').update({ name, ownership, luminosity, industry_tier: tier }).eq('id', id); alert("Parameters updated."); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
-window.saveDMBodyProperties = function(id) {
+// Was purely cosmetic — mutated the in-memory selectedTarget.data object and
+// showed an "updated locally" alert, but never wrote to the DB, so edits
+// vanished on refresh and never reached other players. Now persists to
+// planetary_modifiers (see js/db.js loadPlanetaryModifiers for why that
+// table/keying rather than a direct star_systems write — most bodies, being
+// procedural, have no real star_systems row to write onto). Select-then-
+// update/insert on body_id rather than .upsert(): body_id isn't confirmed to
+// have a unique constraint, so this avoids depending on one existing.
+window.saveDMBodyProperties = async function(id) {
     if (currentUserRole !== 'dm' || !window.selectedTarget || window.selectedTarget.type !== 'body') return;
-    let b = window.selectedTarget.data; b.name = document.getElementById('edit-body-name').value; b.type = document.getElementById('edit-body-type').value; b.gravity = document.getElementById('edit-body-gravity').value; b.atmosphere = document.getElementById('edit-body-atmosphere').value; b.resources = document.getElementById('edit-body-resources').value;
-    if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); alert("Celestial body updated locally.");
+    const payload = {
+        custom_name: document.getElementById('edit-body-name').value,
+        custom_type: document.getElementById('edit-body-type').value,
+        custom_gravity: document.getElementById('edit-body-gravity').value,
+        custom_atmosphere: document.getElementById('edit-body-atmosphere').value,
+        custom_resources: document.getElementById('edit-body-resources').value
+    };
+    const { data: existing, error: selectError } = await db.from('planetary_modifiers').select('body_id').eq('body_id', id).maybeSingle();
+    if (selectError) { alert("Failed to save scan data: " + selectError.message); return; }
+    const { error } = existing
+        ? await db.from('planetary_modifiers').update(payload).eq('body_id', id)
+        : await db.from('planetary_modifiers').insert({ body_id: id, ...payload });
+    if (error) { alert("Failed to save scan data: " + error.message); return; }
+
+    window.globalPlanetaryModifiersCache = window.globalPlanetaryModifiersCache || {};
+    window.globalPlanetaryModifiersCache[id] = { ...window.globalPlanetaryModifiersCache[id], body_id: id, ...payload };
+    // selectedTarget.data is the raw (pre-override) body object; refreshing
+    // it from getSystemBodies would require re-locating it in its parent
+    // system's list, so just reflect the saved values directly here too —
+    // renderHUDTelemetry reads selectedTarget.data for the 'body' branch.
+    Object.assign(window.selectedTarget.data, { name: payload.custom_name, type: payload.custom_type, gravity: payload.custom_gravity, atmosphere: payload.custom_atmosphere, resources: payload.custom_resources });
+
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    alert("Scan data saved — synced to all players.");
 };
 window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Destroy star system?"))) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
 window.deleteShipToken = async function(id) {
@@ -782,10 +957,16 @@ window.initGalaxyEngine = function() {
         }
 
         if (window.hyperlaneDrawActive) {
-            let snapNode = { x: worldPos.x, y: worldPos.y, name: "Deep Space Node" };
+            // Snapped nodes reuse the real system's id (stable, and doubles
+            // as its Fog-of-War discovery key — see updateHyperlaneDiscovery
+            // below). Deep-space nodes get a freshly generated one so they
+            // have a stable identity too, independent of x/y.
+            let snapNode = { x: worldPos.x, y: worldPos.y, name: "Deep Space Node", id: genHyperlaneNodeId() };
             let allSystems = proceduralSystems.concat(globalDbSystemsCache);
             for (let s of allSystems) { if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < Math.max(15, 25 / window.camera.zoom)) { snapNode = { x: s.x, y: s.y, id: s.id, name: s.name }; break; } }
-            window.activeHyperlaneNodes.push(snapNode); return;
+            window.activeHyperlaneNodes.push(snapNode);
+            const statusEl = document.getElementById('hyperlane-drawing-status'); if (statusEl) statusEl.innerText = (window.editingHyperlaneId ? 'Editing — ' : '') + `Nodes: ${window.activeHyperlaneNodes.length}`;
+            return;
         }
 
         if (window.jumpPlottingActive && window.activeJumpShip) {
@@ -1003,11 +1184,21 @@ window.initGalaxyEngine = function() {
         let allSystems = proceduralSystems.concat(globalDbSystemsCache);
 
         if (window.hyperlanesVisible) {
+            updateHyperlaneDiscovery();
             globalHyperlanesCache.forEach(route => {
                 if (!route.nodes || route.nodes.length < 2) return;
-                ctx.save(); ctx.beginPath(); ctx.moveTo(route.nodes[0].x, route.nodes[0].y);
-                for (let k = 1; k < route.nodes.length; k++) { ctx.lineTo(route.nodes[k].x, route.nodes[k].y); }
-                ctx.strokeStyle = route.color || '#00e1ff'; ctx.lineWidth = 3 / window.camera.zoom; ctx.shadowColor = route.color || '#00e1ff'; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0; ctx.restore();
+                // Per-segment, not whole-route: a segment only draws once
+                // BOTH its endpoint nodes are discovered (see
+                // updateHyperlaneDiscovery/hyperlaneNodeKey above) — a
+                // partially-explored route renders partially, not all-or-
+                // nothing. Undiscovered segments render nothing at all, same
+                // as a hidden hazard zone (no partial hint).
+                for (let k = 0; k < route.nodes.length - 1; k++) {
+                    const a = route.nodes[k], b = route.nodes[k + 1];
+                    if (!window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, a, k)) || !window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, b, k + 1))) continue;
+                    ctx.save(); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+                    ctx.strokeStyle = route.color || '#00e1ff'; ctx.lineWidth = 3 / window.camera.zoom; ctx.shadowColor = route.color || '#00e1ff'; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0; ctx.restore();
+                }
             });
         }
 
