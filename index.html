@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.10">
+    <link rel="stylesheet" href="style.css?v=3.13">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -169,6 +169,19 @@
                                     <div style="flex: 1;"><label for="term-vitality" id="term-vitality-label" style="font-size: 10px; color: #ff6b6b;">Injuries (0-?):</label><input type="number" id="term-vitality" min="0" max="10" value="0"></div>
                                     <div style="flex: 1;"><label for="term-stress" style="font-size: 10px; color: #ffaa00;">Stress (0-20):</label><input type="number" id="term-stress" min="0" max="20" value="0"></div>
                                     <div style="flex: 1;"><label for="term-adversity" style="font-size: 10px; color: #00e5a3;">Adversity (+/-):</label><input type="number" id="term-adversity" value="0"></div>
+                                </div>
+                                <div style="display: flex; gap: 10px; margin-top: 10px; align-items: flex-end;">
+                                    <div style="flex: 1;">
+                                        <label for="term-shield-current" style="font-size: 10px; color: #00e1ff;">Shield (Hit Counter):</label>
+                                        <div style="display:flex; gap:4px; align-items:center;">
+                                            <input type="number" id="term-shield-current" min="0" value="0" style="flex:1;">
+                                            <span style="font-size:11px; color:#6b826a;">/</span>
+                                            <input type="number" id="term-shield-max" min="0" value="0" style="flex:1;">
+                                        </div>
+                                        <span id="term-shield-effective" style="font-size:9px; color:#6b826a;"></span>
+                                    </div>
+                                    <div style="flex: 1;"><label for="term-dr" style="font-size: 10px; color: #c9962f;">Damage Reduction (flat, per hit):</label><input type="number" id="term-dr" min="0" value="0"></div>
+                                    <button type="button" onclick="window.rechargeShield()" style="flex: 1; margin: 0; padding: 8px; font-size: 10px; background:#0a1410; border-color:#00e1ff; color:#00e1ff;">🔄 RECHARGE (New Encounter)</button>
                                 </div>
                             </div>
 
@@ -901,8 +914,41 @@
                     <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Trade Routes</h4>
                     <div id="hyperlane-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
 
-                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #ff3366;">Environmental Hazard Zones</h4>
-                    <p style="font-size: 9px; color: #6b826a; margin-top:0;">Places a zone at current DRADIS center. Systems with a hazard already set (Architect tool) apply it automatically without needing a zone here.</p>
+                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #ff3366;">Hazard Designer — Catalog</h4>
+                    <p style="font-size: 9px; color: #6b826a; margin-top:0;">Reusable hazard blueprints (DM-only) — design once, place as many instances as you like below. Editing a saved definition does not retroactively change zones already placed from it.</p>
+                    <div id="hazard-def-form-heading" style="font-size:9px; color:#6b826a; margin-top:6px;">+ New Hazard Definition</div>
+                    <label for="new-hazdef-name" style="display:none;">Name</label>
+                    <input type="text" id="new-hazdef-name" placeholder="Blueprint name (e.g. 'Standard Pulsar Field')" style="font-size:11px; margin:2px 0;">
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                        <label for="new-hazdef-type" style="display:none;">Type</label>
+                        <select id="new-hazdef-type" style="flex:1.4; font-size:10px; margin:0; background:#0a1410;">
+                            <option value="pulsar">Pulsar Radiation</option>
+                            <option value="nebula">Dense Nebula</option>
+                            <option value="gravity_well">Gravity Well</option>
+                        </select>
+                        <label for="new-hazdef-radius" style="display:none;">Default Radius</label>
+                        <input type="number" id="new-hazdef-radius" placeholder="Radius" value="300" min="10" max="350" style="flex:1; font-size:10px; margin:0; text-align:center;">
+                        <label for="new-hazdef-intensity" style="display:none;">Default Intensity</label>
+                        <input type="number" id="new-hazdef-intensity" placeholder="Intensity" value="1" min="1" max="5" style="flex:1; font-size:10px; margin:0; text-align:center;">
+                    </div>
+                    <label for="new-hazdef-desc" style="display:none;">Description</label>
+                    <textarea id="new-hazdef-desc" rows="2" placeholder="DM reference notes (optional)..." style="font-size:10px; margin:4px 0; width:100%;"></textarea>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn-reveal" id="btn-save-hazard-def" onclick="window.saveHazardDefinition()" style="flex:1; font-size:10px; margin:0;">+ SAVE DEFINITION</button>
+                        <button class="btn-remove" id="btn-cancel-hazard-def-edit" onclick="window.cancelHazardDefinitionEdit()" style="flex:1; font-size:10px; margin:0; display:none;">CANCEL EDIT</button>
+                    </div>
+                    <div id="hazard-def-list-container" style="max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;"></div>
+
+                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #ff3366;">Place Hazard Instance</h4>
+                    <p style="font-size: 9px; color: #6b826a; margin-top:0;">Places a zone at current DRADIS center. Radius is always capped to 350u. Optionally tie it to any star system — DM-placed or procedurally generated — to gate its visibility by that system's Fog of War state (leave untied for the old always-visible, free-floating behavior). Systems with a hazard already set (Architect tool) apply it automatically without needing a zone here.</p>
+                    <label for="new-hazard-system-search" style="display:none;">Target System</label>
+                    <div style="position:relative;">
+                        <input type="text" id="new-hazard-system-search" placeholder="Search any of the 2,600+ galaxy systems (optional)..." autocomplete="off" oninput="window.handleHazardSystemSearch(this.value)" style="font-size: 10px; margin: 2px 0; width: 100%; background:#0a1410;">
+                        <div id="hazard-system-search-dropdown"></div>
+                    </div>
+                    <div id="hazard-system-selected-tag" style="font-size:9px; color:#00e5a3; margin:2px 0; display:none; cursor:pointer;" onclick="window.clearHazardTargetSystem()" title="Click to clear the tie"></div>
+                    <label for="new-hazard-def" style="display:none;">Catalog Definition</label>
+                    <select id="new-hazard-def" onchange="window.applyHazardDefToPlacementForm(this.value)" style="font-size: 10px; margin: 2px 0; width: 100%; background:#0a1410;"><option value="">— Ad-hoc (no catalog blueprint) —</option></select>
                     <div style="display: flex; gap: 6px; margin-top: 4px;">
                         <label for="new-hazard-type" style="display:none;">Hazard Type</label>
                         <select id="new-hazard-type" style="flex:1.4; font-size: 10px; margin: 0; background:#0a1410;">
@@ -911,7 +957,7 @@
                             <option value="gravity_well">Gravity Well</option>
                         </select>
                         <label for="new-hazard-radius" style="display:none;">Radius</label>
-                        <input type="number" id="new-hazard-radius" placeholder="Radius" value="300" min="10" style="flex:1; font-size: 10px; margin: 0; text-align:center;">
+                        <input type="number" id="new-hazard-radius" placeholder="Radius" value="300" min="10" max="350" style="flex:1; font-size: 10px; margin: 0; text-align:center;">
                         <label for="new-hazard-intensity" style="display:none;">Intensity</label>
                         <input type="number" id="new-hazard-intensity" placeholder="Intensity" value="1" min="1" max="5" style="flex:1; font-size: 10px; margin: 0; text-align:center;">
                     </div>
@@ -965,14 +1011,14 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.10"></script>
-    <script src="js/audio.js?v=3.10"></script>
-    <script src="js/ui.js?v=3.10"></script>
-    <script src="js/combat.js?v=3.10"></script>
-    <script src="js/colonies.js?v=3.10"></script>
-    <script src="js/ship-designer.js?v=3.10"></script>
-    <script src="js/perk-designer.js?v=3.10"></script>
-    <script src="js/map.js?v=3.10"></script>
+    <script src="js/db.js?v=3.12"></script>
+    <script src="js/audio.js?v=3.11"></script>
+    <script src="js/ui.js?v=3.13"></script>
+    <script src="js/combat.js?v=3.12"></script>
+    <script src="js/colonies.js?v=3.12"></script>
+    <script src="js/ship-designer.js?v=3.12"></script>
+    <script src="js/perk-designer.js?v=3.12"></script>
+    <script src="js/map.js?v=3.13"></script>
 
 </body>
 </html>
