@@ -243,6 +243,24 @@ window.renderFleetGroupsPanel = function() {
                 }
             }
 
+            // Production line: base rate at 100% Manufacturing-deck health, plus the
+            // live scaled rate if the linked vessel has a Manufacturing-type deck
+            // (see window.processFleetGroupProduction for the actual tick logic —
+            // this is display-only, computed the same way for consistency).
+            let productionLine = '';
+            if (f.production_resource_type && f.production_base_output > 0) {
+                let scaleNote = '';
+                if (ship) {
+                    const mfgDeck = (ship.ship_decks || []).find(d => d.type === 'manufacturing');
+                    if (mfgDeck) {
+                        const scale = mfgDeck.max_hp > 0 ? mfgDeck.hp / mfgDeck.max_hp : 0;
+                        const effective = Math.round(f.production_base_output * scale);
+                        scaleNote = ` &nbsp;·&nbsp; Effective: ${effective}/day (Manufacturing deck ${Math.round(scale * 100)}%)`;
+                    }
+                }
+                productionLine = `<p style="margin:2px 0 0 0; font-size:10px; color:#c9962f;">⚙ Producing: ${f.production_base_output}x ${f.production_resource_type} / day${scaleNote}</p>`;
+            }
+
             html += `
                 <div class="note-card">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -250,6 +268,7 @@ window.renderFleetGroupsPanel = function() {
                             <strong style="color:#00e1ff; font-size:12px;">${f.name}</strong>
                             <p style="margin:2px 0 0 0; font-size:10px;">STATUS: <span style="color:${statusColors[f.status] || '#d4c5a9'};">${f.status}</span></p>
                             <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Vessel: ${ship ? ship.name : '— Unassigned —'} ${route ? `&nbsp;·&nbsp; Route: ${route.name || 'Unnamed'}` : ''}</p>
+                            ${productionLine}
                         </div>
                         <div style="display:flex; gap:4px;">
                             ${window.renderReorderArrows('fleet_groups', ordered, f.id, 'moveFleetGroupOrder')}
@@ -278,11 +297,17 @@ window.addFleetGroup = async function() {
     const linked_ship_id = document.getElementById('new-fleet-ship').value || null;
     const status = document.getElementById('new-fleet-status').value;
     const patrol_hyperlane_id = document.getElementById('new-fleet-route').value || null;
+    const productionTypeEl = document.getElementById('new-fleet-production-type');
+    const productionOutputEl = document.getElementById('new-fleet-production-output');
+    const production_resource_type = productionTypeEl ? (productionTypeEl.value.trim() || null) : null;
+    const production_base_output = productionOutputEl ? (parseInt(productionOutputEl.value) || 0) : 0;
 
-    const { error } = await db.from('fleet_groups').insert({ owner_id: currentUserId, name, status, linked_ship_id, patrol_hyperlane_id });
+    const { error } = await db.from('fleet_groups').insert({ owner_id: currentUserId, name, status, linked_ship_id, patrol_hyperlane_id, production_resource_type, production_base_output });
     if (error) { alert("Failed to commission task group: " + error.message); return; }
 
     document.getElementById('new-fleet-name').value = '';
+    if (productionTypeEl) productionTypeEl.value = '';
+    if (productionOutputEl) productionOutputEl.value = '0';
     if (typeof loadFleetGroups === 'function') loadFleetGroups();
 };
 
@@ -324,6 +349,19 @@ window.deleteFleetGroup = async function(id) {
                     <select id="fleet-edit-route" style="border-color:#00e1ff;"><option value="">No Assigned Route</option></select>
                 </div>
             </div>
+            <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:8px;">
+                <label style="font-size:9px; color:#c9962f; display:block; margin-bottom:4px;">⚙ Production (hybrid: set here, then ticks automatically each day until changed)</label>
+                <div style="display:flex; gap:6px;">
+                    <div style="flex:1.5;">
+                        <label for="fleet-edit-production-type" style="font-size:9px; color:#6b826a;">Resource Type</label>
+                        <input type="text" id="fleet-edit-production-type" placeholder="e.g. Ordnance, Alloys..." style="border-color:#c9962f;">
+                    </div>
+                    <div style="flex:1;">
+                        <label for="fleet-edit-production-output" style="font-size:9px; color:#6b826a;">Base Output / Day</label>
+                        <input type="number" id="fleet-edit-production-output" min="0" style="border-color:#c9962f; text-align:center;">
+                    </div>
+                </div>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="fleet-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="fleet-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#00e1ff; color:#00e1ff;">SAVE CHANGES</button>
@@ -337,7 +375,9 @@ window.deleteFleetGroup = async function(id) {
                 name: document.getElementById('fleet-edit-name').value.trim() || 'Unnamed Task Group',
                 linked_ship_id: document.getElementById('fleet-edit-ship').value || null,
                 status: document.getElementById('fleet-edit-status').value,
-                patrol_hyperlane_id: document.getElementById('fleet-edit-route').value || null
+                patrol_hyperlane_id: document.getElementById('fleet-edit-route').value || null,
+                production_resource_type: document.getElementById('fleet-edit-production-type').value.trim() || null,
+                production_base_output: parseInt(document.getElementById('fleet-edit-production-output').value) || 0
             };
             const { error } = await db.from('fleet_groups').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save task group changes: " + error.message); return; }
@@ -356,6 +396,47 @@ window.deleteFleetGroup = async function(id) {
         document.getElementById('fleet-edit-status').value = fleet.status || 'Standby';
         document.getElementById('fleet-edit-route').innerHTML = '<option value="">No Assigned Route</option>' + globalHyperlanesCache.map(r => `<option value="${r.id}">${r.name || 'Unnamed Route'}</option>`).join('');
         document.getElementById('fleet-edit-route').value = fleet.patrol_hyperlane_id || '';
+        document.getElementById('fleet-edit-production-type').value = fleet.production_resource_type || '';
+        document.getElementById('fleet-edit-production-output').value = fleet.production_base_output || 0;
         overlay.style.display = 'flex';
     };
 })();
+
+/* --- FLEET GROUP ECONOMY / PRODUCTION TICK ---
+   Hybrid manual-config + automatic-tick, per confirmed design: players/DM
+   set resource type + base output on a fleet group (once linked to a
+   vessel), then production runs automatically on every daily tick until
+   changed. Linear scaling off the linked vessel's Manufacturing-type deck
+   HP (no Manufacturing deck present = full base output, no penalty).
+   Output is delivered straight into the linked vessel's cargo expendables,
+   mirroring deliverColonyResources' merge-by-name logic. Called from
+   window.processTimeAdvancement in js/ui.js whenever daysPassed > 0. */
+window.processFleetGroupProduction = async function(daysPassed) {
+    if (!daysPassed || daysPassed <= 0) return;
+    for (const f of fleetGroupsList) {
+        if (!f.linked_ship_id || !f.production_resource_type || !(f.production_base_output > 0)) continue;
+        const vessel = globalShipMarkersCache.find(m => m.id === f.linked_ship_id);
+        if (!vessel) continue;
+
+        const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
+        const scale = mfgDeck ? (mfgDeck.max_hp > 0 ? mfgDeck.hp / mfgDeck.max_hp : 0) : 1;
+        const output = Math.round(f.production_base_output * scale) * daysPassed;
+        if (output <= 0) continue;
+
+        let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+        let existing = cargo.expendables.find(item => item.name.toLowerCase() === f.production_resource_type.toLowerCase());
+        if (existing) { existing.qty += output; }
+        else { cargo.expendables.push({ name: f.production_resource_type, qty: output, unit: 'Units' }); }
+
+        await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+        vessel.cargo_inventory = cargo;
+
+        await db.from('chat_logs').insert({
+            sender_id: 'system',
+            content: `⚙ [PRODUCTION] ${f.name} produced ${output}x ${f.production_resource_type}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''} — delivered to ${vessel.name}'s expendables hold.`,
+            message_type: 'text'
+        });
+    }
+    if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+    if (typeof window.renderFleetGroupsPanel === 'function') window.renderFleetGroupsPanel();
+};
