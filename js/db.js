@@ -124,6 +124,8 @@ async function fetchUserProfile(user) {
     initSystemHazardsRealtimeChannel();
     initPerkDefinitionsRealtimeChannel();
     initHazardDefinitionsRealtimeChannel();
+    initPlanetaryModifiersRealtimeChannel();
+    initHyperlanesRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
@@ -136,6 +138,7 @@ async function fetchUserProfile(user) {
     if (typeof loadSystemHazards === 'function') loadSystemHazards();
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
+    if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
 }
 
 async function loadAllProfiles() {
@@ -257,6 +260,32 @@ async function loadHazardDefinitions() {
     if (data) { window.hazardDefinitionsList = data; if (typeof window.renderHazardDefinitionsPanel === 'function') window.renderHazardDefinitionsPanel(); if (typeof window.populateHazardDefSelect === 'function') window.populateHazardDefSelect(); }
 }
 
+// Overseer Planet Editor persistence — DM edits to a body's scan data
+// (name/type/gravity/atmosphere/resources) used to only mutate the
+// in-memory object (window.saveDMBodyProperties in js/map.js never wrote
+// to the DB), so edits vanished on refresh and never reached other
+// players. planetary_modifiers is an existing-but-previously-unused table
+// keyed on body_id (text, no FK — same reasoning as system_hazards.system_id:
+// most bodies belong to the procedural galaxy, not a real star_systems row,
+// so there's nothing to foreign-key against). It holds ONE override row per
+// edited body; js/map.js merges these on top of a body's generated/base
+// values every time it's read. Only the fields the current Overseer Planet
+// Editor form actually exposes (custom_name/custom_type/custom_gravity/
+// custom_atmosphere/custom_resources) are touched here — the table's other
+// columns (industry/control/defenses/wealth/tech_level/infrastructure/
+// resource_rating) aren't wired to any UI yet and are left alone.
+window.globalPlanetaryModifiersCache = {}; // keyed by body_id for O(1) lookup in getSystemBodies
+async function loadPlanetaryModifiers() {
+    const { data } = await db.from('planetary_modifiers').select('*');
+    if (data) {
+        window.globalPlanetaryModifiersCache = {};
+        data.forEach(row => { window.globalPlanetaryModifiersCache[row.body_id] = row; });
+        // Re-render if a body is currently on screen so a DM edit (this
+        // client's own, or synced in from another) shows immediately.
+        if (window.selectedTarget && window.selectedTarget.type === 'body' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    }
+}
+
 async function loadCodexEntries() {
     const { data } = await db.from('codex_entries').select('*').order('created_at', { ascending: false });
     if (data && data.length > 0) {
@@ -266,6 +295,7 @@ async function loadCodexEntries() {
     }
     if (typeof renderCodexMatrix === 'function') renderCodexMatrix();
     if (typeof populateTerritoryFactionSelect === 'function') populateTerritoryFactionSelect();
+    if (typeof window.populateHyperlaneFactionSelect === 'function') window.populateHyperlaneFactionSelect();
 }
 
 async function checkAnomalyProximity(ship) {
@@ -431,6 +461,32 @@ function initHazardDefinitionsRealtimeChannel() {
     hazardDefinitionsRealtimeChannel = db.channel('hazard_definitions_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'hazard_definitions' }, () => {
             if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
+        })
+        .subscribe();
+}
+
+/* --- PLANETARY MODIFIERS (Overseer Planet Editor overrides): REAL-TIME SYNC ---
+   So a DM's scan-data edit shows up on other clients (and the DM's own other
+   tab) without needing a manual refresh — same pattern as system_hazards. */
+let planetaryModifiersRealtimeChannel = null;
+function initPlanetaryModifiersRealtimeChannel() {
+    planetaryModifiersRealtimeChannel = db.channel('planetary_modifiers_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'planetary_modifiers' }, () => {
+            if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
+        })
+        .subscribe();
+}
+
+/* --- HYPERLANES: REAL-TIME SYNC ---
+   Was never wired up before this session (confirmed via grep — every other
+   table in this app has a channel; this one didn't) — a DM's placed/edited/
+   deleted route never synced live to other clients. Matters more now that
+   routes are actually editable in place rather than just delete-and-redraw. */
+let hyperlanesRealtimeChannel = null;
+function initHyperlanesRealtimeChannel() {
+    hyperlanesRealtimeChannel = db.channel('hyperlanes_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hyperlanes' }, () => {
+            if (typeof loadHyperlanes === 'function') loadHyperlanes();
         })
         .subscribe();
 }
