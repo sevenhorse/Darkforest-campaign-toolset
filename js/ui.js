@@ -201,6 +201,12 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
             await db.from('chat_logs').insert({ sender_id: 'system', content: `✨ [DAILY LOGISTICS] 24-hour cycle complete. Elder E-M Synthesizers recharged.${rationText}`, message_type: 'text' });
             if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
         }
+
+        // Fleet Group Economy: hybrid manual-config + automatic tick — production
+        // configured on a fleet group runs every daily cycle until changed.
+        if (typeof window.processFleetGroupProduction === 'function') {
+            await window.processFleetGroupProduction(daysPassed);
+        }
     }
 };
 
@@ -1293,14 +1299,19 @@ function initFileHandlers() {
 document.addEventListener('DOMContentLoaded', initFileHandlers);
 
 /* --- CARTOGRAPHY MANAGERS (TERRITORIES & ROUTES) --- */
-window.populateTerritoryFactionSelect = function() {
-    const select = document.getElementById('territory-faction-select');
+// Shared by the territory faction select and the new hyperlane faction
+// select (below) — same source list (codex 'factions' entries), same
+// "no faction" fallback option, just a different target <select>.
+window.populateFactionSelect = function(selectId) {
+    const select = document.getElementById(selectId);
     if (!select) return;
     let html = '<option value="">-- No Faction / Neutral --</option>';
     const factions = globalCodexEntriesCache.filter(e => e.category === 'factions');
     factions.forEach(f => { html += `<option value="${f.title}">${f.title}</option>`; });
     select.innerHTML = html;
 };
+window.populateTerritoryFactionSelect = function() { window.populateFactionSelect('territory-faction-select'); };
+window.populateHyperlaneFactionSelect = function() { window.populateFactionSelect('hyperlane-faction-select'); };
 
 window.renderTerritoryList = function() {
     const container = document.getElementById('territory-list-container');
@@ -1358,11 +1369,18 @@ window.renderHyperlaneList = function() {
     if (!container) return;
     let html = '';
     globalHyperlanesCache.forEach(h => {
+        const factionTag = h.faction_name ? `<span style="font-size:9px; color:#6b826a;"> · ${h.faction_name}</span>` : '';
         html += `
             <div class="note-card" style="border-left: 3px solid ${h.color || '#00e1ff'}; padding: 6px; margin-bottom: 4px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <strong style="color: ${h.color || '#00e1ff'}; font-size: 11px;">Trade Route (${h.nodes?.length || 0} Jumps)</strong>
-                    ${currentUserRole === 'dm' ? `<button class="layer-del" onclick="window.deleteHyperlane('${h.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>` : ''}
+                    <div>
+                        <strong style="color: ${h.color || '#00e1ff'}; font-size: 11px;">${h.name || 'Trade Route'}</strong>${factionTag}<br>
+                        <span style="font-size: 9px; color: #6b826a;">${h.nodes?.length || 0} Jumps</span>
+                    </div>
+                    ${currentUserRole === 'dm' ? `<div style="display:flex; gap:4px;">
+                        <button class="layer-edit" onclick="window.startEditHyperlane('${h.id}')" style="font-size: 9px; padding: 2px 4px;">✎ Edit</button>
+                        <button class="layer-del" onclick="window.deleteHyperlane('${h.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>
+                    </div>` : ''}
                 </div>
             </div>
         `;
@@ -1373,6 +1391,7 @@ window.renderHyperlaneList = function() {
 window.deleteHyperlane = async function(id) {
     if (currentUserRole !== 'dm') return;
     if (!(await window.showConfirmModal("Permanently erase this trade route?"))) return;
+    if (window.editingHyperlaneId === id) window.cancelDrawingHyperlane(); // was being edited — bail out of that state first
     await db.from('hyperlanes').delete().eq('id', id);
     if (typeof loadHyperlanes === 'function') loadHyperlanes();
 };
@@ -1575,10 +1594,18 @@ window.applyHazardDefToPlacementForm = function(defId) {
    system that was generated without one.
    Radius is always clamped to window.SYSTEM_HAZARD_MAX_RADIUS (map.js) —
    previously unbounded, which let a zone visually engulf half the map.
-   Tying a zone to a system (system_id) is optional: untied zones keep the
-   original always-visible, no-FOW-gating behavior; tied zones gate their
-   visibility by that system's window.getFowTier (map.js), same rule stars
-   and planets already follow. */
+   Tying a zone to a system (system_id) is optional and PURELY informational
+   as of this session — it's shown in the list below so a DM can tell which
+   hazard belongs to which system, but it no longer drives Fog of War.
+   (It used to: a tied zone's visibility was gated by the tied system's own
+   FOW tier. That broke down because this function places a new zone at
+   wherever the camera happens to be centered — with zero enforced
+   relationship to whatever system was searched/tied — so a zone could be
+   tied to a discovered system while physically sitting on an undiscovered
+   one, or vice versa. FOW gating now checks the zone's OWN x/y directly via
+   window.isPositionSensorVisible (map.js), same as the implicit per-star
+   ring, so every hazard's visibility always matches where it actually is,
+   tied or not — see drawHazardZones in map.js for the full reasoning.) */
 window.placeHazardZone = async function() {
     if (currentUserRole !== 'dm') return;
     // system_id is a plain text column (no FK) — can be a real star_systems
@@ -1614,9 +1641,13 @@ window.renderHazardZoneList = function() {
     (window.globalSystemHazardsCache || []).forEach(hz => {
         const color = hazardColors[hz.hazard_type] || '#ffaa00';
         const tiedSystem = hz.system_id ? allTieableSystems.find(s => s.id === hz.system_id) : null;
+        // "FOW-gated" here means the zone's own position, not this tie — see
+        // the comment above window.placeHazardZone for why the tie itself
+        // stopped being a FOW input this session. Every zone (tied or not)
+        // is now hidden at tier 1 based on where it actually sits.
         const tieTag = hz.system_id
-            ? `<span style="color:#00e5a3;">🔗 ${tiedSystem ? tiedSystem.name : 'Unknown system'} (FOW-gated)</span>`
-            : `<span style="color:#6b826a;">Untied — always visible</span>`;
+            ? `<span style="color:#00e5a3;">🔗 Linked to: ${tiedSystem ? tiedSystem.name : 'Unknown system'} (informational only)</span>`
+            : `<span style="color:#6b826a;">Untied</span>`;
         html += `
             <div class="note-card" style="border-left: 3px solid ${color}; padding: 6px; margin-bottom: 4px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
