@@ -134,6 +134,12 @@ window.renderTerminalCargoDeck = function() {
         html += `<span style="font-size:11px; color:#6b826a;">No cargo items recorded in this section. Use the form on the right to store items.</span>`;
     } else {
         currentCategoryItems.forEach((item, index) => {
+            // Cargo items are a plain JSONB array with no stable per-item id
+            // (unlike Arsenal/Colonies/etc), so reordering here directly
+            // swaps array entries and saves — the array order already IS
+            // the persisted data, there's nothing separate to key by.
+            const upDisabled = index === 0 ? 'disabled' : '';
+            const downDisabled = index === currentCategoryItems.length - 1 ? 'disabled' : '';
             html += `
                 <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403;">
                     <div style="flex:2;">
@@ -141,6 +147,10 @@ window.renderTerminalCargoDeck = function() {
                         <div style="font-size:10px; color:#6b826a;">Unit Type: ${item.unit || 'units'}</div>
                     </div>
                     <div style="display:flex; align-items:center; gap:6px;">
+                        <span class="reorder-arrows">
+                            <button type="button" class="reorder-btn" ${upDisabled} onclick="window.moveCargoItem('${vessel.id}', ${index}, 'up')" title="Move up">▲</button>
+                            <button type="button" class="reorder-btn" ${downDisabled} onclick="window.moveCargoItem('${vessel.id}', ${index}, 'down')" title="Move down">▼</button>
+                        </span>
                         <button onclick="window.modifyCargoQty('${vessel.id}', ${index}, -1)" style="width:24px; padding:2px; font-size:12px; margin:0;">-</button>
                         <label for="cargo-qty-${vessel.id}-${index}" style="display:none;">Quantity</label>
                         <input type="number" id="cargo-qty-${vessel.id}-${index}" value="${item.qty}" onchange="window.updateCargoQtyDirect('${vessel.id}', ${index}, this.value)" style="width:65px; margin:0; text-align:center; font-size:11px; padding:3px;">
@@ -248,6 +258,23 @@ window.removeCargoItem = async function(vesselId, itemIndex) {
         vessel.cargo_inventory = cargo;
         window.renderTerminalCargoDeck();
     }
+};
+
+// Cargo items have no stable id (see renderTerminalCargoDeck) — reorder is
+// a direct array-index swap, saved straight to the DB like every other
+// cargo mutation here, not the personal localStorage helper used elsewhere.
+window.moveCargoItem = async function(vesselId, index, direction) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+    const arr = cargo[activeCargoSubtab];
+    if (!arr) return;
+    const j = direction === 'up' ? index - 1 : index + 1;
+    if (j < 0 || j >= arr.length) return;
+    [arr[index], arr[j]] = [arr[j], arr[index]];
+    await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
+    vessel.cargo_inventory = cargo;
+    window.renderTerminalCargoDeck();
 };
 
 window.addNewCargoEntry = async function() {
@@ -395,12 +422,22 @@ window.renderVesselDeck = function() {
         if (decks.length === 0) dHtml = '<span style="font-size:10px; color:#6b826a;">No internal decks designated.</span>';
         else {
             decks.forEach((d, idx) => {
+                // Ship decks are a plain JSONB array with no stable per-item
+                // id, same situation as cargo — reorder swaps array entries
+                // directly and saves, rather than going through the
+                // localStorage helper used for id-backed lists.
+                const upDisabled = idx === 0 ? 'disabled' : '';
+                const downDisabled = idx === decks.length - 1 ? 'disabled' : '';
                 dHtml += `
                 <div style="margin-bottom: 8px; background: #030403; padding: 6px; border: 1px solid #00e1ff; border-radius: 2px;">
                     <div style="display:flex; justify-content:space-between; font-size:10px; color:#00e1ff; margin-bottom:2px;">
                         <strong>${d.name}</strong><span>${d.hp} / ${d.max_hp}</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:6px;">
+                        <span class="reorder-arrows">
+                            <button type="button" class="reorder-btn" ${upDisabled} onclick="window.moveShipDeckOrder('${vessel.id}', ${idx}, 'up')" title="Move up">▲</button>
+                            <button type="button" class="reorder-btn" ${downDisabled} onclick="window.moveShipDeckOrder('${vessel.id}', ${idx}, 'down')" title="Move down">▼</button>
+                        </span>
                         <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, -5)" style="width:24px; padding:2px; font-size:10px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-5</button>
                         <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, -1)" style="width:24px; padding:2px; font-size:12px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-</button>
                         <div style="flex-grow:1; height:8px; background:#040605; border:1px solid #3c4e36; border-radius:2px; overflow:hidden;">
@@ -1171,6 +1208,18 @@ window.deleteShipDeck = async function(vesselId, idx) {
     window.renderVesselDeck();
 };
 
+window.moveShipDeckOrder = async function(vesselId, idx, direction) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let decks = vessel.ship_decks || [];
+    const j = direction === 'up' ? idx - 1 : idx + 1;
+    if (j < 0 || j >= decks.length) return;
+    [decks[idx], decks[j]] = [decks[j], decks[idx]];
+    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+    vessel.ship_decks = decks;
+    window.renderVesselDeck();
+};
+
 /* Inject Ammo / Gun Count / Damage Type fields into the "Mount New Weapon System"
    form. These fields didn't exist in the HTML at all (the ammo field was being
    looked up by addShipWeapon() but never rendered), and there was no way to set
@@ -1546,7 +1595,8 @@ window.renderArsenal = function() {
     if (arsenal.length === 0) {
         html = '<span style="font-size:10px; color:#6b826a;">No active weapons or powers in arsenal.</span>';
     } else {
-        arsenal.forEach((w, idx) => {
+        const ordered = window.applySavedOrder('arsenal', arsenal);
+        ordered.forEach((w, idx) => {
             let dmgBadge = '';
             if (w.damage_type && window.DAMAGE_TYPES[window.normalizeDamageType(w.damage_type)]) {
                 let dt = window.normalizeDamageType(w.damage_type);
@@ -1567,7 +1617,8 @@ window.renderArsenal = function() {
                     <span style="font-size:10px; text-align:center;" title="Explodes">${w.explodes ? '💥' : ''}</span>
                     ${dmgBadge}
                     <div style="display:flex; gap:4px;">
-                        <button class="layer-edit" onclick="window.rollArsenalWeapon(${idx})" style="padding:2px 6px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">ROLL</button>
+                        ${window.renderReorderArrows('arsenal', ordered, w.id, 'moveArsenalOrder')}
+                        <button class="layer-edit" onclick="window.rollArsenalWeapon('${w.id}')" style="padding:2px 6px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">ROLL</button>
                         <button class="layer-edit" onclick="window.openEditArsenalModal('${w.id}')" style="padding:2px 5px; font-size:9px;">✎</button>
                         <button class="layer-del" onclick="window.deleteArsenalItem('${w.id}')" style="padding:2px 5px; font-size:9px;">✕</button>
                     </div>
@@ -1579,6 +1630,13 @@ window.renderArsenal = function() {
     
     const badgeCombat = document.getElementById('badge-combat');
     if (badgeCombat) badgeCombat.innerText = arsenal.length;
+};
+window.moveArsenalOrder = function(id, direction) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    const arsenal = myProf.arsenal || [];
+    window.moveListItem('arsenal', window.applySavedOrder('arsenal', arsenal), id, direction);
+    window.renderArsenal();
 };
 
 window.addArsenalItem = async function() {
@@ -1720,10 +1778,12 @@ window.deleteArsenalItem = async function(id) {
     };
 })();
 
-window.rollArsenalWeapon = async function(idx) {
+window.rollArsenalWeapon = async function(id) {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
-    let wpn = (myProf.arsenal || [])[idx];
+    // Looked up by stable weapon id, not array position — position shifts
+    // once personal reorder arrows are in play (see window.applySavedOrder).
+    let wpn = (myProf.arsenal || []).find(w => w.id === id);
     if (!wpn) return;
 
     if (wpn.ammo !== null && wpn.ammo !== undefined && wpn.ammo <= 0) {
