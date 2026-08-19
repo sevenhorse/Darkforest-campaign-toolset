@@ -390,6 +390,12 @@ canvas { display: block; width: 100%; height: 100%; }
 .layer-edit { background: #0a1410; color: #00e5a3; border: 1px solid #00e5a3; padding: 2px 6px; border-radius: 2px; cursor: pointer; width: auto; margin: 0; transition: all 0.2s; }
 .layer-edit:hover { background: #00e5a3; color: #000; }
 
+/* Personal (per-browser) up/down list reordering — see window.renderReorderArrows in js/ui.js */
+.reorder-arrows { display: flex; flex-direction: column; gap: 1px; margin-right: 2px; }
+.reorder-btn { background: #0a1410; color: #6b826a; border: 1px solid #3c4e36; padding: 0 4px; line-height: 1.3; font-size: 8px; border-radius: 2px; cursor: pointer; width: auto; margin: 0; transition: all 0.2s; }
+.reorder-btn:hover:not(:disabled) { color: #00e5a3; border-color: #00e5a3; }
+.reorder-btn:disabled { opacity: 0.25; cursor: default; }
+
 .avatar-img { width: 60px; height: 60px; border-radius: 50%; border: 2px solid #00e5a3; object-fit: cover; background: #040605; }
 .presence-pill {
     display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
@@ -406,7 +412,7 @@ canvas { display: block; width: 100%; height: 100%; }
 .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .augment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-.arsenal-row { display: grid; grid-template-columns: 2fr 1fr 1fr 20px 1fr 115px; gap: 6px; align-items: center; margin-bottom: 6px; background: #030403; padding: 6px; border: 1px solid #3c4e36; border-radius: 2px; }
+.arsenal-row { display: grid; grid-template-columns: 2fr 1fr 1fr 20px 1fr 145px; gap: 6px; align-items: center; margin-bottom: 6px; background: #030403; padding: 6px; border: 1px solid #3c4e36; border-radius: 2px; }
 
 #search-results-dropdown {
     position: absolute; top: 45px; left: 0; width: 100%; background: #060907;
@@ -417,6 +423,16 @@ canvas { display: block; width: 100%; height: 100%; }
     padding: 6px 10px; font-size: 11px; color: #d4c5a9; cursor: pointer; border-bottom: 1px solid #3c4e36;
 }
 .search-result-item:hover { background: #0a1410; color: #00e5a3; }
+
+/* Hazard Designer's target-system search — same escape-to-<body>,
+   position:fixed trick as #search-results-dropdown (js/map.js), needed
+   because this input lives inside #dm-tools (overflow-y:auto), which would
+   otherwise clip a tall result list. Reuses .search-result-item styling. */
+#hazard-system-search-dropdown {
+    position: absolute; top: 45px; left: 0; width: 100%; background: #060907;
+    border: 1px solid #00e5a3; border-radius: 2px; max-height: 220px; overflow-y: auto;
+    z-index: 1000; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.8);
+}
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: #3c4e36; border-radius: 3px; }
