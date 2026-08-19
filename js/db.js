@@ -126,9 +126,10 @@ async function fetchUserProfile(user) {
     initHazardDefinitionsRealtimeChannel();
     initPlanetaryModifiersRealtimeChannel();
     initHyperlanesRealtimeChannel();
+    initSystemOwnershipRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
-    
+
     loadAllProfiles(); loadPlayerNotes(); loadCombatTracker(); loadCampaignObjectives();
     loadChatLogs(); loadPmPartnerList(); loadTerritories(); loadHyperlanes(); loadCodexEntries();
     if (typeof loadColonies === 'function') loadColonies();
@@ -139,6 +140,7 @@ async function fetchUserProfile(user) {
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
+    loadSystemOwnershipOverrides();
 }
 
 async function loadAllProfiles() {
@@ -284,6 +286,25 @@ async function loadPlanetaryModifiers() {
         // client's own, or synced in from another) shows immediately.
         if (window.selectedTarget && window.selectedTarget.type === 'body' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
     }
+}
+
+// Territory Faction Ownership Flip: same procedural-vs-custom split as
+// planetary_modifiers above, one level up (system ownership instead of
+// body properties). Custom systems already have a real, live-reloaded
+// `star_systems.ownership` column (no cache needed here for those) — this
+// override table + cache exists ONLY for the ~2,641 procedurally-seeded
+// systems, which have no database row at all to write ownership onto
+// directly. window.applySystemOwnershipOverrides() (js/map.js) mutates
+// the matching entries in globalProceduralSystemsCache in place after
+// every load, so `.ownership` reads the same way regardless of which of
+// the two persistence paths a given system actually uses.
+window.globalSystemOwnershipCache = {}; // keyed by system_id (procedural systems only)
+async function loadSystemOwnershipOverrides() {
+    const { data } = await db.from('system_ownership_overrides').select('*');
+    window.globalSystemOwnershipCache = {};
+    if (data) data.forEach(row => { window.globalSystemOwnershipCache[row.system_id] = row.ownership; });
+    if (typeof window.applySystemOwnershipOverrides === 'function') window.applySystemOwnershipOverrides();
+    if (window.selectedTarget && window.selectedTarget.type === 'star' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 }
 
 async function loadCodexEntries() {
@@ -473,6 +494,15 @@ function initPlanetaryModifiersRealtimeChannel() {
     planetaryModifiersRealtimeChannel = db.channel('planetary_modifiers_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'planetary_modifiers' }, () => {
             if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
+        })
+        .subscribe();
+}
+
+let systemOwnershipRealtimeChannel = null;
+function initSystemOwnershipRealtimeChannel() {
+    systemOwnershipRealtimeChannel = db.channel('system_ownership_overrides_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_ownership_overrides' }, () => {
+            if (typeof loadSystemOwnershipOverrides === 'function') loadSystemOwnershipOverrides();
         })
         .subscribe();
 }
