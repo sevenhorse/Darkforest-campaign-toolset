@@ -198,7 +198,11 @@ window.deliverColonyResources = async function(id) {
 
 window.populateFleetFormSelects = function() {
     const shipSel = document.getElementById('new-fleet-ship');
-    if (shipSel) shipSel.innerHTML = globalShipMarkersCache.map(m => `<option value="${m.id}">${m.name}</option>`).join('') || '<option value="">No vessels available</option>';
+    // "— Unassigned —" is a real, selectable option (value=""), not just a
+    // fallback for "no vessels exist" — without it, a fleet group could
+    // never be created unlinked once any vessel existed, since the select
+    // always defaults to whichever vessel happens to be first in the list.
+    if (shipSel) shipSel.innerHTML = '<option value="">— Unassigned —</option>' + globalShipMarkersCache.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
     const routeSel = document.getElementById('new-fleet-route');
     if (routeSel) routeSel.innerHTML = '<option value="">No Assigned Route</option>' + globalHyperlanesCache.map(r => `<option value="${r.id}">${r.name || 'Unnamed Route'}</option>`).join('');
 };
@@ -247,18 +251,23 @@ window.renderFleetGroupsPanel = function() {
             // live scaled rate if the linked vessel has a Manufacturing-type deck
             // (see window.processFleetGroupProduction for the actual tick logic —
             // this is display-only, computed the same way for consistency).
+            // Must mirror the tick function's own guard exactly (linked_ship_id
+            // AND a resolvable vessel) — showing "Producing" here when the tick
+            // would actually skip this fleet group entirely is misleading.
             let productionLine = '';
             if (f.production_resource_type && f.production_base_output > 0) {
-                let scaleNote = '';
-                if (ship) {
+                if (!ship) {
+                    productionLine = `<p style="margin:2px 0 0 0; font-size:10px; color:#ff6b6b;">⚠ Production configured (${f.production_base_output}x ${f.production_resource_type} / day) but no vessel is linked — nothing will actually be delivered.</p>`;
+                } else {
+                    let scaleNote = '';
                     const mfgDeck = (ship.ship_decks || []).find(d => d.type === 'manufacturing');
                     if (mfgDeck) {
                         const scale = mfgDeck.max_hp > 0 ? mfgDeck.hp / mfgDeck.max_hp : 0;
                         const effective = Math.round(f.production_base_output * scale);
                         scaleNote = ` &nbsp;·&nbsp; Effective: ${effective}/day (Manufacturing deck ${Math.round(scale * 100)}%)`;
                     }
+                    productionLine = `<p style="margin:2px 0 0 0; font-size:10px; color:#c9962f;">⚙ Producing: ${f.production_base_output}x ${f.production_resource_type} / day${scaleNote}</p>`;
                 }
-                productionLine = `<p style="margin:2px 0 0 0; font-size:10px; color:#c9962f;">⚙ Producing: ${f.production_base_output}x ${f.production_resource_type} / day${scaleNote}</p>`;
             }
 
             html += `
@@ -391,7 +400,11 @@ window.deleteFleetGroup = async function(id) {
         ensureModal();
         currentId = id;
         document.getElementById('fleet-edit-name').value = fleet.name || '';
-        document.getElementById('fleet-edit-ship').innerHTML = globalShipMarkersCache.map(m => `<option value="${m.id}">${m.name}</option>`).join('') || '<option value="">No vessels available</option>';
+        // Same "— Unassigned —" real option as the create form — without it,
+        // saving edits on an already-unlinked fleet group would silently
+        // re-link it to whichever vessel happens to be first in the list
+        // (the select can't actually represent "no selection" otherwise).
+        document.getElementById('fleet-edit-ship').innerHTML = '<option value="">— Unassigned —</option>' + globalShipMarkersCache.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
         document.getElementById('fleet-edit-ship').value = fleet.linked_ship_id || '';
         document.getElementById('fleet-edit-status').value = fleet.status || 'Standby';
         document.getElementById('fleet-edit-route').innerHTML = '<option value="">No Assigned Route</option>' + globalHyperlanesCache.map(r => `<option value="${r.id}">${r.name || 'Unnamed Route'}</option>`).join('');
@@ -414,28 +427,37 @@ window.deleteFleetGroup = async function(id) {
 window.processFleetGroupProduction = async function(daysPassed) {
     if (!daysPassed || daysPassed <= 0) return;
     for (const f of fleetGroupsList) {
-        if (!f.linked_ship_id || !f.production_resource_type || !(f.production_base_output > 0)) continue;
-        const vessel = globalShipMarkersCache.find(m => m.id === f.linked_ship_id);
-        if (!vessel) continue;
+        // Each fleet group is isolated in its own try/catch — one vessel
+        // with malformed cargo (or any other unexpected failure) must not
+        // silently skip every fleet group processed after it this tick
+        // (and every tick after that, since nothing here would ever
+        // surface the failure to the DM otherwise).
+        try {
+            if (!f.linked_ship_id || !f.production_resource_type || !(f.production_base_output > 0)) continue;
+            const vessel = globalShipMarkersCache.find(m => m.id === f.linked_ship_id);
+            if (!vessel) continue;
 
-        const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
-        const scale = mfgDeck ? (mfgDeck.max_hp > 0 ? mfgDeck.hp / mfgDeck.max_hp : 0) : 1;
-        const output = Math.round(f.production_base_output * scale) * daysPassed;
-        if (output <= 0) continue;
+            const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
+            const scale = mfgDeck ? (mfgDeck.max_hp > 0 ? mfgDeck.hp / mfgDeck.max_hp : 0) : 1;
+            const output = Math.max(0, Math.round(f.production_base_output * scale) * daysPassed);
+            if (output <= 0) continue;
 
-        let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-        let existing = cargo.expendables.find(item => item.name.toLowerCase() === f.production_resource_type.toLowerCase());
-        if (existing) { existing.qty += output; }
-        else { cargo.expendables.push({ name: f.production_resource_type, qty: output, unit: 'Units' }); }
+            let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+            let existing = cargo.expendables.find(item => item.name.toLowerCase() === f.production_resource_type.toLowerCase());
+            if (existing) { existing.qty += output; }
+            else { cargo.expendables.push({ name: f.production_resource_type, qty: output, unit: 'Units' }); }
 
-        await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
-        vessel.cargo_inventory = cargo;
+            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+            vessel.cargo_inventory = cargo;
 
-        await db.from('chat_logs').insert({
-            sender_id: 'system',
-            content: `⚙ [PRODUCTION] ${f.name} produced ${output}x ${f.production_resource_type}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''} — delivered to ${vessel.name}'s expendables hold.`,
-            message_type: 'text'
-        });
+            await db.from('chat_logs').insert({
+                sender_id: 'system',
+                content: `⚙ [PRODUCTION] ${f.name} produced ${output}x ${f.production_resource_type}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''} — delivered to ${vessel.name}'s expendables hold.`,
+                message_type: 'text'
+            });
+        } catch (err) {
+            console.error(`processFleetGroupProduction: failed for fleet group "${f.name}" (${f.id})`, err);
+        }
     }
     if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
     if (typeof window.renderFleetGroupsPanel === 'function') window.renderFleetGroupsPanel();
