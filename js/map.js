@@ -339,6 +339,122 @@ window.finishActiveTerritory = async function() {
 };
 window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
 
+/* --- TERRITORY FACTION OWNERSHIP FLIP ---
+   Territories were purely cosmetic before this — drawing one and assigning
+   a faction only ever saved the faction name. This is the piece that
+   actually flips ownership on the systems inside the drawn border.
+
+   Confirmed design (all recommended options, one exception noted where it
+   applies): applying is an explicit, separate DM action (not automatic on
+   every save/edit) so a small tweak like a color change doesn't re-trigger
+   a galaxy-wide pass; overlapping territories resolve "last applied wins"
+   with no conflict warning; and — the one non-default choice — deleting
+   or re-applying a territory with a smaller shape DOES automatically
+   un-claim whatever it no longer covers, rather than leaving ownership
+   sticky. That last part is why `territories.owned_system_ids` exists:
+   it's the authoritative record of what THIS territory currently owns, so
+   a release only ever touches systems verified to still belong to this
+   territory's faction — never guessed purely from re-testing geometry,
+   which could otherwise wrongly undo a different, more-recently-applied
+   overlapping territory's claim on the same system. */
+
+// Standard ray-casting point-in-polygon test. `vertices` is the same plain
+// [{x,y}, ...] array territories.vertices already stores.
+window.isPointInPolygon = function(x, y, vertices) {
+    if (!vertices || vertices.length < 3) return false;
+    let inside = false;
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i].x, yi = vertices[i].y;
+        const xj = vertices[j].x, yj = vertices[j].y;
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+};
+
+// Procedural systems have no DB row — this mutates the matching entries in
+// the long-lived globalProceduralSystemsCache in place so `.ownership`
+// reads correctly everywhere regardless of which persistence path a given
+// system actually uses (override table for procedural, real column for
+// custom). Custom systems need no equivalent step: window.loadGalaxyData
+// already rebuilds globalDbSystemsCache fresh from star_systems.ownership.
+window.applySystemOwnershipOverrides = function() {
+    const overrides = window.globalSystemOwnershipCache || {};
+    (globalProceduralSystemsCache || []).forEach(s => {
+        if (overrides[s.id] !== undefined) s.ownership = overrides[s.id];
+    });
+};
+
+// Shared by both delete (releases everything a territory owns) and apply
+// (releases only what fell OUT of its current shape) — releases each
+// listed system ONLY if it's still owned by this territory's faction,
+// which is what makes it safe to call even on systems another,
+// more-recently-applied territory may have since re-claimed.
+window.releaseTerritoryOwnership = async function(t) {
+    const faction = (t.faction_name || '').replace('[HIDDEN] ', '').replace('[HIDDEN]', '').trim();
+    const ids = t.owned_system_ids || [];
+    if (!faction || ids.length === 0) return 0;
+    const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
+    let released = 0;
+    for (const id of ids) {
+        const sys = allSystems.find(s => s.id === id);
+        if (!sys || sys.ownership !== faction) continue;
+        if (sys.isCustom) {
+            await db.from('star_systems').update({ ownership: 'Unclaimed' }).eq('id', id);
+        } else {
+            await db.from('system_ownership_overrides').delete().eq('system_id', id);
+        }
+        sys.ownership = 'Unclaimed'; // instant local reflect; a full reload still follows in the caller
+        released++;
+    }
+    return released;
+};
+
+window.applyTerritoryToGalaxy = async function(territoryId) {
+    if (currentUserRole !== 'dm') return;
+    const t = globalTerritoriesCache.find(x => x.id === territoryId);
+    if (!t) return;
+    if (!t.vertices || t.vertices.length < 3) { alert("This territory has no valid drawn shape to apply."); return; }
+    const faction = (t.faction_name || '').replace('[HIDDEN] ', '').replace('[HIDDEN]', '').trim();
+    if (!faction) { alert("Assign a faction to this territory before applying it — there's no owner to claim systems for otherwise."); return; }
+
+    const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
+    const newOwnedIds = allSystems.filter(s => window.isPointInPolygon(s.x, s.y, t.vertices)).map(s => s.id);
+
+    if (!(await window.showConfirmModal(`Apply "${t.name}" to the galaxy? ${newOwnedIds.length} system(s) inside its border will be claimed for ${faction}; anything this territory previously claimed but no longer covers will be released back to Unclaimed. This changes the shared galaxy for everyone.`))) return;
+
+    const newSet = new Set(newOwnedIds);
+    const toRelease = (t.owned_system_ids || []).filter(id => !newSet.has(id));
+    const releasedCount = await window.releaseTerritoryOwnership({ faction_name: faction, owned_system_ids: toRelease });
+
+    let claimedCount = 0;
+    for (const id of newOwnedIds) {
+        const sys = allSystems.find(s => s.id === id);
+        if (!sys) continue;
+        if (sys.isCustom) {
+            await db.from('star_systems').update({ ownership: faction }).eq('id', id);
+        } else {
+            await db.from('system_ownership_overrides').upsert({ system_id: id, ownership: faction, updated_at: new Date().toISOString() });
+        }
+        sys.ownership = faction;
+        claimedCount++;
+    }
+
+    await db.from('territories').update({ owned_system_ids: newOwnedIds }).eq('id', t.id);
+
+    if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
+    if (typeof loadSystemOwnershipOverrides === 'function') await loadSystemOwnershipOverrides();
+    if (typeof loadTerritories === 'function') await loadTerritories();
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+
+    await db.from('chat_logs').insert({
+        sender_id: 'system',
+        content: `🚩 [TERRITORY] "${t.name}" applied — ${claimedCount} system(s) now under ${faction}${releasedCount > 0 ? `, ${releasedCount} released back to Unclaimed` : ''}.`,
+        message_type: 'text'
+    });
+    if (typeof window.showToast === 'function') window.showToast(`Territory applied: ${claimedCount} claimed${releasedCount > 0 ? `, ${releasedCount} released` : ''}.`);
+};
+
 window.toggleHyperlanes = function() {
     if (currentUserRole === 'dm') { const hBtn = document.getElementById('btn-start-hyperlane-draw'); if(hBtn && hBtn.style.display !== 'none') { window.hyperlanesVisible = !window.hyperlanesVisible; } } else { window.hyperlanesVisible = !window.hyperlanesVisible; }
     window.updateToolButtonStyles();
@@ -942,6 +1058,10 @@ window.initGalaxyEngine = function() {
         proceduralSystems.push({ id: `proc-spiral-${i}`, name: `Arm ${['Alpha','Beta','Gamma','Delta'][arm]}-${1000 + i}`, x, y, size, color, type, luminosity, hazard, multiType: rng() > 0.8 ? 'Binary' : 'Single', ownership: 'Unclaimed', isCustom: false });
     }
     globalProceduralSystemsCache = proceduralSystems;
+    // Defensive re-apply in case the ownership override cache (js/db.js)
+    // already finished loading before the procedural galaxy existed to
+    // merge onto — order shouldn't matter either way.
+    if (typeof window.applySystemOwnershipOverrides === 'function') window.applySystemOwnershipOverrides();
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 
     function screenToWorld(sx, sy) { const rect = canvas.getBoundingClientRect(); return { x: (sx - rect.left - container.clientWidth / 2 - window.camera.x) / window.camera.zoom, y: (sy - rect.top - container.clientHeight / 2 - window.camera.y) / window.camera.zoom }; }
