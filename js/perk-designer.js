@@ -16,7 +16,7 @@ window.PERK_STAT_NAMES = ['Charisma', 'Dexterity', 'Intelligence', 'Strength', '
 
 async function loadPerkDefinitions() {
     const { data } = await db.from('perk_definitions').select('*').order('created_at', { ascending: true });
-    if (data) { perkDefinitionsList = data; if (typeof window.renderPerkDesignerPanel === 'function') window.renderPerkDesignerPanel(); if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel(); }
+    if (data) { perkDefinitionsList = data; if (typeof window.renderPerkDesignerPanel === 'function') window.renderPerkDesignerPanel(); if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel(); if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay(); }
 }
 
 function canManagePerk(p) {
@@ -56,17 +56,20 @@ window.renderPerkDesignerPanel = function() {
     let html = '';
     if (perkDefinitionsList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No perks defined yet.</span>';
 
-    const pending = perkDefinitionsList.filter(p => p.status === 'draft');
-    const approved = perkDefinitionsList.filter(p => p.status === 'approved');
+    const pending = window.applySavedOrder('perks_pending', perkDefinitionsList.filter(p => p.status === 'draft'));
+    const approved = window.applySavedOrder('perks_approved', perkDefinitionsList.filter(p => p.status === 'approved'));
 
-    const renderCard = (p) => {
+    const renderCard = (p, listKey, siblingList) => {
         const editable = canManagePerk(p);
         const proposer = allProfiles.find(a => a.id === p.created_by);
         let effectsLine = p.flavor_only
             ? '<span style="color:#c778dd;">Flavor only — no automatic mechanical effect.</span>'
-            : (p.points_grant > 0
-                ? `<span style="color:#00e5a3;">Grants +${p.points_grant} free skill points to distribute.</span>`
-                : (p.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ') || '<span style="color:#6b826a;">No effects configured.</span>');
+            : [
+                p.points_grant > 0 ? `<span style="color:#00e5a3;">+${p.points_grant} free skill points</span>` : '',
+                p.shield_max_bonus > 0 ? `<span style="color:#00e1ff;">Shield Max +${p.shield_max_bonus}</span>` : '',
+                p.dr_bonus > 0 ? `<span style="color:#c9962f;">DR +${p.dr_bonus}</span>` : '',
+                (p.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ')
+              ].filter(Boolean).join(' · ') || '<span style="color:#6b826a;">No effects configured.</span>';
         return `
             <div class="note-card" style="border-left: 3px solid ${p.status === 'draft' ? '#ffaa00' : '#00e5a3'};">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -78,6 +81,7 @@ window.renderPerkDesignerPanel = function() {
                         ${proposer ? `<span class="author-tag">proposed by: ${proposer.username || 'Commander'}</span>` : ''}
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:100px;">
+                        ${window.renderReorderArrows(listKey, siblingList, p.id, 'movePerkDefinitionOrder')}
                         ${(currentUserRole === 'dm' && p.status === 'draft') ? `<button class="btn-deploy" onclick="window.approvePerk('${p.id}')" style="width:auto; margin:0; padding:3px 6px; font-size:9px;">✓ APPROVE</button>` : ''}
                         ${editable ? `<button class="layer-edit" onclick="window.openEditPerkModal('${p.id}')" style="padding:3px 6px; font-size:9px;">✎</button>` : ''}
                         ${editable ? `<button class="layer-del" onclick="window.deletePerkDefinition('${p.id}')" style="padding:3px 6px; font-size:9px;">✕</button>` : ''}
@@ -89,16 +93,24 @@ window.renderPerkDesignerPanel = function() {
     html = '';
     if (pending.length > 0) {
         html += `<h4 style="color:#ffaa00; font-size:11px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h4>`;
-        pending.forEach(p => html += renderCard(p));
+        pending.forEach(p => html += renderCard(p, 'perks_pending', pending));
     }
     html += `<h4 style="color:#00e5a3; font-size:11px; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-top:14px;">Approved Perks (${approved.length})</h4>`;
     if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">None approved yet.</span>';
-    approved.forEach(p => html += renderCard(p));
+    approved.forEach(p => html += renderCard(p, 'perks_approved', approved));
 
     container.innerHTML = html;
 
     const badge = document.getElementById('badge-perkdesigner');
     if (badge) badge.innerText = pending.length > 0 ? `${pending.length} pending` : approved.length;
+};
+window.movePerkDefinitionOrder = function(id, direction) {
+    const p = window.findPerkDefinition(id);
+    if (!p) return;
+    const listKey = p.status === 'draft' ? 'perks_pending' : 'perks_approved';
+    const siblingList = perkDefinitionsList.filter(x => x.status === p.status);
+    window.moveListItem(listKey, window.applySavedOrder(listKey, siblingList), id, direction);
+    window.renderPerkDesignerPanel();
 };
 
 window.approvePerk = async function(id) {
@@ -180,6 +192,11 @@ window.deletePerkDefinition = async function(id) {
                 <label for="perk-edit-points" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Free Skill Points Granted (e.g. Passive Boost — leave 0 if not a points-grant perk):</label>
                 <input type="number" id="perk-edit-points" min="0" value="0" style="border-color:#c778dd;">
 
+                <div style="display:flex; gap:6px; margin-top:6px;">
+                    <div style="flex:1;"><label for="perk-edit-shieldbonus" style="font-size:9px; color:#00e1ff;">Shield Max Bonus:</label><input type="number" id="perk-edit-shieldbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
+                    <div style="flex:1;"><label for="perk-edit-drbonus" style="font-size:9px; color:#c9962f;">DR Bonus:</label><input type="number" id="perk-edit-drbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
+                </div>
+
                 <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Stat/Skill Effects (auto-applied to the roller):</label>
                 <div id="perk-effects-list" style="margin-bottom:6px;"></div>
                 <div style="background:#030403; padding:6px; border:1px solid #c778dd; border-radius:2px; display:flex; gap:4px; align-items:center;">
@@ -217,6 +234,8 @@ window.deletePerkDefinition = async function(id) {
                 section: parseInt(document.getElementById('perk-edit-section').value) || 1,
                 flavor_only: flavorOnly,
                 points_grant: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-points').value) || 0),
+                shield_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-shieldbonus').value) || 0),
+                dr_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-drbonus').value) || 0),
                 effects: flavorOnly ? [] : workingEffects
             };
 
@@ -247,6 +266,8 @@ window.deletePerkDefinition = async function(id) {
         document.getElementById('perk-edit-flavoronly').checked = false;
         document.getElementById('perk-mechanical-section').style.display = 'block';
         document.getElementById('perk-edit-points').value = '0';
+        document.getElementById('perk-edit-shieldbonus').value = '0';
+        document.getElementById('perk-edit-drbonus').value = '0';
         renderEffectsList();
         overlay.style.display = 'flex';
     };
@@ -264,6 +285,8 @@ window.deletePerkDefinition = async function(id) {
         document.getElementById('perk-edit-flavoronly').checked = !!p.flavor_only;
         document.getElementById('perk-mechanical-section').style.display = p.flavor_only ? 'none' : 'block';
         document.getElementById('perk-edit-points').value = p.points_grant || 0;
+        document.getElementById('perk-edit-shieldbonus').value = p.shield_max_bonus || 0;
+        document.getElementById('perk-edit-drbonus').value = p.dr_bonus || 0;
         renderEffectsList();
         overlay.style.display = 'flex';
     };
