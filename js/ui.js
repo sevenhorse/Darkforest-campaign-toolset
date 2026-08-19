@@ -44,6 +44,80 @@
     };
 })();
 
+/* --- REORDERABLE LISTS (personal, per-browser, up/down arrows) ---
+   Player-requested: manual reordering across the Command Terminal's lists,
+   mobile-friendly (up/down buttons, not drag-and-drop). Confirmed design:
+   PERSONAL preference only — stored in this browser's localStorage, never
+   synced to the DB. No risk of two players' (or a player's and the DM's)
+   reordering fighting over one shared list, and no schema/migration needed
+   across the ~8 affected tables.
+
+   This module only covers lists backed by rows with a real, stable `id`
+   (ship templates, perk definitions, colonies, fleet groups, codex entries,
+   campaign objectives, notes, arsenal weapons). A couple of lists elsewhere
+   (cargo manifest items, ship deck items in combat.js) are plain JSONB
+   arrays with no stable per-item id — those use direct index-swap-and-save
+   to the DB instead, right next to their existing add/remove/edit logic,
+   since for them the array order already IS the persisted data.
+
+   Usage pattern per list (see colonies.js/ship-designer.js/etc for examples):
+     1. In the render function: const ordered = window.applySavedOrder('mykey', myList);
+        ...iterate `ordered` instead of the raw list...
+        ...include `${window.renderReorderArrows('mykey', ordered, item.id, 'moveMyListOrder')}` in each row...
+     2. Add a small wrapper: window.moveMyListOrder = function(id, dir) {
+          window.moveListItem('mykey', window.applySavedOrder('mykey', myList), id, dir);
+          window.renderMyListPanel();
+        };
+   Use a distinct key per independently-orderable sub-list (e.g. a catalog
+   split into "pending"/"approved" sections gets two keys, one per section). */
+window.getSavedListOrder = function(key) {
+    try { return JSON.parse(localStorage.getItem('order_' + key)) || []; } catch (e) { return []; }
+};
+window.saveListOrder = function(key, orderedIds) {
+    localStorage.setItem('order_' + key, JSON.stringify(orderedIds));
+};
+// Sorts `items` (array of objects with an `id`) by this browser's saved
+// order for `key`. Items with no saved position keep their original
+// relative order, effectively appended after any items that do have one
+// (Array.prototype.sort is stable in all modern browsers).
+window.applySavedOrder = function(key, items) {
+    const saved = window.getSavedListOrder(key);
+    if (!saved.length) return items;
+    const rank = new Map(saved.map((id, i) => [id, i]));
+    return [...items].sort((a, b) => {
+        const ra = rank.has(a.id) ? rank.get(a.id) : Infinity;
+        const rb = rank.has(b.id) ? rank.get(b.id) : Infinity;
+        return ra - rb;
+    });
+};
+// Moves item `id` one slot up/down within `items` (pass the same
+// already-ordered array the caller is currently rendering) and persists
+// the resulting order under `key`. Caller re-renders afterward.
+window.moveListItem = function(key, items, id, direction) {
+    const order = items.map(it => it.id);
+    const i = order.indexOf(id);
+    if (i === -1) return;
+    const j = direction === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    window.saveListOrder(key, order);
+};
+// Renders a compact up/down arrow pair for one row. `items` must be the
+// same ordered array the caller is iterating over (so position, and
+// disabled state at the ends, is correct). `moveFnName` is the bare name
+// of a window-scoped wrapper function (called as window.<moveFnName>) that
+// calls window.moveListItem then re-renders the owning panel.
+window.renderReorderArrows = function(key, items, id, moveFnName) {
+    const order = items.map(it => it.id);
+    const i = order.indexOf(id);
+    const upDisabled = i <= 0 ? 'disabled' : '';
+    const downDisabled = (i === -1 || i === order.length - 1) ? 'disabled' : '';
+    return `<span class="reorder-arrows">
+        <button type="button" class="reorder-btn" ${upDisabled} onclick="event.stopPropagation(); window.${moveFnName}('${id}', 'up')" title="Move up">▲</button>
+        <button type="button" class="reorder-btn" ${downDisabled} onclick="event.stopPropagation(); window.${moveFnName}('${id}', 'down')" title="Move down">▼</button>
+    </span>`;
+};
+
 /* --- TOAST NOTIFICATIONS ---
    Same reasoning as the confirm modal above: a plain alert() for "save
    succeeded" messages has the identical browser-disable-dialogs
@@ -412,14 +486,69 @@ window.renderCharacterTerminalData = function() {
     setVal('stat-charisma', c.stat_charisma || 'd4'); setVal('stat-dexterity', c.stat_dexterity || 'd4'); setVal('stat-intelligence', c.stat_intelligence || 'd4');
     setVal('stat-strength', c.stat_strength || 'd4'); setVal('stat-toughness', c.stat_toughness || 'd4'); setVal('stat-willpower', c.stat_willpower || 'd4');
     setVal('term-vitality', c.vitality || 0); setVal('term-stress', c.stress || 0); setVal('term-adversity', c.adversity_tokens || 0);
+    setVal('term-shield-current', c.shield_current || 0); setVal('term-shield-max', c.shield_max || 0); setVal('term-dr', c.dr || 0);
     setVal('term-specialties', c.specialties || ''); setVal('term-assets', c.assets || ''); setVal('term-history', c.history || ''); setVal('term-personal-history', c.personal_history || '');
     setVal('aug-head', c.aug_head || ''); setVal('aug-torso', c.aug_torso || ''); setVal('aug-larm', c.aug_larm || '');
     setVal('aug-rarm', c.aug_rarm || ''); setVal('aug-lleg', c.aug_lleg || ''); setVal('aug-rleg', c.aug_rleg || ''); setVal('aug-internal', c.aug_internal || '');
     
     skillList.forEach(skill => { const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_'); setVal(`skill-${safeKey}`, s[safeKey] || 0); });
     window.updateInjuryMax();
+    window.updateShieldDisplay();
     if (typeof window.renderArsenal === 'function') window.renderArsenal();
     if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
+};
+
+// Shield Max and DR are player-set base values (representing raw equipment,
+// same philosophy as manually-tracked skills), with any perk bonuses (e.g.
+// Special Forces Trooper) added automatically on top for display — same
+// "don't make the player remember to add it" principle the roller already
+// applies to skill/stat perk bonuses.
+window.getEffectiveShieldMax = function(char, perksList) {
+    let base = char.shield_max || 0;
+    let bonus = 0;
+    (perksList || []).forEach(cp => {
+        const def = typeof window.findPerkDefinition === 'function' ? window.findPerkDefinition(cp.perk_definition_id) : null;
+        if (def) bonus += (def.shield_max_bonus || 0);
+    });
+    return base + bonus;
+};
+window.getEffectiveDR = function(char, perksList) {
+    let base = char.dr || 0;
+    let bonus = 0;
+    (perksList || []).forEach(cp => {
+        const def = typeof window.findPerkDefinition === 'function' ? window.findPerkDefinition(cp.perk_definition_id) : null;
+        if (def) bonus += (def.dr_bonus || 0);
+    });
+    return base + bonus;
+};
+
+window.updateShieldDisplay = function() {
+    const label = document.getElementById('term-shield-effective');
+    if (!label) return;
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    const effMax = window.getEffectiveShieldMax(myProf.character || {}, myProf.perks);
+    const effDR = window.getEffectiveDR(myProf.character || {}, myProf.perks);
+    const baseMax = (myProf.character || {}).shield_max || 0;
+    const baseDR = (myProf.character || {}).dr || 0;
+    let bits = [];
+    if (effMax !== baseMax) bits.push(`Effective Max: ${effMax} (base ${baseMax} + perks)`);
+    if (effDR !== baseDR) bits.push(`Effective DR: ${effDR} (base ${baseDR} + perks)`);
+    label.innerText = bits.join(' · ');
+};
+
+// "Recharge" = new encounter — shield resets to its full effective max
+// (base + perk bonuses), matching the confirmed rule that it regenerates
+// automatically between encounters rather than needing a DM repair action.
+window.rechargeShield = async function() {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first."); return; }
+    const effMax = window.getEffectiveShieldMax(myProf.character, myProf.perks);
+    const input = document.getElementById('term-shield-current');
+    if (input) input.value = effMax;
+    await db.from('characters').update({ shield_current: effMax }).eq('id', myProf.character.id);
+    myProf.character.shield_current = effMax;
+    if (typeof window.showToast === 'function') window.showToast(`Shield recharged to ${effMax}.`);
 };
 
 // Injuries max = half the face value of whichever die is assigned to
@@ -515,6 +644,7 @@ window.saveTerminalProfile = async function() {
         profile_id: currentUserId, name: safeGet('term-sheet-name'),
         stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'), stat_intelligence: safeGet('stat-intelligence'), stat_strength: safeGet('stat-strength'), stat_toughness: safeGet('stat-toughness'), stat_willpower: safeGet('stat-willpower'),
         vitality: parseInt(safeGet('term-vitality')) || 0, stress: parseInt(safeGet('term-stress')) || 0, adversity_tokens: parseInt(safeGet('term-adversity')) || 0,
+        shield_current: parseInt(safeGet('term-shield-current')) || 0, shield_max: parseInt(safeGet('term-shield-max')) || 0, dr: parseInt(safeGet('term-dr')) || 0,
         specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'), personal_history: safeGet('term-personal-history'),
         aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'), aug_larm: safeGet('aug-larm'), aug_rarm: safeGet('aug-rarm'), aug_lleg: safeGet('aug-lleg'), aug_rleg: safeGet('aug-rleg'), aug_internal: safeGet('aug-internal')
     };
@@ -534,6 +664,7 @@ window.saveTerminalProfile = async function() {
     if (typeof renderChatFeed === 'function') renderChatFeed();
     if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
     if (typeof window.populateCommsRecipients === 'function') window.populateCommsRecipients();
+    if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
 
     if (typeof window.showToast === 'function') window.showToast("Character dossier & stats secured to database.");
     else alert("Character dossier & stats secured to database.");
@@ -561,6 +692,11 @@ window.renderCrewRoster = function() {
                                 <div><label style="font-size:9px; color:#ffaa00;">Stress</label><input type="number" id="dm-edit-str-${p.id}" value="${char.stress || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
                                 <div><label style="font-size:9px; color:#00e5a3;">Adversity</label><input type="number" id="dm-edit-adv-${p.id}" value="${char.adversity_tokens || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
                             </div>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-top:6px;">
+                                <div><label style="font-size:9px; color:#00e1ff;">Shield Cur</label><input type="number" id="dm-edit-shieldcur-${p.id}" value="${char.shield_current || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
+                                <div><label style="font-size:9px; color:#00e1ff;">Shield Max</label><input type="number" id="dm-edit-shieldmax-${p.id}" value="${char.shield_max || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
+                                <div><label style="font-size:9px; color:#c9962f;">DR</label><input type="number" id="dm-edit-dr-${p.id}" value="${char.dr || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
+                            </div>
                             <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Gear Override:</label>
                             <textarea id="dm-edit-assets-${p.id}" rows="2" style="font-size:10px; margin:2px 0;">${char.assets || ''}</textarea>
                             <button class="btn-reveal" onclick="window.dmUpdatePlayerStats('${p.id}')" style="width:100%; font-size:9px; margin-top:4px; border-color:#ff6b6b; color:#ff6b6b;">APPLY OVERRIDE</button>
@@ -580,7 +716,7 @@ window.renderCrewRoster = function() {
                         <img src="${p.avatar_url || ''}" style="width:40px; height:40px; border:1px solid #3c4e36; background:#040605; object-fit:cover;">
                         <div style="flex:1;">
                             <strong style="color:#00e5a3; font-size:14px;">${char.name || p.username || 'Unknown'}</strong><br>
-                            <span style="color:#6b826a; font-size:10px;">Injuries: ${char.vitality || 0} | Stress: ${char.stress || 0}</span>
+                            <span style="color:#6b826a; font-size:10px;">Injuries: ${char.vitality || 0} | Stress: ${char.stress || 0} | Shield: ${char.shield_current || 0}/${char.shield_max || 0}</span>
                         </div>
                     </div>
                 </div>
@@ -595,10 +731,13 @@ window.dmUpdatePlayerStats = async function(profileId) {
     const vit = parseInt(document.getElementById(`dm-edit-vit-${profileId}`).value) || 0;
     const str = parseInt(document.getElementById(`dm-edit-str-${profileId}`).value) || 0;
     const adv = parseInt(document.getElementById(`dm-edit-adv-${profileId}`).value) || 0;
+    const shieldCur = parseInt(document.getElementById(`dm-edit-shieldcur-${profileId}`).value) || 0;
+    const shieldMax = parseInt(document.getElementById(`dm-edit-shieldmax-${profileId}`).value) || 0;
+    const dr = parseInt(document.getElementById(`dm-edit-dr-${profileId}`).value) || 0;
     const assets = document.getElementById(`dm-edit-assets-${profileId}`).value;
     const prof = allProfiles.find(p => p.id === profileId);
     if (!prof || !prof.character) return;
-    await db.from('characters').update({ vitality: vit, stress: str, adversity_tokens: adv, assets: assets }).eq('id', prof.character.id);
+    await db.from('characters').update({ vitality: vit, stress: str, adversity_tokens: adv, shield_current: shieldCur, shield_max: shieldMax, dr: dr, assets: assets }).eq('id', prof.character.id);
     db.from('chat_logs').insert({ sender_id: 'system', content: `⚙️ [OVERSEER] System parameters overridden for Commander ${prof.username}.`, message_type: 'text' });
     if (typeof window.showToast === 'function') window.showToast("Player metrics overridden and saved to cloud.");
     else alert("Player metrics overridden and saved to cloud.");
@@ -656,9 +795,11 @@ window.renderCodexMatrix = function() {
     if (entries.length === 0) { container.innerHTML = `<span style="font-size:11px; color:#6b826a;">No records located under this classification.</span>`; return; }
 
     let isDM = (currentUserRole === 'dm');
+    const orderKey = 'codex_' + window.activeCodexCategory;
+    const ordered = window.applySavedOrder(orderKey, entries);
     let html = '';
-    entries.forEach(e => {
-        let cleanSubtitle = (e.subtitle || '').replace(/\|\s*LINK:.+/, '').trim(); 
+    ordered.forEach(e => {
+        let cleanSubtitle = (e.subtitle || '').replace(/\|\s*LINK:.+/, '').trim();
         let docHtml = (e.doc_data && e.doc_name) ? `<div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">📎 ATTACHMENT: ${e.doc_name} (${(e.doc_type || 'FILE').toUpperCase()})</div>` : '';
         let authorName = allProfiles.find(p => p.id === e.created_by)?.username || 'Unknown';
         html += `
@@ -666,6 +807,7 @@ window.renderCodexMatrix = function() {
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div><strong style="color:#00e5a3; font-size:13px;">${e.title}</strong><div style="font-size:10px; color:#6b826a; margin-top:2px;">${cleanSubtitle || 'General Record'}</div></div>
                     <div style="display:flex; gap:6px; align-items:center;">
+                        ${window.renderReorderArrows(orderKey, ordered, e.id, 'moveCodexEntryOrder')}
                         <button class="layer-edit" onclick="window.openCodexFullscreen('${e.id}')" style="font-size:9px; padding:3px 8px;">⛶ FULLSCREEN</button>
                         ${isDM ? `<button class="layer-edit" onclick="window.editCodexEntry('${e.id}')" style="font-size:9px; padding:3px 8px; color:#ffaa00; border-color:#ffaa00;">✎ EDIT</button>` : ''}
                         ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${e.id}')" style="font-size:9px; padding:3px 6px;">✕</button>` : ''}
@@ -678,6 +820,21 @@ window.renderCodexMatrix = function() {
         `;
     });
     container.innerHTML = html;
+};
+window.moveCodexEntryOrder = function(id, direction) {
+    const orderKey = 'codex_' + window.activeCodexCategory;
+    let entries = globalCodexEntriesCache.filter(e => e.category === window.activeCodexCategory);
+    if (window.codexSearchFilter) {
+        entries = entries.filter(e => (e.title && e.title.toLowerCase().includes(window.codexSearchFilter)) || (e.subtitle && e.subtitle.toLowerCase().includes(window.codexSearchFilter)) || (e.content && e.content.toLowerCase().includes(window.codexSearchFilter)));
+    }
+    entries = entries.filter(e => {
+        if (currentUserRole === 'dm') return true;
+        let linkMatch = (e.subtitle || '').match(/LINK:(.+)/);
+        if (linkMatch) { return window.scannedSystems && window.scannedSystems.includes(linkMatch[1].trim()); }
+        return true;
+    });
+    window.moveListItem(orderKey, window.applySavedOrder(orderKey, entries), id, direction);
+    window.renderCodexMatrix();
 };
 
 window.editCodexEntry = function(id) {
@@ -822,12 +979,14 @@ window.deleteCampaignObjective = async function(id) { if (!(await window.showCon
 window.renderCampaignObjectives = function() {
     const container = document.getElementById('objectives-list-container'); if (!container) return;
     let html = '';
-    campaignObjectivesList.forEach(obj => {
+    const ordered = window.applySavedOrder('objectives', campaignObjectivesList);
+    ordered.forEach(obj => {
         html += `
             <div class="note-card" style="border-color:${obj.completed ? '#00e5a3' : '#3c4e36'}; opacity:${obj.completed ? '0.7' : '1'};">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <strong style="color:${obj.completed ? '#00e5a3' : '#00e5a3'}; font-size:11px; text-decoration:${obj.completed ? 'line-through' : 'none'};">${obj.title}</strong>
                     <div style="display:flex; gap:6px;">
+                        ${window.renderReorderArrows('objectives', ordered, obj.id, 'moveObjectiveOrder')}
                         <button class="layer-edit" onclick="window.toggleObjectiveComplete('${obj.id}', ${obj.completed})" style="font-size:9px;">${obj.completed ? 'Undo' : 'Complete'}</button>
                         <button class="layer-del" onclick="window.deleteCampaignObjective('${obj.id}')" style="font-size:9px;">X</button>
                     </div>
@@ -837,6 +996,10 @@ window.renderCampaignObjectives = function() {
         `;
     });
     container.innerHTML = html;
+};
+window.moveObjectiveOrder = function(id, direction) {
+    window.moveListItem('objectives', window.applySavedOrder('objectives', campaignObjectivesList), id, direction);
+    window.renderCampaignObjectives();
 };
 
 window.createOrUpdateNote = async function() {
@@ -864,8 +1027,9 @@ window.deleteNote = async function(id) {
 window.renderTerminalNotes = function() {
     const container = document.getElementById('term-notes-list-container'); if (!container) return;
     let html = '';
-    playerNotesList.forEach(n => {
-        if (n.author_id !== currentUserId && n.share_scope === 'private' && currentUserRole !== 'dm') return;
+    const visibleNotes = playerNotesList.filter(n => !(n.author_id !== currentUserId && n.share_scope === 'private' && currentUserRole !== 'dm'));
+    const ordered = window.applySavedOrder('notes', visibleNotes);
+    ordered.forEach(n => {
         const isMine = n.author_id === currentUserId; const isAudit = !isMine && n.share_scope === 'private' && currentUserRole === 'dm';
         let auditTag = isAudit ? `<span style="color:#ff3333; font-size:9px; margin-left:6px;">[OVERSEER AUDIT]</span>` : '';
         html += `
@@ -873,6 +1037,7 @@ window.renderTerminalNotes = function() {
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <strong style="color:#00e5a3; font-size:11px;">${n.title} ${auditTag}</strong>
                     <div style="display:flex; gap:4px;">
+                        ${window.renderReorderArrows('notes', ordered, n.id, 'moveNoteOrder')}
                         <button class="layer-edit" onclick="window.openNoteFullscreen('${n.id}')" style="font-size:8px;">⛶ FULL</button>
                         ${isMine || currentUserRole === 'dm' ? `<button class="layer-edit" onclick="window.editNote('${n.id}')" style="font-size:8px;">Edit</button><button class="layer-del" onclick="window.deleteNote('${n.id}')" style="font-size:8px;">X</button>` : ''}
                     </div>
@@ -883,6 +1048,11 @@ window.renderTerminalNotes = function() {
         `;
     });
     container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No notes recorded.</span>';
+};
+window.moveNoteOrder = function(id, direction) {
+    const visibleNotes = playerNotesList.filter(n => !(n.author_id !== currentUserId && n.share_scope === 'private' && currentUserRole !== 'dm'));
+    window.moveListItem('notes', window.applySavedOrder('notes', visibleNotes), id, direction);
+    window.renderTerminalNotes();
 };
 
 window.openNoteFullscreen = function(id) {
@@ -1207,19 +1377,221 @@ window.deleteHyperlane = async function(id) {
     if (typeof loadHyperlanes === 'function') loadHyperlanes();
 };
 
+/* --- HAZARD DESIGNER CATALOG (DM-only) ---
+   Reusable hazard blueprints — same "design once, save it, place instances
+   later" shift Ship Designer/Perk Designer made. Simpler than either of
+   those: no draft/approval workflow and no per-owner permissions, because
+   hazard placement has always been entirely DM-only (see placeHazardZone
+   below) — there's no player-facing side of this feature to gate, so a
+   flat DM-only catalog (confirmed design decision) is all it needs. */
+let editingHazardDefId = null;
+
+window.renderHazardDefinitionsPanel = function() {
+    const container = document.getElementById('hazard-def-list-container');
+    if (!container) return;
+    const list = window.hazardDefinitionsList || [];
+    const hazardColors = { pulsar: '#ff3366', nebula: '#c778dd', gravity_well: '#7694ff' };
+    let html = '';
+    if (list.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No hazard blueprints designed yet.</span>';
+    list.forEach(d => {
+        const color = hazardColors[d.hazard_type] || '#ffaa00';
+        html += `
+            <div class="note-card" style="border-left: 3px solid ${color}; padding: 6px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                        <strong style="color: ${color}; font-size: 11px;">${d.name}</strong>
+                        <div style="font-size:9px; color:#6b826a;">${d.hazard_type.replace('_', ' ').toUpperCase()} · Radius: ${d.default_radius}u · Intensity: ${d.default_intensity}</div>
+                        ${d.description ? `<div style="font-size:9px; color:#d4c5a9; margin-top:2px;">${d.description}</div>` : ''}
+                    </div>
+                    <div style="display:flex; gap:4px;">
+                        <button class="layer-edit" onclick="window.openEditHazardDefinition('${d.id}')" style="font-size: 9px; padding: 2px 6px;">✎</button>
+                        <button class="layer-del" onclick="window.deleteHazardDefinition('${d.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+};
+
+window.saveHazardDefinition = async function() {
+    if (currentUserRole !== 'dm') return;
+    const name = document.getElementById('new-hazdef-name').value.trim();
+    if (!name) { alert("Enter a blueprint name first."); return; }
+    const hazard_type = document.getElementById('new-hazdef-type').value;
+    const default_radius = Math.min(parseFloat(document.getElementById('new-hazdef-radius').value) || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
+    const default_intensity = parseInt(document.getElementById('new-hazdef-intensity').value) || 1;
+    const description = document.getElementById('new-hazdef-desc').value.trim();
+
+    if (editingHazardDefId) {
+        const { error } = await db.from('hazard_definitions').update({ name, hazard_type, default_radius, default_intensity, description }).eq('id', editingHazardDefId);
+        if (error) { alert("Failed to update blueprint: " + error.message); return; }
+    } else {
+        const { error } = await db.from('hazard_definitions').insert({ name, hazard_type, default_radius, default_intensity, description, created_by: currentUserId });
+        if (error) { alert("Failed to save blueprint: " + error.message); return; }
+    }
+    window.cancelHazardDefinitionEdit();
+    if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
+};
+
+window.openEditHazardDefinition = function(id) {
+    const d = (window.hazardDefinitionsList || []).find(x => x.id === id);
+    if (!d) return;
+    editingHazardDefId = id;
+    document.getElementById('new-hazdef-name').value = d.name || '';
+    document.getElementById('new-hazdef-type').value = d.hazard_type || 'pulsar';
+    document.getElementById('new-hazdef-radius').value = d.default_radius || 300;
+    document.getElementById('new-hazdef-intensity').value = d.default_intensity || 1;
+    document.getElementById('new-hazdef-desc').value = d.description || '';
+    document.getElementById('hazard-def-form-heading').innerText = `✎ Editing: ${d.name}`;
+    document.getElementById('btn-save-hazard-def').innerText = '✓ UPDATE DEFINITION';
+    document.getElementById('btn-cancel-hazard-def-edit').style.display = 'block';
+};
+
+window.cancelHazardDefinitionEdit = function() {
+    editingHazardDefId = null;
+    document.getElementById('hazard-def-form-heading').innerText = '+ New Hazard Definition';
+    document.getElementById('new-hazdef-name').value = '';
+    document.getElementById('new-hazdef-radius').value = '300';
+    document.getElementById('new-hazdef-intensity').value = '1';
+    document.getElementById('new-hazdef-desc').value = '';
+    document.getElementById('btn-save-hazard-def').innerText = '+ SAVE DEFINITION';
+    document.getElementById('btn-cancel-hazard-def-edit').style.display = 'none';
+};
+
+window.deleteHazardDefinition = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!(await window.showConfirmModal("Delete this hazard blueprint? Zones already placed from it are unaffected."))) return;
+    await db.from('hazard_definitions').delete().eq('id', id);
+    if (editingHazardDefId === id) window.cancelHazardDefinitionEdit();
+    if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
+};
+
+// Populates the catalog-definition dropdown in the placement form below.
+window.populateHazardDefSelect = function() {
+    const sel = document.getElementById('new-hazard-def');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Ad-hoc (no catalog blueprint) —</option>' +
+        (window.hazardDefinitionsList || []).map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+};
+
+// Target-system picker for hazard placement: a searchable autocomplete,
+// not a plain <select> — system_hazards.system_id turns out to be a plain
+// text column with no foreign key (confirmed via a live schema check), so
+// it can point at ANY system id, including the ~2,641 procedurally
+// generated galaxy systems (proc-core-*/proc-spiral-*), not just the
+// handful of DM-placed custom ones. A <select> with 2,600+ options isn't
+// usable, so this mirrors the existing global search bar's pattern
+// (window.handleGlobalSearchInput in js/map.js): type to filter by name,
+// click a result to select it. Selection is held in
+// window._hazardTargetSystemId (not a form field value) since procedural
+// system ids aren't real rows a <select>/<option> pairing would suit.
+window._hazardSystemSearchResults = [];
+window._hazardTargetSystemId = null;
+let _hazardSystemDropdownEscaped = false;
+window.handleHazardSystemSearch = function(query) {
+    // Same overflow-clipping problem/fix as the global search dropdown:
+    // #dm-tools scrolls (overflow-y:auto), which still clips a tall
+    // absolutely-positioned child — escape to <body> once, position:fixed
+    // from then on, anchored under the input via getBoundingClientRect.
+    if (!_hazardSystemDropdownEscaped) {
+        const dd = document.getElementById('hazard-system-search-dropdown');
+        if (dd) { document.body.appendChild(dd); _hazardSystemDropdownEscaped = true; }
+    }
+    const dropdown = document.getElementById('hazard-system-search-dropdown');
+    const inputEl = document.getElementById('new-hazard-system-search');
+    if (!dropdown || !inputEl) return;
+
+    // Typing invalidates whatever was previously selected until a result
+    // is actually clicked again — prevents placing against a stale pick
+    // if the DM edits the text without choosing a new match.
+    window._hazardTargetSystemId = null;
+    const tag = document.getElementById('hazard-system-selected-tag');
+    if (tag) tag.style.display = 'none';
+
+    query = (query || '').trim().toLowerCase();
+    if (!query) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; window._hazardSystemSearchResults = []; return; }
+
+    const allSystems = (typeof globalProceduralSystemsCache !== 'undefined' ? globalProceduralSystemsCache : []).concat(typeof globalDbSystemsCache !== 'undefined' ? globalDbSystemsCache : []);
+    const results = allSystems.filter(s => s.name && s.name.toLowerCase().includes(query)).slice(0, 10);
+    window._hazardSystemSearchResults = results;
+
+    const rect = inputEl.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.width = rect.width + 'px';
+
+    if (results.length === 0) {
+        dropdown.innerHTML = '<div class="search-result-item" style="cursor:default; color:#6b826a;">No matches</div>';
+    } else {
+        dropdown.innerHTML = results.map((s, idx) => `<div class="search-result-item" onclick="window.selectHazardTargetSystem(${idx})">${s.name} ${s.isCustom ? '<span style="color:#00e5a3; font-size:9px;">[CUSTOM]</span>' : '<span style="color:#6b826a; font-size:9px;">[GALAXY]</span>'}</div>`).join('');
+    }
+    dropdown.style.display = 'block';
+};
+window.selectHazardTargetSystem = function(idx) {
+    const s = window._hazardSystemSearchResults[idx];
+    if (!s) return;
+    window._hazardTargetSystemId = s.id;
+    const inputEl = document.getElementById('new-hazard-system-search');
+    if (inputEl) inputEl.value = s.name;
+    const tag = document.getElementById('hazard-system-selected-tag');
+    if (tag) { tag.innerText = `🔗 Tied to: ${s.name} (click to clear)`; tag.style.display = 'block'; }
+    const dropdown = document.getElementById('hazard-system-search-dropdown');
+    if (dropdown) { dropdown.innerHTML = ''; dropdown.style.display = 'none'; }
+};
+window.clearHazardTargetSystem = function() {
+    window._hazardTargetSystemId = null;
+    const inputEl = document.getElementById('new-hazard-system-search');
+    if (inputEl) inputEl.value = '';
+    const tag = document.getElementById('hazard-system-selected-tag');
+    if (tag) tag.style.display = 'none';
+};
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('hazard-system-search-dropdown');
+    const input = document.getElementById('new-hazard-system-search');
+    if (!dropdown || dropdown.style.display === 'none') return;
+    if (e.target === input || dropdown.contains(e.target)) return;
+    dropdown.innerHTML = ''; dropdown.style.display = 'none';
+});
+
+// Prefills type/radius/intensity from a chosen blueprint — the instance's
+// fields stay independently editable afterward (same blueprint-vs-deployed-
+// instance split Ship Designer/ship_markers already use).
+window.applyHazardDefToPlacementForm = function(defId) {
+    if (!defId) return;
+    const d = (window.hazardDefinitionsList || []).find(x => x.id === defId);
+    if (!d) return;
+    document.getElementById('new-hazard-type').value = d.hazard_type || 'pulsar';
+    document.getElementById('new-hazard-radius').value = Math.min(d.default_radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
+    document.getElementById('new-hazard-intensity').value = d.default_intensity || 1;
+};
+
 /* --- SYSTEM HAZARD ZONES (DM controls) ---
-   Explicit, precisely-placed zones — independent of the implicit per-system
-   hazard flavor field, which window.checkShipHazards() (map.js) already
-   folds in automatically. This is for a DM who wants a hazard NOT centered
-   on a star, multiple hazards in one system, or a hazard on a system that
-   was generated without one. */
+   Explicit, precisely-placed instances — independent of the implicit
+   per-system hazard flavor field, which window.checkShipHazards() (map.js)
+   already folds in automatically. This is for a DM who wants a hazard NOT
+   centered on a star, multiple hazards in one system, or a hazard on a
+   system that was generated without one.
+   Radius is always clamped to window.SYSTEM_HAZARD_MAX_RADIUS (map.js) —
+   previously unbounded, which let a zone visually engulf half the map.
+   Tying a zone to a system (system_id) is optional: untied zones keep the
+   original always-visible, no-FOW-gating behavior; tied zones gate their
+   visibility by that system's window.getFowTier (map.js), same rule stars
+   and planets already follow. */
 window.placeHazardZone = async function() {
     if (currentUserRole !== 'dm') return;
+    // system_id is a plain text column (no FK) — can be a real star_systems
+    // uuid OR a procedural id like "proc-spiral-1204"; see
+    // window.handleHazardSystemSearch above for why this isn't a <select>.
+    const systemId = window._hazardTargetSystemId || null;
+    const defId = document.getElementById('new-hazard-def').value || null;
     const type = document.getElementById('new-hazard-type').value;
-    const radius = parseFloat(document.getElementById('new-hazard-radius').value) || 300;
+    const radius = Math.min(parseFloat(document.getElementById('new-hazard-radius').value) || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
     const intensity = parseInt(document.getElementById('new-hazard-intensity').value) || 1;
     const payload = {
-        system_id: null,
+        system_id: systemId,
+        definition_id: defId,
         hazard_type: type,
         x: -window.camera.x / window.camera.zoom,
         y: -window.camera.y / window.camera.zoom,
@@ -1227,6 +1599,7 @@ window.placeHazardZone = async function() {
     };
     const { error } = await db.from('system_hazards').insert(payload);
     if (error) { alert("Failed to place hazard zone: " + error.message); return; }
+    window.clearHazardTargetSystem();
     if (typeof loadSystemHazards === 'function') loadSystemHazards();
 };
 
@@ -1234,15 +1607,23 @@ window.renderHazardZoneList = function() {
     const container = document.getElementById('hazard-zone-list-container');
     if (!container) return;
     const hazardColors = { pulsar: '#ff3366', nebula: '#c778dd', gravity_well: '#7694ff' };
+    // Ties can point at either a custom (DB) system or a procedural one —
+    // check both caches, same as window.handleHazardSystemSearch.
+    const allTieableSystems = (typeof globalProceduralSystemsCache !== 'undefined' ? globalProceduralSystemsCache : []).concat(typeof globalDbSystemsCache !== 'undefined' ? globalDbSystemsCache : []);
     let html = '';
     (window.globalSystemHazardsCache || []).forEach(hz => {
         const color = hazardColors[hz.hazard_type] || '#ffaa00';
+        const tiedSystem = hz.system_id ? allTieableSystems.find(s => s.id === hz.system_id) : null;
+        const tieTag = hz.system_id
+            ? `<span style="color:#00e5a3;">🔗 ${tiedSystem ? tiedSystem.name : 'Unknown system'} (FOW-gated)</span>`
+            : `<span style="color:#6b826a;">Untied — always visible</span>`;
         html += `
             <div class="note-card" style="border-left: 3px solid ${color}; padding: 6px; margin-bottom: 4px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <strong style="color: ${color}; font-size: 11px;">${hz.hazard_type.replace('_', ' ').toUpperCase()}</strong>
                         <div style="font-size:9px; color:#6b826a;">Radius: ${hz.radius}u &nbsp;·&nbsp; Intensity: ${hz.intensity}</div>
+                        <div style="font-size:9px; margin-top:2px;">${tieTag}</div>
                     </div>
                     <button class="layer-del" onclick="window.deleteHazardZone('${hz.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>
                 </div>
