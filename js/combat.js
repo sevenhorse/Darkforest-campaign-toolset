@@ -57,6 +57,15 @@ window.sanitizeCargo = function(inv) {
             ]
         };
     }
+    // Guarantee all three arrays exist even on a non-empty-but-partial
+    // object (e.g. hand-edited or legacy cargo missing one field) — every
+    // caller of this function (deliverColonyResources, the fleet-group
+    // production tick, the cargo UI) reads/pushes into these directly
+    // without its own null-guard, so a missing array here would throw a
+    // few call sites downstream instead of failing safely right here.
+    if (!Array.isArray(inv.perishables)) inv.perishables = [];
+    if (!Array.isArray(inv.expendables)) inv.expendables = [];
+    if (!Array.isArray(inv.misc)) inv.misc = [];
     if (inv.synth_capacity === undefined) inv.synth_capacity = 10;
     return inv;
 };
@@ -1713,6 +1722,7 @@ window.renderArsenal = function() {
                     <div style="display:flex; gap:4px;">
                         ${window.renderReorderArrows('arsenal', ordered, w.id, 'moveArsenalOrder')}
                         <button class="layer-edit" onclick="window.rollArsenalWeapon('${w.id}')" style="padding:2px 6px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">ROLL</button>
+                        <button class="layer-edit" onclick="window.openArsenalAttackModal('${w.id}')" title="Resolve Attack (to-hit vs. a target, then damage if it hits)" style="padding:2px 6px; font-size:9px; border-color:#ff3333; color:#ff3333;">⚔</button>
                         <button class="layer-edit" onclick="window.openEditArsenalModal('${w.id}')" style="padding:2px 5px; font-size:9px;">✎</button>
                         <button class="layer-del" onclick="window.deleteArsenalItem('${w.id}')" style="padding:2px 5px; font-size:9px;">✕</button>
                     </div>
@@ -1931,6 +1941,266 @@ window.rollArsenalWeapon = async function(id) {
 
     if(typeof window.broadcastRoll === 'function') {
         await window.broadcastRoll(`[${myProf.username || 'Commander'}] FIRES ${wpn.name}`, breakdownString, total);
+    }
+};
+
+/* --- GROUND COMBAT TO-HIT SYSTEM ---
+   Confirmed design: attacker rolls d20 + weapon modifier + attacker's
+   chosen skill modifier + perk bonuses on that skill; defender rolls ONE
+   core stat die — a PC defender's die size comes from their own character
+   sheet (whoever resolves the attack picks WHICH stat, fresh each time);
+   an NPC defender (no linked character sheet at all) has no stat to pull
+   from, so a raw die size is picked manually instead. Higher total wins;
+   on a tie the player-controlled side wins. Triggered by a new "⚔" button
+   next to each Arsenal weapon's existing ROLL button — the attacker is
+   always the current user's own character (their own Arsenal weapon),
+   same scope as ROLL already has. A miss blocks the damage roll entirely
+   (one integrated action, not a separate advisory step); ammo is
+   consumed either way since the shot was still fired. This is a genuine
+   prototype like the boarding system — the d20 does NOT explode (flat
+   1-20, standard d20-system convention, not stated either way by the
+   confirmed design), the defender's die DOES explode (matches every
+   other core-stat-die roll elsewhere in this app), and `wpn.modifier` is
+   reused as-is for BOTH the to-hit bonus AND the existing damage bonus —
+   the schema only has one modifier field per weapon, so a well-modified
+   weapon is being treated as both more accurate and harder-hitting
+   rather than splitting it into two fields. Flag any of this to revisit
+   after it's actually played. */
+window.DAMAGE_TYPE_TO_SKILL = {
+    'Impact': 'Ballistic Weapons', 'Piercing': 'Ballistic Weapons', 'Flak': 'Ballistic Weapons',
+    'Cold': 'Ballistic Weapons', 'Corrosive': 'Ballistic Weapons',
+    'Energy': 'Energy Weapons', 'Ion': 'Energy Weapons', 'Heat': 'Energy Weapons',
+    'Antimatter': 'Energy Weapons', 'Exotic': 'Energy Weapons',
+    'Explosive': 'Explosives', 'Healing': 'Medical'
+};
+
+function rollExplodingDie(faces, canExplode) {
+    let roll, subRolls = [], rollTotal = 0;
+    do {
+        roll = Math.floor(Math.random() * faces) + 1;
+        rollTotal += roll;
+        subRolls.push(roll);
+    } while (roll === faces && canExplode);
+    return { rollTotal, subRolls };
+}
+
+(function() {
+    let overlay, currentWeaponId;
+
+    function defenderProfile(combatant) {
+        return allProfiles.find(p => p.id === combatant.owner_id) || null;
+    }
+    function defenderIsPC(combatant) {
+        const prof = defenderProfile(combatant);
+        // Requires BOTH a linked character sheet AND a non-DM owner. The
+        // Initiative Tracker's "+ ADD TO INITIATIVE" form (DM-only, for
+        // NPCs) sets owner_id to the DM's own profile id, same field a
+        // player's own "+ JOIN INITIATIVE" self-add uses — nothing in the
+        // data distinguishes "an NPC the DM added" from "the DM's own PC"
+        // by owner_id alone. Excluding role === 'dm' here means every
+        // DM-added combatant is treated as an NPC (manual die size), even
+        // in the rare case the DM adds their own PC through that same
+        // form — a known, flagged edge case, not silently mishandled.
+        return !!(prof && prof.role !== 'dm' && prof.character && prof.character.id);
+    }
+
+    function renderDefenseGroup() {
+        const group = document.getElementById('atk-defense-group');
+        const targetSel = document.getElementById('atk-target-select');
+        if (!group || !targetSel || !targetSel.value) { if (group) group.innerHTML = ''; return; }
+        const target = combatantsList.find(c => c.id === targetSel.value);
+        if (!target) { group.innerHTML = ''; return; }
+        if (defenderIsPC(target)) {
+            group.innerHTML = `
+                <label for="atk-defense-stat-select" style="font-size:9px; color:#6b826a;">Defender rolls (their own stat die) — pick which stat:</label>
+                <select id="atk-defense-stat-select" style="border-color:#ff3333;">
+                    ${window.PERK_STAT_NAMES.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>`;
+        } else {
+            group.innerHTML = `
+                <label for="atk-defense-die-select" style="font-size:9px; color:#6b826a;">No character sheet linked — DM picks a die size:</label>
+                <select id="atk-defense-die-select" style="border-color:#ff3333;">
+                    <option value="d4">d4</option><option value="d6">d6</option><option value="d8" selected>d8</option>
+                    <option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option>
+                </select>`;
+        }
+    }
+
+    function groundCombatTargets() {
+        // Strike-craft squadron tokens share the same Initiative Tracker as
+        // personal combatants (owner_id set to the squadron's owning
+        // player) — excluded here since this is a personal-combat system;
+        // a squadron "defending" with its pilot's personal Charisma/
+        // Willpower die makes no sense. Ship-to-ship combat already has
+        // its own separate weapon-roll system.
+        return combatantsList.filter(c => !c.is_strike_craft);
+    }
+
+    function populateTargetOptions() {
+        const sel = document.getElementById('atk-target-select');
+        if (!sel) return;
+        const targets = groundCombatTargets();
+        sel.innerHTML = targets.length
+            ? targets.map(c => `<option value="${c.id}">${c.name}</option>`).join('')
+            : '<option value="">No eligible combatants in the Initiative Tracker</option>';
+    }
+
+    function ensureModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'arsenal-attack-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:380px; max-width:92vw; border-color:#ff3333;">
+            <h4 style="color:#ff3333; margin-top:0;" id="atk-modal-title">Resolve Attack</h4>
+            <label for="atk-target-select" style="font-size:9px; color:#6b826a;">Target (from Initiative Tracker)</label>
+            <select id="atk-target-select" style="border-color:#ff3333;"></select>
+            <label for="atk-skill-select" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Attacker Skill (adds skill mod + perk bonuses to the to-hit roll)</label>
+            <select id="atk-skill-select" style="border-color:#ff3333;">
+                ${skillList.map(s => `<option value="${s}">${s}</option>`).join('')}
+            </select>
+            <div id="atk-defense-group" style="margin-top:6px;"></div>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button id="atk-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
+                <button id="atk-resolve-btn" class="btn-deploy" style="flex:1; margin-top:0;">⚔ RESOLVE ATTACK</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('atk-cancel-btn').addEventListener('click', () => { overlay.style.display = 'none'; });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+        document.getElementById('atk-target-select').addEventListener('change', renderDefenseGroup);
+        document.getElementById('atk-resolve-btn').addEventListener('click', () => window.resolveArsenalAttack(currentWeaponId));
+    }
+
+    window.openArsenalAttackModal = function(weaponId) {
+        const myProf = allProfiles.find(p => p.id === currentUserId);
+        const wpn = myProf ? (myProf.arsenal || []).find(w => w.id === weaponId) : null;
+        if (!wpn) return;
+        if (wpn.ammo !== null && wpn.ammo !== undefined && wpn.ammo <= 0) {
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`${wpn.name} is out of ammo! Reload or edit it to restock before firing again.`);
+            return;
+        }
+        if (groundCombatTargets().length === 0) { alert("No eligible combatants in the Initiative Tracker to target — add one there first (strike-craft squadron tokens can't be targeted here; use ship weapons for those)."); return; }
+        ensureModal();
+        currentWeaponId = weaponId;
+        document.getElementById('atk-modal-title').innerText = `Resolve Attack: ${wpn.name}`;
+        populateTargetOptions();
+        const dt = wpn.damage_type ? window.normalizeDamageType(wpn.damage_type) : null;
+        document.getElementById('atk-skill-select').value = (dt && window.DAMAGE_TYPE_TO_SKILL[dt]) || 'Ballistic Weapons';
+        renderDefenseGroup();
+        overlay.style.display = 'flex';
+    };
+
+    window.closeArsenalAttackModal = function() { if (overlay) overlay.style.display = 'none'; };
+})();
+
+window.resolveArsenalAttack = async function(weaponId) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    let wpn = (myProf.arsenal || []).find(w => w.id === weaponId);
+    if (!wpn) return;
+
+    // Validated up front, same as window.rollArsenalWeapon's own check — a
+    // malformed dice string must not be discovered only after ammo's been
+    // spent and a hit already broadcast to chat with no damage number.
+    const diceRegex = /^(\d*)d(\d+)$/i;
+    if (!wpn.dice || !wpn.dice.trim().match(diceRegex)) { alert("This weapon's dice format is invalid — edit it before attacking."); return; }
+
+    const targetSel = document.getElementById('atk-target-select');
+    const target = targetSel ? combatantsList.find(c => c.id === targetSel.value) : null;
+    if (!target) { alert("Select a target first."); return; }
+    const skillName = document.getElementById('atk-skill-select').value;
+
+    // --- Attacker roll: flat d20 (no explode) + weapon mod + skill mod + perk bonus on that skill ---
+    let atkBreakdown = [];
+    let atkTotal = Math.floor(Math.random() * 20) + 1;
+    atkBreakdown.push(`d20: ${atkTotal}`);
+
+    let modVal = parseInt(wpn.modifier) || 0;
+    if (modVal !== 0) { atkTotal += modVal; atkBreakdown.push(`Weapon Mod: ${modVal >= 0 ? '+' : ''}${modVal}`); }
+
+    const safeSkillKey = skillName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const skillMod = (myProf.skills || {})[safeSkillKey] || 0;
+    if (skillMod !== 0) { atkTotal += skillMod; atkBreakdown.push(`${skillName}: ${skillMod >= 0 ? '+' : ''}${skillMod}`); }
+
+    const perkBonus = window.getPerkBonusFor(myProf.perks, 'skill', skillName);
+    if (perkBonus.total !== 0) { atkTotal += perkBonus.total; atkBreakdown.push(`${skillName} Perks: ${perkBonus.sources.join(', ')}`); }
+
+    // --- Defender roll: one core stat die (PC, explodes) or a manually-picked die size (NPC, also explodes) ---
+    const targetProfile = allProfiles.find(p => p.id === target.owner_id);
+    // Same "non-DM owner + linked character" rule as the modal's defenderIsPC — see its comment above.
+    const isPC = !!(targetProfile && targetProfile.role !== 'dm' && targetProfile.character && targetProfile.character.id);
+    let defTotal = 0, defLabel = '';
+    if (isPC) {
+        const statName = document.getElementById('atk-defense-stat-select').value;
+        const statKey = 'stat_' + statName.toLowerCase();
+        const faces = parseInt((targetProfile.character[statKey] || 'd4').replace('d', '')) || 4;
+        const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2);
+        defTotal = rollTotal;
+        defLabel = `${target.name} defends with ${statName} (d${faces}: ${subRolls.join('💥')})`;
+    } else {
+        const faces = parseInt((document.getElementById('atk-defense-die-select').value || 'd8').replace('d', '')) || 8;
+        const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2);
+        defTotal = rollTotal;
+        defLabel = `${target.name} defends (DM-picked d${faces}: ${subRolls.join('💥')})`;
+    }
+
+    // --- Resolution: higher total wins. On a tie, the player-controlled side
+    // wins; if that's ambiguous (both sides player-controlled, or neither is —
+    // e.g. two DM-run NPCs), the attacker wins the tie as a deliberate
+    // default, not something the confirmed design specified either way. ---
+    const attackerIsPlayer = currentUserRole !== 'dm';
+    const defenderIsPlayer = isPC; // isPC already requires a non-DM owner, see the comment above
+    let hit;
+    if (atkTotal > defTotal) hit = true;
+    else if (atkTotal < defTotal) hit = false;
+    else hit = !(defenderIsPlayer && !attackerIsPlayer);
+
+    // Ammo is consumed on any fired shot, hit or miss — the round left the barrel either way.
+    if (wpn.ammo !== null && wpn.ammo !== undefined) {
+        wpn.ammo = Math.max(0, wpn.ammo - 1);
+        await db.from('character_arsenal').update({ ammo: wpn.ammo }).eq('id', wpn.id);
+        if (typeof window.renderArsenal === 'function') window.renderArsenal();
+    }
+
+    let resultHtml = `
+        <div style="margin-top:4px; padding:4px; border-left:2px solid #ff3333; background:rgba(255,51,51,0.1);">
+            <strong>To-Hit:</strong> ${atkBreakdown.join(' + ')} = <strong style="color:#ffaa00;">${atkTotal}</strong><br>
+            <strong>Defense:</strong> ${defLabel} = <strong style="color:#00e1ff;">${defTotal}</strong><br>
+            <strong style="color:${hit ? '#00e5a3' : '#ff3333'};">${hit ? '✅ HIT' : '❌ MISS'}</strong>
+        </div>`;
+
+    let finalTotal = atkTotal;
+
+    if (hit) {
+        // wpn.dice was already validated against diceRegex before this
+        // function did anything else (ammo spend, chat broadcast) — this
+        // match is guaranteed to succeed, no silent "hit with no damage" path.
+        const match = wpn.dice.trim().match(diceRegex);
+        let numDice = parseInt(match[1]) || 1;
+        let diceFaces = parseInt(match[2]);
+        let canExplode = wpn.explodes && diceFaces >= 2;
+        let dmgTotal = 0;
+        let dmgBreakdownParts = [];
+        for (let i = 0; i < numDice; i++) {
+            const { rollTotal, subRolls } = rollExplodingDie(diceFaces, canExplode);
+            dmgTotal += rollTotal;
+            dmgBreakdownParts.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
+        }
+        dmgTotal += modVal;
+        if (modVal !== 0) dmgBreakdownParts.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
+        finalTotal = dmgTotal;
+        resultHtml += `
+            <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
+                <strong>Damage:</strong> ${dmgBreakdownParts.join(' + ')} = <strong style="color:#ff3333;">${dmgTotal} Dmg</strong>
+            </div>`;
+    }
+
+    if (window.AudioEngine) window.AudioEngine.playShoot();
+    if (typeof window.closeArsenalAttackModal === 'function') window.closeArsenalAttackModal();
+
+    if (typeof window.broadcastRoll === 'function') {
+        await window.broadcastRoll(`[${myProf.username || 'Commander'}] ATTACKS ${target.name} with ${wpn.name}`, resultHtml, finalTotal);
     }
 };
 
