@@ -44,7 +44,8 @@ window.renderShipDesignerPanel = function() {
     let html = '';
     if (shipTemplatesList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No vessel profiles designed yet.</span>';
 
-    shipTemplatesList.forEach(t => {
+    const ordered = window.applySavedOrder('ship_templates', shipTemplatesList);
+    ordered.forEach(t => {
         const editable = canManageTemplate(t);
         const owner = allProfiles.find(p => p.id === t.owner_id);
         const weaponCount = (t.ship_weapons || []).length;
@@ -60,6 +61,7 @@ window.renderShipDesignerPanel = function() {
                         <span class="author-tag">designer: ${owner ? (owner.username || 'Commander') : 'Unknown'}</span>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:120px;">
+                        ${window.renderReorderArrows('ship_templates', ordered, t.id, 'moveShipTemplateOrder')}
                         <button class="btn-deploy" onclick="window.deployShipTemplate('${t.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">🚀 DEPLOY</button>
                         ${editable ? `<button class="layer-edit" onclick="window.openEditTemplateModal('${t.id}')" style="padding:4px 7px; font-size:9px;">✎ STATS</button>` : ''}
                         ${editable ? `<button class="layer-edit" onclick="window.openTemplateLoadoutModal('${t.id}')" style="padding:4px 7px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">⚔ LOADOUT</button>` : ''}
@@ -81,6 +83,10 @@ window.renderShipDesignerPanel = function() {
             <option value="sublight">Sublight Thrusters</option>`;
         driveSel.dataset.populated = 'true';
     }
+};
+window.moveShipTemplateOrder = function(id, direction) {
+    window.moveListItem('ship_templates', window.applySavedOrder('ship_templates', shipTemplatesList), id, direction);
+    window.renderShipDesignerPanel();
 };
 
 window.saveNewShipTemplate = async function() {
