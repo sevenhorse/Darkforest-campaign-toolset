@@ -38,7 +38,8 @@ window.renderColoniesPanel = function() {
     if (container) {
         let html = '';
         if (coloniesList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No colonies established yet.</span>';
-        coloniesList.forEach(c => {
+        const ordered = window.applySavedOrder('colonies', coloniesList);
+        ordered.forEach(c => {
             const editable = canManage(c);
             const moraleColor = c.morale === 'Thriving' ? '#00e5a3' : c.morale === 'Unrest' ? '#ffaa00' : c.morale === 'Crisis' ? '#ff3333' : '#c9962f';
             html += `
@@ -49,11 +50,11 @@ window.renderColoniesPanel = function() {
                             <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">POP: ${Number(c.population || 0).toLocaleString()} &nbsp;·&nbsp; MORALE: <span style="color:${moraleColor};">${c.morale}</span></p>
                             <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Producing: ${c.resource_output || 0}x ${c.resource_type || 'Unspecified'} / cycle</p>
                         </div>
-                        ${editable ? `
                         <div style="display:flex; gap:4px;">
-                            <button class="layer-edit" onclick="window.openEditColonyModal('${c.id}')" style="padding:3px 7px; font-size:9px;">✎</button>
-                            <button class="layer-del" onclick="window.deleteColony('${c.id}')" style="padding:3px 7px; font-size:9px;">✕</button>
-                        </div>` : ''}
+                            ${window.renderReorderArrows('colonies', ordered, c.id, 'moveColonyOrder')}
+                            ${editable ? `<button class="layer-edit" onclick="window.openEditColonyModal('${c.id}')" style="padding:3px 7px; font-size:9px;">✎</button>
+                            <button class="layer-del" onclick="window.deleteColony('${c.id}')" style="padding:3px 7px; font-size:9px;">✕</button>` : ''}
+                        </div>
                     </div>
                     <div style="display:flex; gap:6px; margin-top:8px; align-items:center;">
                         <label for="colony-deliver-vessel-${c.id}" style="display:none;">Deliver To</label>
@@ -72,6 +73,10 @@ window.renderColoniesPanel = function() {
     }
     const badge = document.getElementById('badge-colonies');
     if (badge) badge.innerText = coloniesList.length + fleetGroupsList.length;
+};
+window.moveColonyOrder = function(id, direction) {
+    window.moveListItem('colonies', window.applySavedOrder('colonies', coloniesList), id, direction);
+    window.renderColoniesPanel();
 };
 
 window.addColony = async function() {
@@ -212,7 +217,8 @@ window.renderFleetGroupsPanel = function() {
         let html = '';
         if (fleetGroupsList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No fleet task groups commissioned yet.</span>';
         const statusColors = { 'Standby': '#6b826a', 'Patrolling': '#00e5a3', 'Escorting': '#00e1ff', 'Mining Operations': '#ffaa00', 'RTB': '#ff6b6b' };
-        fleetGroupsList.forEach(f => {
+        const ordered = window.applySavedOrder('fleet_groups', fleetGroupsList);
+        ordered.forEach(f => {
             const editable = canManage(f);
             const ship = globalShipMarkersCache.find(m => m.id === f.linked_ship_id);
             const route = globalHyperlanesCache.find(r => r.id === f.patrol_hyperlane_id);
@@ -246,6 +252,7 @@ window.renderFleetGroupsPanel = function() {
                             <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Vessel: ${ship ? ship.name : '— Unassigned —'} ${route ? `&nbsp;·&nbsp; Route: ${route.name || 'Unnamed'}` : ''}</p>
                         </div>
                         <div style="display:flex; gap:4px;">
+                            ${window.renderReorderArrows('fleet_groups', ordered, f.id, 'moveFleetGroupOrder')}
                             ${ship ? `<button class="layer-edit" onclick="window.locateFleetShip('${ship.id}')" style="padding:3px 7px; font-size:9px;" title="Locate on DRADIS">🎯</button>` : ''}
                             ${editable ? `
                             <button class="layer-edit" onclick="window.openEditFleetModal('${f.id}')" style="padding:3px 7px; font-size:9px;">✎</button>
@@ -259,6 +266,10 @@ window.renderFleetGroupsPanel = function() {
     }
     const badge = document.getElementById('badge-colonies');
     if (badge) badge.innerText = coloniesList.length + fleetGroupsList.length;
+};
+window.moveFleetGroupOrder = function(id, direction) {
+    window.moveListItem('fleet_groups', window.applySavedOrder('fleet_groups', fleetGroupsList), id, direction);
+    window.renderFleetGroupsPanel();
 };
 
 window.addFleetGroup = async function() {
