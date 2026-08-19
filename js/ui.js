@@ -1330,6 +1330,7 @@ window.renderTerritoryList = function() {
                     </div>
                     <div style="display: flex; gap: 4px;">
                         ${currentUserRole === 'dm' ? `
+                        <button class="layer-apply" onclick="window.applyTerritoryToGalaxy('${t.id}')" style="font-size: 9px; padding: 2px 4px;">🚩 Apply</button>
                         <button class="layer-edit" onclick="window.toggleTerritoryVisibility('${t.id}', ${isHidden})" style="font-size: 9px; padding: 2px 4px;">${isHidden ? '👁️ Unhide' : '🌫️ Hide'}</button>
                         <button class="layer-del" onclick="window.deleteTerritory('${t.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>
                         ` : ''}
@@ -1359,9 +1360,16 @@ window.toggleTerritoryVisibility = async function(id, currentlyHidden) {
 
 window.deleteTerritory = async function(id) {
     if (currentUserRole !== 'dm') return;
-    if (!(await window.showConfirmModal("Permanently erase this territory border?"))) return;
+    if (!(await window.showConfirmModal("Permanently erase this territory border? Any systems it currently owns will be un-claimed back to Unclaimed."))) return;
+    const t = globalTerritoriesCache.find(x => x.id === id);
+    if (t && typeof window.releaseTerritoryOwnership === 'function') {
+        await window.releaseTerritoryOwnership(t);
+    }
     await db.from('territories').delete().eq('id', id);
-    if (typeof loadTerritories === 'function') loadTerritories();
+    if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
+    if (typeof loadSystemOwnershipOverrides === 'function') await loadSystemOwnershipOverrides();
+    if (typeof loadTerritories === 'function') await loadTerritories();
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 
 window.renderHyperlaneList = function() {
