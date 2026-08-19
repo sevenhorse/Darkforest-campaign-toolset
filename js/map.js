@@ -70,14 +70,22 @@ window.getSystemBodies = function(system) {
    existing system's hazard flavor becomes mechanically real immediately,
    without the DM needing to manually re-place a zone on each one. */
 window.HAZARD_IMPLICIT_RADIUS = 350;
+// Explicit DM-placed zones (system_hazards) used to accept any radius the
+// DM typed, unbounded relative to the star it was near — a zone could
+// visually (and mechanically) engulf half the map. Clamped to match the
+// implicit per-system hazard radius above, both here (mechanical effect
+// range) and in drawHazardZones below (visual ring) so what you see and
+// what actually affects your ship always agree.
+window.SYSTEM_HAZARD_MAX_RADIUS = window.HAZARD_IMPLICIT_RADIUS;
 window.checkShipHazards = function(shipMarker) {
     if (!shipMarker) return [];
     let hits = [];
 
     (window.globalSystemHazardsCache || []).forEach(hz => {
+        const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
         let dist = Math.hypot(shipMarker.x - hz.x, shipMarker.y - hz.y);
-        if (dist <= (hz.radius || 300)) {
-            hits.push({ type: hz.hazard_type, intensity: hz.intensity || 1, radius: hz.radius || 300, source: 'zone', distance: dist });
+        if (dist <= r) {
+            hits.push({ type: hz.hazard_type, intensity: hz.intensity || 1, radius: r, source: 'zone', distance: dist });
         }
     });
 
@@ -382,10 +390,22 @@ function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
    window.checkShipHazards in the hazard engine section below) — so a
    Pulsar-flagged system shows its danger ring on the map even if no DM
    ever placed an explicit zone there. Bounded to visible viewport per
-   hazard, same pattern as everything else in this render loop. */
+   hazard, same pattern as everything else in this render loop.
+   Explicit zones tied to a system (hz.system_id) are hidden entirely at
+   FOW tier 1 (undiscovered/out of sensor range) — same rule stars/planets
+   already follow via window.getFowTier. Untied zones (no system_id) keep
+   the original always-visible behavior. Radius is always clamped to
+   window.SYSTEM_HAZARD_MAX_RADIUS regardless of tie. */
 function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
     (window.globalSystemHazardsCache || []).forEach(hz => {
-        const r = hz.radius || 300;
+        if (hz.system_id) {
+            // system_id is untyped text (no FK) — it can point at a custom
+            // (DB) system OR a procedural one, so both caches get checked
+            // (matches js/ui.js's window.handleHazardSystemSearch).
+            const tiedSystem = (globalProceduralSystemsCache || []).find(s => s.id === hz.system_id) || (globalDbSystemsCache || []).find(s => s.id === hz.system_id);
+            if (tiedSystem && window.getFowTier(tiedSystem) === 1) return;
+        }
+        const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
         if (Math.abs(hz.x - cx) > hw + r || Math.abs(hz.y - cy) > hh + r) return;
         drawSingleHazard(ctx, hz.x, hz.y, r, hz.hazard_type, zoom, time);
     });
