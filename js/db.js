@@ -123,6 +123,7 @@ async function fetchUserProfile(user) {
     initShipTemplatesRealtimeChannel();
     initSystemHazardsRealtimeChannel();
     initPerkDefinitionsRealtimeChannel();
+    initHazardDefinitionsRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     
@@ -134,6 +135,7 @@ async function fetchUserProfile(user) {
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
     if (typeof loadSystemHazards === 'function') loadSystemHazards();
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
+    if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
 }
 
 async function loadAllProfiles() {
@@ -246,6 +248,13 @@ async function loadHyperlanes() {
 async function loadSystemHazards() {
     const { data } = await db.from('system_hazards').select('*');
     if (data) { window.globalSystemHazardsCache = data; if (typeof renderHazardZoneList === 'function') renderHazardZoneList(); }
+}
+
+// Hazard Designer catalog — reusable blueprints, separate from the placed
+// instances above (system_hazards). See js/ui.js for the CRUD.
+async function loadHazardDefinitions() {
+    const { data } = await db.from('hazard_definitions').select('*').order('created_at', { ascending: true });
+    if (data) { window.hazardDefinitionsList = data; if (typeof window.renderHazardDefinitionsPanel === 'function') window.renderHazardDefinitionsPanel(); if (typeof window.populateHazardDefSelect === 'function') window.populateHazardDefSelect(); }
 }
 
 async function loadCodexEntries() {
@@ -410,6 +419,18 @@ function initPerkDefinitionsRealtimeChannel() {
     perkDefinitionsRealtimeChannel = db.channel('perk_definitions_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'perk_definitions' }, () => {
             if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
+        })
+        .subscribe();
+}
+
+/* --- HAZARD DEFINITIONS: REAL-TIME SYNC ---
+   DM-only catalog, matching the ship_templates/perk_definitions pattern —
+   mainly useful if the DM has two browser tabs open. */
+let hazardDefinitionsRealtimeChannel = null;
+function initHazardDefinitionsRealtimeChannel() {
+    hazardDefinitionsRealtimeChannel = db.channel('hazard_definitions_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hazard_definitions' }, () => {
+            if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
         })
         .subscribe();
 }
