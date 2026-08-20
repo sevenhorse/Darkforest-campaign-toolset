@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.16">
+    <link rel="stylesheet" href="style.css?v=3.17">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -753,18 +753,27 @@
             <div style="display: flex; align-items: center; gap: 6px;">
                 <button onclick="window.openFullDossierTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e5a3; color: #00e5a3; font-size: 10px;">DOSSIER</button>
                 <button onclick="window.openFullCargoTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e1ff; color: #00e1ff; font-size: 10px;">CARGO</button>
-                <button onclick="window.openFullCodexTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">CODEX</button>
                 <button onclick="window.toggleCommsArray()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e1ff; color: #00e1ff; font-size: 10px;">COMMS</button>
-                <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">COMBAT</button>
-                <button onclick="window.toggleBattleMap()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c778dd; color: #c778dd; font-size: 10px;">BATTLE MAP</button>
-                <button onclick="window.toggleSalvagePanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">SALVAGE</button>
                 <button id="dm-scratchpad-toggle-btn" onclick="window.toggleDmScratchpad()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff3333; color: #ff6b6b; font-size: 10px; display:none;">SCRATCHPAD</button>
-                <button onclick="window.resetUiLayout()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RESET UI</button>
                 <span id="user-role" class="role-badge">Authenticating...</span>
                 <button onclick="window.handleLogout()" style="width: auto; margin: 0; padding: 4px 10px; font-size: 10px;">Disconnect</button>
             </div>
         </div>
-        
+
+        <!-- BOTTOM-CENTER TOGGLE ROW: split off the top bar's right-hand group
+             (2026-08-20) once it started clipping the Disconnect button. Only
+             CODEX/COMBAT/BATTLE MAP/SALVAGE/RESET UI moved here -- everything
+             else in the top bar (search, MEASURE/PING/ROUTES/TERRITORIES/RADAR,
+             clock, DOSSIER/CARGO/COMMS/SCRATCHPAD, role badge, Disconnect)
+             stays put per explicit instruction. -->
+        <div id="bottom-toggle-bar">
+            <button onclick="window.openFullCodexTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">CODEX</button>
+            <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">COMBAT</button>
+            <button onclick="window.toggleBattleMap()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c778dd; color: #c778dd; font-size: 10px;">BATTLE MAP</button>
+            <button onclick="window.toggleSalvagePanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">SALVAGE</button>
+            <button onclick="window.resetUiLayout()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RESET UI</button>
+        </div>
+
         <div id="canvas-wrapper">
             <div id="canvas-container">
                 <canvas id="galaxyCanvas"></canvas>
