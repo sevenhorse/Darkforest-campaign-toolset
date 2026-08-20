@@ -207,6 +207,21 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
         if (typeof window.processFleetGroupProduction === 'function') {
             await window.processFleetGroupProduction(daysPassed);
         }
+
+        // Battlefield Salvage — Manufacturing-deck post-processing: same
+        // once-daily cadence as fleet group production, converting raw
+        // wreckage sitting in any ship's cargo into a DM-configured output.
+        if (typeof window.processSalvageConversion === 'function') {
+            await window.processSalvageConversion(daysPassed);
+        }
+    }
+
+    // Battlefield Salvage — Gather timer completion check runs on EVERY
+    // advancement (not just daysPassed > 0): a gather duration can be a
+    // handful of hours, so it shouldn't have to wait for a full day to
+    // resolve. Uses the absolute clock value directly rather than daysPassed.
+    if (typeof window.processSalvageGatherCompletion === 'function') {
+        await window.processSalvageGatherCompletion(newHours);
     }
 };
 
@@ -1331,6 +1346,7 @@ window.renderTerritoryList = function() {
                     <div style="display: flex; gap: 4px;">
                         ${currentUserRole === 'dm' ? `
                         <button class="layer-apply" onclick="window.applyTerritoryToGalaxy('${t.id}')" style="font-size: 9px; padding: 2px 4px;">🚩 Apply</button>
+                        <button class="layer-edit" onclick="window.startEditTerritory('${t.id}')" style="font-size: 9px; padding: 2px 4px;">✏️ Edit</button>
                         <button class="layer-edit" onclick="window.toggleTerritoryVisibility('${t.id}', ${isHidden})" style="font-size: 9px; padding: 2px 4px;">${isHidden ? '👁️ Unhide' : '🌫️ Hide'}</button>
                         <button class="layer-del" onclick="window.deleteTerritory('${t.id}')" style="font-size: 9px; padding: 2px 4px;">✕</button>
                         ` : ''}
