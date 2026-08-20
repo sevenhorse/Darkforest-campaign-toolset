@@ -103,6 +103,12 @@ window.saveNewShipTemplate = async function() {
         max_hardened: parseInt(document.getElementById('new-template-hardened').value) || 0,
         max_hull: parseInt(document.getElementById('new-template-hull').value) || 100,
         hardpoint_slots: parseInt(document.getElementById('new-template-slots').value) || 4,
+        // Tactical Battle Map movement (added this session) — grid px/round
+        // a deployed token can move before drag becomes DM-judgment-call
+        // "overdrawn." Separate from drive_type/speed, which is the
+        // galaxy-scale FTL travel stat and the wrong scale entirely for the
+        // 460x380 tactical grid.
+        tactical_speed: parseInt(document.getElementById('new-template-speed').value) || 80,
         ship_weapons: [],
         ship_decks: [],
         is_secret: false
@@ -142,15 +148,21 @@ window.deployShipTemplate = async function(id) {
         integrity_ablative: t.max_ablative || 0, max_ablative: t.max_ablative || 0,
         integrity_hardened: t.max_hardened || 0, max_hardened: t.max_hardened || 0,
         integrity_hull: t.max_hull || 100, max_hull: t.max_hull || 100,
+        tactical_speed: t.tactical_speed || 80,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
         ship_decks: JSON.parse(JSON.stringify(t.ship_decks || []))
     };
-    const { error } = await db.from('ship_markers').insert(payload);
-    if (error) { alert("Failed to deploy vessel: " + error.message); return; }
+    // .select().single() added this session (Tactical Battle Map build) so
+    // callers can learn the new marker's id — e.g. to immediately place it
+    // as a battle-map token. Purely additive: existing callers that ignore
+    // the return value (deploying to the galaxy map) are unaffected.
+    const { data, error } = await db.from('ship_markers').insert(payload).select().single();
+    if (error) { alert("Failed to deploy vessel: " + error.message); return null; }
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
     if (window.AudioEngine) window.AudioEngine.playPing();
     if (typeof window.showToast === 'function') window.showToast(`${t.name} deployed to your current DRADIS position.`);
     else alert(`${t.name} deployed to your current DRADIS position.`);
+    return data ? data.id : null;
 };
 
 /* --- EDIT STATS MODAL --- */
@@ -187,6 +199,9 @@ window.deployShipTemplate = async function(id) {
                 <div style="flex:1;"><label for="tmpl-edit-hull" style="font-size:9px; color:#6b826a;">Hull</label><input type="number" id="tmpl-edit-hull" min="0" style="border-color:#00e1ff; text-align:center;"></div>
                 <div style="flex:1;"><label for="tmpl-edit-slots" style="font-size:9px; color:#6b826a;">Hardpoint Slots</label><input type="number" id="tmpl-edit-slots" min="0" style="border-color:#00e1ff; text-align:center;"></div>
             </div>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="tmpl-edit-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed</label><input type="number" id="tmpl-edit-speed" min="0" style="border-color:#00e1ff; text-align:center;"></div>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="tmpl-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="tmpl-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#00e1ff; color:#00e1ff;">SAVE CHANGES</button>
@@ -205,7 +220,8 @@ window.deployShipTemplate = async function(id) {
                 max_ablative: parseInt(document.getElementById('tmpl-edit-ablative').value) || 0,
                 max_hardened: parseInt(document.getElementById('tmpl-edit-hardened').value) || 0,
                 max_hull: parseInt(document.getElementById('tmpl-edit-hull').value) || 0,
-                hardpoint_slots: parseInt(document.getElementById('tmpl-edit-slots').value) || 4
+                hardpoint_slots: parseInt(document.getElementById('tmpl-edit-slots').value) || 4,
+                tactical_speed: parseInt(document.getElementById('tmpl-edit-speed').value) || 80
             };
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -228,6 +244,7 @@ window.deployShipTemplate = async function(id) {
         document.getElementById('tmpl-edit-hardened').value = t.max_hardened || 0;
         document.getElementById('tmpl-edit-hull').value = t.max_hull || 0;
         document.getElementById('tmpl-edit-slots').value = t.hardpoint_slots || 4;
+        document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 80;
         overlay.style.display = 'flex';
     };
 })();
@@ -438,6 +455,7 @@ window.saveNewSecretTemplate = async function() {
         max_shields: parseInt(document.getElementById('new-secret-template-shields').value) || 0,
         max_hull: parseInt(document.getElementById('new-secret-template-hull').value) || 100,
         hardpoint_slots: parseInt(document.getElementById('new-secret-template-slots').value) || 4,
+        tactical_speed: parseInt(document.getElementById('new-secret-template-speed').value) || 80,
         ship_weapons: [],
         ship_decks: [],
         is_secret: true
@@ -461,4 +479,149 @@ window.deployTemplateToInitiative = async function(id) {
     if (error) { alert("Failed to inject into initiative tracker: " + error.message); return; }
     if (typeof loadCombatTracker === 'function') loadCombatTracker();
     if (window.AudioEngine) window.AudioEngine.playPing();
+};
+
+/* --- SAVED FLEETS (Battlefield Salvage/Battle Map follow-on, this session) ---
+   Solves "don't make me re-deploy the same 4-ship raider squadron one
+   template at a time every battle." Lives here (not battle-map.js) since
+   it's fundamentally a Secret Repository CRUD feature — the actual
+   deploy-to-grid action is what lives in battle-map.js (deployFleetToBattle),
+   same file-ownership split as everything else deploy-related
+   (deployShipTemplate lives here, deployTemplateToBattle lives there).
+
+   A saved fleet is NOT a copy of any ship data — it's a named list of
+   { template_id, quantity } references back into ship_templates, same
+   "override/placement layer on top of the real entity" principle as
+   battle_encounters.tokens. Deploying a fleet just calls the existing
+   window.deployShipTemplate once per unit (quantity times per member),
+   which already creates a fresh, fully-stocked ship_markers row each call —
+   so reusing a fleet across battles never carries over battle damage from a
+   prior fight; there's nothing TO carry over since each deploy is new.
+
+   DM-only at the database level (see the saved_fleets_dm_only RLS policy,
+   same "profiles.role = 'dm'" check ship_templates already uses for
+   is_secret rows) — NOT the blanket-authenticated policy most tables in
+   this app use, since a saved fleet has no public-facing variant at all. */
+window.globalSavedFleetsCache = [];
+
+async function loadSavedFleets() {
+    if (currentUserRole !== 'dm') return; // client-side courtesy — RLS is the real gate
+    const { data } = await db.from('saved_fleets').select('*').order('created_at', { ascending: true });
+    if (data) { window.globalSavedFleetsCache = data; if (typeof window.renderSavedFleetsPanel === 'function') window.renderSavedFleetsPanel(); }
+}
+window.loadSavedFleets = loadSavedFleets;
+
+let savedFleetsRealtimeChannel = null;
+function initSavedFleetsRealtimeChannel() {
+    savedFleetsRealtimeChannel = db.channel('saved_fleets_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'saved_fleets' }, () => {
+            loadSavedFleets();
+        })
+        .subscribe();
+}
+window.initSavedFleetsRealtimeChannel = initSavedFleetsRealtimeChannel;
+
+window.saveNewFleet = async function() {
+    if (currentUserRole !== 'dm') return;
+    const nameInput = document.getElementById('new-saved-fleet-name');
+    const name = (nameInput && nameInput.value.trim()) || 'Untitled Fleet';
+    const { error } = await db.from('saved_fleets').insert({ name, owner_id: currentUserId, members: [] });
+    if (error) { alert('Failed to save fleet: ' + error.message); return; }
+    if (nameInput) nameInput.value = '';
+    loadSavedFleets();
+};
+
+window.deleteSavedFleet = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    const fleet = window.globalSavedFleetsCache.find(f => f.id === id);
+    if (!(await window.showConfirmModal(`Permanently delete saved fleet "${fleet ? fleet.name : ''}"? This only removes the saved composition — it doesn't touch any templates in it or any vessel already deployed from it.`))) return;
+    await db.from('saved_fleets').delete().eq('id', id);
+    loadSavedFleets();
+};
+
+window.addFleetMember = async function(fleetId) {
+    if (currentUserRole !== 'dm') return;
+    const fleet = window.globalSavedFleetsCache.find(f => f.id === fleetId);
+    if (!fleet) return;
+    const select = document.getElementById(`fleet-add-tmpl-${fleetId}`);
+    const qtyInput = document.getElementById(`fleet-add-qty-${fleetId}`);
+    if (!select || !select.value) { alert('Select a template first.'); return; }
+    const qty = Math.max(1, parseInt(qtyInput && qtyInput.value) || 1);
+
+    const members = (fleet.members || []).slice();
+    const existing = members.find(m => m.template_id === select.value);
+    if (existing) existing.quantity += qty;
+    else members.push({ template_id: select.value, quantity: qty });
+
+    const { error } = await db.from('saved_fleets').update({ members }).eq('id', fleetId);
+    if (error) { alert('Failed to add to fleet: ' + error.message); return; }
+    fleet.members = members;
+    if (qtyInput) qtyInput.value = '1';
+    window.renderSavedFleetsPanel();
+};
+
+window.updateFleetMemberQty = async function(fleetId, templateId, delta) {
+    if (currentUserRole !== 'dm') return;
+    const fleet = window.globalSavedFleetsCache.find(f => f.id === fleetId);
+    if (!fleet) return;
+    const members = (fleet.members || []).map(m => m.template_id === templateId ? { ...m, quantity: Math.max(1, m.quantity + delta) } : m);
+    await db.from('saved_fleets').update({ members }).eq('id', fleetId);
+    fleet.members = members;
+    window.renderSavedFleetsPanel();
+};
+
+window.removeFleetMember = async function(fleetId, templateId) {
+    if (currentUserRole !== 'dm') return;
+    const fleet = window.globalSavedFleetsCache.find(f => f.id === fleetId);
+    if (!fleet) return;
+    const members = (fleet.members || []).filter(m => m.template_id !== templateId);
+    await db.from('saved_fleets').update({ members }).eq('id', fleetId);
+    fleet.members = members;
+    window.renderSavedFleetsPanel();
+};
+
+window.renderSavedFleetsPanel = function() {
+    if (currentUserRole !== 'dm') return;
+    const container = document.getElementById('saved-fleets-list-container');
+    if (!container) return;
+    const fleets = window.globalSavedFleetsCache || [];
+    const allTemplates = (typeof shipTemplatesList !== 'undefined' ? shipTemplatesList : []).concat(window.secretShipTemplatesList || []);
+    const tmplOptionsHtml = allTemplates.map(t => `<option value="${t.id}">${t.name}${t.is_secret ? ' 🔒' : ''}</option>`).join('') || '<option value="">-- No templates designed --</option>';
+
+    if (fleets.length === 0) {
+        container.innerHTML = '<span style="font-size:9px; color:#6b826a;">No saved fleets yet.</span>';
+        return;
+    }
+    container.innerHTML = fleets.map(fleet => {
+        const members = fleet.members || [];
+        const memberRowsHtml = members.length === 0
+            ? '<span style="font-size:8px; color:#6b826a;">Empty — add a vessel below.</span>'
+            : members.map(m => {
+                const t = findAnyTemplateById(m.template_id);
+                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:9px;">
+                    <span style="color:#d4c5a9;">${t ? t.name : '(deleted template)'}${t && t.is_secret ? ' 🔒' : ''}</span>
+                    <div style="display:flex; gap:3px; align-items:center;">
+                        <button onclick="window.updateFleetMemberQty('${fleet.id}', '${m.template_id}', -1)" style="width:18px; padding:1px; margin:0; font-size:9px;">-</button>
+                        <span style="min-width:14px; text-align:center; color:#ffaaaa;">${m.quantity}x</span>
+                        <button onclick="window.updateFleetMemberQty('${fleet.id}', '${m.template_id}', 1)" style="width:18px; padding:1px; margin:0; font-size:9px;">+</button>
+                        <button class="layer-del" onclick="window.removeFleetMember('${fleet.id}', '${m.template_id}')" style="font-size:8px; padding:1px 5px; margin-left:4px;">✕</button>
+                    </div>
+                </div>`;
+            }).join('');
+        return `
+            <div class="note-card" style="border-color:#c778dd;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong style="color:#c778dd; font-size:12px;">${fleet.name}</strong>
+                    <button class="layer-del" onclick="window.deleteSavedFleet('${fleet.id}')" style="padding:3px 6px; font-size:9px;">✕ DELETE FLEET</button>
+                </div>
+                <div style="margin-top:6px;">${memberRowsHtml}</div>
+                <div style="display:flex; gap:4px; margin-top:8px; align-items:center; border-top:1px solid #3c4e36; padding-top:6px;">
+                    <label for="fleet-add-tmpl-${fleet.id}" style="display:none;">Template</label>
+                    <select id="fleet-add-tmpl-${fleet.id}" style="flex:2; font-size:9px; margin:0;">${tmplOptionsHtml}</select>
+                    <label for="fleet-add-qty-${fleet.id}" style="display:none;">Quantity</label>
+                    <input type="number" id="fleet-add-qty-${fleet.id}" value="1" min="1" style="width:36px; font-size:9px; margin:0; text-align:center;">
+                    <button class="btn-deploy" onclick="window.addFleetMember('${fleet.id}')" style="font-size:9px; padding:3px 8px; border-color:#c778dd; color:#c778dd;">+ ADD</button>
+                </div>
+            </div>`;
+    }).join('');
 };
