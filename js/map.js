@@ -278,11 +278,11 @@ window.spawnTokenAtCenter = async function() {
             { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Piercing" },
             { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 2, damage_type: "Piercing" },
             { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Energy" },
-            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0, gun_count: 8, damage_type: "Explosive" },
-            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Antimatter" },
-            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak" },
-            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak" },
-            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak" },
+            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0, gun_count: 8, damage_type: "Explosive", weapon_class: "ordnance" },
+            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Antimatter", weapon_class: "ordnance" },
+            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak", is_point_defense: true },
+            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak", is_point_defense: true },
+            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak", is_point_defense: true },
             { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Flak" },
             { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 3, damage_type: "Heat" },
             { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Antimatter" },
@@ -331,13 +331,79 @@ window.toggleTerritoryTool = function() {
     window.updateToolButtonStyles();
 };
 
-window.startDrawingTerritory = function() { window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+// Territory editor follow-on (this session): edit-in-place, ported directly
+// from the hyperlane edit-in-place pattern (window.editingHyperlaneId /
+// startEditHyperlane / finishActiveHyperlane's UPDATE-vs-INSERT branch) —
+// same underlying draw-tool state machine, so the same shape applies here
+// with no new invention needed. window.editingTerritoryId: set by
+// startEditTerritory; null = finishActiveTerritory inserts a new territory
+// instead of updating one. window.editingTerritoryWasHidden: a territory's
+// "hidden" state lives as a '[HIDDEN] ' prefix baked into faction_name
+// (see toggleTerritoryVisibility) — the edit form only ever shows/saves the
+// stripped faction name, so this flag is what lets a save re-apply that
+// prefix instead of silently un-hiding a hidden territory just by editing it.
+window.editingTerritoryId = null;
+window.editingTerritoryWasHidden = false;
+
+function resetTerritoryFormFields() {
+    const nameEl = document.getElementById('territory-name-input'); if (nameEl) nameEl.value = '';
+    const colorEl = document.getElementById('territory-color-input'); if (colorEl) colorEl.value = '#00e5a3';
+    const factionEl = document.getElementById('territory-faction-select'); if (factionEl) factionEl.value = '';
+}
+
+window.startDrawingTerritory = function() { window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; resetTerritoryFormFields(); window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('btn-undo-territory-vertex').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+
+// Loads an existing territory's vertices/name/color/faction back into the
+// draw state so the DM can add/remove waypoints and save in place (an
+// UPDATE, not a new territory) instead of the old delete-and-redraw-only
+// workflow. Deliberately does NOT touch owned_system_ids or re-flip galaxy
+// ownership — saving an edit only updates the territory's own row; Apply
+// stays the separate, explicit action it already was (an earlier session's
+// confirmed design), so an edited-but-not-yet-re-Applied territory's shape
+// change has no effect on the shared galaxy until the DM hits Apply again.
+window.startEditTerritory = function(territoryId) {
+    if (currentUserRole !== 'dm') return;
+    const t = globalTerritoriesCache.find(x => x.id === territoryId);
+    if (!t) return;
+    window.editingTerritoryId = territoryId;
+    window.editingTerritoryWasHidden = !!(t.faction_name && t.faction_name.includes('[HIDDEN]'));
+    window.activeTerritoryVertices = (t.vertices || []).map(v => ({ x: v.x, y: v.y }));
+    const nameEl = document.getElementById('territory-name-input'); if (nameEl) nameEl.value = t.name || '';
+    const colorEl = document.getElementById('territory-color-input'); if (colorEl) colorEl.value = t.color || '#00e5a3';
+    const factionEl = document.getElementById('territory-faction-select'); if (factionEl) factionEl.value = (t.faction_name || '').replace('[HIDDEN] ', '').replace('[HIDDEN]', '');
+    window.territoryDrawActive = true;
+    document.getElementById('btn-start-territory-draw').style.display = 'none';
+    document.getElementById('btn-finish-territory-draw').style.display = 'block';
+    document.getElementById('btn-cancel-territory-draw').style.display = 'block';
+    document.getElementById('btn-undo-territory-vertex').style.display = 'block';
+    document.getElementById('territory-drawing-status').style.display = 'block';
+    document.getElementById('territory-drawing-status').innerText = `Editing "${t.name || 'New Sector'}" — Nodes: ${window.activeTerritoryVertices.length}`;
+    window.updateToolButtonStyles();
+};
+
+window.undoLastTerritoryVertex = function() { if (window.activeTerritoryVertices.length > 0) { window.activeTerritoryVertices.pop(); const statusEl = document.getElementById('territory-drawing-status'); if (statusEl) statusEl.innerText = (window.editingTerritoryId ? 'Editing — ' : '') + `Nodes: ${window.activeTerritoryVertices.length}`; } };
+
 window.finishActiveTerritory = async function() {
     if (window.activeTerritoryVertices.length < 3) { alert("Requires at least 3 nodes."); return; }
-    const name = document.getElementById('territory-name-input').value || 'New Sector'; const color = document.getElementById('territory-color-input').value || '#00e5a3'; const faction = document.getElementById('territory-faction-select') ? document.getElementById('territory-faction-select').value : '';
-    await db.from('territories').insert({ name, color, vertices: window.activeTerritoryVertices, faction_name: faction }); window.cancelDrawingTerritory(); if (typeof window.loadTerritories === 'function') window.loadTerritories();
+    const name = document.getElementById('territory-name-input').value || 'New Sector'; const color = document.getElementById('territory-color-input').value || '#00e5a3';
+    let faction = document.getElementById('territory-faction-select') ? document.getElementById('territory-faction-select').value : '';
+    // Bug fix (pre-deploy review): this used to also require `faction` to be
+    // truthy before re-applying the hidden prefix — editing a hidden
+    // territory that has no faction assigned (the "-- No Faction / Neutral
+    // --" option) silently un-hid it, since an empty faction skipped the
+    // prefix entirely. toggleTerritoryVisibility's own hide path prefixes
+    // unconditionally (`'[HIDDEN] ' + (t.faction_name || '')`), so a hidden
+    // territory with no faction is already a valid, pre-existing stored
+    // shape — the edit path just needs to match that, not gate on faction.
+    if (window.editingTerritoryId && window.editingTerritoryWasHidden) faction = '[HIDDEN] ' + faction;
+    const payload = { name, color, vertices: window.activeTerritoryVertices, faction_name: faction };
+    const { error } = window.editingTerritoryId
+        ? await db.from('territories').update(payload).eq('id', window.editingTerritoryId)
+        : await db.from('territories').insert(payload);
+    if (error) { alert("Failed to save territory: " + error.message); return; }
+    window.cancelDrawingTerritory(); if (typeof window.loadTerritories === 'function') window.loadTerritories();
 };
-window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
+window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; resetTerritoryFormFields(); document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('btn-undo-territory-vertex').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
 
 /* --- TERRITORY FACTION OWNERSHIP FLIP ---
    Territories were purely cosmetic before this — drawing one and assigning
@@ -381,7 +447,10 @@ window.isPointInPolygon = function(x, y, vertices) {
 window.applySystemOwnershipOverrides = function() {
     const overrides = window.globalSystemOwnershipCache || {};
     (globalProceduralSystemsCache || []).forEach(s => {
-        if (overrides[s.id] !== undefined) s.ownership = overrides[s.id];
+        const o = overrides[s.id];
+        if (o === undefined) return;
+        if (o.ownership !== undefined) s.ownership = o.ownership;
+        if (o.control !== undefined && o.control !== null) s.control = o.control;
     });
 };
 
@@ -399,12 +468,17 @@ window.releaseTerritoryOwnership = async function(t) {
     for (const id of ids) {
         const sys = allSystems.find(s => s.id === id);
         if (!sys || sys.ownership !== faction) continue;
+        // Control follow-on: reset alongside Ownership on release, same
+        // reasoning as Ownership reverting to Unclaimed — a released system
+        // shouldn't keep showing a stale "faction X is in functional control"
+        // tag once that faction no longer owns it either.
         if (sys.isCustom) {
-            await db.from('star_systems').update({ ownership: 'Unclaimed' }).eq('id', id);
+            await db.from('star_systems').update({ ownership: 'Unclaimed', control: 'None' }).eq('id', id);
         } else {
             await db.from('system_ownership_overrides').delete().eq('system_id', id);
         }
         sys.ownership = 'Unclaimed'; // instant local reflect; a full reload still follows in the caller
+        sys.control = 'None';
         released++;
     }
     return released;
@@ -421,7 +495,19 @@ window.applyTerritoryToGalaxy = async function(territoryId) {
     const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
     const newOwnedIds = allSystems.filter(s => window.isPointInPolygon(s.x, s.y, t.vertices)).map(s => s.id);
 
-    if (!(await window.showConfirmModal(`Apply "${t.name}" to the galaxy? ${newOwnedIds.length} system(s) inside its border will be claimed for ${faction}; anything this territory previously claimed but no longer covers will be released back to Unclaimed. This changes the shared galaxy for everyone.`))) return;
+    // Territory editor follow-on (this session): warn the DM when this Apply
+    // would take systems away from a DIFFERENT faction, rather than applying
+    // silently. Still purely informational — "last applied wins, no hard
+    // block on overlap" is a confirmed decision from an earlier session and
+    // isn't being reversed here, this just surfaces the count before the
+    // one confirm click that already existed.
+    const contestedCount = newOwnedIds.filter(id => {
+        const sys = allSystems.find(s => s.id === id);
+        return sys && sys.ownership && sys.ownership !== 'Unclaimed' && sys.ownership !== faction;
+    }).length;
+    let confirmMsg = `Apply "${t.name}" to the galaxy? ${newOwnedIds.length} system(s) inside its border will be claimed for ${faction}; anything this territory previously claimed but no longer covers will be released back to Unclaimed. This changes the shared galaxy for everyone.`;
+    if (contestedCount > 0) confirmMsg += ` ⚠ ${contestedCount} of these system(s) are currently claimed by another faction and will be reassigned to ${faction}.`;
+    if (!(await window.showConfirmModal(confirmMsg))) return;
 
     const newSet = new Set(newOwnedIds);
     const toRelease = (t.owned_system_ids || []).filter(id => !newSet.has(id));
@@ -431,12 +517,23 @@ window.applyTerritoryToGalaxy = async function(territoryId) {
     for (const id of newOwnedIds) {
         const sys = allSystems.find(s => s.id === id);
         if (!sys) continue;
+        // Control follow-on (this session, confirmed design): Apply stamps a
+        // default Control (= the new owning faction) ONLY on a genuinely new
+        // claim (current ownership isn't already this faction) — a system
+        // this territory already owned before this Apply keeps whatever
+        // Control value the DM may have hand-edited, so re-applying the same
+        // (or reshaped) territory never clobbers a manually-set "owned by A,
+        // controlled by B" override. Computed BEFORE sys.ownership is
+        // overwritten below, since that's the "was this already ours" check.
+        const isNewClaim = sys.ownership !== faction;
+        const controlValue = isNewClaim ? faction : (sys.control || 'None');
         if (sys.isCustom) {
-            await db.from('star_systems').update({ ownership: faction }).eq('id', id);
+            await db.from('star_systems').update({ ownership: faction, control: controlValue }).eq('id', id);
         } else {
-            await db.from('system_ownership_overrides').upsert({ system_id: id, ownership: faction, updated_at: new Date().toISOString() });
+            await db.from('system_ownership_overrides').upsert({ system_id: id, ownership: faction, control: controlValue, updated_at: new Date().toISOString() });
         }
         sys.ownership = faction;
+        sys.control = controlValue;
         claimedCount++;
     }
 
@@ -945,8 +1042,43 @@ window.jumpToRecent = function(index) { let r = recentTargets[index]; if (!r) re
 
 window.saveDMStarProperties = async function(id) {
     if (currentUserRole !== 'dm') return;
-    const name = document.getElementById('edit-star-name').value; const ownership = document.getElementById('edit-star-ownership').value; const luminosity = document.getElementById('edit-star-luminosity').value; const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
-    await db.from('star_systems').update({ name, ownership, luminosity, industry_tier: tier }).eq('id', id); alert("Parameters updated."); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+    const name = document.getElementById('edit-star-name').value; const ownership = document.getElementById('edit-star-ownership').value; const control = document.getElementById('edit-star-control') ? document.getElementById('edit-star-control').value : undefined; const luminosity = document.getElementById('edit-star-luminosity').value; const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
+    const payload = { name, ownership, luminosity, industry_tier: tier };
+    if (control !== undefined) payload.control = control;
+    await db.from('star_systems').update(payload).eq('id', id);
+    alert("Parameters updated.");
+    if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
+    // Bug fix (pre-deploy review): loadGalaxyData rebuilds globalDbSystemsCache
+    // with brand-new objects — window.selectedTarget/hoveredTarget still held
+    // a reference to the OLD (pre-edit) object, so the Overseer Star Editor
+    // box kept showing stale values until the DM deselected and re-clicked
+    // the star. Mirrors the same re-sync already applied for the Planet
+    // Editor (saveDMBodyProperties) and for saveDMSystemOwnershipControl.
+    const refreshed = (globalDbSystemsCache || []).find(s => s.id === id);
+    if (refreshed) {
+        if (window.selectedTarget && window.selectedTarget.data && window.selectedTarget.data.id === id) Object.assign(window.selectedTarget.data, refreshed);
+        if (window.hoveredTarget && window.hoveredTarget.data && window.hoveredTarget.data.id === id) Object.assign(window.hoveredTarget.data, refreshed);
+    }
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+};
+
+// Control follow-on (this session): procedural systems have no real
+// star_systems row to write Ownership/Control onto directly (same split
+// planetary_modifiers and system_ownership_overrides already solved) — this
+// is the direct single-system editor for that majority of the galaxy,
+// mirroring the custom-system SAVE SYSTEM button above but scoped to only
+// the two fields that exist for a procedural system at all.
+window.saveDMSystemOwnershipControl = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    const ownershipEl = document.getElementById('edit-star-ownership'); const controlEl = document.getElementById('edit-star-control');
+    if (!ownershipEl || !controlEl) return;
+    const ownership = ownershipEl.value || 'Unclaimed'; const control = controlEl.value || 'None';
+    await db.from('system_ownership_overrides').upsert({ system_id: id, ownership, control, updated_at: new Date().toISOString() });
+    const sys = (globalProceduralSystemsCache || []).find(s => s.id === id);
+    if (sys) { sys.ownership = ownership; sys.control = control; }
+    alert("Parameters updated.");
+    if (typeof loadSystemOwnershipOverrides === 'function') await loadSystemOwnershipOverrides();
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 // Was purely cosmetic — mutated the in-memory selectedTarget.data object and
 // showed an "updated locally" alert, but never wrote to the DB, so edits
@@ -1073,7 +1205,7 @@ window.initGalaxyEngine = function() {
         if (window.territoryDrawActive) {
             const startNode = window.activeTerritoryVertices[0]; const snapDist = 30 / window.camera.zoom;
             if (startNode && window.activeTerritoryVertices.length >= 3 && Math.hypot(worldPos.x - startNode.x, worldPos.y - startNode.y) < snapDist) { window.finishActiveTerritory(); return; }
-            window.activeTerritoryVertices.push({ x: worldPos.x, y: worldPos.y }); document.getElementById('territory-drawing-status').innerText = `Nodes: ${window.activeTerritoryVertices.length}`; return;
+            window.activeTerritoryVertices.push({ x: worldPos.x, y: worldPos.y }); document.getElementById('territory-drawing-status').innerText = (window.editingTerritoryId ? 'Editing — ' : '') + `Nodes: ${window.activeTerritoryVertices.length}`; return;
         }
 
         if (window.hyperlaneDrawActive) {
@@ -1200,14 +1332,39 @@ window.initGalaxyEngine = function() {
         if (dynamicTarget.type === 'star') {
             const s = dynamicTarget.data; let fowTier = window.getFowTier(s);
             let dmEditorBox = '';
-            if (currentUserRole === 'dm' && s.isCustom) {
-                dmEditorBox = `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
-                    <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER STAR EDITOR</span>
-                    <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Name:</label><input type="text" id="edit-star-name" value="${s.name}" style="font-size:10px; margin:2px 0;">
-                    <label style="font-size:9px; color:#6b826a; display:block;">Ownership:</label><input type="text" id="edit-star-ownership" value="${s.ownership || 'Unclaimed'}" style="font-size:10px; margin:2px 0;">
-                    <div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Class:</label><select id="edit-star-luminosity" style="font-size:9px; margin:2px 0;"><option value="Class G (Yellow)" ${s.luminosity==='Class G (Yellow)'?'selected':''}>Class G</option><option value="Class M (Red Dwarf)" ${s.luminosity==='Class M (Red Dwarf)'?'selected':''}>Class M</option><option value="Class O (Blue Giant)" ${s.luminosity==='Class O (Blue Giant)'?'selected':''}>Class O</option><option value="Black Hole" ${s.luminosity==='Black Hole'?'selected':''}>Black Hole</option><option value="Hidden Anomaly" ${s.luminosity==='Hidden Anomaly'?'selected':''}>Hidden Anomaly</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Tier:</label><input type="number" id="edit-star-tier" value="${s.industry_tier || 0}" style="font-size:10px; margin:2px 0;"></div></div>
-                    <button class="btn-reveal" onclick="window.saveDMStarProperties('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">SAVE SYSTEM</button>
-                    <button class="btn-remove" onclick="window.deleteStarSystem('${s.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DESTROY</button></div>`;
+            // Control follow-on (this session): Ownership/Control fields now
+            // show for the DM on EVERY system, not just DM-authored custom
+            // ones. Custom systems keep the full "OVERSEER STAR EDITOR" box
+            // (name/class/tier/destroy, unchanged) with Ownership+Control
+            // added to it. Procedural systems previously had NO per-system
+            // editor at all — Ownership could only ever be set by drawing
+            // and Applying a whole Territory over them. That gap meant
+            // Control (confirmed to need to "remain editable after the
+            // fact") had no path to actually be edited on a procedural
+            // system once Territory Apply's one-time default stamp had been
+            // set, short of redrawing an entire territory border. This adds
+            // a smaller "SYSTEM CONTROL OVERRIDE" box for that case —
+            // Ownership+Control only, writing straight to
+            // system_ownership_overrides (same table/pattern Territory
+            // Apply already uses for procedural systems).
+            if (currentUserRole === 'dm') {
+                const ownershipControlFields = `
+                    <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Ownership:</label><input type="text" id="edit-star-ownership" value="${s.ownership || 'Unclaimed'}" style="font-size:10px; margin:2px 0;">
+                    <label style="font-size:9px; color:#6b826a; display:block;">Control:</label><input type="text" id="edit-star-control" value="${s.control || 'None'}" style="font-size:10px; margin:2px 0;">`;
+                if (s.isCustom) {
+                    dmEditorBox = `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
+                        <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER STAR EDITOR</span>
+                        <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Name:</label><input type="text" id="edit-star-name" value="${s.name}" style="font-size:10px; margin:2px 0;">
+                        ${ownershipControlFields}
+                        <div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Class:</label><select id="edit-star-luminosity" style="font-size:9px; margin:2px 0;"><option value="Class G (Yellow)" ${s.luminosity==='Class G (Yellow)'?'selected':''}>Class G</option><option value="Class M (Red Dwarf)" ${s.luminosity==='Class M (Red Dwarf)'?'selected':''}>Class M</option><option value="Class O (Blue Giant)" ${s.luminosity==='Class O (Blue Giant)'?'selected':''}>Class O</option><option value="Black Hole" ${s.luminosity==='Black Hole'?'selected':''}>Black Hole</option><option value="Hidden Anomaly" ${s.luminosity==='Hidden Anomaly'?'selected':''}>Hidden Anomaly</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Tier:</label><input type="number" id="edit-star-tier" value="${s.industry_tier || 0}" style="font-size:10px; margin:2px 0;"></div></div>
+                        <button class="btn-reveal" onclick="window.saveDMStarProperties('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">SAVE SYSTEM</button>
+                        <button class="btn-remove" onclick="window.deleteStarSystem('${s.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DESTROY</button></div>`;
+                } else {
+                    dmEditorBox = `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
+                        <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ SYSTEM CONTROL OVERRIDE</span>
+                        ${ownershipControlFields}
+                        <button class="btn-reveal" onclick="window.saveDMSystemOwnershipControl('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">SAVE</button></div>`;
+                }
             }
 
             if (fowTier === 1) {
@@ -1217,7 +1374,7 @@ window.initGalaxyEngine = function() {
                 content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #ffaa00; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br><span style="color: #6b826a;">Orbital Bodies Detected:</span> ${bodies}<br><span style="color: #ffaa00; font-size:9px; margin-top:6px; display:block;">⚠ AWAITING DEEP SCAN FOR SURFACE TELEMETRY</span>${dradisBtn}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}</div>`;
             } else {
                 let hazardBadge = s.hazard && s.hazard !== 'None' ? `<span style="color:#ff3333; font-weight:bold; display:block; margin:2px 0;">⚠️ HAZARD: ${s.hazard.toUpperCase()}</span>` : '';
-                content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br>${hazardBadge}<span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br><span style="color: #00e5a3; font-size:9px; margin-top:6px; display:block;">✓ DRADIS TELEMETRY COMPLETE</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}</div>`;
+                content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br>${hazardBadge}<span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br><span style="color: #6b826a;">Control:</span> ${s.control || 'None'}<br><span style="color: #00e5a3; font-size:9px; margin-top:6px; display:block;">✓ DRADIS TELEMETRY COMPLETE</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}</div>`;
             }
         } else if (dynamicTarget.type === 'ship') {
             const m = dynamicTarget.data; let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied'; let iffColor = iff === 'hostile' ? '#ff3333' : (iff === 'neutral' ? '#ffaa00' : '#00e5a3');
