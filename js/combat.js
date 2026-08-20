@@ -9,7 +9,7 @@ const STRIKE_CRAFT_DB = {
             { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact" },
             { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat" },
             { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing" },
-            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat" }
+            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance" }
         ]
     },
     hawk: {
@@ -17,7 +17,7 @@ const STRIKE_CRAFT_DB = {
         weapons: [
             { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact" },
             { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing" },
-            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing" }
+            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance" }
         ]
     },
     messenger: {
@@ -377,6 +377,14 @@ window.renderVesselDeck = function() {
     const decksContainer = document.getElementById('vessel-decks-container');
     const weaponsContainer = document.getElementById('vessel-weapons-container');
 
+    // One-time populate of the static "new weapon" damage-type select — it
+    // has no options in index.html's markup since DAMAGE_TYPES lives here in
+    // JS, not duplicated into static HTML (same reasoning as the edit modal).
+    const newWpnDmgTypeSelect = document.getElementById('new-ship-wpn-dmgtype');
+    if (newWpnDmgTypeSelect && newWpnDmgTypeSelect.options.length === 0) {
+        newWpnDmgTypeSelect.innerHTML = window.buildDamageTypeOptionsHtml('Impact');
+    }
+
     if (healthContainer) {
         const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
         const s_max = vessel.max_shields || 400;
@@ -495,24 +503,63 @@ window.renderVesselDeck = function() {
                 ownershipContainer.innerHTML = '';
             }
         }
+
+        // Battlefield Salvage — Manufacturing-deck post-processing config.
+        // Mirrors the fleet_groups production fields exactly (nullable
+        // output / zero rate = "not configured", same convention), just
+        // scoped to this ship instead of a fleet group. DM or the vessel's
+        // own owner can set it; everyone else sees nothing here.
+        const salvageContainer = document.getElementById('vessel-salvage-container');
+        if (salvageContainer) {
+            if (currentUserRole === 'dm' || vessel.owner_id === currentUserId) {
+                salvageContainer.innerHTML = `
+                <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:10px;">
+                    <label style="font-size: 9px; color: #c9962f;">⚙ Salvage Processing (Manufacturing deck, scales with its HP%):</label>
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                        <label for="salvage-proc-output-${vessel.id}" style="display:none;">Output resource</label>
+                        <input type="text" id="salvage-proc-output-${vessel.id}" placeholder="Output resource (e.g. Refined Alloys)" value="${vessel.salvage_processing_output || ''}" style="flex:2; margin:0; font-size:9px; padding:3px; border-color:#c9962f;">
+                        <label for="salvage-proc-rate-${vessel.id}" style="display:none;">Rate per day</label>
+                        <input type="number" id="salvage-proc-rate-${vessel.id}" placeholder="Rate/day" min="0" value="${vessel.salvage_processing_rate || 0}" style="flex:1; margin:0; font-size:9px; padding:3px; text-align:center; border-color:#c9962f;">
+                        <button class="layer-edit" onclick="window.saveSalvageProcessingConfig('${vessel.id}')" style="flex:0 0 auto; font-size:9px; margin:0; border-color:#c9962f; color:#c9962f;">SAVE</button>
+                    </div>
+                    <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">Converts "Unprocessed Wreckage Salvage" from this ship's own cargo into the named resource, up to Rate/day (scaled down if the Manufacturing deck is damaged, full rate if no Manufacturing deck is installed). Rate 0 = disabled.</p>
+                </div>`;
+            } else {
+                salvageContainer.innerHTML = '';
+            }
+        }
     }
 
     if (weaponsContainer) {
-        let targetOptions = '<option value="">-- No Target --</option>';
-        globalShipMarkersCache.forEach(m => { if(m.id !== vessel.id) targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
-
         const weapons = vessel.ship_weapons || [];
         let wHtml = '';
         if (weapons.length === 0) wHtml = '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>';
         else {
             weapons.forEach((w, idx) => {
+                // Tactical Battle Map: if this vessel is currently a token in
+                // the active battle, narrow the target list to that battle's
+                // other tokens only, further filtered by THIS weapon's own
+                // range (0/unset = unlimited). Computed per-weapon since
+                // range is a per-weapon stat — two weapons on the same ship
+                // can see different target lists. Returns null when there's
+                // no active battle or this vessel isn't in it, in which case
+                // the full galaxy-wide target list below is unchanged.
+                const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range) : null;
+                const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id);
+                let targetOptions = '<option value="">-- No Target --</option>';
+                targetCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
+
                 let wDmgType = window.normalizeDamageType(w.damage_type || window.inferLegacyDamageType(w.name));
                 let wDmgInfo = window.DAMAGE_TYPES[wDmgType];
+                let wClass = w.weapon_class === 'ordnance' ? 'ordnance' : 'direct_fire';
+                let classBadge = wClass === 'ordnance' ? `<span style="font-size:8px; color:#c778dd; border:1px solid #c778dd; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Ordnance — multi-turn flight, counter-fireable by Point Defense">☠ ORDNANCE</span>` : '';
+                let pdBadge = w.is_point_defense ? `<span style="font-size:8px; color:#66d9ff; border:1px solid #66d9ff; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Point Defense — auto-fires at inbound ordnance and engaged strike craft on Advance Round">🛡 PD</span>` : '';
+                let rangeBadge = w.range ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Battle Map targeting range">📏 ${w.range}</span>` : '';
                 wHtml += `
                 <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
-                            <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>
+                            <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}
                             <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
                         </div>
                         <div style="display:flex; gap:6px; align-items:center;">
@@ -520,7 +567,9 @@ window.renderVesselDeck = function() {
                             <select id="wpn-target-${vessel.id}-${idx}" style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
                             <label for="wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
                             <input type="number" id="wpn-volley-${vessel.id}-${idx}" value="1" min="1" max="${w.gun_count || 1}" title="Volley Count (max ${w.gun_count || 1} guns)" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
-                            <button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>
+                            ${wClass === 'ordnance'
+                                ? `<button class="layer-edit" onclick="window.launchOrdnance('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#c778dd; color:#c778dd;" title="Launches a multi-turn payload if this vessel is a token in an active battle; resolves instantly otherwise">LAUNCH</button>`
+                                : `<button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>`}
                             <button class="layer-edit" onclick="window.openEditWeaponModal('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;" title="Edit weapon">✎</button>
                             <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
                         </div>
@@ -1046,6 +1095,20 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
                 integrity_hardened: result.integrity_hardened
             });
             await syncSquadronHpToParent(targetShip);
+
+            // Tactical Battle Map: if this target is a token in the active
+            // battle and just hit 0 hull, auto-withdraw its token (does not
+            // touch this ship_markers row itself). No-op outside a battle.
+            if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
+
+            // Range/Ordnance build (this session): persist which target this
+            // squadron is currently engaging. Squadrons have no grid position
+            // of their own on the Battle Map, so PD auto-fire uses this
+            // "engaged target" as a stand-in for the squadron's location —
+            // updated every time it fires, no separate "assign attack run"
+            // action exists yet.
+            sq.target_id = targetShip.id;
+            await db.from('ship_markers').update({ ship_deployed: vessel.ship_deployed }).eq('id', vessel.id);
         }
     }
 
@@ -1179,6 +1242,11 @@ window.rollShipWeapon = async function(vesselId, idx) {
                 integrity_hardened: result.integrity_hardened
             });
             await syncSquadronHpToParent(targetShip);
+
+            // Tactical Battle Map: if this target is a token in the active
+            // battle and just hit 0 hull, auto-withdraw its token (does not
+            // touch this ship_markers row itself). No-op outside a battle.
+            if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
         }
     }
 
@@ -1371,6 +1439,21 @@ window.buildDamageTypeOptionsHtml = function(selected) {
     return Object.keys(window.DAMAGE_TYPES).map(k => `<option value="${k}" ${k === selected ? 'selected' : ''}>${k}</option>`).join('');
 };
 
+/* --- WEAPON CLASSIFICATION (Ordnance groundwork) ---
+   ship_weapons entries previously had no structured category at all — a
+   "missile" was indistinguishable from a turret except by its free-text
+   name. weapon_class is new: 'direct_fire' (default/legacy, resolves same
+   turn as today) vs 'ordnance' (missiles/torpedoes — conceptually a
+   multi-turn flight subject to point-defense counter-fire). is_point_defense
+   flags a weapon (PDC/PDL/PDG-style) as a valid counter-fire system.
+   IMPORTANT: this is schema + UI groundwork only. Neither field is read by
+   any resolution logic yet — the actual multi-turn flight/counter-fire loop
+   is deferred to the Tactical Battle Map Phase 2 build, once battle
+   encounters exist for that loop to operate against. Legacy weapons with no
+   weapon_class fall back to 'direct_fire' everywhere, same convention as
+   ship_decks' type fallback. */
+window.WEAPON_CLASS_LABELS = { direct_fire: 'Direct Fire', ordnance: 'Ordnance' };
+
 // Native title tooltips (reliable, no extra markup) built from the shared table.
 window.getDamageTypeTooltip = function(dmgType, context) {
     const info = window.DAMAGE_TYPES[dmgType];
@@ -1527,7 +1610,16 @@ window.addShipWeapon = async function() {
     let gunCount = (gunsInput && parseInt(gunsInput.value) > 0) ? parseInt(gunsInput.value) : 1;
 
     let dmgTypeSelect = document.getElementById('new-ship-wpn-dmgtype');
-    let damageType = dmgTypeSelect ? dmgTypeSelect.value : 'Impact/Ion';
+    let damageType = (dmgTypeSelect && dmgTypeSelect.value) ? dmgTypeSelect.value : 'Impact';
+
+    let classSelect = document.getElementById('new-ship-wpn-class');
+    let weaponClass = (classSelect && classSelect.value === 'ordnance') ? 'ordnance' : 'direct_fire';
+    let pdCheckbox = document.getElementById('new-ship-wpn-pd');
+    let isPointDefense = pdCheckbox ? pdCheckbox.checked : false;
+    let rangeInput = document.getElementById('new-ship-wpn-range');
+    // 0 = unlimited (no Battle Map targeting restriction) — the default for
+    // every new weapon and for every legacy weapon that predates this field.
+    let weaponRange = rangeInput ? Math.max(0, parseInt(rangeInput.value) || 0) : 0;
 
     if (!select || !select.value) { alert("Select a vessel token first."); return; }
     if (!name) { alert("Please enter a weapon system name."); return; }
@@ -1539,10 +1631,11 @@ window.addShipWeapon = async function() {
     if (!vessel) return;
 
     let weapons = vessel.ship_weapons || [];
-    weapons.push({ 
-        loc, name, dice, modifier: mod, explodes, 
+    weapons.push({
+        loc, name, dice, modifier: mod, explodes,
         ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0,
-        gun_count: gunCount, damage_type: damageType
+        gun_count: gunCount, damage_type: damageType,
+        weapon_class: weaponClass, is_point_defense: isPointDefense, range: weaponRange
     });
 
     await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
@@ -1554,6 +1647,9 @@ window.addShipWeapon = async function() {
     document.getElementById('new-ship-wpn-mod').value = '';
     if (ammoInput) ammoInput.value = '';
     if (gunsInput) gunsInput.value = '1';
+    if (classSelect) classSelect.value = 'direct_fire';
+    if (pdCheckbox) pdCheckbox.checked = false;
+    if (rangeInput) rangeInput.value = '0';
     window.renderVesselDeck();
 };
 
@@ -1600,9 +1696,21 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             <select id="wpn-edit-dmgtype" style="border-color:#ff3333;">
                 ${window.buildDamageTypeOptionsHtml('Impact')}
             </select>
-            <label for="wpn-edit-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;">
-                <input type="checkbox" id="wpn-edit-explodes" style="margin:0;"> Exploding Dice
-            </label>
+            <label for="wpn-edit-class" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Weapon Class</label>
+            <select id="wpn-edit-class" style="border-color:#ff3333;">
+                <option value="direct_fire">Direct Fire (standard)</option>
+                <option value="ordnance">Ordnance (missile/torpedo — multi-turn, counter-fireable)</option>
+            </select>
+            <label for="wpn-edit-range" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;" title="Battle Map targeting range, grid px. 0 = unlimited.">Range (Battle Map grid px, 0 = unlimited)</label>
+            <input type="number" id="wpn-edit-range" min="0" style="border-color:#ff3333; text-align:center;">
+            <div style="display:flex; justify-content:space-between; margin-top:8px;">
+                <label for="wpn-edit-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                    <input type="checkbox" id="wpn-edit-explodes" style="margin:0;"> Exploding Dice
+                </label>
+                <label for="wpn-edit-pd" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                    <input type="checkbox" id="wpn-edit-pd" style="margin:0;"> Point Defense
+                </label>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="wpn-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="wpn-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0;">SAVE CHANGES</button>
@@ -1625,6 +1733,9 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             wpn.modifier = mod || '+0';
             wpn.explodes = document.getElementById('wpn-edit-explodes').checked;
             wpn.damage_type = document.getElementById('wpn-edit-dmgtype').value;
+            wpn.weapon_class = document.getElementById('wpn-edit-class').value === 'ordnance' ? 'ordnance' : 'direct_fire';
+            wpn.is_point_defense = document.getElementById('wpn-edit-pd').checked;
+            wpn.range = Math.max(0, parseInt(document.getElementById('wpn-edit-range').value) || 0);
 
             let gunsVal = parseInt(document.getElementById('wpn-edit-guns').value);
             wpn.gun_count = (gunsVal && gunsVal > 0) ? gunsVal : 1;
@@ -1661,6 +1772,9 @@ window.deleteShipWeapon = async function(vesselId, idx) {
         document.getElementById('wpn-edit-guns').value = wpn.gun_count || 1;
         document.getElementById('wpn-edit-dmgtype').value = window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name));
         document.getElementById('wpn-edit-explodes').checked = !!wpn.explodes;
+        document.getElementById('wpn-edit-class').value = wpn.weapon_class === 'ordnance' ? 'ordnance' : 'direct_fire';
+        document.getElementById('wpn-edit-pd').checked = !!wpn.is_point_defense;
+        document.getElementById('wpn-edit-range').value = wpn.range || 0;
         overlay.style.display = 'flex';
     };
 })();
@@ -2466,6 +2580,19 @@ window.advanceCombatRound = async function() {
             });
         }
     }
+
+    // Tactical Battle Map movement: refreshes every active-battle token's
+    // move_remaining back to its vessel's tactical_speed on this same tick,
+    // per confirmed design (see js/battle-map.js file header). No-op outside
+    // an active battle.
+    if (typeof window.resetBattleMapMovement === 'function') await window.resetBattleMapMovement();
+
+    // Range/Ordnance: ages in-flight ordnance (splits into 6 after turn 1,
+    // resolves impact when turns run out) and auto-resolves Point Defense
+    // against both inbound payloads and engaged strike craft, on this same
+    // tick. See js/battle-map.js's file header for the full confirmed
+    // design. No-op outside an active battle.
+    if (typeof window.processBattleRoundAutomations === 'function') await window.processBattleRoundAutomations();
 
     if (anyChanged) {
         if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
