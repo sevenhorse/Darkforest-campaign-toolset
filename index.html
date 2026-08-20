@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.14">
+    <link rel="stylesheet" href="style.css?v=3.16">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -383,6 +383,7 @@
                                         <button class="btn-reveal" onclick="window.addShipDeck()" style="width:100%; font-size:10px; margin:0; padding: 4px 12px; border-color:#00e1ff; color:#00e1ff;">+ BUILD DECK</button>
                                     </div>
                                     <div id="vessel-ownership-container"></div>
+                                    <div id="vessel-salvage-container"></div>
                                 </div>
                             </div>
                             <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
@@ -401,10 +402,30 @@
                                         <label for="new-ship-wpn-mod" style="display:none;">Mod</label>
                                         <input type="text" id="new-ship-wpn-mod" placeholder="+Mod" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
                                     </div>
-                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                        <label for="new-ship-wpn-ammo" style="display:none;">Ammo</label>
+                                        <input type="number" id="new-ship-wpn-ammo" min="0" placeholder="Ammo (blank=∞)" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+                                        <label for="new-ship-wpn-guns" style="display:none;">Guns</label>
+                                        <input type="number" id="new-ship-wpn-guns" min="1" value="1" placeholder="Guns" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
+                                    </div>
+                                    <label for="new-ship-wpn-dmgtype" style="font-size: 9px; color: #ffaaaa;">Damage Type:</label>
+                                    <select id="new-ship-wpn-dmgtype" style="margin:2px 0 6px 0; border-color:#ff3333;"></select>
+                                    <label for="new-ship-wpn-class" style="font-size: 9px; color: #ffaaaa;">Weapon Class (governs turn-to-hit/counter-fire behavior on the Battle Map):</label>
+                                    <select id="new-ship-wpn-class" style="margin:2px 0 6px 0; border-color:#ff3333;">
+                                        <option value="direct_fire" selected>Direct Fire (standard)</option>
+                                        <option value="ordnance">Ordnance (missile/torpedo — multi-turn, counter-fireable)</option>
+                                    </select>
+                                    <label for="new-ship-wpn-range" style="font-size: 9px; color: #ffaaaa;" title="Battle Map targeting range, grid px. 0 = unlimited (no restriction) — the default for every weapon unless set otherwise.">Range (Battle Map grid px, 0 = unlimited):</label>
+                                    <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                                         <label for="new-ship-wpn-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
                                             <input type="checkbox" id="new-ship-wpn-explodes" checked style="margin:0;"> Exploding Dice
                                         </label>
+                                        <label for="new-ship-wpn-pd" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                            <input type="checkbox" id="new-ship-wpn-pd" style="margin:0;"> Point Defense
+                                        </label>
+                                    </div>
+                                    <div style="text-align:right;">
                                         <button class="btn-remove" onclick="window.addShipWeapon()" style="width:auto; font-size:10px; margin:0; padding: 4px 12px;">+ INSTALL HARDPOINT</button>
                                     </div>
                                 </div>
@@ -574,6 +595,9 @@
                                 <div style="flex:1;"><label for="new-template-hull" style="font-size:9px; color:#6b826a;">Hull:</label><input type="number" id="new-template-hull" value="100" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
                                 <div style="flex:1;"><label for="new-template-slots" style="font-size:9px; color:#6b826a;">Hardpoint Slots:</label><input type="number" id="new-template-slots" value="4" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
                             </div>
+                            <div style="display:flex; gap:6px; margin-top:6px;">
+                                <div style="flex:1;"><label for="new-template-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed:</label><input type="number" id="new-template-speed" value="80" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
+                            </div>
                             <button class="btn-reveal" onclick="window.saveNewShipTemplate()" style="margin-top:10px; border-color:#00e1ff; color:#00e1ff;">+ SAVE VESSEL PROFILE</button>
                         </div>
                         <div class="sheet-section">
@@ -732,6 +756,8 @@
                 <button onclick="window.openFullCodexTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">CODEX</button>
                 <button onclick="window.toggleCommsArray()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e1ff; color: #00e1ff; font-size: 10px;">COMMS</button>
                 <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">COMBAT</button>
+                <button onclick="window.toggleBattleMap()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c778dd; color: #c778dd; font-size: 10px;">BATTLE MAP</button>
+                <button onclick="window.toggleSalvagePanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">SALVAGE</button>
                 <button id="dm-scratchpad-toggle-btn" onclick="window.toggleDmScratchpad()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff3333; color: #ff6b6b; font-size: 10px; display:none;">SCRATCHPAD</button>
                 <button onclick="window.resetUiLayout()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RESET UI</button>
                 <span id="user-role" class="role-badge">Authenticating...</span>
@@ -781,6 +807,7 @@
                     <button id="btn-finish-territory-draw" class="btn-reveal" onclick="window.finishActiveTerritory()" style="flex:1; font-size:10px; margin:0; display:none;">✓ CLOSE & SAVE</button>
                     <button id="btn-cancel-territory-draw" class="btn-remove" onclick="window.cancelDrawingTerritory()" style="flex:1; font-size:10px; margin:0; display:none;">✕ CANCEL</button>
                 </div>
+                <button id="btn-undo-territory-vertex" class="layer-edit" onclick="window.undoLastTerritoryVertex()" style="width:100%; font-size:10px; margin-top:4px; display:none;">↩ UNDO LAST VERTEX</button>
                 <div id="territory-drawing-status" style="font-size: 10px; color: #ffaa00; margin-top: 6px; display: none;">Drawing Active...</div>
 
                 <h4 style="margin-top: 15px; margin-bottom: 6px; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; font-size: 11px;">Active Sector Borders</h4>
@@ -878,6 +905,68 @@
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
                 <div id="combat-tracker-body"></div>
+            </div>
+
+            <div id="battle-map-panel" class="panel">
+                <div id="battle-map-header" class="panel-header-drag">
+                    <h4 style="margin:0; color:#c778dd;">Tactical Battle Map</h4>
+                    <span style="font-size: 10px; color: #6b826a;">DRAG</span>
+                </div>
+
+                <div id="battle-map-dm-controls" style="display:none; margin-bottom:8px;">
+                    <label for="battle-map-name-input" style="font-size:9px; color:#6b826a;">Encounter Name:</label>
+                    <input type="text" id="battle-map-name-input" placeholder="e.g. Ambush at Kessel Point" style="font-size:11px; margin:2px 0;">
+                    <button class="btn-deploy" onclick="window.startBattleEncounter()" style="width:100%; font-size:10px; margin-top:4px; border-color:#c778dd; color:#c778dd;">⚔ START BATTLE</button>
+                </div>
+
+                <div id="battle-map-inactive-msg" style="font-size:10px; color:#6b826a; text-align:center; padding:20px 0;">No active engagement.</div>
+
+                <div id="battle-map-active-container" style="display:none;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <strong id="battle-map-encounter-name" style="color:#c778dd; font-size:12px;"></strong>
+                        <div style="display:flex; gap:4px;">
+                            <button class="layer-edit" onclick="window.advanceCombatRound()" title="Reuses the same global cooldown/overheat/loiter tick every vessel already uses" style="font-size:9px; padding:3px 8px;">⏭ ADVANCE ROUND</button>
+                            <button id="battle-map-end-btn" class="btn-remove" onclick="window.endBattleEncounter()" style="font-size:9px; padding:3px 8px; display:none;">✕ END BATTLE</button>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:10px;">
+                        <label for="battle-map-grid" style="display:none;">Battle grid — click to place an armed token, drag a placed token to reposition, click a placed token to open it</label>
+                        <div id="battle-map-grid" style="position:relative; width:460px; height:380px; background: repeating-linear-gradient(0deg, #0a1410, #0a1410 39px, #16241c 40px), repeating-linear-gradient(90deg, #0a1410, #0a1410 39px, #16241c 40px); border:1px solid #3c4e36; overflow:hidden; flex-shrink:0; cursor:crosshair;"></div>
+
+                        <div style="flex:1; min-width:150px; display:flex; flex-direction:column; gap:8px;">
+                            <div>
+                                <h5 style="margin:0 0 4px 0; font-size:10px; color:#00e5a3;">Available Vessels</h5>
+                                <div id="battle-map-palette" style="max-height:200px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+                            </div>
+                            <div id="battle-map-dm-deploy" style="display:none;">
+                                <h5 style="margin:0 0 4px 0; font-size:10px; color:#c778dd;">Deploy Template</h5>
+                                <label for="battle-map-template-select" style="display:none;">Template</label>
+                                <select id="battle-map-template-select" style="font-size:9px; margin:0;"></select>
+                                <button class="btn-deploy" onclick="window.deployTemplateToBattle()" style="width:100%; font-size:9px; margin-top:4px; border-color:#c778dd; color:#c778dd;">+ DEPLOY TO ARENA</button>
+                                <h5 style="margin:10px 0 4px 0; font-size:10px; color:#c778dd;">Deploy Saved Fleet</h5>
+                                <label for="battle-map-fleet-select" style="display:none;">Saved Fleet</label>
+                                <select id="battle-map-fleet-select" style="font-size:9px; margin:0;"></select>
+                                <button class="btn-deploy" onclick="window.deployFleetToBattle()" style="width:100%; font-size:9px; margin-top:4px; border-color:#c778dd; color:#c778dd;">+ DEPLOY FLEET TO ARENA</button>
+                            </div>
+                        </div>
+                    </div>
+                    <h5 style="margin:8px 0 4px 0; font-size:10px; color:#6b826a;">Engaged Roster</h5>
+                    <div id="battle-map-tokens-list" style="font-size:9px; color:#d4c5a9; max-height:100px; overflow-y:auto;"></div>
+                    <h5 style="margin:8px 0 4px 0; font-size:10px; color:#c778dd;">☠ Incoming Ordnance</h5>
+                    <div id="battle-map-ordnance-list" style="font-size:9px; color:#d4c5a9; max-height:100px; overflow-y:auto;"></div>
+                </div>
+
+                <button onclick="window.toggleBattleMap()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
+            </div>
+
+            <div id="salvage-panel" class="panel">
+                <div id="salvage-header" class="panel-header-drag">
+                    <h4 style="margin:0; color:#c9962f;">Battlefield Salvage</h4>
+                    <span style="font-size: 10px; color: #6b826a;">DRAG</span>
+                </div>
+                <div id="salvage-list-container" style="max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+                <button onclick="window.toggleSalvagePanel()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
             </div>
 
             <!-- DM OPERATIONS PANEL WITH SYSTEM ARCHITECT TRIGGER -->
@@ -1019,10 +1108,22 @@
                             <input type="number" id="new-secret-template-hull" placeholder="Hull" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                             <input type="number" id="new-secret-template-slots" placeholder="Slots" value="4" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                         </div>
+                        <div style="display:flex; gap:6px; margin-top:4px;">
+                            <input type="number" id="new-secret-template-speed" placeholder="Tactical Speed" title="Battle Map movement allowance, grid px/round" value="80" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                        </div>
                         <button class="btn-remove" onclick="window.saveNewSecretTemplate()" style="width:100%; margin-top:6px; font-size:10px;">+ STORE IN REPOSITORY</button>
                     </div>
                     <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; font-size:11px; color:#ff6b6b;">Stored Templates</h4>
                     <div id="secret-templates-list-container" style="max-height:280px; overflow-y:auto;"></div>
+
+                    <h4 style="margin:14px 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; font-size:11px; color:#c778dd;">Saved Fleets</h4>
+                    <p style="font-size:9px; color:#6b826a; margin:0 0 6px 0;">Reusable compositions of the templates above — deploy a whole fleet to an active battle in one click from the Battle Map's DM controls, instead of placing each vessel individually every time.</p>
+                    <div style="display:flex; gap:6px; margin-bottom:8px;">
+                        <label for="new-saved-fleet-name" style="display:none;">Fleet Name</label>
+                        <input type="text" id="new-saved-fleet-name" placeholder="e.g. Void Raider Squadron" style="flex:1; font-size:10px; margin:0; border-color:#c778dd;">
+                        <button class="btn-deploy" onclick="window.saveNewFleet()" style="width:auto; font-size:9px; margin:0; padding:4px 10px; border-color:#c778dd; color:#c778dd;">+ NEW FLEET</button>
+                    </div>
+                    <div id="saved-fleets-list-container" style="max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
                 </div>
 
                 <div id="dm-panel-maint" class="dm-subpanel">
@@ -1051,14 +1152,15 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.15"></script>
+    <script src="js/db.js?v=3.19"></script>
     <script src="js/audio.js?v=3.11"></script>
-    <script src="js/ui.js?v=3.17"></script>
-    <script src="js/combat.js?v=3.15"></script>
+    <script src="js/ui.js?v=3.19"></script>
+    <script src="js/combat.js?v=3.20"></script>
     <script src="js/colonies.js?v=3.14"></script>
-    <script src="js/ship-designer.js?v=3.12"></script>
+    <script src="js/ship-designer.js?v=3.15"></script>
     <script src="js/perk-designer.js?v=3.12"></script>
-    <script src="js/map.js?v=3.18"></script>
+    <script src="js/map.js?v=3.21"></script>
+    <script src="js/battle-map.js?v=1.5"></script>
 
 </body>
 </html>
