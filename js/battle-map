@@ -1,61 +1,7 @@
 /* ==========================================================================
    js/battle-map.js - Tactical Battle Map (Phase 1)
    ==========================================================================
-   New this session. Confirmed design (see darkforest-architecture-reference.md
-   checkpoints): a simple fixed-size arena, no pan/zoom/starfield — click to
-   place, click to target. Full mutual visibility once in a battle (no FOW).
-   Dragging a Secret Repository template onto the map creates a REAL
-   ship_markers row via the existing window.deployShipTemplate flow — a
-   battle token is a placement record pointing at a real vessel, never a
-   parallel lightweight entity. Free drag-to-reposition (no movement rules/
-   stats — that's an explicitly separate, not-yet-designed thread).
 
-   Data shape: battle_encounters row = { id, name, is_active, created_by,
-   created_at, tokens: [{ token_id, ship_marker_id, x, y }] }. Only one
-   active battle at a time (Phase 1 scope) — starting a new one deactivates
-   any currently-active row rather than deleting it (keeps history).
-
-   Deliberately NOT in Phase 1 (see architecture doc): range rules, draw-tool
-   AOE targeting, hex/grid overlay, multiple simultaneous battles, and the
-   MLRS multi-turn ordnance/counter-fire engine itself (weapon classification
-   groundwork for that exists in combat.js, but the actual resolution loop is
-   a later build).
-
-   --- MOVEMENT (built same session as a follow-up to Phase 1, confirmed
-   design) --- No dedicated turn/initiative tracker: move_remaining refreshes
-   on the SAME global tick every other per-round mechanic in this app already
-   uses (js/combat.js's advanceCombatRound, via window.resetBattleMapMovement
-   below) rather than inventing a separate turn concept. Allowance comes from
-   a new ship_templates/ship_markers.tactical_speed stat (grid px/round,
-   default 80), copied onto ship_markers at deploy time exactly like
-   integrity_hull/max_hull already are — deliberately NOT derived from
-   drive_type/speed, which is the galaxy-scale FTL travel stat and the wrong
-   scale for this 460x380 grid. Enforcement is DM-trusted, not code-blocked:
-   dragging a token past its move_remaining is never prevented, it just goes
-   negative and renders red (roster line + a small "!" badge on the token)
-   so the DM can see at a glance who overspent. move_remaining lives on the
-   battle_encounters.tokens record itself (per-battle, per-round state —
-   not on ship_markers, which persists across battles).
-
-   --- BATTLEFIELD SALVAGE (built same session, layered on the destroyed-
-   token hook below) --- Confirmed design: destroying a token spawns a
-   battlefield_salvage row at a player-owned vessel's position (any player
-   ship still in the battle, not necessarily the killing blow — no player
-   ship present means no salvage). A manual "Gather" action (ship must be
-   within SALVAGE_GATHER_RANGE) starts a DM/player-set duration timer
-   against the existing universeTimeHours clock; completion is automatic
-   once that clock passes the deadline (checked every time advancement, not
-   just daily ticks, since a duration can be sub-day) and delivers the raw
-   resource into the gathering vessel's cargo misc array. Separately, any
-   vessel with BOTH the raw resource in cargo AND a configured
-   salvage_processing_output/rate (new ship_markers columns, same
-   nullable/zero-means-off convention as fleet_groups' production fields)
-   converts some per day, scaled by its Manufacturing deck's HP% exactly
-   like fleet-group production already does — see
-   window.processSalvageConversion. Deliberately NOT built: any UI rendering
-   of salvage markers on the galaxy canvas itself (map.js's render loop
-   wasn't touched) — salvage is presented as a DOM list panel only, same
-   pattern as Territory Control, not a clickable map token. */
 
 window.globalBattleEncounterCache = null;
 window.battleMapArmedToken = null; // { ship_marker_id } while a palette entry is armed for click-to-place, else null
