@@ -127,6 +127,9 @@ async function fetchUserProfile(user) {
     initPlanetaryModifiersRealtimeChannel();
     initHyperlanesRealtimeChannel();
     initSystemOwnershipRealtimeChannel();
+    if (typeof initBattleEncountersRealtimeChannel === 'function') initBattleEncountersRealtimeChannel();
+    if (typeof initBattlefieldSalvageRealtimeChannel === 'function') initBattlefieldSalvageRealtimeChannel();
+    if (typeof initSavedFleetsRealtimeChannel === 'function') initSavedFleetsRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
 
@@ -141,6 +144,9 @@ async function fetchUserProfile(user) {
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
     loadSystemOwnershipOverrides();
+    if (typeof loadBattleEncounters === 'function') loadBattleEncounters();
+    if (typeof loadBattlefieldSalvage === 'function') loadBattlefieldSalvage();
+    if (typeof loadSavedFleets === 'function') loadSavedFleets();
 }
 
 async function loadAllProfiles() {
@@ -298,11 +304,15 @@ async function loadPlanetaryModifiers() {
 // the matching entries in globalProceduralSystemsCache in place after
 // every load, so `.ownership` reads the same way regardless of which of
 // the two persistence paths a given system actually uses.
-window.globalSystemOwnershipCache = {}; // keyed by system_id (procedural systems only)
+window.globalSystemOwnershipCache = {}; // keyed by system_id (procedural systems only) -> { ownership, control }
 async function loadSystemOwnershipOverrides() {
     const { data } = await db.from('system_ownership_overrides').select('*');
     window.globalSystemOwnershipCache = {};
-    if (data) data.forEach(row => { window.globalSystemOwnershipCache[row.system_id] = row.ownership; });
+    // Control follow-on (this session): cache value widened from a plain
+    // ownership string to { ownership, control } — see the new checkpoint
+    // in the architecture doc for why Control needed the same override-table
+    // treatment procedural systems already had for Ownership.
+    if (data) data.forEach(row => { window.globalSystemOwnershipCache[row.system_id] = { ownership: row.ownership, control: row.control }; });
     if (typeof window.applySystemOwnershipOverrides === 'function') window.applySystemOwnershipOverrides();
     if (window.selectedTarget && window.selectedTarget.type === 'star' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 }
