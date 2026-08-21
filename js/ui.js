@@ -150,8 +150,18 @@ window.renderReorderArrows = function(key, items, id, moveFnName) {
     };
 })();
 
-/* --- CALENDAR & TIME ENGINE --- */
-window.universeTimeHours = parseInt(localStorage.getItem('odyssey_universe_time') || '24192000'); 
+/* --- CALENDAR & TIME ENGINE ---
+   Live-synced this session (was per-browser localStorage only before, with
+   zero cross-client sync beyond a "hey I changed it" chat announcement —
+   see the new checkpoint in the architecture doc for the full design and
+   why). Source of truth is now the `campaign_clock` table (a singleton
+   row, id=1, `js/db.js`'s `driveSpeeds`-adjacent constants aren't involved
+   here). `window.universeTimeHours` is still the in-memory value every
+   other function reads, and localStorage still gets written on every
+   update as a last-known-value cache for the instant before the next
+   page's async load resolves — it is NOT the source of truth anymore,
+   just a display fallback. */
+window.universeTimeHours = parseInt(localStorage.getItem('odyssey_universe_time') || '24192000');
 window.timeFlowActive = false;
 window.timeFlowInterval = null;
 
@@ -199,6 +209,7 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
         if (anyUpdated) {
             let rationText = rationsLogged ? " Rations consumed." : "";
             await db.from('chat_logs').insert({ sender_id: null, content: `✨ [DAILY LOGISTICS] 24-hour cycle complete. Elder E-M Synthesizers recharged.${rationText}`, message_type: 'system' });
+            if (window.AudioEngine) window.AudioEngine.playChime();
             if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
         }
 
@@ -225,16 +236,85 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
     }
 };
 
-window.initCalendarEngine = function() {
+// Small shared helper — every write path below ends by applying the same
+// button-state refresh, so this stays in one place instead of five.
+function syncTimeFlowButton() {
+    const btn = document.getElementById('time-flow-btn');
+    if (btn) { btn.innerText = window.timeFlowActive ? '⏸ PAUSE FLOW' : '▶ RESUME FLOW'; btn.style.borderColor = window.timeFlowActive ? '#3c4e36' : '#00e5a3'; }
+}
+
+window.initCalendarEngine = async function() {
+    // Load (and, if needed, seed/bootstrap) the shared campaign_clock row.
+    // This browser's own pre-sync localStorage value is only used as a
+    // fallback seed if the row doesn't exist yet at all, or (DM only, one
+    // time) to become the new shared truth per the DM's own confirmed
+    // choice — see the block comment below.
+    const localSeedHours = window.universeTimeHours;
+    let clockRow = null;
+    try {
+        const { data } = await db.from('campaign_clock').select('*').eq('id', 1).maybeSingle();
+        clockRow = data;
+    } catch (e) { /* falls through to the localStorage-only fallback below */ }
+
+    if (!clockRow) {
+        const { data: inserted } = await db.from('campaign_clock').insert({ id: 1, universe_time_hours: localSeedHours, time_flow_active: false }).select().maybeSingle();
+        clockRow = inserted;
+    } else if (currentUserRole === 'dm' && localStorage.getItem('odyssey_clock_migrated_to_shared') !== 'true') {
+        // One-time migration bootstrap, DM only: per the DM's own confirmed
+        // choice, THIS browser's currently-displayed local time becomes the
+        // new shared truth for the whole table — overriding whatever the
+        // table was left at (its own default, or another player's earlier
+        // insert-fallback above). Gated by a localStorage flag so it only
+        // ever fires once per browser, not on every reload — otherwise a
+        // stale local snapshot could keep clobbering real shared progress.
+        const { data: updated } = await db.from('campaign_clock').update({ universe_time_hours: localSeedHours }).eq('id', 1).select().maybeSingle();
+        clockRow = updated || clockRow;
+    }
+    localStorage.setItem('odyssey_clock_migrated_to_shared', 'true');
+
+    if (clockRow) {
+        window.universeTimeHours = clockRow.universe_time_hours;
+        window.timeFlowActive = clockRow.time_flow_active;
+    }
+    localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
-    window.timeFlowInterval = setInterval(async () => {
-        if (window.timeFlowActive) { 
-            let oldTime = window.universeTimeHours;
-            window.universeTimeHours += 1; 
+    syncTimeFlowButton();
+
+    // Realtime mirror: every client (DM and players alike) just reflects
+    // whatever the table says — NOT re-running processTimeAdvancement here.
+    // Whichever client's own action caused the change already ran that
+    // locally, exactly once, before writing to the DB (see adjustTime /
+    // applyManualTime / resetTimeline / the passive tick below / and
+    // executePlottedJump in js/map.js). Re-running it again on every other
+    // connected client on receipt would double (or N-times-over) the daily
+    // tick's real DB side effects — ration consumption, fleet production,
+    // salvage conversion — once per connected browser instead of once.
+    db.channel('campaign_clock_stream')
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'campaign_clock' }, (payload) => {
+            if (!payload.new) return;
+            window.universeTimeHours = payload.new.universe_time_hours;
+            window.timeFlowActive = payload.new.time_flow_active;
             localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
-            window.updateCalendarDisplay(); 
-            await window.processTimeAdvancement(oldTime, window.universeTimeHours);
-        }
+            window.updateCalendarDisplay();
+            syncTimeFlowButton();
+        })
+        .subscribe();
+
+    // Passive flow tick: only the DM's own browser actually drives writes
+    // (confirmed design — with a shared clock, every connected client
+    // ticking independently would advance time once per connected browser
+    // per interval, N times too fast). Every non-DM client's interval (and
+    // any second DM browser tab) just no-ops here; they still see the
+    // ticking value live via the realtime mirror above.
+    window.timeFlowInterval = setInterval(async () => {
+        if (currentUserRole !== 'dm' || !window.timeFlowActive) return;
+        const { data, error } = await db.rpc('adjust_campaign_clock', { delta_hours: 1 });
+        if (error || !data || !data[0]) return;
+        const { old_hours, new_hours } = data[0];
+        window.universeTimeHours = new_hours;
+        localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+        window.updateCalendarDisplay();
+        await window.processTimeAdvancement(old_hours, new_hours);
     }, 4000);
 };
 
@@ -252,13 +332,17 @@ window.adjustTime = async function(amount, unit) {
     if (unit === 'hours') multiplier = 1; if (unit === 'days') multiplier = 24;
     if (unit === 'months') multiplier = 24 * 30; if (unit === 'years') multiplier = 24 * 30 * 12;
 
-    let oldTime = window.universeTimeHours;
-    window.universeTimeHours += amount * multiplier;
-    if (window.universeTimeHours < 0) window.universeTimeHours = 0;
-    
+    // Delta operation — uses the atomic RPC (row-locked server-side) rather
+    // than a client-computed read-then-write, so this can't race a
+    // simultaneous passive tick or a player's FTL jump into a lost update.
+    const { data, error } = await db.rpc('adjust_campaign_clock', { delta_hours: amount * multiplier });
+    if (error || !data || !data[0]) { alert("Failed to adjust chronology: " + (error ? error.message : "unknown error")); return; }
+    const { old_hours, new_hours } = data[0];
+
+    window.universeTimeHours = new_hours;
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay(); window.broadcastTimeSync();
-    await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+    await window.processTimeAdvancement(old_hours, new_hours);
 };
 
 window.applyManualTime = async function() {
@@ -271,34 +355,52 @@ window.applyManualTime = async function() {
     if (isNaN(yr)) { alert("Please enter a valid year."); return; }
 
     const hoursInYear = 24 * 30 * 12; const hoursInMonth = 24 * 30; const hoursInDay = 24;
-    let oldTime = window.universeTimeHours;
-    window.universeTimeHours = (yr * hoursInYear) + ((mo - 1) * hoursInMonth) + ((da - 1) * hoursInDay) + hr;
-    if (window.universeTimeHours < 0) window.universeTimeHours = 0;
+    let newTime = (yr * hoursInYear) + ((mo - 1) * hoursInMonth) + ((da - 1) * hoursInDay) + hr;
+    if (newTime < 0) newTime = 0;
 
+    // Absolute set (not a delta) — "it is now exactly this date" is
+    // supposed to overwrite whatever was there, so this uses a plain
+    // update rather than the RPC. Reads a fresh old-value immediately
+    // before writing to keep the processTimeAdvancement day-crossing math
+    // accurate even if this client's own cached value had drifted.
+    const { data: current } = await db.from('campaign_clock').select('universe_time_hours').eq('id', 1).maybeSingle();
+    let oldTime = current ? current.universe_time_hours : window.universeTimeHours;
+
+    const { error } = await db.from('campaign_clock').update({ universe_time_hours: newTime, updated_at: new Date().toISOString() }).eq('id', 1);
+    if (error) { alert("Failed to set chronology: " + error.message); return; }
+
+    window.universeTimeHours = newTime;
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay(); window.broadcastTimeSync();
-    await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+    await window.processTimeAdvancement(oldTime, newTime);
     alert("Chronology manually updated.");
 };
 
 window.resetTimeline = async function() {
     if (currentUserRole !== 'dm') return;
-    if (!(await window.showConfirmModal("Reset timeline back to YR 2800.01.01?"))) return;
-    let oldTime = window.universeTimeHours;
-    window.universeTimeHours = 24192000;
+    if (!(await window.showConfirmModal("Reset timeline back to YR 2800.01.01? This affects the shared campaign clock for everyone."))) return;
+
+    const { data: current } = await db.from('campaign_clock').select('universe_time_hours').eq('id', 1).maybeSingle();
+    let oldTime = current ? current.universe_time_hours : window.universeTimeHours;
+    const newTime = 24192000;
+
+    const { error } = await db.from('campaign_clock').update({ universe_time_hours: newTime, updated_at: new Date().toISOString() }).eq('id', 1);
+    if (error) { alert("Failed to reset timeline: " + error.message); return; }
+
+    window.universeTimeHours = newTime;
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay(); window.broadcastTimeSync();
-    await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+    await window.processTimeAdvancement(oldTime, newTime);
 };
 
-window.toggleTimeFlow = function() {
+window.toggleTimeFlow = async function() {
     if (currentUserRole !== 'dm') return;
     window.timeFlowActive = !window.timeFlowActive;
-    const btn = document.getElementById('time-flow-btn');
-    if (btn) {
-        btn.innerText = window.timeFlowActive ? '⏸ PAUSE FLOW' : '▶ RESUME FLOW';
-        btn.style.borderColor = window.timeFlowActive ? '#3c4e36' : '#00e5a3';
-    }
+    syncTimeFlowButton();
+    // Persisted so every client's realtime mirror knows flow is active —
+    // matters for the passive-tick driver check in initCalendarEngine
+    // above, and for any future player-facing "time is flowing" indicator.
+    await db.from('campaign_clock').update({ time_flow_active: window.timeFlowActive, updated_at: new Date().toISOString() }).eq('id', 1);
 };
 
 window.broadcastTimeSync = function() {
@@ -359,6 +461,7 @@ makePanelDraggable('comms-array-panel', 'comms-array-header', 'odyssey_comms_pos
 makePanelDraggable('calendar-control-panel', 'calendar-control-header', 'odyssey_calendar_pos');
 makePanelDraggable('dm-scratchpad-panel', 'dm-scratchpad-header', 'odyssey_scratchpad_pos');
 makePanelDraggable('territory-control-panel', 'territory-control-header', 'odyssey_territory_pos');
+makePanelDraggable('credits-panel', 'credits-header', 'odyssey_credits_pos');
 
 window.resetUiLayout = function() {
     Object.keys(localStorage).forEach(k => { if (k.startsWith('odyssey_') && !k.includes('universe_time') && !k.includes('scanned')) localStorage.removeItem(k); });
@@ -474,6 +577,8 @@ injectJumpToShipButtons();
 window.toggleCombatTracker = function() { const panel = document.getElementById('combat-tracker-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
 window.toggleCommsArray = function() { const panel = document.getElementById('comms-array-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; if (panel.style.display === 'block' && typeof window.populateCommsRecipients === 'function') window.populateCommsRecipients(); };
 window.toggleDmScratchpad = function() { if (currentUserRole !== 'dm') return; const panel = document.getElementById('dm-scratchpad-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
+// Not DM-gated (unlike the scratchpad above) -- attribution info is fine for anyone to see.
+window.toggleCreditsPanel = function() { const panel = document.getElementById('credits-panel'); if (panel) panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
 window.saveDmScratchpad = function() { if (currentUserRole !== 'dm') return; const val = document.getElementById('dm-scratchpad-input').value; localStorage.setItem('odyssey_dm_scratchpad', val); };
 
 /* --- SKILLS & CHARACTER TERMINAL --- */
@@ -1232,6 +1337,11 @@ window.handleIncomingChatLog = function(newLog) {
     // Only messages I'm actually party to: global (no recipient), or ones
     // where I'm the sender or the recipient.
     if (newLog.recipient_id && newLog.recipient_id !== currentUserId && newLog.sender_id !== currentUserId) return;
+    // Comms chirp (2026-08 audio polish) -- skip on my own messages: this
+    // realtime handler also fires for the sender's own INSERT (echoed back
+    // by Supabase), and sendChatMessage() already appends it locally
+    // without a sound, so chirping here too would double-fire on send.
+    if (window.AudioEngine && newLog.sender_id !== currentUserId) window.AudioEngine.playChirp();
     window.appendLocalChatLog(newLog);
 };
 
