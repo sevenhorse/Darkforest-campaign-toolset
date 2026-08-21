@@ -590,25 +590,44 @@ window.updateInjuryMax = function() {
 
 /* --- PERKS PANEL (Dossier tab) ---
    Section 1 is self-selected, editable anytime (honor-system table, matches
-   how skill tracking already works — no hard lock). Section 2 is DM-awarded
-   only, from the Crew Roster tab (see window.awardSection2Perk in that
-   render function) — a player can't grant it to themselves. */
+   how skill tracking already works — no hard lock). As of this session,
+   Section 1 is NO LONGER single-pick: a player can hold any number of
+   Section 1 specializations simultaneously (picker + ADD, each with its own
+   remove button), matching the "no cap" convention Section 2 already used.
+   Section 2 remains DM-awarded only, from the Crew Roster tab (see
+   window.awardSection2Perk in that render function) — a player still can't
+   grant Section 2 perks to themselves, and this session did not add
+   player-side removal for Section 2 (out of the confirmed scope — DM awards
+   are still DM-only to undo, same as before). */
 window.renderPerksPanel = function() {
     const container = document.getElementById('perks-panel-container');
     if (!container) return;
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
     const perks = myProf.perks || [];
-    const section1 = perks.find(p => p.section === 1);
+    const section1 = perks.filter(p => p.section === 1);
     const section2 = perks.filter(p => p.section === 2);
 
     const sec1Choices = typeof window.getApprovedPerksBySection === 'function' ? window.getApprovedPerksBySection(1) : [];
-    let sec1Options = '<option value="">— None Selected —</option>';
-    sec1Choices.forEach(p => {
-        sec1Options += `<option value="${p.id}" ${section1 && section1.perk_definition_id === p.id ? 'selected' : ''}>${p.name}</option>`;
+    const sec1PickedIds = new Set(section1.map(p => p.perk_definition_id));
+    const sec1Available = sec1Choices.filter(p => !sec1PickedIds.has(p.id));
+    let sec1PickerOptions = '<option value="">— Select a Specialization —</option>';
+    sec1Available.forEach(p => {
+        sec1PickerOptions += `<option value="${p.id}">${p.name}</option>`;
     });
-    const sec1Def = section1 ? window.findPerkDefinition(section1.perk_definition_id) : null;
-    const sec1Desc = sec1Def ? sec1Def.description : '';
+
+    let sec1Html = section1.length === 0 ? '<span style="font-size:10px; color:#6b826a;">None selected yet.</span>' : '';
+    section1.forEach(p => {
+        const def = window.findPerkDefinition(p.perk_definition_id);
+        if (!def) return;
+        sec1Html += `<div style="background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
+            <div style="flex:1;">
+                <strong style="color:#00e5a3; font-size:11px;">${def.name}</strong>
+                <div style="font-size:9px; color:#6b826a;">${def.description || ''}</div>
+            </div>
+            <button onclick="window.removeSection1Perk('${p.id}')" title="Remove specialization" style="width:auto; margin:0; padding:2px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">✕</button>
+        </div>`;
+    });
 
     let sec2Html = section2.length === 0 ? '<span style="font-size:10px; color:#6b826a;">None awarded yet.</span>' : '';
     section2.forEach(p => {
@@ -622,9 +641,13 @@ window.renderPerksPanel = function() {
 
     container.innerHTML = `
         <div style="margin-top:10px; border-top:1px solid #3c4e36; padding-top:8px;">
-            <label for="perk-section1-select" style="font-size:9px; color:#6b826a;">Section 1 Specialization (character creation pick):</label>
-            <select id="perk-section1-select" onchange="window.setSection1Perk(this.value)" style="font-size:11px; margin:2px 0;">${sec1Options}</select>
-            ${sec1Desc ? `<div style="font-size:9px; color:#00e5a3; margin-top:2px;">${sec1Desc}</div>` : ''}
+            <label style="font-size:9px; color:#6b826a;">Section 1 Specializations (character creation pick, no cap):</label>
+            <div style="margin-top:4px;">${sec1Html}</div>
+            <div style="display:flex; gap:4px; margin-top:6px;">
+                <label for="perk-section1-picker" style="display:none;">Add Specialization</label>
+                <select id="perk-section1-picker" style="flex:1; margin:0; font-size:11px;">${sec1PickerOptions}</select>
+                <button class="btn-deploy" onclick="window.addSection1Perk()" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">+ ADD</button>
+            </div>
         </div>
         <div style="margin-top:10px;">
             <label style="font-size:9px; color:#6b826a;">Section 2 Perks (DM-awarded, no cap):</label>
@@ -633,20 +656,26 @@ window.renderPerksPanel = function() {
     `;
 };
 
-window.setSection1Perk = async function(perkDefId) {
+window.addSection1Perk = async function() {
+    const select = document.getElementById('perk-section1-picker');
+    const perkDefId = select ? select.value : null;
+    if (!perkDefId) return;
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first before selecting a specialization."); return; }
-    const existing = (myProf.perks || []).find(p => p.section === 1);
-    if (existing) {
-        await db.from('character_perks').delete().eq('id', existing.id);
-        myProf.perks = (myProf.perks || []).filter(p => p.id !== existing.id);
-    }
-    if (perkDefId) {
-        const { data, error } = await db.from('character_perks').insert({ character_id: myProf.character.id, perk_definition_id: perkDefId, section: 1 }).select().single();
-        if (error) { alert("Failed to save specialization: " + error.message); return; }
-        myProf.perks = myProf.perks || [];
-        myProf.perks.push(data);
-    }
+    const already = (myProf.perks || []).some(p => p.section === 1 && p.perk_definition_id === perkDefId);
+    if (already) return;
+    const { data, error } = await db.from('character_perks').insert({ character_id: myProf.character.id, perk_definition_id: perkDefId, section: 1 }).select().single();
+    if (error) { alert("Failed to save specialization: " + error.message); return; }
+    myProf.perks = myProf.perks || [];
+    myProf.perks.push(data);
+    if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
+};
+
+window.removeSection1Perk = async function(perkRowId) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    await db.from('character_perks').delete().eq('id', perkRowId);
+    myProf.perks = (myProf.perks || []).filter(p => p.id !== perkRowId);
     if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
 };
 
