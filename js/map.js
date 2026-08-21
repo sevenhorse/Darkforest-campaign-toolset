@@ -8,7 +8,7 @@ window.draggedStar = null;
 
 window.measuringTapeActive = false; window.measureStartPoint = null; window.measureEndPoint = null;
 window.pingModeActive = false; window.activePings = [];
-window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; window.selectedDriveSpeed = 250;
+window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; window.selectedDriveSpeed = 250; window.selectedDriveTypeKey = 'ftl_class1';
 window.territoryToolActive = false; window.territoryDrawActive = false; window.activeTerritoryVertices = [];
 window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = [];
 window.hyperlanesVisible = true; // was never initialized before — left routes invisible until manually toggled once
@@ -958,12 +958,13 @@ window.startJumpPlottingMode = function() {
     if (!window.selectedTarget || window.selectedTarget.type !== 'ship') return;
     window.jumpPlottingActive = true; window.measuringTapeActive = false; window.pingModeActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
     window.activeJumpShip = window.selectedTarget.data; window.jumpTargetPoint = null;
-    window.selectedDriveSpeed = driveSpeeds[window.activeJumpShip.drive_type || 'ftl_class1'].speed;
+    window.selectedDriveTypeKey = window.activeJumpShip.drive_type || 'ftl_class1';
+    window.selectedDriveSpeed = driveSpeeds[window.selectedDriveTypeKey].speed;
     window.updateToolButtonStyles(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 window.cancelJumpPlotting = function() { window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-window.setDriveSpeedKey = function(key) { if (driveSpeeds[key]) { window.selectedDriveSpeed = driveSpeeds[key].speed; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); } };
-window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId) { window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.setDriveSpeedKey = function(key) { if (driveSpeeds[key]) { window.selectedDriveTypeKey = key; window.selectedDriveSpeed = driveSpeeds[key].speed; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); } };
+window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId) { window.selectedDriveTypeKey = newDriveType; window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; let cargo = ship.cargo_inventory || {}; cargo.iff = newIff; await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', shipId); ship.cargo_inventory = cargo; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 
 /* --- MASTER-TO-SUB-TOKEN DOCKING ---
@@ -982,6 +983,7 @@ window.dockShipToMaster = async function(subShipId, masterShipId) {
     const { error } = await db.from('ship_markers').update({ docked_to: masterShipId }).eq('id', subShipId);
     if (error) { alert("Failed to dock: " + error.message); return; }
     if (sub) sub.docked_to = masterShipId;
+    if (window.AudioEngine) window.AudioEngine.playDock();
     window.clearSelectedTarget(); // it's no longer an independently selectable token
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
@@ -998,6 +1000,7 @@ window.undockShip = async function(shipId) {
     const { error } = await db.from('ship_markers').update(updates).eq('id', shipId);
     if (error) { alert("Failed to undock: " + error.message); return; }
     Object.assign(ship, updates);
+    if (window.AudioEngine) window.AudioEngine.playDock();
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 
@@ -1005,27 +1008,61 @@ window.executePlottedJump = async function() {
     if (!window.activeJumpShip || !window.jumpTargetPoint) return;
     let ship = window.activeJumpShip; let target = window.jumpTargetPoint;
     let dist = Math.hypot(target.x - ship.x, target.y - ship.y);
-    let tripHours = Math.max(1, Math.round(dist / window.selectedDriveSpeed));
     let fuelCost = Math.max(1, Math.round(dist / 100)); if (window.selectedDriveSpeed < 50) fuelCost = 0;
-    
+
     let cargo = ship.cargo_inventory || {}; let expendables = cargo.expendables || [];
     let fuelIdx = expendables.findIndex(i => i.name.toLowerCase().includes('energy core') || i.name.toLowerCase().includes('fuel'));
-    
+
     if (fuelCost > 0) {
-        if (fuelIdx >= 0 && expendables[fuelIdx].qty >= fuelCost) { expendables[fuelIdx].qty -= fuelCost; cargo.expendables = expendables; } 
+        if (fuelIdx >= 0 && expendables[fuelIdx].qty >= fuelCost) { expendables[fuelIdx].qty -= fuelCost; cargo.expendables = expendables; }
         else { if (window.AudioEngine) window.AudioEngine.playError(); alert(`Insufficient Fuel! Requires ${fuelCost} Energy Cores.`); return; }
     }
 
+    // Relativistic time-inversion (this session's lore fix, see the block
+    // comment above window.JUMP_TIME_INVERSION_MAX_HOURS in js/db.js for the
+    // full design rationale) — REPLACES the old forward "trip takes N
+    // hours" model. Gravity-well distortion carried over unchanged from the
+    // retired jumpToActiveShip mechanic this supersedes.
+    let driftDist = dist;
+    let gravityWellHit = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(ship).find(h => h.type === 'gravity_well') : null;
+    let gravityWellNote = '';
+    if (gravityWellHit) {
+        const mult = 1 + (0.5 * (gravityWellHit.intensity || 1));
+        driftDist = driftDist * mult;
+        gravityWellNote = ` [GRAVITY WELL: jump vector distorted, effective distance x${mult}]`;
+    }
+    const isFtl = window.selectedDriveTypeKey !== 'sublight';
+    let rawDriftHours = 0;
+    if (isFtl || !window.jumpInversionFtlOnly) {
+        rawDriftHours = driftDist * window.selectedDriveSpeed / window.TEMPORAL_DRIFT_CONSTANT;
+    }
+    let driftHours = rawDriftHours > 0 ? Math.min(window.JUMP_TIME_INVERSION_MAX_HOURS, Math.max(1, Math.round(rawDriftHours))) : 0;
+    const cappedNote = rawDriftHours > window.JUMP_TIME_INVERSION_MAX_HOURS ? ' [CAPPED]' : '';
+
     if (window.AudioEngine) window.AudioEngine.playWarp();
-    let oldTime = window.universeTimeHours; window.universeTimeHours += tripHours; localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
-    if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
+    // Shared campaign clock (this session's live-sync fix): the drift is
+    // applied via the same atomic RPC every other clock write path uses
+    // (js/ui.js), not a direct read-modify-write of window.universeTimeHours
+    // — per the DM's own confirmed choice, this genuinely rewinds the ONE
+    // shared clock the whole table sees, not just this player's own view.
+    let oldTime = window.universeTimeHours, newTime = window.universeTimeHours;
+    if (driftHours > 0) {
+        const { data: clockData, error: clockError } = await db.rpc('adjust_campaign_clock', { delta_hours: -driftHours });
+        if (!clockError && clockData && clockData[0]) {
+            oldTime = clockData[0].old_hours; newTime = clockData[0].new_hours;
+            window.universeTimeHours = newTime;
+            localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+            if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
+        }
+    }
 
     ship.x = target.x; ship.y = target.y; ship.cargo_inventory = cargo;
     await db.from('ship_markers').update({ x: target.x, y: target.y, cargo_inventory: cargo }).eq('id', ship.id);
     if(typeof checkAnomalyProximity === 'function') await checkAnomalyProximity(ship);
-    if(typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+    if(typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, newTime);
 
-    await db.from('chat_logs').insert({ sender_id: currentUserId, content: `🚀 [FTL JUMP] Vessel '${ship.name}' completed jump to ${target.name}. Trip: ${tripHours} hrs.`, message_type: 'text' });
+    const driftNote = driftHours > 0 ? ` Chronometer reads ${driftHours}h prior to departure per relativistic inversion.${cappedNote}${gravityWellNote}` : '';
+    await db.from('chat_logs').insert({ sender_id: currentUserId, content: `🚀 [FTL JUMP] Vessel '${ship.name}' completed jump to ${target.name}.${driftNote}`, message_type: 'text' });
     window.cancelJumpPlotting(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 
@@ -1301,8 +1338,9 @@ window.initGalaxyEngine = function() {
         if (window.jumpPlottingActive && window.activeJumpShip) {
             let snapTarget = null; let allSystems = proceduralSystems.concat(globalDbSystemsCache);
             for (let s of allSystems) { if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < 40) { snapTarget = { x: s.x, y: s.y, name: s.name, hazard: s.hazard }; break; } }
-            if (snapTarget) { window.jumpTargetPoint = { x: snapTarget.x, y: snapTarget.y, name: snapTarget.name, hazard: snapTarget.hazard }; } 
+            if (snapTarget) { window.jumpTargetPoint = { x: snapTarget.x, y: snapTarget.y, name: snapTarget.name, hazard: snapTarget.hazard }; }
             else { window.jumpTargetPoint = { x: worldPos.x, y: worldPos.y, name: `Sector (${Math.round(worldPos.x)}, ${Math.round(worldPos.y)})`, hazard: 'None' }; }
+            if (window.AudioEngine) window.AudioEngine.playConfirm();
             if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
         }
 
@@ -1465,11 +1503,21 @@ window.initGalaxyEngine = function() {
                 let calcTimeStr = '';
                 if (window.jumpTargetPoint) {
                     let dist = Math.hypot(window.jumpTargetPoint.x - m.x, window.jumpTargetPoint.y - m.y);
-                    let hrs = Math.max(1, Math.round(dist / window.selectedDriveSpeed));
                     let fuelCost = window.selectedDriveSpeed < 50 ? 0 : Math.max(1, Math.round(dist / 100));
-                    calcTimeStr = `<div style="font-size:10px; color:#00e5a3; margin:4px 0; background:#030403; padding:6px; border:1px solid #3c4e36;">Distance: ${dist.toFixed(1)} u<br>FTL Trip Duration: <strong>~${hrs} hours</strong><br><span style="color:#ffaa00;">Fuel Cost: ${fuelCost} Energy Cores</span></div>`;
+                    // Preview mirrors window.executePlottedJump's real relativistic
+                    // time-inversion math exactly (this session's lore fix) so the
+                    // player sees the actual chronometer effect before committing,
+                    // not the old forward "trip duration" estimate.
+                    let driftDist = dist;
+                    let gwHit = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(m).find(h => h.type === 'gravity_well') : null;
+                    if (gwHit) driftDist = driftDist * (1 + (0.5 * (gwHit.intensity || 1)));
+                    let isFtlPreview = window.selectedDriveTypeKey !== 'sublight';
+                    let rawDrift = (isFtlPreview || !window.jumpInversionFtlOnly) ? (driftDist * window.selectedDriveSpeed / window.TEMPORAL_DRIFT_CONSTANT) : 0;
+                    let driftPreview = rawDrift > 0 ? Math.min(window.JUMP_TIME_INVERSION_MAX_HOURS, Math.max(1, Math.round(rawDrift))) : 0;
+                    let driftLine = driftPreview > 0 ? `Chronometer Drift: <strong style="color:#ff66ff;">-${driftPreview}h${rawDrift > window.JUMP_TIME_INVERSION_MAX_HOURS ? ' [CAPPED]' : ''}</strong> (arrive before departure)` : `Chronometer Drift: <strong>None</strong> (sublight)`;
+                    calcTimeStr = `<div style="font-size:10px; color:#00e5a3; margin:4px 0; background:#030403; padding:6px; border:1px solid #3c4e36;">Distance: ${dist.toFixed(1)} u<br>${driftLine}<br><span style="color:#ffaa00;">Fuel Cost: ${fuelCost} Energy Cores</span></div>`;
                 }
-                jumpPlotterBox = `<div style="background:#040605; border:1px solid #00e1ff; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#00e1ff; font-weight:bold;">🌌 JUMP VECTOR PLOTTER</span><div style="font-size:10px; color:#d4c5a9; margin:4px 0;">${targetInfo}</div><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Drive System Override:</label><select onchange="window.setDriveSpeedKey(this.value)" style="font-size:9px; margin:2px 0; background:#0a1410; color:#00e1ff;">${driveOptionsHtml}</select>${calcTimeStr}<div style="display:flex; gap:6px; margin-top:6px;"><button class="btn-reveal" onclick="window.executePlottedJump()" ${!window.jumpTargetPoint ? 'disabled style="opacity:0.5;"' : ''} style="flex:2; font-size:9px; padding:6px;">🚀 EXECUTE JUMP & ADVANCE TIME</button><button class="btn-remove" onclick="window.cancelJumpPlotting()" style="flex:1; font-size:9px; padding:6px;">CANCEL</button></div></div>`;
+                jumpPlotterBox = `<div style="background:#040605; border:1px solid #00e1ff; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#00e1ff; font-weight:bold;">🌌 JUMP VECTOR PLOTTER</span><div style="font-size:10px; color:#d4c5a9; margin:4px 0;">${targetInfo}</div><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Drive System Override:</label><select onchange="window.setDriveSpeedKey(this.value)" style="font-size:9px; margin:2px 0; background:#0a1410; color:#00e1ff;">${driveOptionsHtml}</select>${calcTimeStr}<div style="display:flex; gap:6px; margin-top:6px;"><button class="btn-reveal" onclick="window.executePlottedJump()" ${!window.jumpTargetPoint ? 'disabled style="opacity:0.5;"' : ''} style="flex:2; font-size:9px; padding:6px;">🚀 EXECUTE JUMP</button><button class="btn-remove" onclick="window.cancelJumpPlotting()" style="flex:1; font-size:9px; padding:6px;">CANCEL</button></div></div>`;
             } else if (isLocked) { jumpPlotterBox = `<button class="btn-deploy" onclick="window.startJumpPlottingMode()" style="font-size:9px; padding:6px; margin-top:6px;">🌌 PLOT JUMP VECTOR</button>`; }
 
             // DOCKING BAY: undock button if this ship IS a docked sub-craft (reachable
