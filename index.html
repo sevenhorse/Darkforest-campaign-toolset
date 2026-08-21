@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.18">
+    <link rel="stylesheet" href="style.css?v=3.19">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -744,6 +744,16 @@
                 <button id="hyperlane-toggle-btn" onclick="window.toggleHyperlanes()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">ROUTES</button>
                 <button id="territory-tool-toggle-btn" onclick="window.toggleTerritoryTool()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px; display: none;">TERRITORIES</button>
                 <button id="radar-sweep-toggle-btn" onclick="window.toggleRadarSweep()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RADAR</button>
+                <div style="position: relative; display: inline-block;">
+                    <button id="audio-controls-toggle-btn" onclick="window.toggleAudioControls()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">🔊 AUDIO</button>
+                    <div id="audio-controls-dropdown" style="display: none; position: absolute; top: 28px; left: 0; z-index: 50; background: #040605; border: 1px solid #3c4e36; border-radius: 2px; padding: 8px; width: 170px;">
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; color: #6b826a; cursor: pointer; margin-bottom: 8px;">
+                            <input type="checkbox" id="audio-mute-toggle" onchange="window.AudioEngine.setMuted(this.checked)" style="margin: 0; width: auto;"> Mute Music
+                        </label>
+                        <label for="audio-volume-slider" style="font-size: 9px; color: #6b826a; display: block; margin-bottom: 2px;">Music Volume</label>
+                        <input type="range" id="audio-volume-slider" min="0" max="100" value="40" oninput="window.AudioEngine.setMusicVolume(this.value / 100)" style="width: 100%; margin: 0;">
+                    </div>
+                </div>
                 <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 8px; border-radius: 2px; font-size: 10px; color: #00e5a3; cursor: pointer; white-space: nowrap;" onclick="window.toggleCalendarControls()">
                     <span id="clock-ticker-text">YR 2800.01.01 // 00:00</span>
                 </div>
@@ -773,6 +783,11 @@
             <button onclick="window.toggleSalvagePanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">SALVAGE</button>
             <button onclick="window.resetUiLayout()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RESET UI</button>
         </div>
+
+        <!-- Deliberately tiny/muted, tucked in an otherwise-empty corner -- a
+             visible-but-not-competing-for-attention credits trigger, per the
+             DM's own "non-intrusive" request (2026-08). -->
+        <div id="credits-trigger" onclick="window.toggleCreditsPanel()" title="Credits & Attribution" style="position: fixed; bottom: 4px; left: 8px; z-index: 21; font-size: 8px; color: #3c4e36; cursor: pointer; user-select: none; letter-spacing: 0.5px;">CREDITS</div>
 
         <div id="canvas-wrapper">
             <div id="canvas-container">
@@ -834,6 +849,26 @@
                 <button onclick="window.toggleDmScratchpad()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 6px; float: right;">CLOSE</button>
             </div>
 
+            <div id="credits-panel" class="panel">
+                <div id="credits-header" class="panel-header-drag">
+                    <h4 style="margin:0;">Credits &amp; Attribution</h4>
+                    <span style="font-size: 10px; color: #6b826a;">DRAG</span>
+                </div>
+                <div style="font-size: 10px; line-height: 1.6;">
+                    <p style="margin: 0 0 10px 0; color: #6b826a;">Music beds in this build are hotlinked from OpenGameArt.org, not original work:</p>
+                    <p style="margin: 0 0 8px 0;">
+                        <strong style="color:#00e5a3;">"Battle Music"</strong> by <strong>Peter Eastman</strong> — CC-BY 3.0 (attribution required).<br>
+                        <a href="https://opengameart.org/content/battle-music-0" target="_blank" rel="noopener noreferrer" style="color:#00e1ff; word-break: break-all;">opengameart.org/content/battle-music-0</a>
+                    </p>
+                    <p style="margin: 0;">
+                        <strong style="color:#00e5a3;">"Ambience Pack 1 — Sci-Fi Horror"</strong> by <strong>Joth</strong> — CC0 (public domain).<br>
+                        <a href="https://opengameart.org/content/ambience-pack-1-sci-fi-horror" target="_blank" rel="noopener noreferrer" style="color:#00e1ff; word-break: break-all;">opengameart.org/content/ambience-pack-1-sci-fi-horror</a>
+                    </p>
+                    <p style="margin: 10px 0 0 0; color: #6b826a;">All sound effects are synthesized in-browser (Web Audio API), no third-party assets.</p>
+                </div>
+                <button onclick="window.toggleCreditsPanel()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
+            </div>
+
             <div id="calendar-control-panel" class="panel">
                 <div id="calendar-control-header" class="panel-header-drag">
                     <h4 style="margin:0;">Chronology Control Deck</h4>
@@ -875,7 +910,7 @@
                             <input type="checkbox" id="jump-inversion-ftl-only" checked onchange="window.setJumpInversionFtlOnly(this.checked)" style="margin:0; width:auto;">
                             Jump Time-Inversion: FTL Vessels Only
                         </label>
-                        <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">When on, only FTL-drive vessels invert the chronometer on Jump-to-Ship — sublight vessels advance time normally. Disable to apply the inversion to every drive type.</p>
+                        <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">When on, only FTL-drive vessels invert the chronometer on a plotted jump (Jump Vector Plotter) — sublight vessels advance/lose no time. Disable to apply the inversion to every drive type.</p>
                     </div>
                 </div>
                 <button onclick="window.toggleCalendarControls()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
@@ -1160,15 +1195,15 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.20"></script>
-    <script src="js/audio.js?v=3.11"></script>
-    <script src="js/ui.js?v=3.21"></script>
+    <script src="js/db.js?v=3.21"></script>
+    <script src="js/audio.js?v=3.12"></script>
+    <script src="js/ui.js?v=3.24"></script>
     <script src="js/combat.js?v=3.22"></script>
     <script src="js/colonies.js?v=3.15"></script>
     <script src="js/ship-designer.js?v=3.15"></script>
     <script src="js/perk-designer.js?v=3.13"></script>
-    <script src="js/map.js?v=3.23"></script>
-    <script src="js/battle-map.js?v=1.7"></script>
+    <script src="js/map.js?v=3.26"></script>
+    <script src="js/battle-map.js?v=1.8"></script>
 
 </body>
 </html>
