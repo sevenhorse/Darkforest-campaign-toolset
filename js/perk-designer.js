@@ -119,7 +119,7 @@ window.approvePerk = async function(id) {
     if (!p) return;
     const { error } = await db.from('perk_definitions').update({ status: 'approved' }).eq('id', id);
     if (error) { alert("Failed to approve perk: " + error.message); return; }
-    db.from('chat_logs').insert({ sender_id: 'system', content: `📋 [OVERSEER] Specialization "${p.name}" approved and added to the active roster.`, message_type: 'text' });
+    db.from('chat_logs').insert({ sender_id: null, content: `📋 [OVERSEER] Specialization "${p.name}" approved and added to the active roster.`, message_type: 'system' });
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
 };
 
