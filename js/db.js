@@ -145,6 +145,11 @@ async function fetchUserProfile(user) {
     if (typeof initSavedFleetsRealtimeChannel === 'function') initSavedFleetsRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
+    // Kick off the ambient music bed now that we have a real authenticated
+    // session -- the music files live in a private Supabase Storage bucket
+    // (signed URLs only), so this can't succeed before login the way the
+    // old local-file version could.
+    if (window.AudioEngine && !window.AudioEngine.isMuted()) window.AudioEngine.startAmbient();
 
     loadAllProfiles(); loadPlayerNotes(); loadCombatTracker(); loadCampaignObjectives();
     loadChatLogs(); loadPmPartnerList(); loadTerritories(); loadHyperlanes(); loadCodexEntries();
