@@ -357,12 +357,138 @@ window.updateShipStance = async function(shipId, stance) {
     await db.from('ship_markers').update({ ship_stance: stance }).eq('id', shipId);
     let ship = globalShipMarkersCache.find(s => s.id === shipId);
     if(ship) ship.ship_stance = stance;
-    
+
     await db.from('chat_logs').insert({
         sender_id: currentUserId,
         content: `⚙️ [TACTICS] Vessel '${ship.name}' is now assuming **${stance.toUpperCase()}** stance.`,
         message_type: 'text'
     });
+    if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+};
+
+/* --- SHARED SHIP STATUS RENDERERS ---
+   Extracted this session so the Vessel Deck (js/combat.js) and the Battle
+   Map's full-screen ship-status cards (js/battle-map.js) show identical
+   stance/health markup from ONE implementation, not two independently
+   maintained copies. No id-lookup dependencies (stance's onchange and the
+   health bars' onclick handlers all pass values directly as arguments), so
+   these two are safe to reuse verbatim with no prefixing needed — unlike
+   the weapon-row renderer below, which DOES need per-caller unique element
+   ids since two callers can legitimately render the same weapon's
+   target/volley controls into the DOM at once. */
+window.renderShipStanceHtml = function(vessel) {
+    let currentStance = vessel.ship_stance || 'Balanced';
+    return `
+        <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center;">
+            <label for="vessel-stance-${vessel.id}" style="font-size:10px; color:#00e5a3; font-weight:bold;">TACTICAL STANCE:</label>
+            <select id="vessel-stance-${vessel.id}" onchange="window.updateShipStance('${vessel.id}', this.value)" style="width:160px; margin:0; padding:4px; font-size:10px; background:#040605; color:#00e5a3; border:1px solid #3c4e36;">
+                <option value="Balanced" ${currentStance === 'Balanced' ? 'selected' : ''}>Balanced (Standard)</option>
+                <option value="Aggressive" ${currentStance === 'Aggressive' ? 'selected' : ''}>Aggressive (+Dmg, -Def)</option>
+                <option value="Defensive" ${currentStance === 'Defensive' ? 'selected' : ''}>Defensive (+Def, -Dmg)</option>
+                <option value="Evasive" ${currentStance === 'Evasive' ? 'selected' : ''}>Evasive (Dodge Focus)</option>
+            </select>
+        </div>
+    `;
+};
+
+// editable=false renders the same 5 bars with no +/-/-10/+10 buttons — used
+// for an enemy/NPC vessel's card on the Battle Map, where a player can see
+// health but shouldn't be able to adjust it themselves.
+window.renderShipHealthBarsHtml = function(vessel, editable) {
+    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
+    const s_max = vessel.max_shields || 400;
+    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
+    const h_max = vessel.max_hull || 300;
+    const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
+    const r_max = vessel.max_reactive || 10;
+    const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
+    const a_max = vessel.max_ablative || 10;
+    const hd_int = vessel.integrity_hardened !== undefined ? vessel.integrity_hardened : 0;
+    const hd_max = vessel.max_hardened || 0;
+
+    const makeBar = (label, current, max, color, key) => `
+        <div style="margin-bottom: 8px;">
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:${color}; margin-bottom:2px;">
+                <strong>${label}</strong>
+                <span>${current} / ${max}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+                ${editable ? `<button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -10)" style="width:24px; padding:2px; font-size:10px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-10</button>
+                <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -1)" style="width:24px; padding:2px; font-size:12px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-</button>` : ''}
+                <div style="flex-grow:1; height:12px; background:#030403; border:1px solid #3c4e36; border-radius:2px; overflow:hidden;">
+                    <div style="width:${Math.max(0, Math.min(100, (current/max)*100))}%; height:100%; background:${current === 0 ? '#ff3333' : color}; transition:width 0.3s;"></div>
+                </div>
+                ${editable ? `<button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 1)" style="width:24px; padding:2px; font-size:12px; margin:0;">+</button>
+                <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 10)" style="width:24px; padding:2px; font-size:10px; margin:0;">+10</button>` : ''}
+            </div>
+        </div>
+    `;
+
+    return makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('REACTIVE ARMOR (IMPACT/EXPLOSIVE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT/ENERGY)', a_int, a_max, '#ffaa00', 'ablative') + makeBar('HARDENED ARMOR', hd_int, Math.max(1, hd_max), '#c9962f', 'hardened') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
+};
+
+// idPrefix distinguishes this weapon row's target/volley element ids from
+// another simultaneous render of the SAME weapon elsewhere in the DOM (the
+// Vessel Deck uses '' — unchanged from before this session; the Battle Map
+// cards use 'bm-'). showManageButtons hides the ✎ edit / ✕ delete weapon
+// buttons — those are weapon-DESIGN actions, out of place on an in-combat
+// HUD, so the Battle Map cards render with showManageButtons:false while
+// the Vessel Deck (the one place weapons should be edited) keeps them.
+window.renderShipWeaponsHtml = function(vessel, opts) {
+    opts = opts || {};
+    const idPrefix = opts.idPrefix || '';
+    const showManageButtons = opts.showManageButtons !== false;
+    const weapons = vessel.ship_weapons || [];
+    if (weapons.length === 0) return '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>';
+    let wHtml = '';
+    weapons.forEach((w, idx) => {
+        const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range) : null;
+        const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id);
+        let targetOptions = '<option value="">-- No Target --</option>';
+        targetCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
+
+        let wDmgType = window.normalizeDamageType(w.damage_type || window.inferLegacyDamageType(w.name));
+        let wDmgInfo = window.DAMAGE_TYPES[wDmgType];
+        let wClass = w.weapon_class === 'ordnance' ? 'ordnance' : 'direct_fire';
+        let classBadge = wClass === 'ordnance' ? `<span style="font-size:8px; color:#c778dd; border:1px solid #c778dd; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Ordnance — multi-turn flight, counter-fireable by Point Defense">☠ ORDNANCE</span>` : '';
+        let pdBadge = w.is_point_defense ? `<span style="font-size:8px; color:#66d9ff; border:1px solid #66d9ff; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Point Defense — auto-fires at inbound ordnance and engaged strike craft on Advance Round">🛡 PD</span>` : '';
+        let rangeBadge = w.range ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Battle Map targeting range">📏 ${w.range}</span>` : '';
+        wHtml += `
+        <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}
+                    <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <label for="${idPrefix}wpn-target-${vessel.id}-${idx}" style="display:none;">Target</label>
+                    <select id="${idPrefix}wpn-target-${vessel.id}-${idx}" style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
+                    <label for="${idPrefix}wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
+                    <input type="number" id="${idPrefix}wpn-volley-${vessel.id}-${idx}" value="1" min="1" max="${w.gun_count || 1}" title="Volley Count (max ${w.gun_count || 1} guns)" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
+                    ${wClass === 'ordnance'
+                        ? `<button class="layer-edit" onclick="window.launchOrdnance('${vessel.id}', ${idx}, '${idPrefix}')" style="padding:4px 10px; font-size:10px; border-color:#c778dd; color:#c778dd;" title="Launches a multi-turn payload if this vessel is a token in an active battle; resolves instantly otherwise">LAUNCH</button>`
+                        : `<button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx}, '${idPrefix}')" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>`}
+                    ${showManageButtons ? `<button class="layer-edit" onclick="window.openEditWeaponModal('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;" title="Edit weapon">✎</button>
+                    <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>` : ''}
+                </div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:8px; gap:8px;">
+                <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
+                    <div style="font-size:9px; color:#6b826a; margin-bottom:4px;">AMMO: ${w.ammo < 0 ? 'INF' : `${w.ammo}/${w.max_ammo}`}</div>
+                    ${w.ammo >= 0 ? `<div style="display:flex; justify-content:center; gap:4px;"><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'ammo', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'ammo', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button></div>` : ''}
+                </div>
+                <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
+                    <div style="font-size:9px; color:#6b826a; margin-bottom:4px;">COOLDOWN: ${w.cooldown || 0}</div>
+                    <div style="display:flex; justify-content:center; gap:4px;"><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'cooldown', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'cooldown', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button></div>
+                </div>
+                <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
+                    <div style="font-size:9px; color:#ffaa00; margin-bottom:4px;">OVERHEAT: ${w.overheat || 0}/10</div>
+                    <div style="display:flex; justify-content:center; gap:4px;"><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button></div>
+                </div>
+            </div>
+        </div>`;
+    });
+    return wHtml;
 };
 
 window.renderVesselDeck = function() {
@@ -386,51 +512,14 @@ window.renderVesselDeck = function() {
     }
 
     if (healthContainer) {
-        const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
-        const s_max = vessel.max_shields || 400;
-        const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
-        const h_max = vessel.max_hull || 300;
-        const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
-        const r_max = vessel.max_reactive || 10;
-        const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
-        const a_max = vessel.max_ablative || 10;
-        const hd_int = vessel.integrity_hardened !== undefined ? vessel.integrity_hardened : 0;
-        const hd_max = vessel.max_hardened || 0;
-
-        let currentStance = vessel.ship_stance || 'Balanced';
-        let stanceHtml = `
-            <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center;">
-                <label for="vessel-stance-${vessel.id}" style="font-size:10px; color:#00e5a3; font-weight:bold;">TACTICAL STANCE:</label>
-                <select id="vessel-stance-${vessel.id}" onchange="window.updateShipStance('${vessel.id}', this.value)" style="width:160px; margin:0; padding:4px; font-size:10px; background:#040605; color:#00e5a3; border:1px solid #3c4e36;">
-                    <option value="Balanced" ${currentStance === 'Balanced' ? 'selected' : ''}>Balanced (Standard)</option>
-                    <option value="Aggressive" ${currentStance === 'Aggressive' ? 'selected' : ''}>Aggressive (+Dmg, -Def)</option>
-                    <option value="Defensive" ${currentStance === 'Defensive' ? 'selected' : ''}>Defensive (+Def, -Dmg)</option>
-                    <option value="Evasive" ${currentStance === 'Evasive' ? 'selected' : ''}>Evasive (Dodge Focus)</option>
-                </select>
-            </div>
-        `;
-
-        const makeBar = (label, current, max, color, key) => `
-            <div style="margin-bottom: 8px;">
-                <div style="display:flex; justify-content:space-between; font-size:10px; color:${color}; margin-bottom:2px;">
-                    <strong>${label}</strong>
-                    <span>${current} / ${max}</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -10)" style="width:24px; padding:2px; font-size:10px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-10</button>
-                    <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', -1)" style="width:24px; padding:2px; font-size:12px; margin:0; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">-</button>
-                    <div style="flex-grow:1; height:12px; background:#030403; border:1px solid #3c4e36; border-radius:2px; overflow:hidden;">
-                        <div style="width:${Math.max(0, Math.min(100, (current/max)*100))}%; height:100%; background:${current === 0 ? '#ff3333' : color}; transition:width 0.3s;"></div>
-                    </div>
-                    <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 1)" style="width:24px; padding:2px; font-size:12px; margin:0;">+</button>
-                    <button onclick="window.modifyShipHealth('${vessel.id}', '${key}', 10)" style="width:24px; padding:2px; font-size:10px; margin:0;">+10</button>
-                </div>
-            </div>
-        `;
-        
         let resetBtn = `<div style="display:flex; gap:6px; margin-bottom:10px;"><button class="btn-reveal" onclick="window.resetShipStats('${vessel.id}')" style="flex:1; font-size:10px; margin:0; border-color:#00e5a3;">↺ RESET COMBAT STATS</button><button class="layer-edit" onclick="window.openEditMaxStatsModal('${vessel.id}')" style="flex:1; font-size:10px; margin:0; border-color:#c9962f; color:#c9962f;">✎ EDIT BASE STATS</button></div>`;
 
-        healthContainer.innerHTML = stanceHtml + resetBtn + makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('REACTIVE ARMOR (IMPACT/EXPLOSIVE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT/ENERGY)', a_int, a_max, '#ffaa00', 'ablative') + makeBar('HARDENED ARMOR', hd_int, Math.max(1, hd_max), '#c9962f', 'hardened') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
+        // Stance selector + health bars are shared with the Battle Map's
+        // full-screen ship-status cards (see window.renderShipStanceHtml /
+        // window.renderShipHealthBarsHtml below) — one implementation, two
+        // call sites, so they can't drift apart. Reset/Edit Base Stats stay
+        // Vessel-Deck-only (an admin/setup action, not a combat one).
+        healthContainer.innerHTML = window.renderShipStanceHtml(vessel) + resetBtn + window.renderShipHealthBarsHtml(vessel, true);
     }
 
     if (decksContainer) {
@@ -531,67 +620,11 @@ window.renderVesselDeck = function() {
     }
 
     if (weaponsContainer) {
-        const weapons = vessel.ship_weapons || [];
-        let wHtml = '';
-        if (weapons.length === 0) wHtml = '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>';
-        else {
-            weapons.forEach((w, idx) => {
-                // Tactical Battle Map: if this vessel is currently a token in
-                // the active battle, narrow the target list to that battle's
-                // other tokens only, further filtered by THIS weapon's own
-                // range (0/unset = unlimited). Computed per-weapon since
-                // range is a per-weapon stat — two weapons on the same ship
-                // can see different target lists. Returns null when there's
-                // no active battle or this vessel isn't in it, in which case
-                // the full galaxy-wide target list below is unchanged.
-                const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range) : null;
-                const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id);
-                let targetOptions = '<option value="">-- No Target --</option>';
-                targetCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
-
-                let wDmgType = window.normalizeDamageType(w.damage_type || window.inferLegacyDamageType(w.name));
-                let wDmgInfo = window.DAMAGE_TYPES[wDmgType];
-                let wClass = w.weapon_class === 'ordnance' ? 'ordnance' : 'direct_fire';
-                let classBadge = wClass === 'ordnance' ? `<span style="font-size:8px; color:#c778dd; border:1px solid #c778dd; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Ordnance — multi-turn flight, counter-fireable by Point Defense">☠ ORDNANCE</span>` : '';
-                let pdBadge = w.is_point_defense ? `<span style="font-size:8px; color:#66d9ff; border:1px solid #66d9ff; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Point Defense — auto-fires at inbound ordnance and engaged strike craft on Advance Round">🛡 PD</span>` : '';
-                let rangeBadge = w.range ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Battle Map targeting range">📏 ${w.range}</span>` : '';
-                wHtml += `
-                <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div>
-                            <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}
-                            <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
-                        </div>
-                        <div style="display:flex; gap:6px; align-items:center;">
-                            <label for="wpn-target-${vessel.id}-${idx}" style="display:none;">Target</label>
-                            <select id="wpn-target-${vessel.id}-${idx}" style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
-                            <label for="wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
-                            <input type="number" id="wpn-volley-${vessel.id}-${idx}" value="1" min="1" max="${w.gun_count || 1}" title="Volley Count (max ${w.gun_count || 1} guns)" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
-                            ${wClass === 'ordnance'
-                                ? `<button class="layer-edit" onclick="window.launchOrdnance('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#c778dd; color:#c778dd;" title="Launches a multi-turn payload if this vessel is a token in an active battle; resolves instantly otherwise">LAUNCH</button>`
-                                : `<button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>`}
-                            <button class="layer-edit" onclick="window.openEditWeaponModal('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;" title="Edit weapon">✎</button>
-                            <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
-                        </div>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; margin-top:8px; gap:8px;">
-                        <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
-                            <div style="font-size:9px; color:#6b826a; margin-bottom:4px;">AMMO: ${w.ammo < 0 ? 'INF' : `${w.ammo}/${w.max_ammo}`}</div>
-                            ${w.ammo >= 0 ? `<div style="display:flex; justify-content:center; gap:4px;"><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'ammo', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'ammo', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button></div>` : ''}
-                        </div>
-                        <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
-                            <div style="font-size:9px; color:#6b826a; margin-bottom:4px;">COOLDOWN: ${w.cooldown || 0}</div>
-                            <div style="display:flex; justify-content:center; gap:4px;"><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'cooldown', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'cooldown', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button></div>
-                        </div>
-                        <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
-                            <div style="font-size:9px; color:#ffaa00; margin-bottom:4px;">OVERHEAT: ${w.overheat || 0}/10</div>
-                            <div style="display:flex; justify-content:center; gap:4px;"><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button></div>
-                        </div>
-                    </div>
-                </div>`;
-            });
-        }
-        weaponsContainer.innerHTML = wHtml;
+        // Shared with the Battle Map's ship-status cards -- see
+        // window.renderShipWeaponsHtml above renderVesselDeck. Vessel Deck
+        // keeps its plain (unprefixed) element ids and the manage buttons,
+        // unchanged from before this session.
+        weaponsContainer.innerHTML = window.renderShipWeaponsHtml(vessel, { idPrefix: '', showManageButtons: true });
     }
 
     const embarkedContainer = document.getElementById('vessel-embarked-container');
@@ -663,6 +696,15 @@ window.renderVesselDeck = function() {
         }
         deployedContainer.innerHTML = dHtml;
     }
+
+    // Keep the Battle Map's full-screen ship-status cards in sync with
+    // anything that just changed here (health, weapons, stance, ammo,
+    // cooldown...) — renderVesselDeck is already the "something about a
+    // vessel changed" signal every mutating function in this file calls, so
+    // hooking in here covers all of them in one place instead of touching
+    // ~20 call sites individually. No-ops if the Battle Map isn't open or
+    // there's no active encounter (renderBattleMapPanel bails out early).
+    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
 
 window.modifyShipHealth = async function(vesselId, key, delta) {
@@ -1128,16 +1170,17 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
     }
 };
 
-window.rollShipWeapon = async function(vesselId, idx) {
+window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
+    idPrefix = idPrefix || '';
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    
+
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
 
-    let volleyInput = document.getElementById(`wpn-volley-${vesselId}-${idx}`);
+    let volleyInput = document.getElementById(`${idPrefix}wpn-volley-${vesselId}-${idx}`);
     let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
-    let targetSelect = document.getElementById(`wpn-target-${vesselId}-${idx}`);
+    let targetSelect = document.getElementById(`${idPrefix}wpn-target-${vesselId}-${idx}`);
     let targetId = targetSelect ? targetSelect.value : null;
 
     let gunCount = wpn.gun_count || 1;
@@ -1381,9 +1424,9 @@ window.reassignVesselOwnership = async function(vesselId) {
 
     try {
         await db.from('chat_logs').insert({
-            sender_id: 'system',
+            sender_id: null,
             content: `⚔️ BOARDING RESOLVED: "${vessel.name}" has been captured — ownership transferred to ${newOwnerName}.`,
-            message_type: 'text'
+            message_type: 'system'
         });
     } catch (e) { /* chat log is best-effort, don't block the transfer on it */ }
 
@@ -2574,9 +2617,9 @@ window.advanceCombatRound = async function() {
 
         if (flightLog.length > 0) {
             await db.from('chat_logs').insert({
-                sender_id: 'system',
+                sender_id: null,
                 content: `🚨 [FLIGHT OPS] ${vessel.name}: ${flightLog.join(' ')}`,
-                message_type: 'text'
+                message_type: 'system'
             });
         }
     }
