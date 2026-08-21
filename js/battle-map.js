@@ -105,7 +105,7 @@ window.startBattleEncounter = async function() {
     const { error } = await db.from('battle_encounters').insert({ name, is_active: true, created_by: currentUserId, tokens: [] });
     if (error) { alert('Failed to start battle: ' + error.message); return; }
     if (nameInput) nameInput.value = '';
-    await db.from('chat_logs').insert({ sender_id: 'system', content: `⚔️ [TACTICAL BATTLE MAP] Engagement started: "${name}".`, message_type: 'text' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement started: "${name}".`, message_type: 'system' });
     if (window.AudioEngine) window.AudioEngine.playKlaxon();
     loadBattleEncounters();
 };
@@ -114,7 +114,7 @@ window.endBattleEncounter = async function() {
     if (currentUserRole !== 'dm' || !window.globalBattleEncounterCache) return;
     if (!(await window.showConfirmModal(`End engagement "${window.globalBattleEncounterCache.name}"? The record is kept (marked inactive), tokens' underlying vessels are untouched.`))) return;
     await db.from('battle_encounters').update({ is_active: false }).eq('id', window.globalBattleEncounterCache.id);
-    await db.from('chat_logs').insert({ sender_id: 'system', content: `⚔️ [TACTICAL BATTLE MAP] Engagement ended: "${window.globalBattleEncounterCache.name}".`, message_type: 'text' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement ended: "${window.globalBattleEncounterCache.name}".`, message_type: 'system' });
     loadBattleEncounters();
 };
 
@@ -182,7 +182,7 @@ window.checkBattleTokenDestroyed = async function(vessel) {
     if (!tok) return;
     const remaining = tokens.filter(t => t.token_id !== tok.token_id);
     await saveBattleTokens(remaining);
-    await db.from('chat_logs').insert({ sender_id: 'system', content: `💥 [TACTICAL BATTLE MAP] ${vessel.name} destroyed — removed from the engagement.`, message_type: 'text' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `💥 [TACTICAL BATTLE MAP] ${vessel.name} destroyed — removed from the engagement.`, message_type: 'system' });
 
     // Battlefield Salvage: spawn at any player-owned vessel still present in
     // the battle. "Player" = owner's profile role !== 'dm', same heuristic
@@ -203,7 +203,7 @@ window.checkBattleTokenDestroyed = async function(vessel) {
                 resource_name: 'Unprocessed Wreckage Salvage', qty: 5, unit: 'Tons',
                 status: 'available', source_vessel_name: vessel.name, created_by: currentUserId
             });
-            await db.from('chat_logs').insert({ sender_id: 'system', content: `🛰️ [SALVAGE] Wreckage from ${vessel.name} drifts near ${anchor.name} — recoverable.`, message_type: 'text' });
+            await db.from('chat_logs').insert({ sender_id: null, content: `🛰️ [SALVAGE] Wreckage from ${vessel.name} drifts near ${anchor.name} — recoverable.`, message_type: 'system' });
         }
     }
 
@@ -478,7 +478,7 @@ window.processBattleRoundAutomations = async function() {
 
     for (const line of chatLines) {
       try {
-        await db.from('chat_logs').insert({ sender_id: 'system', content: line, message_type: 'text' });
+        await db.from('chat_logs').insert({ sender_id: null, content: line, message_type: 'system' });
       } catch (err) {
         console.error('processBattleRoundAutomations: failed to post chat log line', line, err);
       }
@@ -535,7 +535,7 @@ window.startSalvageGather = async function(salvageId) {
         gather_started_at_hours: window.universeTimeHours, gather_duration_hours: duration
     }).eq('id', salvageId);
     if (error) { alert('Failed to start gathering: ' + error.message); return; }
-    await db.from('chat_logs').insert({ sender_id: 'system', content: `⏳ [SALVAGE] ${ship.name} began recovering wreckage — ready in ${duration}h.`, message_type: 'text' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `⏳ [SALVAGE] ${ship.name} began recovering wreckage — ready in ${duration}h.`, message_type: 'system' });
     loadBattlefieldSalvage();
 };
 
@@ -571,7 +571,7 @@ window.processSalvageGatherCompletion = async function(newHours) {
         await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', ship.id);
         ship.cargo_inventory = cargo;
         await db.from('battlefield_salvage').delete().eq('id', rec.id);
-        await db.from('chat_logs').insert({ sender_id: 'system', content: `📦 [SALVAGE] ${ship.name} recovered ${rec.qty}x ${rec.resource_name}.`, message_type: 'text' });
+        await db.from('chat_logs').insert({ sender_id: null, content: `📦 [SALVAGE] ${ship.name} recovered ${rec.qty}x ${rec.resource_name}.`, message_type: 'system' });
         any = true;
     }
     if (any) {
@@ -611,9 +611,9 @@ window.processSalvageConversion = async function(daysPassed) {
             await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
             vessel.cargo_inventory = cargo;
             await db.from('chat_logs').insert({
-                sender_id: 'system',
+                sender_id: null,
                 content: `⚙ [SALVAGE PROCESSING] ${vessel.name} refined ${consumed}x Unprocessed Wreckage Salvage into ${consumed}x ${vessel.salvage_processing_output}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''}.`,
-                message_type: 'text'
+                message_type: 'system'
             });
         } catch (err) {
             console.error(`processSalvageConversion: failed for vessel "${vessel.name}" (${vessel.id})`, err);
@@ -682,7 +682,8 @@ window.getBattleScopedTargets = function(vesselId, range) {
    instead. Aging, the turn-1 split into 6, PD auto-fire, and impact
    resolution all happen in window.processBattleRoundAutomations, called
    from combat.js's advanceCombatRound. */
-window.launchOrdnance = async function(vesselId, idx) {
+window.launchOrdnance = async function(vesselId, idx, idPrefix) {
+    idPrefix = idPrefix || '';
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
     let wpn = (vessel.ship_weapons || [])[idx];
@@ -692,10 +693,10 @@ window.launchOrdnance = async function(vesselId, idx) {
     if (!selfPos) {
         // Not a battle-map token right now — no grid to track a flight
         // against, so ordnance just resolves the old instant way.
-        return window.rollShipWeapon(vesselId, idx);
+        return window.rollShipWeapon(vesselId, idx, idPrefix);
     }
 
-    let targetSelect = document.getElementById(`wpn-target-${vesselId}-${idx}`);
+    let targetSelect = document.getElementById(`${idPrefix}wpn-target-${vesselId}-${idx}`);
     let targetId = targetSelect ? targetSelect.value : null;
     if (!targetId) { alert('Select a target first.'); return; }
     let targetVessel = globalShipMarkersCache.find(m => m.id === targetId);
@@ -735,7 +736,7 @@ window.launchOrdnance = async function(vesselId, idx) {
     await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
 
     if (window.AudioEngine) window.AudioEngine.playShoot();
-    await db.from('chat_logs').insert({ sender_id: 'system', content: `☠️ [ORDNANCE] ${vessel.name} launches ${wpn.name} at ${targetVessel.name} — impact in 3 rounds.`, message_type: 'text' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `☠️ [ORDNANCE] ${vessel.name} launches ${wpn.name} at ${targetVessel.name} — impact in 3 rounds.`, message_type: 'system' });
     window.renderVesselDeck();
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
@@ -801,7 +802,7 @@ window.deployFleetToBattle = async function() {
         }
     }
     await saveBattleTokens(tokens);
-    await db.from('chat_logs').insert({ sender_id: 'system', content: `⚔️ [TACTICAL BATTLE MAP] ${fleet.name} deployed — ${placedCount} vessel${placedCount === 1 ? '' : 's'} placed.`, message_type: 'text' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] ${fleet.name} deployed — ${placedCount} vessel${placedCount === 1 ? '' : 's'} placed.`, message_type: 'system' });
     window.renderBattleMapPanel();
 };
 
@@ -878,11 +879,10 @@ window.resetBattleMapMovement = async function() {
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
 
-// Same draggable-floating-panel convention as every other overlay (js/ui.js
-// makePanelDraggable) — called here (rather than from ui.js) since this
-// panel's markup/ownership belongs to this file, consistent with how each
-// other panel wires its own drag call right where it's introduced.
-if (typeof makePanelDraggable === 'function') makePanelDraggable('battle-map-panel', 'battle-map-header', 'odyssey_battlemap_pos');
+// Salvage stays a normal draggable floating panel. Battle Map itself is NO
+// LONGER draggable as of this session's full-screen build — it's now a
+// fixed full-viewport overlay (same convention as #character-terminal),
+// so a drag call on it would be meaningless/broken.
 if (typeof makePanelDraggable === 'function') makePanelDraggable('salvage-panel', 'salvage-header', 'odyssey_salvage_pos');
 
 window.renderSalvagePanel = function() {
@@ -940,7 +940,10 @@ window.renderBattleMapPanel = function() {
 
     dmControls.style.display = (isDm && !encounter) ? 'block' : 'none';
     inactiveMsg.style.display = encounter ? 'none' : 'block';
-    activeContainer.style.display = encounter ? 'block' : 'none';
+    // activeContainer is now the two-column .battle-map-layout flex box
+    // (full-screen build, this session) — 'flex', not 'block', or the grid
+    // + ship-cards columns collapse back to a single stacked column.
+    activeContainer.style.display = encounter ? 'flex' : 'none';
     if (!encounter) return;
 
     document.getElementById('battle-map-encounter-name').innerText = encounter.name;
@@ -1020,24 +1023,10 @@ window.renderBattleMapPanel = function() {
             : fleets.map(f => `<option value="${f.id}">${f.name} (${(f.members || []).reduce((n, m) => n + (m.quantity || 1), 0)} vessels)</option>`).join('');
     }
 
-    // --- Roster / withdraw list ---
-    const listContainer = document.getElementById('battle-map-tokens-list');
-    if (listContainer) {
-        if (tokens.length === 0) {
-            listContainer.innerHTML = 'No vessels placed on the grid yet.';
-        } else {
-            listContainer.innerHTML = tokens.map(tok => {
-                const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
-                const canWithdraw = isDm || (vessel && vessel.owner_id === currentUserId);
-                const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : ((vessel?.tactical_speed ?? 80));
-                const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
-                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
-                    <span>${vessel ? vessel.name : '(missing vessel)'}${vessel ? ` — Hull ${vessel.integrity_hull ?? '?'}/${vessel.max_hull ?? '?'}` : ''} <span style="color:${moveColor};" title="Movement remaining this round (informational — not enforced)">· Move ${moveRemaining}/${(vessel?.tactical_speed ?? 80)}</span></span>
-                    ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
-                </div>`;
-            }).join('');
-        }
-    }
+    // --- Ship-status cards (weapons + health) — replaces the old plain
+    // "Engaged Roster" list this session; see window.renderBattleShipCards
+    // below for the permission rule (own/allied vs. DM/NPC vessels).
+    window.renderBattleShipCards(tokens);
 
     // --- Incoming Ordnance (informational — PD is fully automatic, see
     // window.processBattleRoundAutomations; nothing here is clickable) ---
@@ -1061,4 +1050,69 @@ window.renderBattleMapPanel = function() {
             }).join('');
         }
     }
+};
+
+/* --- SHIP-STATUS CARDS (full-screen build, this session) ---
+   Confirmed permission rule: the DM sees full weapon+health detail on every
+   token, no exceptions. A player sees full detail (stance, interactive
+   weapons, editable health bars) on any PLAYER-owned vessel — their own
+   AND allies' (every NPC in this app is owned by the DM's account, so
+   "player-owned" == "owner's profile role !== 'dm'" cleanly separates the
+   two, same heuristic this project already uses for combat_tracker
+   PC-vs-NPC detection). A DM/NPC-owned vessel viewed by a player shows
+   health only — all 5 defensive bars, read-only, no stance selector, no
+   weapons at all. This is a DISPLAY-level rule only, same honor-system
+   trust model as the rest of this app — nothing here changes RLS or adds
+   real access control, it just controls what gets rendered into the DOM. */
+window.renderBattleShipCards = function(tokens) {
+    const container = document.getElementById('battle-map-ship-cards');
+    if (!container) return;
+    const isDm = currentUserRole === 'dm';
+    const profiles = (typeof allProfiles !== 'undefined' ? allProfiles : []);
+
+    if (!tokens || tokens.length === 0) {
+        container.innerHTML = '<span style="font-size:10px; color:#6b826a;">No vessels placed on the grid yet.</span>';
+        return;
+    }
+
+    container.innerHTML = tokens.map(tok => {
+        const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+        if (!vessel) {
+            return `<div class="battle-ship-card" style="border-color:#ff3333;"><span style="font-size:10px; color:#ff3333;">(vessel record missing — token may need to be withdrawn)</span></div>`;
+        }
+
+        const ownerProf = profiles.find(p => p.id === vessel.owner_id);
+        const ownedByPlayer = !!(ownerProf && ownerProf.role !== 'dm');
+        const fullDetail = isDm || ownedByPlayer;
+        const canWithdraw = isDm || vessel.owner_id === currentUserId;
+        const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : (vessel.tactical_speed ?? 80);
+        const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
+        const accentColor = fullDetail ? '#00e5a3' : '#ff3333';
+        const ownerTag = ownerProf ? (ownerProf.username || 'Commander') : (isDm ? 'Unowned' : 'Unknown');
+
+        const header = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
+                <div>
+                    <strong style="color:${accentColor}; font-size:13px;">${vessel.name}</strong>
+                    <span style="font-size:9px; color:#6b826a; margin-left:6px;">${ownerTag}${vessel.is_strike_craft ? ' · 🛩️' : ''}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 80}</span>
+                    ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
+                </div>
+            </div>`;
+
+        if (!fullDetail) {
+            return `<div class="battle-ship-card" style="border-color:${accentColor};">${header}${window.renderShipHealthBarsHtml(vessel, false)}</div>`;
+        }
+
+        return `<div class="battle-ship-card" style="border-color:${accentColor};">
+            ${header}
+            ${window.renderShipStanceHtml(vessel)}
+            ${window.renderShipHealthBarsHtml(vessel, true)}
+            <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #3c4e36;">
+                ${window.renderShipWeaponsHtml(vessel, { idPrefix: 'bm-', showManageButtons: false })}
+            </div>
+        </div>`;
+    }).join('');
 };
