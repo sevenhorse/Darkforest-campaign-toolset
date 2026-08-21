@@ -189,7 +189,7 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
                 if (rationIdx >= 0 && cargo.perishables[rationIdx].qty > 0) {
                     cargo.perishables[rationIdx].qty -= 1; changed = true; rationsLogged = true;
                 } else if (rationIdx >= 0 || cargo.perishables.length > 0) {
-                    await db.from('chat_logs').insert({ sender_id: 'system', content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has depleted Standard Rations. Starvation protocols active.`, message_type: 'text' });
+                    await db.from('chat_logs').insert({ sender_id: null, content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has depleted Standard Rations. Starvation protocols active.`, message_type: 'system' });
                     if (window.AudioEngine) window.AudioEngine.playError();
                 }
             }
@@ -198,7 +198,7 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
         
         if (anyUpdated) {
             let rationText = rationsLogged ? " Rations consumed." : "";
-            await db.from('chat_logs').insert({ sender_id: 'system', content: `✨ [DAILY LOGISTICS] 24-hour cycle complete. Elder E-M Synthesizers recharged.${rationText}`, message_type: 'text' });
+            await db.from('chat_logs').insert({ sender_id: null, content: `✨ [DAILY LOGISTICS] 24-hour cycle complete. Elder E-M Synthesizers recharged.${rationText}`, message_type: 'system' });
             if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
         }
 
@@ -788,7 +788,7 @@ window.dmUpdatePlayerStats = async function(profileId) {
     const prof = allProfiles.find(p => p.id === profileId);
     if (!prof || !prof.character) return;
     await db.from('characters').update({ vitality: vit, stress: str, adversity_tokens: adv, shield_current: shieldCur, shield_max: shieldMax, dr: dr, assets: assets }).eq('id', prof.character.id);
-    db.from('chat_logs').insert({ sender_id: 'system', content: `⚙️ [OVERSEER] System parameters overridden for Commander ${prof.username}.`, message_type: 'text' });
+    db.from('chat_logs').insert({ sender_id: null, content: `⚙️ [OVERSEER] System parameters overridden for Commander ${prof.username}.`, message_type: 'system' });
     if (typeof window.showToast === 'function') window.showToast("Player metrics overridden and saved to cloud.");
     else alert("Player metrics overridden and saved to cloud.");
 };
@@ -809,9 +809,9 @@ window.awardSection2Perk = async function(profileId) {
     prof.perks.push(data);
 
     await db.from('chat_logs').insert({
-        sender_id: 'system',
+        sender_id: null,
         content: `🎖️ [OVERSEER] ${prof.username || 'Commander'} was awarded the specialization: ${perkDef.name}.`,
-        message_type: 'text'
+        message_type: 'system'
     });
     if (typeof window.showToast === 'function') window.showToast(`Awarded ${perkDef.name} to ${prof.username || 'Commander'}.`);
     if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
@@ -1003,11 +1003,11 @@ window.executeDradisScan = async function(sysId) {
         localStorage.setItem('odyssey_scanned', JSON.stringify(window.scannedSystems));
     }
 
-    await db.from('chat_logs').insert({ sender_id: 'system', content: `📡 [DRADIS SWEEP] Task Force Black completed a deep scan of '${s.name}'. Operation took ${scanHours} hours. Orbital census uploaded to mainframe. [SYS_SCAN:${sysId}]`, message_type: 'text' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `📡 [DRADIS SWEEP] Task Force Black completed a deep scan of '${s.name}'. Operation took ${scanHours} hours. Orbital census uploaded to mainframe. [SYS_SCAN:${sysId}]`, message_type: 'system' });
     
     let unlockedLore = globalCodexEntriesCache.filter(e => (e.subtitle || '').includes(`LINK:${sysId}`));
     if (unlockedLore.length > 0) {
-        await db.from('chat_logs').insert({ sender_id: 'system', content: `📖 [INTEL DECRYPTED] DRADIS sweep recovered hidden data caches. New Codex entries unlocked.`, message_type: 'text' });
+        await db.from('chat_logs').insert({ sender_id: null, content: `📖 [INTEL DECRYPTED] DRADIS sweep recovered hidden data caches. New Codex entries unlocked.`, message_type: 'system' });
     }
 
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
@@ -1264,13 +1264,13 @@ window.renderChatFeed = function() {
     source.forEach(log => {
         const sender = allProfiles.find(p => p.id === log.sender_id); const senderName = sender ? (sender.username || 'Commander') : 'Unknown';
         const isDM = !!log.recipient_id; let headerColor = isDM ? '#c778dd' : '#00e5a3'; let prefix = isDM ? '🔒 [PRIVATE]' : '🌐';
-        if (log.sender_id === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
+        if (log.message_type === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
         if (log.message_type === 'roll') { headerColor = '#ff6b6b'; prefix = '🎲 [ROLL]'; }
         if (log.message_type === 'ping') { headerColor = '#00e1ff'; prefix = '📍 [PING]'; }
         let contentHTML = log.content;
         if (log.message_type === 'roll' && log.roll_data) { contentHTML = `<strong style="font-size:12px;">${log.content}</strong><br><span style="font-size:9px; color:#6b826a;">${log.roll_data.breakdown}</span>`; }
         if (log.message_type === 'ping' && log.roll_data) { contentHTML = `${log.content} <button class="layer-edit" onclick="window.jumpToPingLocation(${log.roll_data.x}, ${log.roll_data.y})" style="padding:2px 8px; font-size:9px; margin-left:6px;">JUMP TO LOCATION</button>`; }
-        html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.sender_id === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;">${contentHTML}</div></div>`;
+        html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.message_type === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;">${contentHTML}</div></div>`;
     });
     feed.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No messages in this channel yet.</span>';
     feed.scrollTop = feed.scrollHeight;
