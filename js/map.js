@@ -545,9 +545,9 @@ window.applyTerritoryToGalaxy = async function(territoryId) {
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 
     await db.from('chat_logs').insert({
-        sender_id: 'system',
+        sender_id: null,
         content: `🚩 [TERRITORY] "${t.name}" applied — ${claimedCount} system(s) now under ${faction}${releasedCount > 0 ? `, ${releasedCount} released back to Unclaimed` : ''}.`,
-        message_type: 'text'
+        message_type: 'system'
     });
     if (typeof window.showToast === 'function') window.showToast(`Territory applied: ${claimedCount} claimed${releasedCount > 0 ? `, ${releasedCount} released` : ''}.`);
 };
