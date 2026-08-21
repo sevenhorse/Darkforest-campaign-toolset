@@ -213,7 +213,7 @@ async function loadChatLogs() {
         .order('created_at', { ascending: false }).limit(75);
     if (data) { 
         chatLogsList = data.reverse(); 
-        if (chatLogsList.length === 0) chatLogsList = [{ sender_id: 'system', content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked.', message_type: 'text' }];
+        if (chatLogsList.length === 0) chatLogsList = [{ sender_id: null, content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked.', message_type: 'system' }];
         chatLogsList.forEach(log => window.checkSysScan(log));
         if (typeof renderChatFeed === 'function') renderChatFeed(); 
     }
@@ -337,7 +337,7 @@ async function checkAnomalyProximity(ship) {
         let dist = Math.hypot(ship.x - anomaly.x, ship.y - anomaly.y);
         if (dist < DRADIS_RANGE) {
             await db.from('star_systems').update({ luminosity: 'Revealed Anomaly', color: '#ff3333' }).eq('id', anomaly.id);
-            await db.from('chat_logs').insert({ sender_id: 'system', content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' detected a subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}.`, message_type: 'text' });
+            await db.from('chat_logs').insert({ sender_id: null, content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' detected a subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}.`, message_type: 'system' });
             if (window.AudioEngine) window.AudioEngine.playKlaxon();
             anomaly.luminosity = 'Revealed Anomaly'; anomaly.color = '#ff3333';
         }
@@ -625,9 +625,9 @@ window.jumpToActiveShip = async function() {
         if (typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
         const cappedNote = jumpDist / 250 > window.JUMP_TIME_INVERSION_MAX_HOURS ? ' [CAPPED]' : '';
         await db.from('chat_logs').insert({
-            sender_id: 'system',
+            sender_id: null,
             content: `🌀 [TEMPORAL DESYNC] ${ship.name} completed an FTL jump (${jumpDist.toFixed(1)}u since last transit). Chronometer reads ${rollbackHours}h prior to departure per relativistic inversion.${cappedNote}${gravityWellNote}`,
-            message_type: 'text'
+            message_type: 'system'
         });
         if (typeof loadChatLogs === 'function') loadChatLogs();
     }
