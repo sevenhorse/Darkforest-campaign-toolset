@@ -161,7 +161,25 @@ canvas { display: block; width: 100%; height: 100%; }
 #calendar-control-panel { top: 80px; right: 20px; width: 320px; display: none; z-index: 15; }
 #dm-scratchpad-panel { top: 340px; left: 20px; width: 320px; display: none; z-index: 15; }
 #territory-control-panel { top: 20px; left: 380px; width: 340px; display: none; z-index: 18; }
-#battle-map-panel { top: 60px; left: 60px; width: 700px; display: none; z-index: 20; max-height: 85vh; overflow-y: auto; }
+/* Tactical Battle Map — full-screen overlay, same convention as
+   #character-terminal (fixed to the viewport, high z-index, dark border)
+   rather than a small draggable .panel. Superseded the old floating
+   460x460-ish box so there's room for the ship-status cards alongside the
+   grid. No longer draggable (position:fixed + 100vw/100vh makes dragging
+   meaningless) — the header's old "DRAG" hint was removed in index.html. */
+#battle-map-panel {
+    display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(3, 4, 3, 0.98); z-index: 100; box-sizing: border-box;
+    padding: 20px 30px; overflow: hidden; border: 4px solid #3c4e36; border-radius: 0;
+    max-height: none; max-width: none;
+}
+.battle-map-layout { display: flex; gap: 16px; height: calc(100vh - 80px); }
+.battle-map-left-col {
+    flex: 0 0 500px; display: flex; flex-direction: column; gap: 10px;
+    overflow-y: auto; overflow-x: hidden; padding-right: 6px;
+}
+.battle-map-right-col { flex: 1; min-width: 0; overflow-y: auto; padding-right: 6px; }
+.battle-ship-card { background: #030403; border: 1px solid #3c4e36; border-radius: 2px; padding: 10px; }
 #salvage-panel { top: 100px; right: 20px; width: 320px; display: none; z-index: 20; max-height: 70vh; overflow-y: auto; }
 
 #bottom-right-presence {
