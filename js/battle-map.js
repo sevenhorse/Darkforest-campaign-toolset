@@ -67,9 +67,19 @@ const BATTLE_GRID_H = 380;
 const BATTLE_TOKEN_SIZE = 34;
 
 async function loadBattleEncounters() {
+    // Battle music hook (2026-08 audio polish): this function already runs
+    // on EVERY connected client via battle_encounters_stream below, whoever
+    // started/ended the fight -- so comparing the active-state edge here
+    // fires the music bed for the whole table, not just the DM's browser.
+    const wasActive = !!window.globalBattleEncounterCache;
     const { data, error } = await db.from('battle_encounters').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(1);
     if (error) { console.error('loadBattleEncounters failed', error); return; }
     window.globalBattleEncounterCache = (data && data.length > 0) ? data[0] : null;
+    const isActive = !!window.globalBattleEncounterCache;
+    if (window.AudioEngine) {
+        if (isActive && !wasActive) window.AudioEngine.startBattleMusic();
+        else if (!isActive && wasActive) window.AudioEngine.stopBattleMusic();
+    }
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 }
 
