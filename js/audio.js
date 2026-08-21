@@ -25,15 +25,43 @@ window.AudioEngine = (function() {
 
     /* ----------------------------------------------------------------------
        MUSIC BEDS -- real Battlestar Galactica soundtrack (Bear McCreary),
-       supplied by the DM as local files
+       served from a PRIVATE Supabase Storage bucket, not a public file
        ----------------------------------------------------------------------
-       Replaces the earlier CC0/CC-BY OpenGameArt hotlinks entirely (the DM
-       found the OpenGameArt ambient pack's horror lean didn't fit BSG's
-       tone, then supplied real soundtrack tracks directly as local files
-       in a "music tracks/" folder alongside index.html/js/style.css --
-       see the "Real soundtrack swap" checkpoint in
-       darkforest-architecture-reference.md). Filenames below match the
-       DM's own files exactly, numeric prefixes included.
+       Earlier this session these tracks were referenced as local files in
+       a "music tracks/" folder, which worked fine locally but turned out
+       to be a real problem the moment this app got deployed to a public
+       GitHub Pages site: a static host has zero access control, so any
+       file sitting in that repo is a plain public URL anyone (or any
+       crawler) can fetch, logged in or not -- not something that should
+       be true of full copyrighted commercial recordings. See the "Private
+       Supabase Storage for music" checkpoint in
+       darkforest-architecture-reference.md for the full discussion.
+
+       Fix: the 8 real audio files (m4a) now live in a PRIVATE Storage
+       bucket ('music-tracks', public:false, migration
+       music_tracks_private_storage) instead of the git repo. This file
+       never references a raw file URL -- it asks Supabase for a
+       short-lived SIGNED url (createSignedUrl, MUSIC_SIGNED_URL_TTL_SEC
+       below) each time a track starts, which only succeeds for an
+       authenticated session (RLS: music_tracks_authenticated_read).
+       Uploading/replacing files in the bucket is DM-only (RLS:
+       music_tracks_dm_write, same profiles.role='dm' pattern as the
+       pre-existing saved_fleets_dm_only policy) -- done via the Supabase
+       dashboard's Storage UI directly, not through this app's own UI (a
+       deliberate scope call for a one-time 8-file task, not built as an
+       in-app uploader this round).
+
+       This meaningfully narrows exposure (no public crawlable URL, no
+       search-engine indexing, access requires an actual login to this
+       campaign) but does NOT eliminate it -- nothing stops an
+       authenticated player from saving a track once it's played in their
+       own browser and re-sharing it themselves. That's a real, standing
+       limit, not something this fixes outright.
+
+       PERSONAL-USE NOTE (carried over, still true): these are real,
+       commercially-released, copyrighted recordings, not royalty-free
+       assets. This setup is meant for the DM's own table's private
+       sessions -- not a general public release of this tool.
 
        Ambient bed rotates through 6 tracks (shuffled, reshuffled on
        exhaustion): Pegasus, Dark Unions, Something Dark Is Coming, Worthy
@@ -43,24 +71,9 @@ window.AudioEngine = (function() {
        loadBattleEncounters(), unchanged wiring from before): Prelude to
        War, Worthy of Survival, Scar. "Worthy of Survival" deliberately
        appears in BOTH rotations -- the DM's own choice, not a mistake.
-
-       PERSONAL-USE NOTE (flagged plainly, not silently assumed): these
-       are real, commercially-released, copyrighted recordings, not
-       royalty-free assets like the tracks they replaced. Referencing
-       local files the DM already owns, for their own private table, is
-       one thing -- if this project is ever meant to be published,
-       distributed, or run for a paying audience, these files would need
-       to come out first. That's a real constraint on this project's
-       future, not just a footnote.
-
-       No hotlink risk anymore (files are local, not fetched from a
-       third-party server) -- but the app now depends on this exact
-       "music tracks/" folder shipping alongside index.html/js/style.css.
-       If it's ever missing (fresh clone, moved files), a track fails
-       silently the same way a broken hotlink used to (console.warn, no
-       crash, that track just doesn't play).
     */
-    const MUSIC_DIR = 'music tracks/';
+    const MUSIC_BUCKET = 'music-tracks';
+    const MUSIC_SIGNED_URL_TTL_SEC = 6 * 60 * 60; // 6h -- comfortably covers one session; a fresh URL is fetched per track anyway, not cached across the whole session
     const AMBIENT_TRACKS = [
         '08 Pegasus.m4a',
         '15 Dark Unions.m4a',
@@ -85,6 +98,16 @@ window.AudioEngine = (function() {
     let battleAudio = null;
     let ambientDesired = false; // "should ambient be playing when nothing overrides it"
     let battleActive = false;
+    // Consecutive-failure guards -- without these, if the WHOLE bucket/bed
+    // is unreachable (RLS misconfigured, bucket empty, logged out), the old
+    // "on error, just try the next track" logic would spin forever, firing
+    // a fresh failed network request every few ms (this is exactly what
+    // happened with the old local-file 404s before this fix -- a genuine
+    // bug, not just a symptom of the wrong URL). Once a full rotation's
+    // worth of consecutive failures happens, stop retrying until
+    // startAmbient()/startBattleMusic() is explicitly called again.
+    let ambientFailStreak = 0;
+    let battleFailStreak = 0;
 
     function shuffleIndices(n) {
         const a = []; for (let i = 0; i < n; i++) a.push(i);
@@ -124,40 +147,73 @@ window.AudioEngine = (function() {
     }
 
     // Shared rotating-playlist factory -- ambient and battle both need
-    // identical shuffle/reshuffle-on-exhaustion behavior now that BOTH are
-    // multi-track playlists (battle wasn't, before this swap), so this is
-    // one implementation instead of two that could drift apart.
+    // identical shuffle/reshuffle-on-exhaustion behavior, so this is one
+    // implementation instead of two that could drift apart. Returns the
+    // bucket-relative object path (filename), not a URL -- signed URLs are
+    // fetched per-track in playNextTrack below.
     function makeRotatingPlaylist(filenames) {
         let order = shuffleIndices(filenames.length);
         let cursor = -1;
         return function next() {
             cursor++;
             if (cursor >= order.length) { order = shuffleIndices(filenames.length); cursor = 0; }
-            return MUSIC_DIR + filenames[order[cursor]];
+            return filenames[order[cursor]];
         };
     }
-    const nextAmbientUrl = makeRotatingPlaylist(AMBIENT_TRACKS);
-    const nextBattleUrl = makeRotatingPlaylist(BATTLE_TRACKS);
+    const nextAmbientPath = makeRotatingPlaylist(AMBIENT_TRACKS);
+    const nextBattlePath = makeRotatingPlaylist(BATTLE_TRACKS);
 
-    // kind: 'ambient' | 'battle' -- plays the next track in that bed's own
-    // rotation, fading it in. Used both for normal track-ended advancement
-    // and for a manual skip (see skipTrack below).
-    function playNextTrack(kind) {
+    // Records a load/play failure for the given bed; returns true if the
+    // bed has now failed a full rotation's worth in a row and should STOP
+    // retrying (caller must not recurse further in that case).
+    function recordFailureAndCheckGiveUp(isAmbient) {
+        const trackCount = isAmbient ? AMBIENT_TRACKS.length : BATTLE_TRACKS.length;
+        if (isAmbient) {
+            ambientFailStreak++;
+            if (ambientFailStreak > trackCount) { console.warn('[AudioEngine] ambient bed: every track failed to load/play -- pausing retries until startAmbient() runs again (check login + the music-tracks bucket).'); return true; }
+        } else {
+            battleFailStreak++;
+            if (battleFailStreak > trackCount) { console.warn('[AudioEngine] battle bed: every track failed to load/play -- pausing retries until startBattleMusic() runs again (check login + the music-tracks bucket).'); return true; }
+        }
+        return false;
+    }
+
+    // kind: 'ambient' | 'battle' -- fetches a signed URL for the next track
+    // in that bed's own rotation and plays it, fading in. Used both for
+    // normal track-ended advancement and for a manual skip (see skipTrack
+    // below). Async because getting a signed URL is a network round-trip.
+    async function playNextTrack(kind) {
         const isAmbient = kind === 'ambient';
         if (isAmbient) { if (!ambientDesired || battleActive) return; }
         else { if (!battleActive) return; }
-        const rawUrl = isAmbient ? nextAmbientUrl() : nextBattleUrl();
-        const el = new Audio(encodeURI(rawUrl)); // encodeURI handles the spaces in folder/file names
+        const path = isAmbient ? nextAmbientPath() : nextBattlePath();
+
+        let signedUrl;
+        try {
+            const { data, error } = await db.storage.from(MUSIC_BUCKET).createSignedUrl(path, MUSIC_SIGNED_URL_TTL_SEC);
+            if (error || !data || !data.signedUrl) throw error || new Error('no signedUrl in response');
+            signedUrl = data.signedUrl;
+        } catch (err) {
+            console.warn('[AudioEngine] could not get a signed URL (check you are logged in and this file exists in the "music-tracks" Storage bucket):', path, err);
+            if (recordFailureAndCheckGiveUp(isAmbient)) return;
+            return playNextTrack(kind); // try the next track in this bed's rotation
+        }
+
+        const el = new Audio(signedUrl);
         el.volume = 0;
         el.addEventListener('ended', () => playNextTrack(kind));
-        el.addEventListener('error', () => { console.warn('[AudioEngine] track failed to load (check the "music tracks" folder is present):', rawUrl); playNextTrack(kind); });
-        if (isAmbient) ambientAudio = el; else battleAudio = el;
+        el.addEventListener('error', () => {
+            console.warn('[AudioEngine] signed track URL failed to play:', path);
+            if (!recordFailureAndCheckGiveUp(isAmbient)) playNextTrack(kind);
+        });
+        if (isAmbient) { ambientAudio = el; ambientFailStreak = 0; } else { battleAudio = el; battleFailStreak = 0; }
         el.play().catch(() => { /* blocked until a user gesture -- click-unlock listener below retries */ });
         fadeTo(el, effectiveVolume(), isAmbient ? 2000 : 1000);
     }
 
     function startAmbient() {
         ambientDesired = true;
+        ambientFailStreak = 0; // explicit (re)start always gets a fresh full attempt
         if (battleActive) return; // battle bed takes priority; resumes when it ends
         if (ambientAudio && !ambientAudio.paused) return;
         playNextTrack('ambient');
@@ -173,6 +229,7 @@ window.AudioEngine = (function() {
     function startBattleMusic() {
         if (battleActive) return; // already running, don't restart from 0
         battleActive = true;
+        battleFailStreak = 0; // explicit (re)start always gets a fresh full attempt
         if (ambientAudio && !ambientAudio.paused) { const a = ambientAudio; fadeTo(a, 0, 1200, () => a.pause()); }
         playNextTrack('battle');
     }
@@ -250,11 +307,16 @@ window.AudioEngine = (function() {
     });
 
     // Browsers require a user interaction to unlock audio playback. This
-    // both resumes the oscillator SFX context (original behavior, unchanged)
-    // and kicks off the ambient bed for the first time (new).
+    // resumes the oscillator SFX context (original behavior, unchanged).
+    // NOTE: starting the ambient bed itself now happens from db.js's
+    // fetchUserProfile() right after a real login succeeds -- the signed-URL
+    // fetch requires an authenticated session, so calling startAmbient() from
+    // a pre-login click (e.g. clicking the email field) would just fail and
+    // burn this one-time listener for nothing. We still try it here too, in
+    // case this fires on a click that happens to land after login.
     document.addEventListener('click', () => {
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-        if (!muted) startAmbient();
+        if (!muted && typeof currentUserId !== 'undefined' && currentUserId) startAmbient();
     }, { once: true });
 
     return {
