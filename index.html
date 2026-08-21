@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.17">
+    <link rel="stylesheet" href="style.css?v=3.18">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -916,13 +916,13 @@
                 <div id="combat-tracker-body"></div>
             </div>
 
-            <div id="battle-map-panel" class="panel">
-                <div id="battle-map-header" class="panel-header-drag">
+            <div id="battle-map-panel">
+                <div id="battle-map-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #3c4e36; padding-bottom:12px; margin-bottom:12px;">
                     <h4 style="margin:0; color:#c778dd;">Tactical Battle Map</h4>
-                    <span style="font-size: 10px; color: #6b826a;">DRAG</span>
+                    <button onclick="window.toggleBattleMap()" style="width:auto; padding:8px 20px; background:#3d0c0c; border-color:#ff3333; color:#ffaaaa;">✕ CLOSE — RETURN TO MAP</button>
                 </div>
 
-                <div id="battle-map-dm-controls" style="display:none; margin-bottom:8px;">
+                <div id="battle-map-dm-controls" style="display:none; margin-bottom:8px; max-width:400px;">
                     <label for="battle-map-name-input" style="font-size:9px; color:#6b826a;">Encounter Name:</label>
                     <input type="text" id="battle-map-name-input" placeholder="e.g. Ambush at Kessel Point" style="font-size:11px; margin:2px 0;">
                     <button class="btn-deploy" onclick="window.startBattleEncounter()" style="width:100%; font-size:10px; margin-top:4px; border-color:#c778dd; color:#c778dd;">⚔ START BATTLE</button>
@@ -930,43 +930,42 @@
 
                 <div id="battle-map-inactive-msg" style="font-size:10px; color:#6b826a; text-align:center; padding:20px 0;">No active engagement.</div>
 
-                <div id="battle-map-active-container" style="display:none;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                        <strong id="battle-map-encounter-name" style="color:#c778dd; font-size:12px;"></strong>
-                        <div style="display:flex; gap:4px;">
-                            <button class="layer-edit" onclick="window.advanceCombatRound()" title="Reuses the same global cooldown/overheat/loiter tick every vessel already uses" style="font-size:9px; padding:3px 8px;">⏭ ADVANCE ROUND</button>
-                            <button id="battle-map-end-btn" class="btn-remove" onclick="window.endBattleEncounter()" style="font-size:9px; padding:3px 8px; display:none;">✕ END BATTLE</button>
+                <div id="battle-map-active-container" class="battle-map-layout" style="display:none;">
+                    <div class="battle-map-left-col">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong id="battle-map-encounter-name" style="color:#c778dd; font-size:12px;"></strong>
+                            <div style="display:flex; gap:4px;">
+                                <button class="layer-edit" onclick="window.advanceCombatRound()" title="Reuses the same global cooldown/overheat/loiter tick every vessel already uses" style="font-size:9px; padding:3px 8px;">⏭ ADVANCE ROUND</button>
+                                <button id="battle-map-end-btn" class="btn-remove" onclick="window.endBattleEncounter()" style="font-size:9px; padding:3px 8px; display:none;">✕ END BATTLE</button>
+                            </div>
                         </div>
-                    </div>
 
-                    <div style="display:flex; gap:10px;">
                         <label for="battle-map-grid" style="display:none;">Battle grid — click to place an armed token, drag a placed token to reposition, click a placed token to open it</label>
                         <div id="battle-map-grid" style="position:relative; width:460px; height:380px; background: repeating-linear-gradient(0deg, #0a1410, #0a1410 39px, #16241c 40px), repeating-linear-gradient(90deg, #0a1410, #0a1410 39px, #16241c 40px); border:1px solid #3c4e36; overflow:hidden; flex-shrink:0; cursor:crosshair;"></div>
 
-                        <div style="flex:1; min-width:150px; display:flex; flex-direction:column; gap:8px;">
-                            <div>
-                                <h5 style="margin:0 0 4px 0; font-size:10px; color:#00e5a3;">Available Vessels</h5>
-                                <div id="battle-map-palette" style="max-height:200px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
-                            </div>
-                            <div id="battle-map-dm-deploy" style="display:none;">
-                                <h5 style="margin:0 0 4px 0; font-size:10px; color:#c778dd;">Deploy Template</h5>
-                                <label for="battle-map-template-select" style="display:none;">Template</label>
-                                <select id="battle-map-template-select" style="font-size:9px; margin:0;"></select>
-                                <button class="btn-deploy" onclick="window.deployTemplateToBattle()" style="width:100%; font-size:9px; margin-top:4px; border-color:#c778dd; color:#c778dd;">+ DEPLOY TO ARENA</button>
-                                <h5 style="margin:10px 0 4px 0; font-size:10px; color:#c778dd;">Deploy Saved Fleet</h5>
-                                <label for="battle-map-fleet-select" style="display:none;">Saved Fleet</label>
-                                <select id="battle-map-fleet-select" style="font-size:9px; margin:0;"></select>
-                                <button class="btn-deploy" onclick="window.deployFleetToBattle()" style="width:100%; font-size:9px; margin-top:4px; border-color:#c778dd; color:#c778dd;">+ DEPLOY FLEET TO ARENA</button>
-                            </div>
+                        <div>
+                            <h5 style="margin:0 0 4px 0; font-size:10px; color:#00e5a3;">Available Vessels</h5>
+                            <div id="battle-map-palette" style="max-height:150px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
                         </div>
+                        <div id="battle-map-dm-deploy" style="display:none;">
+                            <h5 style="margin:0 0 4px 0; font-size:10px; color:#c778dd;">Deploy Template</h5>
+                            <label for="battle-map-template-select" style="display:none;">Template</label>
+                            <select id="battle-map-template-select" style="font-size:9px; margin:0;"></select>
+                            <button class="btn-deploy" onclick="window.deployTemplateToBattle()" style="width:100%; font-size:9px; margin-top:4px; border-color:#c778dd; color:#c778dd;">+ DEPLOY TO ARENA</button>
+                            <h5 style="margin:10px 0 4px 0; font-size:10px; color:#c778dd;">Deploy Saved Fleet</h5>
+                            <label for="battle-map-fleet-select" style="display:none;">Saved Fleet</label>
+                            <select id="battle-map-fleet-select" style="font-size:9px; margin:0;"></select>
+                            <button class="btn-deploy" onclick="window.deployFleetToBattle()" style="width:100%; font-size:9px; margin-top:4px; border-color:#c778dd; color:#c778dd;">+ DEPLOY FLEET TO ARENA</button>
+                        </div>
+                        <h5 style="margin:8px 0 4px 0; font-size:10px; color:#c778dd;">☠ Incoming Ordnance</h5>
+                        <div id="battle-map-ordnance-list" style="font-size:9px; color:#d4c5a9; max-height:100px; overflow-y:auto;"></div>
                     </div>
-                    <h5 style="margin:8px 0 4px 0; font-size:10px; color:#6b826a;">Engaged Roster</h5>
-                    <div id="battle-map-tokens-list" style="font-size:9px; color:#d4c5a9; max-height:100px; overflow-y:auto;"></div>
-                    <h5 style="margin:8px 0 4px 0; font-size:10px; color:#c778dd;">☠ Incoming Ordnance</h5>
-                    <div id="battle-map-ordnance-list" style="font-size:9px; color:#d4c5a9; max-height:100px; overflow-y:auto;"></div>
-                </div>
 
-                <button onclick="window.toggleBattleMap()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
+                    <div class="battle-map-right-col">
+                        <h5 style="margin:0 0 6px 0; font-size:10px; color:#6b826a;">Engaged Vessels — weapons &amp; status</h5>
+                        <div id="battle-map-ship-cards" style="display:flex; flex-direction:column; gap:10px;"></div>
+                    </div>
+                </div>
             </div>
 
             <div id="salvage-panel" class="panel">
@@ -1161,15 +1160,15 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.19"></script>
+    <script src="js/db.js?v=3.20"></script>
     <script src="js/audio.js?v=3.11"></script>
-    <script src="js/ui.js?v=3.20"></script>
-    <script src="js/combat.js?v=3.20"></script>
-    <script src="js/colonies.js?v=3.14"></script>
+    <script src="js/ui.js?v=3.21"></script>
+    <script src="js/combat.js?v=3.22"></script>
+    <script src="js/colonies.js?v=3.15"></script>
     <script src="js/ship-designer.js?v=3.15"></script>
-    <script src="js/perk-designer.js?v=3.12"></script>
-    <script src="js/map.js?v=3.21"></script>
-    <script src="js/battle-map.js?v=1.5"></script>
+    <script src="js/perk-designer.js?v=3.13"></script>
+    <script src="js/map.js?v=3.22"></script>
+    <script src="js/battle-map.js?v=1.7"></script>
 
 </body>
 </html>
