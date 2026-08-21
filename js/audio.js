@@ -5,10 +5,11 @@
    approach from before this session's audio-polish pass, just more of them.
 
    Music (ambient + battle) is the one part of this file that is NOT
-   synthesized: it hotlinks real CC0 / CC-BY tracks from opengameart.org via
-   plain <audio> elements. That's a deliberate, confirmed tradeoff (2026-08
-   audio polish session) -- see the block comment above AMBIENT_PLAYLIST
-   below for what that means and what could break it.
+   synthesized: it plays real Battlestar Galactica soundtrack tracks (Bear
+   McCreary) the DM supplied as local files in a "music tracks/" folder
+   alongside this project -- see the block comment above MUSIC_DIR below
+   for the full rationale, the personal-use note, and what changed from
+   the earlier CC0/CC-BY OpenGameArt hotlinks this replaced.
    ========================================================================== */
 window.AudioEngine = (function() {
     let audioCtx = null;
@@ -23,55 +24,56 @@ window.AudioEngine = (function() {
     }
 
     /* ----------------------------------------------------------------------
-       MUSIC BEDS -- state, licensing notes, and hotlink risk
+       MUSIC BEDS -- real Battlestar Galactica soundtrack (Bear McCreary),
+       supplied by the DM as local files
        ----------------------------------------------------------------------
-       Confirmed design (2026-08 audio polish session):
-         - Ambient bed: rotates through all 5 tracks below (shuffled order,
-           reshuffled each time the playlist is exhausted) rather than
-           looping just one -- each track is only ~1 min, a single one on
-           repeat would get noticeable fast.
-         - Battle bed: a single track, auto-starts/stops with
-           battle_encounters.is_active flipping true/false (wired in
-           js/battle-map.js's loadBattleEncounters(), which already runs on
-           EVERY connected client via that table's realtime channel -- so
-           this fires for players too, not just the DM who started the
-           encounter).
-         - Both are real hotlinked files from opengameart.org, NOT
-           synthesized -- the user explicitly chose this over synthesizing
-           the music too, accepting the tradeoff below.
+       Replaces the earlier CC0/CC-BY OpenGameArt hotlinks entirely (the DM
+       found the OpenGameArt ambient pack's horror lean didn't fit BSG's
+       tone, then supplied real soundtrack tracks directly as local files
+       in a "music tracks/" folder alongside index.html/js/style.css --
+       see the "Real soundtrack swap" checkpoint in
+       darkforest-architecture-reference.md). Filenames below match the
+       DM's own files exactly, numeric prefixes included.
 
-       HOTLINK RISK (flagged plainly, not silently decided): these files
-       live on opengameart.org's own file server, not this project. There is
-       no local copy and no offline fallback. If OpenGameArt ever moves,
-       renames, or removes any of these files, that track just goes silent
-       (console.warn logged, no crash) until someone notices and swaps the
-       URL. If that ever becomes a problem, the fix is to download the files
-       and self-host them from the project instead -- ask and that can get
-       wired up, but downloading binary assets isn't something this build
-       session can do on its own.
+       Ambient bed rotates through 6 tracks (shuffled, reshuffled on
+       exhaustion): Pegasus, Dark Unions, Something Dark Is Coming, Worthy
+       of Survival, Martial Law, Standing In the Mud.
+       Battle bed rotates through 3 tracks the same way, auto-starting/
+       stopping with battle_encounters.is_active (js/battle-map.js's
+       loadBattleEncounters(), unchanged wiring from before): Prelude to
+       War, Worthy of Survival, Scar. "Worthy of Survival" deliberately
+       appears in BOTH rotations -- the DM's own choice, not a mistake.
 
-       LICENSING:
-         - Ambient pack ("Ambience Pack 1 -- Sci-Fi Horror") is CC0 --
-           public domain, no attribution required.
-         - Battle track ("Battle Music" by Peter Eastman) is CC-BY 3.0, NOT
-           CC0 -- it requires a credit ("Please credit Peter Eastman").
-           That credit still needs to go somewhere the user/testers will
-           actually see it, e.g. an About/Credits panel -- not yet added
-           anywhere in this build. Flagging this as an open item, not
-           assuming it's handled.
+       PERSONAL-USE NOTE (flagged plainly, not silently assumed): these
+       are real, commercially-released, copyrighted recordings, not
+       royalty-free assets like the tracks they replaced. Referencing
+       local files the DM already owns, for their own private table, is
+       one thing -- if this project is ever meant to be published,
+       distributed, or run for a paying audience, these files would need
+       to come out first. That's a real constraint on this project's
+       future, not just a footnote.
+
+       No hotlink risk anymore (files are local, not fetched from a
+       third-party server) -- but the app now depends on this exact
+       "music tracks/" folder shipping alongside index.html/js/style.css.
+       If it's ever missing (fresh clone, moved files), a track fails
+       silently the same way a broken hotlink used to (console.warn, no
+       crash, that track just doesn't play).
     */
-    const AMBIENT_PLAYLIST = [
-        'https://opengameart.org/sites/default/files/The%20Surreal%20Truth.mp3',
-        'https://opengameart.org/sites/default/files/Infestation%20in%20the%20Control%20Room.mp3',
-        "https://opengameart.org/sites/default/files/Final%20Captain%27s%20Log.mp3",
-        'https://opengameart.org/sites/default/files/The%20Depths%20of%20Hell.mp3',
-        'https://opengameart.org/sites/default/files/Cage%20of%20the%20Cryptid.mp3'
+    const MUSIC_DIR = 'music tracks/';
+    const AMBIENT_TRACKS = [
+        '08 Pegasus.m4a',
+        '15 Dark Unions.m4a',
+        '10 Something Dark Is Coming.m4a',
+        '21 Worthy of Survival.m4a',
+        '06 Martial Law.m4a',
+        '07 Standing In the Mud.m4a'
     ];
-    const BATTLE_TRACK_URL = 'https://opengameart.org/sites/default/files/Battle_1.ogg';
-    // Creator's own loop instructions: cut off the final chord at 1:28.6 and
-    // jump back to 0:04.6 (skips the intro on repeats, not on the first play).
-    const BATTLE_LOOP_START = 4.6;
-    const BATTLE_LOOP_END = 88.6;
+    const BATTLE_TRACKS = [
+        '17 Prelude to War.m4a',
+        '21 Worthy of Survival.m4a',
+        '11 Scar.m4a'
+    ];
 
     let musicVolume = (function() {
         const v = parseFloat(localStorage.getItem('odyssey_audio_volume'));
@@ -81,8 +83,6 @@ window.AudioEngine = (function() {
 
     let ambientAudio = null;
     let battleAudio = null;
-    let ambientOrder = shuffleIndices(AMBIENT_PLAYLIST.length);
-    let ambientCursor = -1;
     let ambientDesired = false; // "should ambient be playing when nothing overrides it"
     let battleActive = false;
 
@@ -123,29 +123,44 @@ window.AudioEngine = (function() {
         }, 50);
     }
 
-    function nextAmbientUrl() {
-        ambientCursor++;
-        if (ambientCursor >= ambientOrder.length) { ambientOrder = shuffleIndices(AMBIENT_PLAYLIST.length); ambientCursor = 0; }
-        return AMBIENT_PLAYLIST[ambientOrder[ambientCursor]];
+    // Shared rotating-playlist factory -- ambient and battle both need
+    // identical shuffle/reshuffle-on-exhaustion behavior now that BOTH are
+    // multi-track playlists (battle wasn't, before this swap), so this is
+    // one implementation instead of two that could drift apart.
+    function makeRotatingPlaylist(filenames) {
+        let order = shuffleIndices(filenames.length);
+        let cursor = -1;
+        return function next() {
+            cursor++;
+            if (cursor >= order.length) { order = shuffleIndices(filenames.length); cursor = 0; }
+            return MUSIC_DIR + filenames[order[cursor]];
+        };
     }
+    const nextAmbientUrl = makeRotatingPlaylist(AMBIENT_TRACKS);
+    const nextBattleUrl = makeRotatingPlaylist(BATTLE_TRACKS);
 
-    function playNextAmbientTrack() {
-        if (!ambientDesired || battleActive) return;
-        const url = nextAmbientUrl();
-        const el = new Audio(url);
+    // kind: 'ambient' | 'battle' -- plays the next track in that bed's own
+    // rotation, fading it in. Used both for normal track-ended advancement
+    // and for a manual skip (see skipTrack below).
+    function playNextTrack(kind) {
+        const isAmbient = kind === 'ambient';
+        if (isAmbient) { if (!ambientDesired || battleActive) return; }
+        else { if (!battleActive) return; }
+        const rawUrl = isAmbient ? nextAmbientUrl() : nextBattleUrl();
+        const el = new Audio(encodeURI(rawUrl)); // encodeURI handles the spaces in folder/file names
         el.volume = 0;
-        el.addEventListener('ended', playNextAmbientTrack);
-        el.addEventListener('error', () => { console.warn('[AudioEngine] ambient track failed to load (hotlink may be broken):', url); playNextAmbientTrack(); });
-        ambientAudio = el;
+        el.addEventListener('ended', () => playNextTrack(kind));
+        el.addEventListener('error', () => { console.warn('[AudioEngine] track failed to load (check the "music tracks" folder is present):', rawUrl); playNextTrack(kind); });
+        if (isAmbient) ambientAudio = el; else battleAudio = el;
         el.play().catch(() => { /* blocked until a user gesture -- click-unlock listener below retries */ });
-        fadeTo(el, effectiveVolume(), 2000);
+        fadeTo(el, effectiveVolume(), isAmbient ? 2000 : 1000);
     }
 
     function startAmbient() {
         ambientDesired = true;
         if (battleActive) return; // battle bed takes priority; resumes when it ends
         if (ambientAudio && !ambientAudio.paused) return;
-        playNextAmbientTrack();
+        playNextTrack('ambient');
     }
 
     function stopAmbient(fadeMs) {
@@ -155,31 +170,33 @@ window.AudioEngine = (function() {
         fadeTo(el, 0, fadeMs || 1200, () => { el.pause(); if (el === ambientAudio) ambientAudio = null; });
     }
 
-    function ensureBattleAudio() {
-        if (battleAudio) return battleAudio;
-        const el = new Audio(BATTLE_TRACK_URL);
-        el.volume = 0;
-        el.addEventListener('timeupdate', () => { if (el.currentTime >= BATTLE_LOOP_END) el.currentTime = BATTLE_LOOP_START; });
-        el.addEventListener('error', () => console.warn('[AudioEngine] battle track failed to load (hotlink may be broken):', BATTLE_TRACK_URL));
-        battleAudio = el;
-        return el;
-    }
-
     function startBattleMusic() {
         if (battleActive) return; // already running, don't restart from 0
         battleActive = true;
         if (ambientAudio && !ambientAudio.paused) { const a = ambientAudio; fadeTo(a, 0, 1200, () => a.pause()); }
-        const el = ensureBattleAudio();
-        el.currentTime = 0; el.volume = 0;
-        el.play().catch(() => {});
-        fadeTo(el, effectiveVolume(), 1000);
+        playNextTrack('battle');
     }
 
     function stopBattleMusic() {
         if (!battleActive) return;
         battleActive = false;
         if (battleAudio) { const el = battleAudio; fadeTo(el, 0, 1500, () => { el.pause(); el.currentTime = 0; }); }
-        if (ambientDesired) playNextAmbientTrack(); // resumes on the NEXT track, not mid-song where it left off -- simplification, flagged here rather than silently done
+        if (ambientDesired) playNextTrack('ambient'); // resumes on the NEXT track, not mid-song where it left off -- simplification, flagged here rather than silently done
+    }
+
+    // Manual "skip to next track" -- hard-stops whatever's currently
+    // audible (no fade-out; a deliberate skip should feel instant, not
+    // linger) and immediately fades in the next track of WHICHEVER bed is
+    // currently active (battle takes priority, same as everywhere else).
+    // No-ops if neither bed is supposed to be playing.
+    function skipTrack() {
+        if (battleActive) {
+            if (battleAudio) { if (battleAudio._fadeInterval) clearInterval(battleAudio._fadeInterval); battleAudio.pause(); }
+            playNextTrack('battle');
+        } else if (ambientDesired) {
+            if (ambientAudio) { if (ambientAudio._fadeInterval) clearInterval(ambientAudio._fadeInterval); ambientAudio.pause(); }
+            playNextTrack('ambient');
+        }
     }
 
     function setMusicVolume(v) {
@@ -449,6 +466,7 @@ window.AudioEngine = (function() {
         stopAmbient: stopAmbient,
         startBattleMusic: startBattleMusic,
         stopBattleMusic: stopBattleMusic,
+        skipTrack: skipTrack,
         setMusicVolume: setMusicVolume,
         setMuted: setMuted,
         toggleMute: toggleMute,
