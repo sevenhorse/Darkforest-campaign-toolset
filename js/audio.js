@@ -202,10 +202,27 @@ window.AudioEngine = (function() {
     }
     document.addEventListener('DOMContentLoaded', syncControlsUI);
 
+    // #audio-controls-dropdown lives inside #top-bar, which has
+    // overflow-y:hidden (for the button row's horizontal-scroll safety net)
+    // -- an absolutely-positioned dropdown there gets silently clipped to
+    // invisible the moment it extends past the bar's own 50px height. Same
+    // bug class as #search-results-dropdown / #hazard-system-search-dropdown
+    // elsewhere in this app, and the same fix: switch to position:fixed
+    // (escapes ancestor overflow-clipping since nothing here sets a
+    // transform/filter) and compute the on-screen position from the
+    // button's own getBoundingClientRect() each time it opens.
     window.toggleAudioControls = function() {
         const dd = document.getElementById('audio-controls-dropdown');
+        const btn = document.getElementById('audio-controls-toggle-btn');
         if (!dd) return;
-        dd.style.display = (dd.style.display === 'block') ? 'none' : 'block';
+        const opening = dd.style.display !== 'block';
+        if (opening && btn) {
+            const rect = btn.getBoundingClientRect();
+            dd.style.position = 'fixed';
+            dd.style.top = (rect.bottom + 4) + 'px';
+            dd.style.left = rect.left + 'px';
+        }
+        dd.style.display = opening ? 'block' : 'none';
     };
     document.addEventListener('click', (e) => {
         const dd = document.getElementById('audio-controls-dropdown');
