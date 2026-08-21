@@ -818,7 +818,7 @@ function drawSingleHazard(ctx, x, y, radius, type, zoom, time) {
    left/top are NOT CSS-transitioned so tracking stays perfectly in sync
    during pan/zoom; only the dish's width/height transition (see .radar-sweep
    in style.css) for a smooth resize at the galaxy<->system-focus boundary. */
-const GALAXY_RADIUS_WORLD = 11000;
+const GALAXY_RADIUS_WORLD = 16000; // kept in sync with initGalaxyEngine's own galaxyRadius (this session's star-spacing fix widened it from 11000)
 function updateRadarSweepPosition(cssWidth, cssHeight) {
     if (!window.radarSweepActive) return;
     const overlay = document.getElementById('radar-sweep-overlay');
@@ -1115,6 +1115,28 @@ window.saveDMBodyProperties = async function(id) {
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
     alert("Scan data saved — synced to all players.");
 };
+// New this session, alongside the minimum-star-spacing fix above: there was
+// previously no way for a DM to remove a planetary_modifiers override once
+// saved (only insert/update existed) — a gap regardless of the spacing fix,
+// but one that matters more now since that fix can detach an override from
+// the body it was meant for. Reverts the body to its raw generated/custom
+// values, not to any particular prior state (there's no history kept).
+window.deletePlanetOverride = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!(await window.showConfirmModal("Clear this scan-data override? The body will revert to its default generated/custom values."))) return;
+    const { error } = await db.from('planetary_modifiers').delete().eq('body_id', id);
+    if (error) { alert("Failed to clear override: " + error.message); return; }
+
+    if (window.globalPlanetaryModifiersCache) delete window.globalPlanetaryModifiersCache[id];
+    [window.selectedTarget, window.hoveredTarget].forEach(t => {
+        if (t && t.data && t.data.id === id && t.data.parentSystem) {
+            const raw = getSystemBodiesRaw(t.data.parentSystem).find(b => b.id === id);
+            if (raw) Object.assign(t.data, { name: raw.name, type: raw.type, gravity: raw.gravity, atmosphere: raw.atmosphere, resources: raw.resources });
+        }
+    });
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    alert("Override cleared — synced to all players.");
+};
 window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Destroy star system?"))) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
 window.deleteShipToken = async function(id) {
     const ship = globalShipMarkersCache.find(m => m.id === id);
@@ -1156,8 +1178,15 @@ window.initGalaxyEngine = function() {
     applyRadarSweepState();
     window.updateToolButtonStyles();
     
-    const proceduralSystems = []; const rng = mulberry32(1048596); 
-    const coreRadius = 1400; const galaxyRadius = 11000;
+    const proceduralSystems = []; const rng = mulberry32(1048596);
+    // galaxyRadius widened 11000->16000 this session (real 4 LY spacing
+    // floor, see below, wasn't reachable at the old radius without losing
+    // ~42% of the spiral-arm star count — the DM's own confirmed choice was
+    // to widen the map instead of losing that much population). Every
+    // absolute in-galaxy distance is now proportionally larger as a result —
+    // sublight/FTL travel times across the whole map, not just the pairs
+    // that used to be too close, are all longer than before this session.
+    const coreRadius = 1400; const galaxyRadius = 16000;
     
     proceduralSystems.push({ id: 'proc-core-blackhole', name: 'Sagittarius Prime', x: 0, y: 0, size: 10, color: '#000000', type: 'Black Hole', luminosity: 'Supermassive Singularity', hazard: 'Gravity Well', multiType: 'Single', ownership: 'Uninhabitable Core', isCustom: false });
     for (let i = 0; i < 240; i++) {
@@ -1166,25 +1195,73 @@ window.initGalaxyEngine = function() {
         if (heat > 0.85) { color = '#000000'; luminosity = 'Singularity'; hazard = 'Gravity Well'; } else if (heat > 0.5) { color = '#ffe9c4'; luminosity = 'Class G (Yellow)'; hazard = 'None'; }
         proceduralSystems.push({ id: `proc-core-${i}`, name: `Core Sector-${2000 + i}`, x, y, size: rng() * 2.5 + 3.5, color, type: luminosity === 'Singularity' ? 'Black Hole' : 'Star', luminosity, hazard, multiType: rng() > 0.7 ? 'Binary' : 'Single', ownership: 'Galactic Core', isCustom: false });
     }
+    // Minimum spiral-arm star spacing (this session): with no distance check
+    // at all, pure random scatter of 2,400 stars produced occasional pairs
+    // landing within a handful of world units of each other — reading as
+    // "half a light year apart" on the measuring tool (100 units = 1 LY),
+    // vs. the real nearest-star distance of ~4.2 LY (Proxima Centauri).
+    // Deliberately NOT applied to the galactic core loop above (240 stars,
+    // radius <=1400) — real galactic cores are genuinely far denser than the
+    // solar neighborhood, so that loop's tight packing stays as-is on purpose.
+    // A rejected candidate rerolls its position (not its type/color rolls,
+    // which only happen once a position is accepted) up to
+    // MAX_PLACEMENT_ATTEMPTS times; if it still can't find a clear spot, that
+    // star is skipped rather than forced in — see MIN_STAR_SPACING_FALLBACK
+    // below. This does NOT touch star_systems, is fully deterministic (same
+    // seed every load), and only affects freshly-generated positions — but
+    // because rerolls consume extra draws from the single shared `rng()`
+    // stream, every star from this point on lands somewhere different than
+    // it did before this fix, and a small number of `proc-spiral-N` ids will
+    // no longer exist at all. Confirmed acceptable with the DM before
+    // building this: any territory claim / hazard zone / planet-editor
+    // override that was tied to a procedural star may now be orphaned — see
+    // the new Planet Editor override delete button (added alongside this
+    // fix) and the pre-existing Hazard Zone / Territory delete buttons for
+    // cleaning those up.
+    const MIN_STAR_SPACING = 400; // ~4 LY at 100 units = 1 LY
+    const MIN_STAR_SPACING_SQ = MIN_STAR_SPACING * MIN_STAR_SPACING;
+    // 20 attempts (not the initially-tried 8) + the widened galaxyRadius
+    // above together keep spiral-star loss to ~3% (~2,328/2,400 placed) —
+    // tested directly rather than assumed; 8 attempts at the old radius lost
+    // 42%, which is why both numbers changed together.
+    const MAX_PLACEMENT_ATTEMPTS = 20;
+    const MIN_STAR_SPACING_FALLBACK = 'skip'; // drop the star rather than force an overlap
+    const spiralPositions = [];
+
     for (let i = 0; i < 2400; i++) {
-        let arm = i % 4; 
-        let r = Math.pow(rng(), 0.6) * (galaxyRadius - coreRadius) + coreRadius;
-        
-        // 1.6 winding factor removes the "pointiness", making arms open up gracefully
-        let spiralTheta = (Math.log(r / coreRadius) * 1.6) + ((arm * 2 * Math.PI) / 4);
-        // Doubled scatter angle to widen the arms
-        let finalTheta = spiralTheta + (rng() - 0.5) * (0.8 + (r / galaxyRadius) * 0.8);
-        // Doubled radius scatter to fill the gaps between arms
-        let finalR = r + (rng() - 0.5) * (400 + (r / galaxyRadius) * 800);
-        // Increased outlier chance from 12% to 18% to seed the dark voids with rogue stars
-        if (rng() > 0.82) { finalTheta = rng() * Math.PI * 2; finalR = rng() * galaxyRadius; }
-        
-        let x = Math.cos(finalTheta) * finalR; let y = Math.sin(finalTheta) * finalR;
+        let arm = i % 4;
+        let x, y, placed = false;
+
+        for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS; attempt++) {
+            let r = Math.pow(rng(), 0.6) * (galaxyRadius - coreRadius) + coreRadius;
+
+            // 1.6 winding factor removes the "pointiness", making arms open up gracefully
+            let spiralTheta = (Math.log(r / coreRadius) * 1.6) + ((arm * 2 * Math.PI) / 4);
+            // Doubled scatter angle to widen the arms
+            let finalTheta = spiralTheta + (rng() - 0.5) * (0.8 + (r / galaxyRadius) * 0.8);
+            // Doubled radius scatter to fill the gaps between arms
+            let finalR = r + (rng() - 0.5) * (400 + (r / galaxyRadius) * 800);
+            // Increased outlier chance from 12% to 18% to seed the dark voids with rogue stars
+            if (rng() > 0.82) { finalTheta = rng() * Math.PI * 2; finalR = rng() * galaxyRadius; }
+
+            let candX = Math.cos(finalTheta) * finalR; let candY = Math.sin(finalTheta) * finalR;
+
+            let tooClose = false;
+            for (let k = 0; k < spiralPositions.length; k++) {
+                let dx = spiralPositions[k].x - candX; let dy = spiralPositions[k].y - candY;
+                if (dx * dx + dy * dy < MIN_STAR_SPACING_SQ) { tooClose = true; break; }
+            }
+            if (!tooClose) { x = candX; y = candY; placed = true; break; }
+        }
+
+        if (!placed) continue; // MIN_STAR_SPACING_FALLBACK === 'skip'
+        spiralPositions.push({ x, y });
+
         let type = 'Star'; let size = rng() * 2.0 + 3.0; let color = '#ffe9c4'; let luminosity = 'Class G (Yellow)'; let hazard = 'None';
-        
+
         let starRoll = rng();
-        if (starRoll > 0.985) { type = 'Black Hole'; color = '#000000'; size = 6.5; luminosity = 'Singularity'; hazard = 'Gravity Well'; } 
-        else if (starRoll > 0.94) { type = 'Nebula'; color = ['#ff3366', '#33ccff', '#cc33ff', '#33ff99'][Math.floor(rng() * 4)]; size = 120 + rng() * 120; luminosity = 'Gas Cloud'; hazard = 'Nebula'; } 
+        if (starRoll > 0.985) { type = 'Black Hole'; color = '#000000'; size = 6.5; luminosity = 'Singularity'; hazard = 'Gravity Well'; }
+        else if (starRoll > 0.94) { type = 'Nebula'; color = ['#ff3366', '#33ccff', '#cc33ff', '#33ff99'][Math.floor(rng() * 4)]; size = 120 + rng() * 120; luminosity = 'Gas Cloud'; hazard = 'Nebula'; }
         else { let heat = rng(); if (heat > 0.75) { color = '#7694ff'; luminosity = 'Class O (Blue Giant)'; if (rng() > 0.6) hazard = 'Pulsar'; } else if (heat > 0.35) { color = '#ffe9c4'; luminosity = 'Class G (Yellow)'; } else { color = '#ffb37b'; luminosity = 'Class M (Red Dwarf)'; size *= 0.8; } }
 
         proceduralSystems.push({ id: `proc-spiral-${i}`, name: `Arm ${['Alpha','Beta','Gamma','Delta'][arm]}-${1000 + i}`, x, y, size, color, type, luminosity, hazard, multiType: rng() > 0.8 ? 'Binary' : 'Single', ownership: 'Unclaimed', isCustom: false });
@@ -1438,7 +1515,7 @@ window.initGalaxyEngine = function() {
             content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${(currentUserRole === 'dm' || m.owner_id === currentUserId) ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
-            let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button></div>` : '';
+            let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button>${(window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id]) ? `<button class="btn-remove" onclick="window.deletePlanetOverride('${p.id}')" style="font-size:9px; padding:4px; margin-top:4px; width:100%;">🗑️ CLEAR OVERRIDE (revert to default)</button>` : ''}</div>` : '';
             content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${p.color}; font-size: 13px;">🪐 ${p.name}</strong><br><span style="color: #6b826a;">System:</span> ${p.parentSystem.name}<br><span style="color: #6b826a;">Class:</span> ${p.type} | <span style="color: #6b826a;">Grav:</span> ${p.gravity}<br><span style="color: #00e5a3; font-weight:bold; margin-top:4px; display:block;">Scans:</span> <span style="color: #d4c5a9;">${p.resources}</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmBodyEditorBox}</div>`;
         }
     };
