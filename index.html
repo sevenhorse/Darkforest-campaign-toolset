@@ -752,6 +752,7 @@
                         </label>
                         <label for="audio-volume-slider" style="font-size: 9px; color: #6b826a; display: block; margin-bottom: 2px;">Music Volume</label>
                         <input type="range" id="audio-volume-slider" min="0" max="100" value="40" oninput="window.AudioEngine.setMusicVolume(this.value / 100)" style="width: 100%; margin: 0;">
+                        <button onclick="window.AudioEngine.skipTrack()" style="width: 100%; margin-top: 8px; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 9px;">⏭ SKIP TRACK</button>
                     </div>
                 </div>
                 <div id="universe-clock-display" style="background: #040605; border: 1px solid #3c4e36; padding: 4px 8px; border-radius: 2px; font-size: 10px; color: #00e5a3; cursor: pointer; white-space: nowrap;" onclick="window.toggleCalendarControls()">
@@ -855,16 +856,10 @@
                     <span style="font-size: 10px; color: #6b826a;">DRAG</span>
                 </div>
                 <div style="font-size: 10px; line-height: 1.6;">
-                    <p style="margin: 0 0 10px 0; color: #6b826a;">Music beds in this build are hotlinked from OpenGameArt.org, not original work:</p>
                     <p style="margin: 0 0 8px 0;">
-                        <strong style="color:#00e5a3;">"Battle Music"</strong> by <strong>Peter Eastman</strong> — CC-BY 3.0 (attribution required).<br>
-                        <a href="https://opengameart.org/content/battle-music-0" target="_blank" rel="noopener noreferrer" style="color:#00e1ff; word-break: break-all;">opengameart.org/content/battle-music-0</a>
+                        <strong style="color:#00e5a3;">Music:</strong> Battlestar Galactica original soundtrack, composed by <strong>Bear McCreary</strong>. Used here as local files for this table's own private sessions — not redistributed, not for public or commercial use.
                     </p>
-                    <p style="margin: 0;">
-                        <strong style="color:#00e5a3;">"Ambience Pack 1 — Sci-Fi Horror"</strong> by <strong>Joth</strong> — CC0 (public domain).<br>
-                        <a href="https://opengameart.org/content/ambience-pack-1-sci-fi-horror" target="_blank" rel="noopener noreferrer" style="color:#00e1ff; word-break: break-all;">opengameart.org/content/ambience-pack-1-sci-fi-horror</a>
-                    </p>
-                    <p style="margin: 10px 0 0 0; color: #6b826a;">All sound effects are synthesized in-browser (Web Audio API), no third-party assets.</p>
+                    <p style="margin: 0; color: #6b826a;">All sound effects are synthesized in-browser (Web Audio API), no third-party assets.</p>
                 </div>
                 <button onclick="window.toggleCreditsPanel()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
             </div>
@@ -1196,7 +1191,7 @@
 
     <!-- MAIN JAVASCRIPT LINKS -->
     <script src="js/db.js?v=3.21"></script>
-    <script src="js/audio.js?v=3.13"></script>
+    <script src="js/audio.js?v=3.14"></script>
     <script src="js/ui.js?v=3.24"></script>
     <script src="js/combat.js?v=3.22"></script>
     <script src="js/colonies.js?v=3.15"></script>
