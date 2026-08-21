@@ -124,9 +124,9 @@ window.deliverColonyResources = async function(id) {
     if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
 
     await db.from('chat_logs').insert({
-        sender_id: 'system',
+        sender_id: null,
         content: `📦 [SUPPLY RUN] ${colony.resource_output || 0}x ${colony.resource_type || 'Raw Materials'} delivered from ${colony.name} to ${vessel.name}'s expendables hold.`,
-        message_type: 'text'
+        message_type: 'system'
     });
 };
 
@@ -451,9 +451,9 @@ window.processFleetGroupProduction = async function(daysPassed) {
             vessel.cargo_inventory = cargo;
 
             await db.from('chat_logs').insert({
-                sender_id: 'system',
+                sender_id: null,
                 content: `⚙ [PRODUCTION] ${f.name} produced ${output}x ${f.production_resource_type}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''} — delivered to ${vessel.name}'s expendables hold.`,
-                message_type: 'text'
+                message_type: 'system'
             });
         } catch (err) {
             console.error(`processFleetGroupProduction: failed for fleet group "${f.name}" (${f.id})`, err);
