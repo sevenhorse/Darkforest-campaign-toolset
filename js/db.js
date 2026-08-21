@@ -69,6 +69,19 @@ const driveSpeeds = {
     ftl_class2: { name: "Military Class 2 Hyperdrive", speed: 600, label: "Class 2 Hyperdrive" },
     ftl_fold: { name: "Experimental Fold/Jump Drive", speed: 2500, label: "Fold Jump" }
 };
+// Relativistic time-inversion constant (this session's lore fix — see
+// window.executePlottedJump in js/map.js for where this is actually used).
+// A plotted FTL jump's backward chronometer drift = distance * drive speed
+// / this constant, so a faster/more exotic drive causes proportionally MORE
+// drift for the same distance covered (a bigger causality violation for a
+// bigger technological edge) — confirmed design, not guessed. Sublight
+// drives cause none of this by default (see window.jumpInversionFtlOnly
+// below). First-pass tuning, not battle-tested: 62500 was picked so a
+// baseline Class 1 Warp jump between two just-barely-4-LY-apart stars (the
+// new minimum star spacing) drifts ~2 hours, and a full width-of-the-galaxy
+// jump on the same drive drifts ~128 hours (~5.3 days) — both matching the
+// DM's own "a couple hours... several days" examples.
+window.TEMPORAL_DRIFT_CONSTANT = 62500;
 
 window.handleLogin = async function() {
     if (!db) { alert("Database connection failed."); return; }
@@ -562,26 +575,21 @@ window.snapToCommander = function(userId) {
     }
 };
 
-/* --- FEATURE: UNIVERSAL "JUMP TO SHIP" / SPACETIME INVERSION SHORTCUT ---
-   Pans the canvas to the user's own vessel, opens the character terminal
-   straight to the Vessel Deck tab, and applies an in-universe clock rollback
-   as an Expeditionary-Force-style FTL jump time-inversion flourish. Rollback
-   scales with distance since the ship's LAST recorded jump position (not
-   camera position), using the same world-units -> FTL-hours conversion as
-   the measuring tape tool for consistency, hard-capped at 72h. Only applies
-   to FTL-drive vessels by default — sublight vessels just advance time
-   normally — but a DM can flip window.jumpInversionFtlOnly off (checkbox in
-   the Chronology Control Deck panel) to apply it to every drive type.
-   Always logged to Comms so a DM watching the timeline isn't surprised by
-   it — it's flavor, not a way for players to freely rewind the clock at
-   will (that stays DM-gated via window.adjustTime). */
-window.JUMP_TIME_INVERSION_MAX_HOURS = 72;
-window.jumpInversionFtlOnly = localStorage.getItem('odyssey_jump_ftl_only') !== 'false'; // default ON
-window.setJumpInversionFtlOnly = function(checked) {
-    window.jumpInversionFtlOnly = !!checked;
-    localStorage.setItem('odyssey_jump_ftl_only', window.jumpInversionFtlOnly ? 'true' : 'false');
-};
-
+/* --- FEATURE: "JUMP TO SHIP" CAMERA SHORTCUT ---
+   Pans the canvas to the user's own vessel and opens the character terminal
+   straight to the Vessel Deck tab. Used to carry its own clock-rollback
+   "temporal desync" flourish (see window.JUMP_TIME_INVERSION_MAX_HOURS /
+   window.jumpInversionFtlOnly below) — that logic moved this session to
+   window.executePlottedJump (js/map.js), the action that actually MOVES a
+   ship, since attaching a real relativistic-drift game mechanic to a pure
+   camera-recenter shortcut meant it could fire on a ship that was dragged
+   into position by hand, or not fire at all if a player never happened to
+   click this button, rather than consistently on every genuine jump. This
+   function is now a plain camera/terminal shortcut with no calendar effect
+   of its own. `ship_markers.last_ftl_position`, which only ever existed to
+   support the old distance-since-last-jump calculation here, is no longer
+   written or read anywhere — left in the DB as unused dead schema (like
+   character_perks.perk_key before it), not worth a migration to drop. */
 window.jumpToActiveShip = async function() {
     let ship = globalShipMarkersCache.find(m => m.owner_id === currentUserId);
     if (!ship) { alert("DRADIS Error: No active vessel found assigned to your callsign."); return; }
@@ -591,46 +599,30 @@ window.jumpToActiveShip = async function() {
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
     if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(ship.id);
     if (window.AudioEngine) window.AudioEngine.playPing();
+};
 
-    const isFtl = (ship.drive_type || 'ftl_class1') !== 'sublight';
-    if (window.jumpInversionFtlOnly && !isFtl) return; // Sublight vessel: time advances normally, no inversion.
-
-    let lastPos = ship.last_ftl_position || { x: ship.x, y: ship.y };
-    let jumpDist = Math.hypot(ship.x - lastPos.x, ship.y - lastPos.y);
-
-    // Gravity Well hazard: harder to navigate/plot a clean jump vector near
-    // one, represented as inflated effective jump distance (and so, more
-    // rollback hours) rather than inventing a separate movement-points
-    // resource this app doesn't otherwise track.
-    let gravityWellHit = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(ship).find(h => h.type === 'gravity_well') : null;
-    let gravityWellNote = '';
-    if (gravityWellHit) {
-        const mult = 1 + (0.5 * (gravityWellHit.intensity || 1));
-        jumpDist = jumpDist * mult;
-        gravityWellNote = ` [GRAVITY WELL: jump vector distorted, effective distance x${mult}]`;
-    }
-
-    let rollbackHours = Math.min(window.JUMP_TIME_INVERSION_MAX_HOURS, Math.round(jumpDist / 250));
-
-    // Baseline the ship's next jump distance from wherever it is right now.
-    const newLastPos = { x: ship.x, y: ship.y };
-    ship.last_ftl_position = newLastPos;
-    db.from('ship_markers').update({ last_ftl_position: newLastPos }).eq('id', ship.id);
-
-    if (typeof window.universeTimeHours === 'number' && rollbackHours > 0) {
-        let oldTime = window.universeTimeHours;
-        window.universeTimeHours = Math.max(0, window.universeTimeHours - rollbackHours);
-        localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
-        if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
-        if (typeof window.processTimeAdvancement === 'function') await window.processTimeAdvancement(oldTime, window.universeTimeHours);
-        const cappedNote = jumpDist / 250 > window.JUMP_TIME_INVERSION_MAX_HOURS ? ' [CAPPED]' : '';
-        await db.from('chat_logs').insert({
-            sender_id: null,
-            content: `🌀 [TEMPORAL DESYNC] ${ship.name} completed an FTL jump (${jumpDist.toFixed(1)}u since last transit). Chronometer reads ${rollbackHours}h prior to departure per relativistic inversion.${cappedNote}${gravityWellNote}`,
-            message_type: 'system'
-        });
-        if (typeof loadChatLogs === 'function') loadChatLogs();
-    }
+/* --- RELATIVISTIC TIME-INVERSION (this session's lore fix) ---
+   Every genuine FTL jump (see window.executePlottedJump, js/map.js) makes
+   the ship's chronometer read EARLIER than departure — scaled by distance
+   covered and how exotic the drive is, per the DM's own confirmed lore rule
+   — REPLACING the old forward "trip takes N hours" model entirely, not
+   applying on top of it. Hard-capped so a single jump can't rewind more
+   than ~7 days (168h) even on the most exotic drive across the full width
+   of the galaxy; raised from this mechanic's old 72h cap (which predates
+   this session, attached to the jumpToActiveShip shortcut above) once the
+   DM confirmed a true edge-to-edge jump should be able to read "several
+   days," not clip at 3. Only applies to FTL-drive vessels by default —
+   sublight vessels cause none of this — but a DM can flip
+   window.jumpInversionFtlOnly off (checkbox in the Chronology Control Deck
+   panel) to apply it to every drive type. Always logged to Comms so a DM
+   watching the timeline isn't surprised by it — it's automatic physics, not
+   a way for players to freely rewind the clock at will (that stays
+   DM-gated via window.adjustTime). */
+window.JUMP_TIME_INVERSION_MAX_HOURS = 168;
+window.jumpInversionFtlOnly = localStorage.getItem('odyssey_jump_ftl_only') !== 'false'; // default ON
+window.setJumpInversionFtlOnly = function(checked) {
+    window.jumpInversionFtlOnly = !!checked;
+    localStorage.setItem('odyssey_jump_ftl_only', window.jumpInversionFtlOnly ? 'true' : 'false');
 };
 
 window.exportCampaignBackup = function() {
