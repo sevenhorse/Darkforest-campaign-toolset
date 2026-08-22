@@ -635,15 +635,23 @@ window.renderVesselDeck = function() {
                 } else {
                     const myProf = (typeof allProfiles !== 'undefined') ? allProfiles.find(p => p.id === currentUserId) : null;
                     const discountPct = (myProf && typeof window.getManufacturingDiscountPct === 'function') ? window.getManufacturingDiscountPct(myProf.perks) : 0;
-                    const blueprints = (typeof manufacturingBlueprintsList !== 'undefined') ? manufacturingBlueprintsList : [];
+                    // Approved-only -- a still-pending proposal (see the
+                    // manufacturing_blueprints approval workflow in
+                    // js/manufacturing.js) isn't buildable yet.
+                    const blueprints = (typeof manufacturingBlueprintsList !== 'undefined') ? manufacturingBlueprintsList.filter(b => b.status !== 'draft') : [];
                     const bpOptions = blueprints.length
                         ? blueprints.map(bp => `<option value="${bp.id}">${bp.name}</option>`).join('')
-                        : '<option value="">No blueprints defined yet</option>';
+                        : '<option value="">No approved blueprints yet</option>';
                     const inProgress = (window.globalManufacturingOrdersCache || []).filter(o => o.source_type === 'vessel' && o.vessel_id === vessel.id);
                     let progressHtml = '';
                     inProgress.forEach(o => {
                         const remaining = Math.max(0, (o.started_at_hours || 0) + (o.duration_hours || 0) - (window.universeTimeHours || 0));
-                        progressHtml += `<p style="margin:2px 0 0 0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p>`;
+                        // This box is already gated to the DM/vessel-owner above, so
+                        // anyone seeing it can also cancel from here -- same
+                        // window.cancelManufacturingOrder used by the Manufacturing
+                        // tab's own dashboard list, just a closer, contextual copy
+                        // of the same button.
+                        progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build and refund any deducted resources">✕</button></div>`;
                     });
                     // Deck-damage time note -- same display convention as Fleet
                     // Group Production's "Effective: Nx/day (Manufacturing deck
