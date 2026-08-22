@@ -178,15 +178,32 @@ window.AudioEngine = (function() {
         return false;
     }
 
-    // kind: 'ambient' | 'battle' -- fetches a signed URL for the next track
-    // in that bed's own rotation and plays it, fading in. Used both for
-    // normal track-ended advancement and for a manual skip (see skipTrack
-    // below). Async because getting a signed URL is a network round-trip.
-    async function playNextTrack(kind) {
+    // Extra attempts on the SAME track (fresh signed URL each time) before
+    // giving up on it and moving to a different track in the rotation.
+    // Added after a real report of "10 Something Dark Is Coming.m4a"
+    // repeatedly hitting net::ERR_QUIC_PROTOCOL_ERROR in Chrome -- that's a
+    // browser/network-layer QUIC connection failure talking to Supabase
+    // Storage's CDN, not something this app's code can prevent outright.
+    // Checked file sizes directly in Storage afterward: that track (18.4MB)
+    // and "17 Prelude to War.m4a" (18.1MB) are both roughly 2.5-4x every
+    // other track (4.3-7.8MB) -- a longer-lived streaming connection simply
+    // gets more chances to hit a transient QUIC error mid-playback, which
+    // is almost certainly why this specific (large, frequently-rotated
+    // ambient) track was the one actually reported. QUIC errors are usually
+    // transient, so retrying the SAME track a couple of times first (before
+    // this code's existing "move to the next track" fallback kicks in)
+    // gives it a real chance to succeed instead of just skipping a track
+    // that would likely have played fine a moment later.
+    const MUSIC_TRACK_RETRY_LIMIT = 2;
+    const MUSIC_TRACK_RETRY_DELAY_MS = 1200;
+
+    async function playTrackAttempt(kind, path, attempt) {
         const isAmbient = kind === 'ambient';
+        // Re-check on every attempt, not just the first -- state can change
+        // during a retry's delay (e.g. the user stopped ambient, or battle
+        // ended, while this track was still trying to recover).
         if (isAmbient) { if (!ambientDesired || battleActive) return; }
         else { if (!battleActive) return; }
-        const path = isAmbient ? nextAmbientPath() : nextBattlePath();
 
         let signedUrl;
         try {
@@ -196,19 +213,38 @@ window.AudioEngine = (function() {
         } catch (err) {
             console.warn('[AudioEngine] could not get a signed URL (check you are logged in and this file exists in the "music-tracks" Storage bucket):', path, err);
             if (recordFailureAndCheckGiveUp(isAmbient)) return;
-            return playNextTrack(kind); // try the next track in this bed's rotation
+            return playNextTrack(kind); // signed-URL step failing isn't a per-track streaming glitch -- move to a different track, not a retry of this one
         }
 
         const el = new Audio(signedUrl);
         el.volume = 0;
         el.addEventListener('ended', () => playNextTrack(kind));
         el.addEventListener('error', () => {
-            console.warn('[AudioEngine] signed track URL failed to play:', path);
+            if (attempt < MUSIC_TRACK_RETRY_LIMIT) {
+                console.warn(`[AudioEngine] track failed to play (attempt ${attempt + 1}/${MUSIC_TRACK_RETRY_LIMIT + 1}), retrying same track:`, path);
+                setTimeout(() => playTrackAttempt(kind, path, attempt + 1), MUSIC_TRACK_RETRY_DELAY_MS);
+                return;
+            }
+            console.warn(`[AudioEngine] track failed to play after ${MUSIC_TRACK_RETRY_LIMIT + 1} attempts, moving on:`, path);
             if (!recordFailureAndCheckGiveUp(isAmbient)) playNextTrack(kind);
         });
         if (isAmbient) { ambientAudio = el; ambientFailStreak = 0; } else { battleAudio = el; battleFailStreak = 0; }
         el.play().catch(() => { /* blocked until a user gesture -- click-unlock listener below retries */ });
         fadeTo(el, effectiveVolume(), isAmbient ? 2000 : 1000);
+    }
+
+    // kind: 'ambient' | 'battle' -- picks the next track in that bed's own
+    // rotation and plays it (fading in), retrying that SAME track a couple
+    // of times first on failure (see playTrackAttempt above) before this
+    // bed's own rotation moves on to a different track. Used both for
+    // normal track-ended advancement and for a manual skip (see skipTrack
+    // below).
+    function playNextTrack(kind) {
+        const isAmbient = kind === 'ambient';
+        if (isAmbient) { if (!ambientDesired || battleActive) return; }
+        else { if (!battleActive) return; }
+        const path = isAmbient ? nextAmbientPath() : nextBattlePath();
+        return playTrackAttempt(kind, path, 0);
     }
 
     function startAmbient() {
