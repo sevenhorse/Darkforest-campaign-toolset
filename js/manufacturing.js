@@ -9,10 +9,9 @@
    the perk-data verification that surfaced this before any code was
    written).
 
-   Shape: a DM-authored catalog (manufacturing_blueprints -- same
-   DM-only-CRUD/everyone-can-see convention as the Hazard Designer, no
-   draft/approval workflow) of buildable items, each costing a resource
-   list + a time cost. A player starts a build order from EITHER:
+   Shape: a catalog (manufacturing_blueprints) of buildable items, each
+   costing a resource list + a time cost. A player starts a build order
+   from EITHER:
      - one of their own VESSELS (must have a Manufacturing-type deck --
        a real, confirmed hard requirement, unlike Fleet Group Production /
        Salvage Processing which treat a missing deck as "full rate, not a
@@ -129,11 +128,47 @@ window.loadManufacturingOrders = loadManufacturingOrders;
 window.initManufacturingBlueprintsRealtimeChannel = initManufacturingBlueprintsRealtimeChannel;
 window.initManufacturingOrdersRealtimeChannel = initManufacturingOrdersRealtimeChannel;
 
-function canManageBlueprint() {
-    // DM-only, no per-owner permission complexity -- same exception the
-    // Hazard Designer already established (a catalog with no per-owner
-    // concept, unlike Ship Templates/Perks/Colonies/Fleets).
-    return currentUserRole === 'dm';
+/* ==========================================================================
+   APPROVAL WORKFLOW (added on request -- "copy the approval system from
+   the perk designer... it will save me some work overhead"): copied
+   structurally from js/perk-designer.js's own draft/approved flow on
+   perk_definitions, applied here to manufacturing_blueprints via a new
+   status column (migration manufacturing_blueprints_add_approval_status,
+   default 'approved' so all 47 pre-existing seeded blueprints stayed
+   immediately buildable -- nothing got swept into a pending bucket by
+   adding the column).
+
+   Anyone can now propose a new blueprint (same fields a DM would fill in
+   -- resource cost, time, output -- no field-level restriction, matching
+   perks exactly); a DM-authored blueprint still goes straight to
+   'approved' with zero extra clicks (same as a DM-authored perk). A
+   'draft' blueprint is NOT buildable and NOT selectable as another
+   blueprint's resource-cost input until a DM approves it -- the DM's
+   actual "work overhead" savings is that they now only have to review
+   and click ✓ APPROVE instead of hand-entering every blueprint
+   themselves.
+
+   Two divergences from copying perks 1:1, both deliberate:
+   1. canManageBlueprint(bp) below double-checks permission INSIDE
+      openEditBlueprintModal/deleteManufacturingBlueprint (perks' own
+      openEditPerkModal has no such internal check at all, trusting the
+      edit button's own visibility as the only gate) -- a small, free
+      hardening, not a functional difference for any legitimate caller.
+   2. The Manufacturing tab's sidebar badge already meant something before
+      this change (count of in-progress BUILD ORDERS, added last session)
+      -- rather than overwriting that with a "pending PROPOSALS" count
+      the way perk's own badge works, it now shows "N pending" only when
+      a proposal is actually awaiting review, falling back to the
+      in-progress-orders count otherwise. Keeps both signals instead of
+      losing one to match perks exactly.
+   ========================================================================== */
+
+function canManageBlueprint(bp) {
+    // DM always. A non-DM can additionally manage (edit/delete) ONLY their
+    // own still-pending ('draft') proposal -- exactly canManagePerk's own
+    // rule. Once approved, a blueprint reverts to DM-only, same as a perk.
+    if (currentUserRole === 'dm') return true;
+    return !!(bp && bp.status === 'draft' && bp.created_by === currentUserId);
 }
 
 // Non-stacking: takes the MAX manufacturing_discount_pct across every perk
@@ -179,7 +214,13 @@ window.getManufacturingDiscountPct = function(charPerksList) {
 function findBlueprintByOutputName(name) {
     if (!name) return null;
     const lower = name.toLowerCase();
-    return (manufacturingBlueprintsList || []).find(b => b.output_type === 'cargo_item' && ((b.output_payload && b.output_payload.name) || '').toLowerCase() === lower);
+    // Only resolves against an APPROVED blueprint's output -- a still-draft
+    // proposal isn't "real" yet, so it can't participate in a tier chain as
+    // if it were. An unresolvable name (including one that only matches a
+    // pending draft) falls through to computeBlueprintTier's existing
+    // "unresolved input -- treat as Tier 1, raw feedstock" handling, same
+    // as a renamed/deleted blueprint already does.
+    return (manufacturingBlueprintsList || []).find(b => b.output_type === 'cargo_item' && b.status !== 'draft' && ((b.output_payload && b.output_payload.name) || '').toLowerCase() === lower);
 }
 
 function computeBlueprintTier(bp, visiting) {
@@ -221,10 +262,12 @@ function formatBlueprintTier(tier) {
 }
 
 /* ==========================================================================
-   SCREEN: DM blueprint catalog + a live "in-progress builds" list, everyone
-   can see both (same visibility split as Battlefield Salvage's own panel --
-   the catalog/order data itself isn't secret, only editing the catalog is
-   DM-gated).
+   SCREEN: blueprint catalog (now propose-and-approve, see the APPROVAL
+   WORKFLOW header comment above) + a live "in-progress builds" list,
+   everyone can see both (same visibility split as Battlefield Salvage's
+   own panel -- the catalog/order data itself isn't secret; editing an
+   APPROVED blueprint is DM-only, but anyone can propose a new one, and a
+   proposer can edit/delete their own still-pending draft).
 
    Originally a floating draggable panel; moved to its own Command Terminal
    tab (term-panel-manufacturing) alongside Ship Designer/Perk Designer --
@@ -262,34 +305,52 @@ function describeBlueprintCost(bp) {
 window.renderManufacturingPanel = function() {
     const bpContainer = document.getElementById('manufacturing-blueprints-container');
     const ordContainer = document.getElementById('manufacturing-orders-container');
-    const addBtnWrap = document.getElementById('manufacturing-add-blueprint-wrap');
-    if (addBtnWrap) addBtnWrap.style.display = canManageBlueprint() ? 'block' : 'none';
+    // The "+ PROPOSE BLUEPRINT" button is always visible now -- anyone can
+    // propose, same as "+ PROPOSE PERK" has no visibility gate.
 
+    let pendingCount = 0;
     if (bpContainer) {
-        let html = '';
-        if (manufacturingBlueprintsList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No manufacturing blueprints defined yet.</span>';
-        manufacturingBlueprintsList.forEach(bp => {
-            const editable = canManageBlueprint();
+        // Pending Review / Approved Blueprints split -- direct mirror of
+        // js/perk-designer.js's own renderPerkDesignerPanel.
+        const pending = manufacturingBlueprintsList.filter(bp => bp.status === 'draft');
+        const approved = manufacturingBlueprintsList.filter(bp => bp.status !== 'draft');
+        pendingCount = pending.length;
+
+        const renderCard = (bp) => {
+            const editable = canManageBlueprint(bp);
             const tier = computeBlueprintTier(bp);
             const tierWarn = (tier !== Infinity && tier > MANUFACTURING_TIER_CAP) ? ' <span style="color:#ff9b6b;">(exceeds 5-layer guideline)</span>' : '';
             const tierColor = tier === Infinity ? '#ff6b6b' : '#6b826a';
-            html += `
-            <div class="note-card">
+            const proposer = (bp.status === 'draft' && typeof allProfiles !== 'undefined') ? allProfiles.find(a => a.id === bp.created_by) : null;
+            return `
+            <div class="note-card" style="border-left: 3px solid ${bp.status === 'draft' ? '#ffaa00' : '#3c4e36'};">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#c9962f; font-size:12px;">${bp.name}</strong>
+                        <strong style="color:${bp.status === 'draft' ? '#ffaa00' : '#c9962f'}; font-size:12px;">${bp.name}</strong>
                         <span style="font-size:8px; color:${tierColor}; margin-left:6px;">${formatBlueprintTier(tier)}${tierWarn}</span>
+                        ${bp.status === 'draft' ? '<span style="font-size:8px; color:#ffaa00;"> · PENDING REVIEW</span>' : ''}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${bp.description || ''}</p>
                         <p style="margin:4px 0 0 0; font-size:9px; color:#6b826a;">Cost: ${describeBlueprintCost(bp)} &nbsp;·&nbsp; Time: ${bp.time_cost_hours}h</p>
                         <p style="margin:2px 0 0 0; font-size:9px; color:#6b826a;">${describeBlueprintOutput(bp)}</p>
+                        ${proposer ? `<span class="author-tag">proposed by: ${proposer.username || 'Commander'}</span>` : ''}
                     </div>
-                    ${editable ? `<div style="display:flex; gap:4px; flex:0 0 auto;">
-                        <button class="layer-edit" onclick="window.openEditBlueprintModal('${bp.id}')" style="padding:3px 7px; font-size:9px;">✎</button>
-                        <button class="layer-del" onclick="window.deleteManufacturingBlueprint('${bp.id}')" style="padding:3px 7px; font-size:9px;">✕</button>
-                    </div>` : ''}
+                    <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:110px;">
+                        ${(currentUserRole === 'dm' && bp.status === 'draft') ? `<button class="btn-deploy" onclick="window.approveBlueprint('${bp.id}')" style="width:auto; margin:0; padding:3px 6px; font-size:9px;">✓ APPROVE</button>` : ''}
+                        ${editable ? `<button class="layer-edit" onclick="window.openEditBlueprintModal('${bp.id}')" style="padding:3px 7px; font-size:9px;">✎</button>` : ''}
+                        ${editable ? `<button class="layer-del" onclick="window.deleteManufacturingBlueprint('${bp.id}')" style="padding:3px 7px; font-size:9px;">✕</button>` : ''}
+                    </div>
                 </div>
             </div>`;
-        });
+        };
+
+        let html = '';
+        if (pending.length > 0) {
+            html += `<h5 style="color:#ffaa00; font-size:10px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h5>`;
+            pending.forEach(bp => html += renderCard(bp));
+        }
+        html += `<h5 style="color:#6b826a; font-size:10px; margin:${pending.length > 0 ? '10px' : '0'} 0 4px 0;">Approved Blueprints (${approved.length})</h5>`;
+        if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">No approved blueprints yet.</span>';
+        approved.forEach(bp => html += renderCard(bp));
         bpContainer.innerHTML = html;
     }
 
@@ -300,23 +361,43 @@ window.renderManufacturingPanel = function() {
         orders.forEach(o => {
             const readyAt = (o.started_at_hours || 0) + (o.duration_hours || 0);
             const remaining = Math.max(0, readyAt - (window.universeTimeHours || 0));
-            const sourceLabel = o.source_type === 'colony' ? '🏛 Colony' : '🚀 Vessel';
             const vessel = (typeof globalShipMarkersCache !== 'undefined') ? globalShipMarkersCache.find(m => m.id === o.vessel_id) : null;
+            // Cancel permission mirrors window.cancelManufacturingOrder's own
+            // check exactly -- DM, or the owner of whichever vessel/colony
+            // actually initiated the build (not the delivery vessel for a
+            // colony order).
+            let canCancel = currentUserRole === 'dm';
+            let sourceLabel;
+            if (o.source_type === 'colony') {
+                const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === o.source_colony_id) : null;
+                if (colony && colony.owner_id === currentUserId) canCancel = true;
+                sourceLabel = `🏛 ${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}`;
+            } else {
+                if (vessel && vessel.owner_id === currentUserId) canCancel = true;
+                sourceLabel = `🚀 ${vessel ? vessel.name : 'Vessel'}`;
+            }
             html += `
             <div class="note-card">
-                <strong style="color:#c9962f; font-size:11px;">${o.blueprint_name || 'Unknown Blueprint'}</strong>
-                <p style="margin:2px 0 0 0; font-size:9px; color:#6b826a;">${sourceLabel}${vessel ? ` → ${vessel.name}` : ''}${o.discount_pct ? ` &nbsp;·&nbsp; ${o.discount_pct}% discount applied` : ''}</p>
-                <p style="margin:2px 0 0 0; font-size:9px; color:#d4c5a9;">Ready in ~${remaining.toFixed(1)}h</p>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <strong style="color:#c9962f; font-size:11px;">${o.blueprint_name || 'Unknown Blueprint'}</strong>
+                        <p style="margin:2px 0 0 0; font-size:9px; color:#6b826a;">${sourceLabel}${o.discount_pct ? ` &nbsp;·&nbsp; ${o.discount_pct}% discount applied` : ''}</p>
+                        <p style="margin:2px 0 0 0; font-size:9px; color:#d4c5a9;">Ready in ~${remaining.toFixed(1)}h</p>
+                    </div>
+                    ${canCancel ? `<button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:3px 7px; font-size:9px;" title="Cancel this build and refund any deducted resources">✕ CANCEL</button>` : ''}
+                </div>
             </div>`;
         });
         ordContainer.innerHTML = html;
     }
 
-    // Badge shows the count of builds currently in progress across every
-    // vessel and colony -- same "item count, not unread/urgent" convention
-    // as the Colonies & Fleets tab's own badge.
+    // Badge prioritizes "N pending" (a blueprint proposal awaiting DM
+    // review -- same priority perk-designer's own badge gives its pending
+    // count), falling back to the in-progress-build-order count otherwise
+    // (that count is what this badge showed before the approval workflow
+    // was added, and is still worth surfacing when nothing needs review).
     const badge = document.getElementById('badge-manufacturing');
-    if (badge) badge.innerText = (window.globalManufacturingOrdersCache || []).length;
+    if (badge) badge.innerText = pendingCount > 0 ? `${pendingCount} pending` : (window.globalManufacturingOrdersCache || []).length;
 };
 
 /* Rendered by js/colonies.js's renderColoniesPanel, inside each editable
@@ -325,15 +406,21 @@ window.renderManufacturingPanel = function() {
    existing colony-deliver-vessel-<id> select as the Manufacturing order's
    delivery target instead of drawing a second picker. */
 window.renderColonyManufacturingBox = function(colony) {
-    const blueprints = manufacturingBlueprintsList || [];
+    // Approved-only -- a still-pending proposal isn't buildable yet.
+    const blueprints = (manufacturingBlueprintsList || []).filter(b => b.status !== 'draft');
     const bpOptions = blueprints.length
         ? blueprints.map(bp => `<option value="${bp.id}">${bp.name}</option>`).join('')
-        : '<option value="">No blueprints defined yet</option>';
+        : '<option value="">No approved blueprints yet</option>';
     const inProgress = (window.globalManufacturingOrdersCache || []).filter(o => o.source_type === 'colony' && o.source_colony_id === colony.id);
     let progressHtml = '';
     inProgress.forEach(o => {
         const remaining = Math.max(0, (o.started_at_hours || 0) + (o.duration_hours || 0) - (window.universeTimeHours || 0));
-        progressHtml += `<p style="margin:2px 0 0 0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p>`;
+        // This box only renders for an editable (DM/owner) colony already
+        // (see js/colonies.js's renderColoniesPanel), so anyone seeing it
+        // can also cancel from here -- colony builds have no resource cost
+        // to refund (time only), window.cancelManufacturingOrder handles
+        // that case as a plain cancel.
+        progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build">✕</button></div>`;
     });
     return `
     <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:6px;">
@@ -349,10 +436,21 @@ window.renderColonyManufacturingBox = function(colony) {
 };
 
 window.deleteManufacturingBlueprint = async function(id) {
-    if (!canManageBlueprint()) return;
     const bp = manufacturingBlueprintsList.find(b => b.id === id);
+    if (bp && !canManageBlueprint(bp)) return;
     if (!(await window.showConfirmModal(`Delete blueprint "${bp ? bp.name : ''}"? Any order currently in progress from it is unaffected (it already has its own snapshot).`))) return;
     await db.from('manufacturing_blueprints').delete().eq('id', id);
+    loadManufacturingBlueprints();
+};
+
+// Direct mirror of window.approvePerk.
+window.approveBlueprint = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    const bp = manufacturingBlueprintsList.find(b => b.id === id);
+    if (!bp) return;
+    const { error } = await db.from('manufacturing_blueprints').update({ status: 'approved' }).eq('id', id);
+    if (error) { alert('Failed to approve blueprint: ' + error.message); return; }
+    await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `📋 [OVERSEER] Blueprint "${bp.name}" approved and added to the active manufacturing catalog.` });
     loadManufacturingBlueprints();
 };
 
@@ -410,7 +508,10 @@ window.deleteManufacturingBlueprint = async function(id) {
     // renamed or deleted -- only ADDING a new cost row requires picking
     // from this list.
     function getKnownManufacturableBlueprints(excludeId) {
-        return (manufacturingBlueprintsList || []).filter(b => b.output_type === 'cargo_item' && b.id !== excludeId);
+        // Approved-only -- a pending proposal isn't real yet, so it can't be
+        // picked as another (possibly also-pending) blueprint's resource
+        // input. Matches findBlueprintByOutputName's own approved-only rule.
+        return (manufacturingBlueprintsList || []).filter(b => b.output_type === 'cargo_item' && b.id !== excludeId && b.status !== 'draft');
     }
 
     function populateCostInputDropdown() {
@@ -580,10 +681,18 @@ window.deleteManufacturingBlueprint = async function(id) {
             };
 
             if (currentId) {
+                // Never touch status on an update -- an approved blueprint
+                // being edited by the DM stays approved, and a draft being
+                // edited by its own proposer stays draft until a DM
+                // approves it. Same as perk_definitions' own update path.
                 const { error } = await db.from('manufacturing_blueprints').update(payload).eq('id', currentId);
                 if (error) { alert('Failed to save blueprint: ' + error.message); return; }
             } else {
                 payload.created_by = currentUserId;
+                // DM-authored blueprints go straight in as approved; anyone
+                // else's proposal starts as a draft pending DM review --
+                // exact mirror of perk_definitions' own insert-status rule.
+                payload.status = currentUserRole === 'dm' ? 'approved' : 'draft';
                 const { error } = await db.from('manufacturing_blueprints').insert(payload);
                 if (error) { alert('Failed to create blueprint: ' + error.message); return; }
             }
@@ -593,11 +702,14 @@ window.deleteManufacturingBlueprint = async function(id) {
     }
 
     window.openNewBlueprintModal = function() {
-        if (!canManageBlueprint()) return;
+        // No permission gate -- anyone can propose a new blueprint now (same
+        // as openNewPerkModal has none). A DM's own submission still saves
+        // straight to 'approved'; anyone else's starts as a 'draft' pending
+        // review -- see the save handler above.
         ensureModal();
         currentId = null;
         workingCosts = [];
-        document.getElementById('bp-modal-title').innerText = 'New Manufacturing Blueprint';
+        document.getElementById('bp-modal-title').innerText = currentUserRole === 'dm' ? 'New Manufacturing Blueprint' : 'Propose New Manufacturing Blueprint';
         document.getElementById('bp-edit-name').value = '';
         document.getElementById('bp-edit-desc').value = '';
         document.getElementById('bp-edit-hours').value = 24;
@@ -618,9 +730,13 @@ window.deleteManufacturingBlueprint = async function(id) {
     };
 
     window.openEditBlueprintModal = function(id) {
-        if (!canManageBlueprint()) return;
         const bp = manufacturingBlueprintsList.find(b => b.id === id);
         if (!bp) return;
+        // Belt-and-suspenders check (the edit button itself is already only
+        // ever rendered for someone canManageBlueprint(bp) already allows --
+        // see renderManufacturingPanel below) -- unlike openEditPerkModal,
+        // which trusts the button's own visibility as its only gate.
+        if (!canManageBlueprint(bp)) return;
         ensureModal();
         currentId = id;
         workingCosts = JSON.parse(JSON.stringify(bp.resource_cost || []));
@@ -735,8 +851,15 @@ window.startVesselManufacturingOrder = async function(vesselId) {
             return;
         }
     }
-    requirements.forEach(req => {
-        findCargoItemAcrossBuckets(cargo, req.name).item.qty -= req.qty;
+    // Snapshot exactly what's deducted -- name/unit/qty AND which bucket it
+    // came from -- onto the order itself as resource_cost_snapshot. Needed
+    // so a later cancel can refund precisely what was taken, into the same
+    // bucket, rather than guessing from the blueprint's current (possibly
+    // since-edited) resource_cost. See window.cancelManufacturingOrder.
+    const deductedSnapshot = requirements.map(req => {
+        const found = findCargoItemAcrossBuckets(cargo, req.name);
+        found.item.qty -= req.qty;
+        return { name: req.name, unit: req.unit, qty: req.qty, bucket: found.bucket };
     });
 
     await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
@@ -747,7 +870,8 @@ window.startVesselManufacturingOrder = async function(vesselId) {
     const { error } = await db.from('manufacturing_orders').insert({
         blueprint_id: bp.id, blueprint_name: bp.name, output_type: bp.output_type, output_payload: bp.output_payload,
         source_type: 'vessel', vessel_id: vesselId, character_id: myProf.character.id, initiated_by: currentUserId,
-        started_at_hours: window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct
+        started_at_hours: window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct,
+        resource_cost_snapshot: deductedSnapshot
     });
     if (error) { alert('Failed to start build: ' + error.message); return; }
 
@@ -797,6 +921,85 @@ window.startColonyManufacturingOrder = async function(colonyId) {
         sender_id: null, message_type: 'system',
         content: `🏭 [MANUFACTURING] ${colony.name} began building "${bp.name}" for delivery to ${vessel.name}${discountPct ? ` (${discountPct}% discount applied)` : ''} — ready in ${durationHours.toFixed(1)}h. (Colony builds cost time only -- no material deduction.)`
     });
+    loadManufacturingOrders();
+};
+
+/* ==========================================================================
+   CANCELLING AN IN-PROGRESS ORDER -- refunds the exact resources deducted
+   at start time (via resource_cost_snapshot, see startVesselManufacturingOrder)
+   back into whichever cargo bucket they came from. Permission mirrors the
+   START permission exactly: DM, or the owner of whichever vessel/colony
+   actually initiated the build (NOT the delivery vessel for a colony
+   order -- the colony is what "paid" the time cost and is what a player
+   would expect "my build" to mean there).
+
+   A vessel order started before this column existed has
+   resource_cost_snapshot === null -- there is no record of what was
+   deducted (the blueprint's CURRENT resource_cost might not even match
+   what the order actually cost if it's been edited since), so those
+   cancel with a clear "could not auto-refund" notice instead of guessing.
+   A colony order never deducted anything to begin with (time cost only),
+   so its cancel is refund-free by design, not a gap.
+   ========================================================================== */
+
+window.cancelManufacturingOrder = async function(orderId) {
+    // Re-fetch fresh rather than trusting the local cache -- the order may
+    // have already completed (processManufacturingOrders deletes it) or
+    // been cancelled by someone else in the moment between this button
+    // rendering and being clicked.
+    const { data: order } = await db.from('manufacturing_orders').select('*').eq('id', orderId).maybeSingle();
+    if (!order) { alert('This build order no longer exists -- it may have already completed or been cancelled.'); loadManufacturingOrders(); return; }
+
+    let ownerOk = currentUserRole === 'dm';
+    let sourceName = 'Unknown source';
+    if (!ownerOk && order.source_type === 'colony') {
+        const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
+        if (colony) { ownerOk = colony.owner_id === currentUserId; sourceName = colony.name; }
+    } else if (!ownerOk && order.source_type === 'vessel') {
+        const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
+        if (vessel) { ownerOk = vessel.owner_id === currentUserId; sourceName = vessel.name; }
+    } else if (order.source_type === 'colony') {
+        sourceName = ((typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null)?.name || sourceName;
+    } else {
+        sourceName = (globalShipMarkersCache.find(m => m.id === order.vessel_id) || {}).name || sourceName;
+    }
+    if (!ownerOk) { alert('Only the DM or the build\'s own source vessel/colony owner can cancel it.'); return; }
+
+    const hasRefund = order.source_type === 'vessel' && Array.isArray(order.resource_cost_snapshot) && order.resource_cost_snapshot.length > 0;
+    const refundLine = hasRefund
+        ? `Refunds: ${order.resource_cost_snapshot.map(r => `${r.qty}x ${r.name}`).join(', ')}.`
+        : (order.source_type === 'colony' ? 'Colony builds cost time only -- nothing to refund.' : 'No resource-cost record on this order (started before refund tracking existed) -- it will be cancelled with NO automatic refund.');
+    if (!(await window.showConfirmModal(`Cancel "${order.blueprint_name}" (${sourceName})? ${refundLine}`))) return;
+
+    if (hasRefund) {
+        const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
+        if (vessel) {
+            let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+            order.resource_cost_snapshot.forEach(r => {
+                const bucket = MANUFACTURING_CARGO_BUCKETS.includes(r.bucket) ? r.bucket : 'expendables';
+                const existing = (cargo[bucket] || []).find(i => i.name.toLowerCase() === r.name.toLowerCase());
+                if (existing) existing.qty += r.qty;
+                else cargo[bucket].push({ name: r.name, qty: r.qty, unit: r.unit || 'Units' });
+            });
+            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+            vessel.cargo_inventory = cargo;
+            if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+        }
+    }
+
+    // Delete rather than a status='cancelled' row -- same "no unbounded
+    // table growth, chat log is the audit trail" convention completion
+    // already uses just below.
+    await db.from('manufacturing_orders').delete().eq('id', order.id);
+
+    await db.from('chat_logs').insert({
+        sender_id: null, message_type: 'system',
+        content: `🚫 [MANUFACTURING] "${order.blueprint_name}" build at ${sourceName} was cancelled.${hasRefund ? ` Refunded: ${order.resource_cost_snapshot.map(r => `${r.qty}x ${r.name}`).join(', ')}.` : (order.source_type === 'vessel' ? ' No refund on record for this build.' : '')}`
+    });
+    // loadManufacturingOrders already re-renders the Manufacturing tab, the
+    // Vessel Deck's Manufacturing Bay box, and the Colonies & Fleets boxes
+    // (see its own definition near the top of this file) -- no separate
+    // re-render calls needed here.
     loadManufacturingOrders();
 };
 
