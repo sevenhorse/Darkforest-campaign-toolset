@@ -4,7 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Intrepid Horizon Mainframe</title>
-    <link rel="stylesheet" href="style.css?v=3.19">
+    <!-- Inline SVG data-URI favicon -- silences the browser's automatic
+         GET /favicon.ico 404 (no favicon file existed before this, and none
+         needs to be uploaded/hosted separately since this is embedded
+         directly in the markup). Simple DRADIS-style radar blip, matching
+         the app's terminal green-on-black theme. -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="style.css?v=3.21">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -384,6 +390,7 @@
                                     </div>
                                     <div id="vessel-ownership-container"></div>
                                     <div id="vessel-salvage-container"></div>
+                                    <div id="vessel-manufacturing-container"></div>
                                 </div>
                             </div>
                             <div class="sheet-section" style="border-color:#ff6b6b; background:rgba(92,18,18,0.05);">
@@ -782,6 +789,7 @@
             <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">COMBAT</button>
             <button onclick="window.toggleBattleMap()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c778dd; color: #c778dd; font-size: 10px;">BATTLE MAP</button>
             <button onclick="window.toggleSalvagePanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">SALVAGE</button>
+            <button onclick="window.toggleManufacturingPanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">MANUFACTURING</button>
             <button onclick="window.resetUiLayout()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RESET UI</button>
         </div>
 
@@ -965,13 +973,22 @@
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <strong id="battle-map-encounter-name" style="color:#c778dd; font-size:12px;"></strong>
                             <div style="display:flex; gap:4px;">
-                                <button class="layer-edit" onclick="window.advanceCombatRound()" title="Reuses the same global cooldown/overheat/loiter tick every vessel already uses" style="font-size:9px; padding:3px 8px;">⏭ ADVANCE ROUND</button>
+                                <button id="battle-map-advance-btn" class="layer-edit" onclick="window.advanceCombatRound()" title="Reuses the same global cooldown/overheat/loiter tick every vessel already uses" style="font-size:9px; padding:3px 8px; display:none;">⏭ ADVANCE ROUND</button>
                                 <button id="battle-map-end-btn" class="btn-remove" onclick="window.endBattleEncounter()" style="font-size:9px; padding:3px 8px; display:none;">✕ END BATTLE</button>
                             </div>
                         </div>
 
                         <label for="battle-map-grid" style="display:none;">Battle grid — click to place an armed token, drag a placed token to reposition, click a placed token to open it</label>
-                        <div id="battle-map-grid" style="position:relative; width:460px; height:380px; background: repeating-linear-gradient(0deg, #0a1410, #0a1410 39px, #16241c 40px), repeating-linear-gradient(90deg, #0a1410, #0a1410 39px, #16241c 40px); border:1px solid #3c4e36; overflow:hidden; flex-shrink:0; cursor:crosshair;"></div>
+                        <!-- Wrapper reserves the VISUALLY scaled footprint (460x380 * BATTLE_GRID_SCALE)
+                             in the flex layout; the inner grid keeps its real 460x380 box (unchanged
+                             logical coordinate space -- token x/y, weapon range, tactical_speed all
+                             still mean exactly what they meant before) and is scaled up purely via CSS
+                             transform. See js/battle-map.js's BATTLE_GRID_SCALE comment for the full
+                             reasoning (tester feedback: "make the map bigger", done visual-only so no
+                             weapon range/speed retuning is forced). -->
+                        <div id="battle-map-grid-wrap" style="width:700px; height:580px; flex-shrink:0; overflow:hidden;">
+                            <div id="battle-map-grid" style="position:relative; width:460px; height:380px; background: repeating-linear-gradient(0deg, #0a1410, #0a1410 39px, #16241c 40px), repeating-linear-gradient(90deg, #0a1410, #0a1410 39px, #16241c 40px); border:1px solid #3c4e36; overflow:hidden; cursor:crosshair; transform:scale(1.5); transform-origin:0 0;"></div>
+                        </div>
 
                         <div>
                             <h5 style="margin:0 0 4px 0; font-size:10px; color:#00e5a3;">Available Vessels</h5>
@@ -1005,6 +1022,22 @@
                 </div>
                 <div id="salvage-list-container" style="max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
                 <button onclick="window.toggleSalvagePanel()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
+            </div>
+
+            <div id="manufacturing-panel" class="panel">
+                <div id="manufacturing-header" class="panel-header-drag">
+                    <h4 style="margin:0; color:#c9962f;">Manufacturing</h4>
+                    <span style="font-size: 10px; color: #6b826a;">DRAG</span>
+                </div>
+                <div id="manufacturing-add-blueprint-wrap" style="display:none; margin-bottom:8px;">
+                    <button class="btn-reveal" onclick="window.openNewBlueprintModal()" style="width:100%; font-size:10px; margin:0; border-color:#c9962f; color:#c9962f;">+ NEW BLUEPRINT (DM)</button>
+                </div>
+                <h5 style="margin:0 0 4px 0; font-size:10px; color:#6b826a;">Blueprint Catalog</h5>
+                <div id="manufacturing-blueprints-container" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:10px;"></div>
+                <h5 style="margin:0 0 4px 0; font-size:10px; color:#6b826a;">In-Progress Builds</h5>
+                <div id="manufacturing-orders-container" style="max-height:180px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+                <p style="font-size:8px; color:#6b826a; margin:8px 0 0 0;">To start a build, use the Manufacturing Bay box on one of your vessels (Vessel Deck, requires a Manufacturing-type deck) or on one of your colonies (Colonies tab, time cost only).</p>
+                <button onclick="window.toggleManufacturingPanel()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
             </div>
 
             <!-- DM OPERATIONS PANEL WITH SYSTEM ARCHITECT TRIGGER -->
@@ -1190,15 +1223,16 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.22"></script>
+    <script src="js/db.js?v=3.23"></script>
     <script src="js/audio.js?v=3.15"></script>
-    <script src="js/ui.js?v=3.24"></script>
-    <script src="js/combat.js?v=3.22"></script>
-    <script src="js/colonies.js?v=3.15"></script>
+    <script src="js/ui.js?v=3.25"></script>
+    <script src="js/combat.js?v=3.24"></script>
+    <script src="js/colonies.js?v=3.16"></script>
     <script src="js/ship-designer.js?v=3.15"></script>
     <script src="js/perk-designer.js?v=3.13"></script>
     <script src="js/map.js?v=3.26"></script>
-    <script src="js/battle-map.js?v=1.8"></script>
+    <script src="js/battle-map.js?v=1.9"></script>
+    <script src="js/manufacturing.js?v=1.5"></script>
 
 </body>
 </html>
