@@ -617,6 +617,56 @@ window.renderVesselDeck = function() {
                 salvageContainer.innerHTML = '';
             }
         }
+
+        // Manufacturing Bay — start a build order from this vessel's own
+        // cargo. Unlike Salvage Processing/Fleet Group Production, a
+        // Manufacturing-type deck is a hard requirement here (confirmed
+        // design), not just an output-scaling factor — no deck, no builds
+        // from this vessel at all. DM or the vessel's own owner only, same
+        // permission shape as Salvage Processing. See js/manufacturing.js.
+        const mfgContainer = document.getElementById('vessel-manufacturing-container');
+        if (mfgContainer) {
+            if (currentUserRole === 'dm' || vessel.owner_id === currentUserId) {
+                const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
+                if (!mfgDeck) {
+                    mfgContainer.innerHTML = `<div style="background:#030403; padding:8px; border:1px solid #3c4e36; border-radius:2px; margin-top:10px;">
+                        <p style="font-size:9px; color:#6b826a; margin:0;">🏭 No Manufacturing-type deck installed — this vessel cannot run build orders.</p>
+                    </div>`;
+                } else {
+                    const myProf = (typeof allProfiles !== 'undefined') ? allProfiles.find(p => p.id === currentUserId) : null;
+                    const discountPct = (myProf && typeof window.getManufacturingDiscountPct === 'function') ? window.getManufacturingDiscountPct(myProf.perks) : 0;
+                    const blueprints = (typeof manufacturingBlueprintsList !== 'undefined') ? manufacturingBlueprintsList : [];
+                    const bpOptions = blueprints.length
+                        ? blueprints.map(bp => `<option value="${bp.id}">${bp.name}</option>`).join('')
+                        : '<option value="">No blueprints defined yet</option>';
+                    const inProgress = (window.globalManufacturingOrdersCache || []).filter(o => o.source_type === 'vessel' && o.vessel_id === vessel.id);
+                    let progressHtml = '';
+                    inProgress.forEach(o => {
+                        const remaining = Math.max(0, (o.started_at_hours || 0) + (o.duration_hours || 0) - (window.universeTimeHours || 0));
+                        progressHtml += `<p style="margin:2px 0 0 0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p>`;
+                    });
+                    // Deck-damage time note -- same display convention as Fleet
+                    // Group Production's "Effective: Nx/day (Manufacturing deck
+                    // Y%)" line in js/colonies.js, but for TIME instead of an
+                    // output rate. Floored at 10% efficiency to match the actual
+                    // scaling window.startVesselManufacturingOrder applies.
+                    const deckScale = mfgDeck.max_hp > 0 ? Math.max(0.1, mfgDeck.hp / mfgDeck.max_hp) : 1;
+                    const deckNote = deckScale < 1 ? ` — <span style="color:#ff9b6b;">Manufacturing deck at ${Math.round(deckScale * 100)}% (builds take ${(1 / deckScale).toFixed(1)}x longer)</span>` : '';
+                    mfgContainer.innerHTML = `
+                    <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:10px;">
+                        <label style="font-size: 9px; color: #c9962f;">🏭 Manufacturing Bay (Manufacturing deck installed)${discountPct ? ` — ${discountPct}% perk discount applies` : ''}${deckNote}:</label>
+                        <div style="display:flex; gap:6px; margin-top:4px;">
+                            <label for="mfg-vessel-blueprint-${vessel.id}" style="display:none;">Blueprint</label>
+                            <select id="mfg-vessel-blueprint-${vessel.id}" style="flex:1; margin:0; font-size:9px; padding:3px; border-color:#c9962f;">${bpOptions}</select>
+                            <button class="btn-deploy" onclick="window.startVesselManufacturingOrder('${vessel.id}')" style="flex:0 0 auto; font-size:9px; padding:4px 8px; margin:0;">BUILD</button>
+                        </div>
+                        ${progressHtml}
+                    </div>`;
+                }
+            } else {
+                mfgContainer.innerHTML = '';
+            }
+        }
     }
 
     if (weaponsContainer) {
