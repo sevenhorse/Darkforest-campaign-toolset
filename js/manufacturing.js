@@ -221,19 +221,28 @@ function formatBlueprintTier(tier) {
 }
 
 /* ==========================================================================
-   PANEL: DM blueprint catalog + a live "in-progress builds" list, everyone
+   SCREEN: DM blueprint catalog + a live "in-progress builds" list, everyone
    can see both (same visibility split as Battlefield Salvage's own panel --
    the catalog/order data itself isn't secret, only editing the catalog is
    DM-gated).
-   ========================================================================== */
 
-window.toggleManufacturingPanel = function() {
-    const panel = document.getElementById('manufacturing-panel');
-    if (!panel) return;
-    const opening = panel.style.display !== 'block';
-    panel.style.display = opening ? 'block' : 'none';
-    if (opening) { loadManufacturingBlueprints(); loadManufacturingOrders(); }
-};
+   Originally a floating draggable panel; moved to its own Command Terminal
+   tab (term-panel-manufacturing) alongside Ship Designer/Perk Designer --
+   this screen is a catalog/dashboard only (per the DM's own confirmed
+   choice), NOT where a build is started. The actual "start a build"
+   controls stay put on their existing source-specific screens (the
+   Manufacturing Bay box on a vessel's own Vessel Deck tab, and the box on
+   a colony's own card in Colonies & Fleets) since those need that
+   vessel's/colony's own context (cargo, deck, delivery-vessel picker) that
+   this dashboard doesn't have. renderManufacturingPanel below is unchanged
+   by the move -- it only ever targeted element IDs, not the floating
+   panel's own container, so re-parenting those same IDs into the new tab's
+   markup required no logic changes here at all. loadManufacturingBlueprints/
+   loadManufacturingOrders already run unconditionally at app startup (see
+   js/db.js's init wiring), so there's no more "load lazily when the panel
+   opens" step to replace -- switchTermTab('manufacturing') just shows
+   already-loaded data, same as every other tab.
+   ========================================================================== */
 
 function describeBlueprintOutput(bp) {
     const p = bp.output_payload || {};
@@ -302,6 +311,12 @@ window.renderManufacturingPanel = function() {
         });
         ordContainer.innerHTML = html;
     }
+
+    // Badge shows the count of builds currently in progress across every
+    // vessel and colony -- same "item count, not unread/urgent" convention
+    // as the Colonies & Fleets tab's own badge.
+    const badge = document.getElementById('badge-manufacturing');
+    if (badge) badge.innerText = (window.globalManufacturingOrdersCache || []).length;
 };
 
 /* Rendered by js/colonies.js's renderColoniesPanel, inside each editable
@@ -850,6 +865,7 @@ window.processManufacturingOrders = async function(newHours) {
     }
 };
 
-/* Registers the manufacturing panel with the same draggable-.panel system
-   every other floating panel uses. */
-if (typeof makePanelDraggable === 'function') makePanelDraggable('manufacturing-panel', 'manufacturing-header', 'odyssey_manufacturing_pos');
+/* Manufacturing moved from a floating draggable panel to its own Command
+   Terminal tab (term-panel-manufacturing) this session -- no more
+   makePanelDraggable registration needed here; the tab shows/hides via
+   switchTermTab like every other tab, not a drag-positioned overlay. */
