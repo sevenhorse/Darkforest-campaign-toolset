@@ -234,6 +234,13 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
     if (typeof window.processSalvageGatherCompletion === 'function') {
         await window.processSalvageGatherCompletion(newHours);
     }
+
+    // Manufacturing Orders — same "every tick, not just daily" reasoning as
+    // Battlefield Salvage's gather completion above: a build's duration can
+    // be sub-day.
+    if (typeof window.processManufacturingOrders === 'function') {
+        await window.processManufacturingOrders(newHours);
+    }
 };
 
 // Small shared helper — every write path below ends by applying the same
