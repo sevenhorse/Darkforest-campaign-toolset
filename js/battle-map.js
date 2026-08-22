@@ -66,6 +66,20 @@ const BATTLE_GRID_W = 460;
 const BATTLE_GRID_H = 380;
 const BATTLE_TOKEN_SIZE = 34;
 
+// Visual-only zoom (tester feedback: "make the map bigger" -- see
+// darkforest-architecture-reference.md's Battle Map layout addendum). The
+// grid's LOGICAL coordinate space (BATTLE_GRID_W/H above, every stored
+// token x/y, every weapon range and tactical_speed check via Math.hypot)
+// is completely unchanged by this -- those are all still defined in the
+// same 460x380 units they always were. Only the on-screen rendering is
+// scaled up via CSS transform (index.html's #battle-map-grid), so a click
+// or drag's raw mouse-pixel delta has to be divided by this factor before
+// it means anything in logical grid units. Change this one constant (and
+// the matching transform:scale()/wrapper size in index.html) to retune
+// the visual size -- it deliberately does NOT touch tactical_speed or any
+// weapon's range value, unlike actually growing the battlespace would.
+const BATTLE_GRID_SCALE = 1.5;
+
 async function loadBattleEncounters() {
     // Battle music hook (2026-08 audio polish): this function already runs
     // on EVERY connected client via battle_encounters_stream below, whoever
@@ -155,7 +169,10 @@ window.handleBattleGridClick = function(evt) {
     const grid = document.getElementById('battle-map-grid');
     if (!grid || evt.target !== grid) return; // ignore clicks that land on a token div (they have their own handler)
     const rect = grid.getBoundingClientRect();
-    const raw = { x: evt.clientX - rect.left - (BATTLE_TOKEN_SIZE / 2), y: evt.clientY - rect.top - (BATTLE_TOKEN_SIZE / 2) };
+    // rect is the POST-transform (visually scaled) box; divide by
+    // BATTLE_GRID_SCALE to convert the click's raw screen-pixel offset back
+    // into the logical 460x380 grid units clampToGrid/BATTLE_GRID_W expect.
+    const raw = { x: (evt.clientX - rect.left) / BATTLE_GRID_SCALE - (BATTLE_TOKEN_SIZE / 2), y: (evt.clientY - rect.top) / BATTLE_GRID_SCALE - (BATTLE_TOKEN_SIZE / 2) };
     const pos = clampToGrid(raw.x, raw.y);
 
     const placedVessel = globalShipMarkersCache.find(m => m.id === window.battleMapArmedToken.ship_marker_id);
@@ -847,9 +864,13 @@ function wireTokenDrag(tokenEl, token) {
         isDragging = true; moved = false;
         startX = e.clientX; startY = e.clientY;
         initialLeft = token.x; initialTop = token.y;
+        // moveEvt.clientX/Y deltas are raw screen pixels; the token div lives
+        // inside #battle-map-grid's CSS transform:scale(), so a screen-pixel
+        // delta corresponds to BATTLE_GRID_SCALE fewer logical grid units --
+        // divide before adding to the token's logical (unscaled) position.
         const onMove = (moveEvt) => {
             if (!isDragging) return;
-            const dx = moveEvt.clientX - startX, dy = moveEvt.clientY - startY;
+            const dx = (moveEvt.clientX - startX) / BATTLE_GRID_SCALE, dy = (moveEvt.clientY - startY) / BATTLE_GRID_SCALE;
             if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true;
             const pos = clampToGrid(initialLeft + dx, initialTop + dy);
             tokenEl.style.left = pos.x + 'px'; tokenEl.style.top = pos.y + 'px';
@@ -858,7 +879,7 @@ function wireTokenDrag(tokenEl, token) {
             isDragging = false;
             window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp);
             if (moved) {
-                const dx = upEvt.clientX - startX, dy = upEvt.clientY - startY;
+                const dx = (upEvt.clientX - startX) / BATTLE_GRID_SCALE, dy = (upEvt.clientY - startY) / BATTLE_GRID_SCALE;
                 const pos = clampToGrid(initialLeft + dx, initialTop + dy);
                 const distMoved = Math.hypot(pos.x - initialLeft, pos.y - initialTop);
                 const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
@@ -959,6 +980,13 @@ window.renderBattleMapPanel = function() {
     document.getElementById('battle-map-encounter-name').innerText = encounter.name;
     const endBtn = document.getElementById('battle-map-end-btn');
     if (endBtn) endBtn.style.display = isDm ? 'inline-block' : 'none';
+    // ADVANCE ROUND was already functionally DM-only (advanceCombatRound
+    // itself returns immediately for a non-DM caller) but the button had no
+    // visibility check of its own, so a player saw a clickable button that
+    // silently did nothing -- tester feedback asked for it hidden outright.
+    // Same toggle pattern as endBtn above.
+    const advanceBtn = document.getElementById('battle-map-advance-btn');
+    if (advanceBtn) advanceBtn.style.display = isDm ? 'inline-block' : 'none';
     const dmDeploy = document.getElementById('battle-map-dm-deploy');
     if (dmDeploy) dmDeploy.style.display = isDm ? 'block' : 'none';
 
@@ -1062,7 +1090,8 @@ window.renderBattleMapPanel = function() {
     }
 };
 
-/* --- SHIP-STATUS CARDS (full-screen build, this session) ---
+/* --- SHIP-STATUS CARDS (full-screen build; collapse/expand added later
+   this session per tester feedback) ---
    Confirmed permission rule: the DM sees full weapon+health detail on every
    token, no exceptions. A player sees full detail (stance, interactive
    weapons, editable health bars) on any PLAYER-owned vessel — their own
@@ -1073,7 +1102,46 @@ window.renderBattleMapPanel = function() {
    health only — all 5 defensive bars, read-only, no stance selector, no
    weapons at all. This is a DISPLAY-level rule only, same honor-system
    trust model as the rest of this app — nothing here changes RLS or adds
-   real access control, it just controls what gets rendered into the DOM. */
+   real access control, it just controls what gets rendered into the DOM.
+
+   Every card now starts COLLAPSED (name + HULL/SHIELDS % only) regardless
+   of the permission tier above, and expands to that same tier's full detail
+   on click — a display-density toggle layered on top of the existing
+   permission split, not a replacement for it. See renderCompactHealthLine /
+   battleMapExpandedCards / window.toggleBattleShipCardExpanded below. */
+// Per-vessel card expand/collapse state, keyed by token_id. Pure
+// client-side UI convenience -- not persisted, not synced between players,
+// resets on page reload -- same "each browser keeps its own not-quite-
+// permanent UI state" spirit as other collapsible bits of this app.
+// Collapsed by default per tester feedback: showing full stance + all 5
+// health bars + the complete weapons list for EVERY engaged vessel at once
+// was "overwhelming" -- see darkforest-architecture-reference.md's Battle
+// Map layout addendum for the full reasoning.
+let battleMapExpandedCards = new Set();
+
+window.toggleBattleShipCardExpanded = function(tokenId) {
+    if (battleMapExpandedCards.has(tokenId)) battleMapExpandedCards.delete(tokenId);
+    else battleMapExpandedCards.add(tokenId);
+    window.renderBattleShipCards((window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || []);
+};
+
+// One-line HULL/SHIELDS % summary for a collapsed card -- deliberately just
+// these two (not all 5 defensive layers renderShipHealthBarsHtml shows) as
+// the "glance" version; the full breakdown is one click away via expand.
+function renderCompactHealthLine(vessel) {
+    const h_max = vessel.max_hull || 300;
+    const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : h_max;
+    const s_max = vessel.max_shields || 400;
+    const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : s_max;
+    const hullPct = h_max > 0 ? Math.max(0, Math.min(100, Math.round((h_int / h_max) * 100))) : 100;
+    const shieldPct = s_max > 0 ? Math.max(0, Math.min(100, Math.round((s_int / s_max) * 100))) : 100;
+    const colorFor = (pct) => pct > 66 ? '#00e5a3' : (pct > 33 ? '#ffaa00' : '#ff3333');
+    return `<div style="display:flex; gap:14px; font-size:9px; margin-top:2px;">
+        <span style="color:${colorFor(hullPct)};">HULL ${hullPct}%</span>
+        <span style="color:${colorFor(shieldPct)};">SHIELDS ${shieldPct}%</span>
+    </div>`;
+}
+
 window.renderBattleShipCards = function(tokens) {
     const container = document.getElementById('battle-map-ship-cards');
     if (!container) return;
@@ -1099,18 +1167,24 @@ window.renderBattleShipCards = function(tokens) {
         const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
         const accentColor = fullDetail ? '#00e5a3' : '#ff3333';
         const ownerTag = ownerProf ? (ownerProf.username || 'Commander') : (isDm ? 'Unowned' : 'Unknown');
+        const expanded = battleMapExpandedCards.has(tok.token_id);
 
         const header = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
-                <div>
+                <div style="display:flex; align-items:center; gap:6px; cursor:pointer;" onclick="window.toggleBattleShipCardExpanded('${tok.token_id}')" title="${expanded ? 'Click to collapse' : 'Click to expand full detail'}">
+                    <span style="font-size:9px; color:#6b826a;">${expanded ? '▾' : '▸'}</span>
                     <strong style="color:${accentColor}; font-size:13px;">${vessel.name}</strong>
-                    <span style="font-size:9px; color:#6b826a; margin-left:6px;">${ownerTag}${vessel.is_strike_craft ? ' · 🛩️' : ''}</span>
+                    <span style="font-size:9px; color:#6b826a;">${ownerTag}${vessel.is_strike_craft ? ' · 🛩️' : ''}</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 80}</span>
                     ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
                 </div>
             </div>`;
+
+        if (!expanded) {
+            return `<div class="battle-ship-card" style="border-color:${accentColor};">${header}${renderCompactHealthLine(vessel)}</div>`;
+        }
 
         if (!fullDetail) {
             return `<div class="battle-ship-card" style="border-color:${accentColor};">${header}${window.renderShipHealthBarsHtml(vessel, false)}</div>`;
