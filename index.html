@@ -10,7 +10,7 @@
          directly in the markup). Simple DRADIS-style radar blip, matching
          the app's terminal green-on-black theme. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=3.21">
+    <link rel="stylesheet" href="style.css?v=3.22">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -129,6 +129,7 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-cargo" onclick="window.switchTermTab('cargo')"><span class="tab-text">Manifest</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-vessel" onclick="window.switchTermTab('vessel')"><span class="tab-text">Vessel Deck</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-colonies" onclick="window.switchTermTab('colonies')"><span class="tab-text">Colonies & Fleets</span> <span class="tab-badge" id="badge-colonies">0</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-manufacturing" onclick="window.switchTermTab('manufacturing')" style="border-color:#c9962f; color:#c9962f;"><span class="tab-text">Manufacturing</span> <span class="tab-badge" id="badge-manufacturing">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-shipdesigner" onclick="window.switchTermTab('shipdesigner')"><span class="tab-text">Ship Designer</span> <span class="tab-badge" id="badge-shipdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-perkdesigner" onclick="window.switchTermTab('perkdesigner')"><span class="tab-text">Perk Designer</span> <span class="tab-badge" id="badge-perkdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-notes" onclick="window.switchTermTab('notes')"><span class="tab-text">Intel & Ops</span> <span class="tab-badge" id="badge-notes">0</span></button>
@@ -575,6 +576,26 @@
                     </div>
                 </div>
 
+                <!-- MANUFACTURING TAB -->
+                <div id="term-panel-manufacturing" class="term-panel-content">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="sheet-section" style="border-color:#c9962f; background:rgba(201,150,47,0.04);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #c9962f; padding-bottom:4px;">
+                                <h4 style="color:#c9962f; margin:0;">Blueprint Catalog</h4>
+                            </div>
+                            <div id="manufacturing-add-blueprint-wrap" style="display:none; margin:8px 0;">
+                                <button class="btn-reveal" onclick="window.openNewBlueprintModal()" style="width:100%; font-size:10px; margin:0; border-color:#c9962f; color:#c9962f;">+ NEW BLUEPRINT (DM)</button>
+                            </div>
+                            <div id="manufacturing-blueprints-container" style="max-height:60vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-top:8px;"></div>
+                        </div>
+                        <div class="sheet-section" style="border-color:#c9962f; background:rgba(201,150,47,0.04);">
+                            <h4 style="color:#c9962f; border-bottom:1px solid #c9962f; padding-bottom:4px; margin:0;">In-Progress Builds (All Vessels & Colonies)</h4>
+                            <div id="manufacturing-orders-container" style="max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-top:8px;"></div>
+                            <p style="font-size:8px; color:#6b826a; margin:10px 0 0 0;">To start a build, use the Manufacturing Bay box on one of your vessels (Vessel Deck tab, requires a Manufacturing-type deck) or on one of your colonies (Colonies & Fleets tab, time cost only). This screen is a catalog/dashboard view -- builds are started from the source vessel or colony.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- SHIP DESIGNER TAB -->
                 <div id="term-panel-shipdesigner" class="term-panel-content">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -789,7 +810,6 @@
             <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">COMBAT</button>
             <button onclick="window.toggleBattleMap()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c778dd; color: #c778dd; font-size: 10px;">BATTLE MAP</button>
             <button onclick="window.toggleSalvagePanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">SALVAGE</button>
-            <button onclick="window.toggleManufacturingPanel()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #c9962f; color: #c9962f; font-size: 10px;">MANUFACTURING</button>
             <button onclick="window.resetUiLayout()" style="width: auto; margin: 0; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">RESET UI</button>
         </div>
 
@@ -1024,22 +1044,6 @@
                 <button onclick="window.toggleSalvagePanel()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
             </div>
 
-            <div id="manufacturing-panel" class="panel">
-                <div id="manufacturing-header" class="panel-header-drag">
-                    <h4 style="margin:0; color:#c9962f;">Manufacturing</h4>
-                    <span style="font-size: 10px; color: #6b826a;">DRAG</span>
-                </div>
-                <div id="manufacturing-add-blueprint-wrap" style="display:none; margin-bottom:8px;">
-                    <button class="btn-reveal" onclick="window.openNewBlueprintModal()" style="width:100%; font-size:10px; margin:0; border-color:#c9962f; color:#c9962f;">+ NEW BLUEPRINT (DM)</button>
-                </div>
-                <h5 style="margin:0 0 4px 0; font-size:10px; color:#6b826a;">Blueprint Catalog</h5>
-                <div id="manufacturing-blueprints-container" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:10px;"></div>
-                <h5 style="margin:0 0 4px 0; font-size:10px; color:#6b826a;">In-Progress Builds</h5>
-                <div id="manufacturing-orders-container" style="max-height:180px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
-                <p style="font-size:8px; color:#6b826a; margin:8px 0 0 0;">To start a build, use the Manufacturing Bay box on one of your vessels (Vessel Deck, requires a Manufacturing-type deck) or on one of your colonies (Colonies tab, time cost only).</p>
-                <button onclick="window.toggleManufacturingPanel()" style="width: auto; padding: 4px 12px; font-size: 9px; margin-top: 10px; float: right;">CLOSE</button>
-            </div>
-
             <!-- DM OPERATIONS PANEL WITH SYSTEM ARCHITECT TRIGGER -->
             <div id="dm-tools" class="panel" style="display:none;">
                 <div id="dm-tools-header" class="panel-header-drag">
@@ -1225,14 +1229,14 @@
     <!-- MAIN JAVASCRIPT LINKS -->
     <script src="js/db.js?v=3.23"></script>
     <script src="js/audio.js?v=3.15"></script>
-    <script src="js/ui.js?v=3.25"></script>
+    <script src="js/ui.js?v=3.26"></script>
     <script src="js/combat.js?v=3.24"></script>
     <script src="js/colonies.js?v=3.16"></script>
     <script src="js/ship-designer.js?v=3.15"></script>
     <script src="js/perk-designer.js?v=3.13"></script>
     <script src="js/map.js?v=3.26"></script>
     <script src="js/battle-map.js?v=1.9"></script>
-    <script src="js/manufacturing.js?v=1.5"></script>
+    <script src="js/manufacturing.js?v=1.6"></script>
 
 </body>
 </html>
