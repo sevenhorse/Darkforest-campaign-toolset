@@ -143,6 +143,8 @@ async function fetchUserProfile(user) {
     if (typeof initBattleEncountersRealtimeChannel === 'function') initBattleEncountersRealtimeChannel();
     if (typeof initBattlefieldSalvageRealtimeChannel === 'function') initBattlefieldSalvageRealtimeChannel();
     if (typeof initSavedFleetsRealtimeChannel === 'function') initSavedFleetsRealtimeChannel();
+    if (typeof initManufacturingBlueprintsRealtimeChannel === 'function') initManufacturingBlueprintsRealtimeChannel();
+    if (typeof initManufacturingOrdersRealtimeChannel === 'function') initManufacturingOrdersRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
     // Kick off the ambient music bed now that we have a real authenticated
@@ -165,6 +167,8 @@ async function fetchUserProfile(user) {
     if (typeof loadBattleEncounters === 'function') loadBattleEncounters();
     if (typeof loadBattlefieldSalvage === 'function') loadBattlefieldSalvage();
     if (typeof loadSavedFleets === 'function') loadSavedFleets();
+    if (typeof loadManufacturingBlueprints === 'function') loadManufacturingBlueprints();
+    if (typeof loadManufacturingOrders === 'function') loadManufacturingOrders();
 }
 
 async function loadAllProfiles() {
