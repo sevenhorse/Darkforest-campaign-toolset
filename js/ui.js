@@ -497,6 +497,7 @@ window.TERM_TAB_ACTIVITY_LABELS = {
     cargo: 'Managing Cargo Manifest',
     vessel: 'Inspecting Vessel Deck',
     colonies: 'Managing Colonial Assets',
+    manufacturing: 'Reviewing Manufacturing',
     shipdesigner: 'Designing Vessel Profiles',
     perkdesigner: 'Designing Specializations',
     notes: 'Editing Tactical Notes',
@@ -514,6 +515,7 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'vessel' && typeof window.renderVesselDeck === 'function') { window.populateVesselDeckSelect(); window.renderVesselDeck(); }
     if (tabName === 'combat') { (async () => { if (!window.diceLogsList) { window.diceLogsList = []; if (typeof loadDiceLogs === 'function') await loadDiceLogs(); } if (typeof window.renderArsenalDiceFeed === 'function') window.renderArsenalDiceFeed(); })(); }
     if (tabName === 'colonies') { if (typeof window.populateFleetFormSelects === 'function') window.populateFleetFormSelects(); if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel(); if (typeof window.renderFleetGroupsPanel === 'function') window.renderFleetGroupsPanel(); }
+    if (tabName === 'manufacturing' && typeof window.renderManufacturingPanel === 'function') window.renderManufacturingPanel();
     if (tabName === 'shipdesigner' && typeof window.renderShipDesignerPanel === 'function') window.renderShipDesignerPanel();
     if (tabName === 'perkdesigner' && typeof window.renderPerkDesignerPanel === 'function') window.renderPerkDesignerPanel();
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
