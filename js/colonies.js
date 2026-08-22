@@ -61,10 +61,14 @@ window.renderColoniesPanel = function() {
                         <select id="colony-deliver-vessel-${c.id}" style="flex:1; margin:0; font-size:9px; padding:3px;"></select>
                         <button class="btn-deploy" onclick="window.deliverColonyResources('${c.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">DELIVER TO EXPENDABLES</button>
                     </div>
+                    ${editable && typeof window.renderColonyManufacturingBox === 'function' ? window.renderColonyManufacturingBox(c) : ''}
                 </div>`;
         });
         container.innerHTML = html;
-        // Populate each colony's delivery-target vessel dropdown.
+        // Populate each colony's delivery-target vessel dropdown -- also
+        // doubles as the Manufacturing order's delivery target (see
+        // window.startColonyManufacturingOrder in js/manufacturing.js),
+        // same select, same reasoning: a colony has no cargo of its own.
         coloniesList.forEach(c => {
             const sel = document.getElementById(`colony-deliver-vessel-${c.id}`);
             if (!sel) return;
