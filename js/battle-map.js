@@ -310,7 +310,24 @@ window.removeBattleToken = async function(tokenId) {
     const isOwner = vessel && vessel.owner_id === currentUserId;
     if (currentUserRole !== 'dm' && !isOwner) return;
     if (!(await window.showConfirmModal('Withdraw this vessel from the battle grid? The vessel itself is untouched.'))) return;
-    saveBattleTokens(tokens.filter(t => t.token_id !== tokenId)).then(() => window.renderBattleMapPanel());
+
+    // Pending-list follow-up (this session): a withdrawn carrier's still-
+    // deployed squadrons used to be left behind as orphaned tokens with no
+    // parent on the grid -- found (not fixed) during the Animation Suite
+    // Part 1 verification pass, closed out now. Pull every companion token
+    // (is_strike_craft + parent_id pointing at this vessel) along with the
+    // carrier's own token. Matches window.checkBattleTokenDestroyed's own
+    // "withdrawing isn't dying" convention -- this only removes GRID
+    // tokens, never touches ship_deployed itself, so the squadrons are
+    // still there (just off the map) if the carrier returns.
+    const squadronTokenIds = tokens
+        .filter(t => {
+            const m = globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id);
+            return m && m.is_strike_craft && m.parent_id === tok.ship_marker_id;
+        })
+        .map(t => t.token_id);
+
+    saveBattleTokens(tokens.filter(t => t.token_id !== tokenId && !squadronTokenIds.includes(t.token_id))).then(() => window.renderBattleMapPanel());
 };
 
 /* Called from js/combat.js's rollShipWeapon right after a damaged vessel's
@@ -940,6 +957,11 @@ window.processSalvageGatherCompletion = async function(newHours) {
         any = true;
     }
     if (any) {
+        // Pending-list follow-up (this session): "gather/salvage complete
+        // has no chime hookup" — reusing playChime, the same SFX the Daily
+        // Logistics 24-hour-cycle completion already uses for "something
+        // finished" (js/ui.js), rather than inventing a new sound for this.
+        if (window.AudioEngine) window.AudioEngine.playChime();
         loadBattlefieldSalvage();
         if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
     }
@@ -1154,9 +1176,17 @@ window.deployTemplateToBattle = async function() {
 // template deploy already uses, so a fleet vessel is exactly as fresh/
 // fully-stocked as if placed individually; there's no separate "fleet
 // vessel" data model and nothing carries over from a prior battle, since
-// each deploy creates a brand-new ship_markers row. No confirmation prompt
-// here, matching deployTemplateToBattle's own lack of one — consistent with
-// the existing single-deploy action rather than introducing a new pattern.
+// each deploy creates a brand-new ship_markers row.
+//
+// Pending-list follow-up (this session): originally had no confirmation
+// prompt at all (an asymmetry with every other DM action in this panel,
+// flagged in the checkpoint notes) and silently skipped any member whose
+// saved template_id no longer resolved to a real template — deployShipTemplate
+// only alerts on a genuine DB insert error, not on "template not found", so
+// a deleted-template member used to just vanish from the placed count with
+// nothing surfaced anywhere. Both closed out: missing-template members are
+// now detected up front and named in the confirm prompt (and in the
+// resulting chat log line) instead of silently disappearing mid-loop.
 window.deployFleetToBattle = async function() {
     if (currentUserRole !== 'dm' || !window.globalBattleEncounterCache) return;
     const select = document.getElementById('battle-map-fleet-select');
@@ -1166,12 +1196,22 @@ window.deployFleetToBattle = async function() {
     const members = fleet.members || [];
     if (members.length === 0) { alert(`"${fleet.name}" has no vessels in it yet — add some from the Secret Repository first.`); return; }
 
+    const missingMembers = members.filter(m => !findAnyTemplateById(m.template_id));
+    const deployableUnitCount = members.reduce((sum, m) => sum + (findAnyTemplateById(m.template_id) ? (m.quantity || 1) : 0), 0);
+
+    let confirmMsg = `Deploy "${fleet.name}" (${deployableUnitCount} vessel${deployableUnitCount === 1 ? '' : 's'}) to the battle grid?`;
+    if (missingMembers.length > 0) {
+        confirmMsg += `\n\n[WARNING] ${missingMembers.length} member${missingMembers.length === 1 ? '' : 's'} of this fleet reference${missingMembers.length === 1 ? 's' : ''} a template that no longer exists in the repository and will be SKIPPED.`;
+    }
+    if (!(await window.showConfirmModal(confirmMsg))) return;
+
     let tokens = (window.globalBattleEncounterCache.tokens || []).slice();
     let placedCount = 0;
     for (const member of members) {
+        if (!findAnyTemplateById(member.template_id)) continue; // already warned above — skip entirely, don't attempt
         for (let i = 0; i < (member.quantity || 1); i++) {
             const newId = await window.deployShipTemplate(member.template_id);
-            if (!newId) continue; // deployShipTemplate already alerted on failure — skip this unit, keep going with the rest of the fleet
+            if (!newId) continue; // deployShipTemplate already alerted on a real DB error — skip this unit, keep going with the rest of the fleet
             if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
             const pos = staggeredTokenPos(tokens.length);
             const newVessel = globalShipMarkersCache.find(m => m.id === newId);
@@ -1180,7 +1220,9 @@ window.deployFleetToBattle = async function() {
         }
     }
     await saveBattleTokens(tokens);
-    await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] ${fleet.name} deployed — ${placedCount} vessel${placedCount === 1 ? '' : 's'} placed.`, message_type: 'system' });
+    let logMsg = `⚔️ [TACTICAL BATTLE MAP] ${fleet.name} deployed — ${placedCount} vessel${placedCount === 1 ? '' : 's'} placed.`;
+    if (missingMembers.length > 0) logMsg += ` (${missingMembers.length} member${missingMembers.length === 1 ? '' : 's'} skipped — deleted template.)`;
+    await db.from('chat_logs').insert({ sender_id: null, content: logMsg, message_type: 'system' });
     window.renderBattleMapPanel();
 };
 
