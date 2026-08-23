@@ -38,6 +38,20 @@ function canManageTemplate(t) {
     return currentUserRole === 'dm' || t.owner_id === currentUserId;
 }
 
+// IFF build (this session): shared badge renderer, used by both the public
+// Ship Designer and Secret Repository card lists, and reusable anywhere else
+// an `iff` value needs a consistent visual (e.g. the Vessel Deck, if it ever
+// wants to show a ship's own designation to the DM). No badge at all for
+// unset (null) -- same "no badge = no info" convention vessel_class already
+// uses, rather than a distracting "UNSET" tag on every un-tagged ship.
+window.IFF_LABELS = { friendly: '✓ FRIENDLY', neutral: '◌ NEUTRAL', hostile: '⚠ HOSTILE' };
+window.IFF_COLORS = { friendly: '#00e5a3', neutral: '#c9962f', hostile: '#ff3333' };
+window.renderIffBadge = function(iff) {
+    if (!iff || !window.IFF_LABELS[iff]) return '';
+    const color = window.IFF_COLORS[iff];
+    return `<span style="font-size:8px; color:${color}; border:1px solid ${color}; border-radius:2px; padding:1px 4px; margin-left:6px;">${window.IFF_LABELS[iff]}</span>`;
+};
+
 window.renderShipDesignerPanel = function() {
     const container = document.getElementById('ship-templates-list-container');
     if (!container) return;
@@ -59,6 +73,7 @@ window.renderShipDesignerPanel = function() {
         // drives mechanically (Attack Capital Ships / Attack Escorts target
         // filtering). Purely a visibility badge here.
         const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
+        const iffBadge = window.renderIffBadge(t.iff);
         const classLine = t.is_station
             ? `${t.class || 'Station'} &nbsp;·&nbsp; Stationary Platform`
             : `${t.class || 'Frigate'} &nbsp;·&nbsp; ${(t.drive_type || 'ftl_class1').replace('ftl_', 'FTL ').replace('_', ' ').replace('sublight', 'Sublight')}`;
@@ -67,7 +82,7 @@ window.renderShipDesignerPanel = function() {
             <div class="note-card">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#00e1ff; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}
+                        <strong style="color:#00e1ff; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}${iffBadge}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${classLine}</p>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Shields ${t.max_shields || 0} · Reactive ${t.max_reactive || 0} · Ablative ${t.max_ablative || 0} · Hardened ${t.max_hardened || 0} · Hull ${t.max_hull || 0}</p>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">${hardpointLine}</p>
@@ -152,7 +167,16 @@ window.saveNewShipTemplate = async function() {
         vessel_class: document.getElementById('new-template-vesselclass').value || null,
         ship_weapons: [],
         ship_decks: [],
-        is_secret: false
+        is_secret: false,
+        // IFF build (this session): a player's own new template defaults to
+        // Friendly automatically -- no UI picker on this form (unlike the
+        // Secret Repository's, which defaults to Hostile), since a player's
+        // own ship is already always visible to them via ownership; this
+        // just makes it consistently visible to OTHER players too, matching
+        // the existing "any player can see/fire any other player's ships"
+        // Battle Map convention. Changeable later via the shared Edit
+        // Vessel Profile modal if it's ever repurposed as an antagonist.
+        iff: 'friendly'
     };
     const { error } = await db.from('ship_templates').insert(payload);
     if (error) { alert("Failed to save vessel profile: " + error.message); return; }
@@ -195,6 +219,13 @@ window.deployShipTemplate = async function(id) {
         tactical_speed: t.is_station ? 0 : (t.tactical_speed || 160),
         is_station: !!t.is_station,
         vessel_class: t.vessel_class || null,
+        // IFF build (this session): carried from the template into the
+        // live ship_markers row, same pattern as vessel_class -- so a
+        // deployed vessel's friend/foe visibility doesn't depend on looking
+        // back at a template that might later be edited/deleted. Still
+        // editable afterward per-deployment via the Vessel Deck's EDIT BASE
+        // STATS modal (js/combat.js), independent of the source template.
+        iff: t.iff || null,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
         ship_decks: JSON.parse(JSON.stringify(t.ship_decks || []))
     };
@@ -257,6 +288,15 @@ window.deployShipTemplate = async function(id) {
                     <option value="Escort">Escort</option>
                 </select>
             </div>
+            <div id="tmpl-edit-iff-wrap" style="display:none;">
+                <label for="tmpl-edit-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) -- controls whether players can see/edit a deployed copy of this template in their Vessel Deck. Friendly is visible alongside a player's own ships; Neutral/Hostile/unset stay DM-only. DM-only field.">IFF Designation (DM only)</label>
+                <select id="tmpl-edit-iff" style="border-color:#ff6b6b;">
+                    <option value="">-- Unset (DM-only) --</option>
+                    <option value="hostile">⚠ Hostile</option>
+                    <option value="neutral">◌ Neutral</option>
+                    <option value="friendly">✓ Friendly</option>
+                </select>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="tmpl-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="tmpl-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#00e1ff; color:#00e1ff;">SAVE CHANGES</button>
@@ -279,7 +319,8 @@ window.deployShipTemplate = async function(id) {
                 hardpoint_slots: parseInt(document.getElementById('tmpl-edit-slots').value) || 4,
                 tactical_speed: isStation ? 0 : (parseInt(document.getElementById('tmpl-edit-speed').value) || 160),
                 is_station: isStation,
-                vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null
+                vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null,
+                iff: document.getElementById('tmpl-edit-iff').value || null
             };
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -304,6 +345,9 @@ window.deployShipTemplate = async function(id) {
         document.getElementById('tmpl-edit-slots').value = t.hardpoint_slots || 4;
         document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 160;
         document.getElementById('tmpl-edit-vesselclass').value = t.vessel_class || '';
+        document.getElementById('tmpl-edit-iff').value = t.iff || '';
+        const iffWrap = document.getElementById('tmpl-edit-iff-wrap');
+        if (iffWrap) iffWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         document.getElementById('tmpl-edit-station').checked = !!t.is_station;
         window.toggleStationFields('tmpl-edit');
         overlay.style.display = 'flex';
@@ -499,12 +543,13 @@ window.renderSecretRepositoryPanel = function() {
         // drives mechanically (Attack Capital Ships / Attack Escorts target
         // filtering). Purely a visibility badge here.
         const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
+        const iffBadge = window.renderIffBadge(t.iff);
         const hardpointTag = t.is_station ? `${weaponCount} hardpoints (no cap)` : `${weaponCount}/${t.hardpoint_slots || 4} hardpoints`;
         html += `
             <div class="note-card" style="border-color:#ff3333;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}
+                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}${iffBadge}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${t.class || 'Frigate'} · Hull ${t.max_hull || 0} · Shields ${t.max_shields || 0} · ${hardpointTag}</p>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:110px;">
@@ -553,7 +598,15 @@ window.saveNewSecretTemplate = async function() {
         ship_weapons: [],
         ship_decks: [],
         is_secret: true,
-        vessel_class: document.getElementById('new-secret-template-vesselclass').value || null
+        vessel_class: document.getElementById('new-secret-template-vesselclass').value || null,
+        // IFF build (this session): Secret Repository templates are almost
+        // always enemies, so this defaults to 'hostile' in the form itself
+        // (see index.html) rather than left unset -- unlike vessel_class,
+        // which has no sensible default and stays optional/cosmetic. A DM
+        // planting a friendly NPC (e.g. an allied escort) picks Friendly
+        // here instead, which is what makes it visible in players' Vessel
+        // Deck once deployed -- see window.canViewVesselDeck (js/combat.js).
+        iff: document.getElementById('new-secret-template-iff').value || 'hostile'
     };
     const { error } = await db.from('ship_templates').insert(payload);
     if (error) { alert("Failed to store repository template: " + error.message); return; }
@@ -561,6 +614,7 @@ window.saveNewSecretTemplate = async function() {
     document.getElementById('new-secret-template-name').value = '';
     document.getElementById('new-secret-template-class').value = '';
     document.getElementById('new-secret-template-vesselclass').value = '';
+    document.getElementById('new-secret-template-iff').value = 'hostile';
     if (stationCheckbox) { stationCheckbox.checked = false; window.toggleStationFields('new-secret-template'); }
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
 };
