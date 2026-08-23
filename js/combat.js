@@ -618,7 +618,19 @@ window.renderVesselDeck = function() {
                 const upDisabled = idx === 0 ? 'disabled' : '';
                 const downDisabled = idx === decks.length - 1 ? 'disabled' : '';
                 const deckType = d.type || 'other';
-                const typeLabel = DECK_TYPE_LABELS[deckType] || 'UNCLASSIFIED';
+                // Pending-list follow-up (this session): edit-in-place for
+                // an existing deck's type — previously only fixable by
+                // scrapping the deck and rebuilding it (losing its current
+                // HP, boarding_status, and any weapon's assigned_deck_id
+                // link, since deckIdx changes on delete). Same permission
+                // model as addShipDeck/deleteShipDeck/modifyShipDeckHealth
+                // right below (no separate role check here — access is
+                // gated by reaching this vessel's Diagnostics panel at all,
+                // same as every other deck-management action on this card).
+                // No confirm modal, matching those same siblings' lack of
+                // one — this only changes metadata, nothing is destroyed.
+                const typeOptionsHtml = Object.keys(DECK_TYPE_LABELS).map(k => `<option value="${k}" ${deckType === k ? 'selected' : ''}>${DECK_TYPE_LABELS[k]}</option>`).join('');
+                const typeLabel = `<select onchange="window.updateShipDeckType('${vessel.id}', ${idx}, this.value)" title="Deck type (mechanical) — Manufacturing-type decks are what Manufacturing Bay/Salvage Processing HP-scaling look for" style="font-size:8px; padding:1px 2px; margin:0; background:#030403; color:#6b826a; border:1px solid #3c4e36; vertical-align:middle;">${typeOptionsHtml}</select>`;
                 const bStatus = d.boarding_status || 'secure';
                 const bLabel = window.BOARDING_STATUS_LABELS[bStatus] || 'SECURE';
                 const bColor = window.BOARDING_STATUS_COLORS[bStatus] || '#00e5a3';
@@ -630,7 +642,7 @@ window.renderVesselDeck = function() {
                 dHtml += `
                 <div style="margin-bottom: 8px; background: #030403; padding: 6px; border: 1px solid #00e1ff; border-radius: 2px;">
                     <div style="display:flex; justify-content:space-between; font-size:10px; color:#00e1ff; margin-bottom:2px;">
-                        <strong>${d.name} <span style="font-size:8px; color:#6b826a; font-weight:normal;">[${typeLabel}]</span></strong><span>${d.hp} / ${d.max_hp}</span>
+                        <strong>${d.name} ${typeLabel}</strong><span>${d.hp} / ${d.max_hp}</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                         <span class="reorder-arrows">
@@ -959,9 +971,16 @@ async function spawnSquadronToken(vessel, sq) {
     }).select().single();
     if (tokenError) { console.error('Failed to spawn squadron token:', tokenError.message); }
 
+    // Pending-list follow-up (this session): is_npc: true set explicitly —
+    // a strike craft squadron isn't anyone's "character" for Ground Combat
+    // To-Hit's defense-roll purposes even when player-owned, so it always
+    // gets the manual-die NPC branch rather than a core-stat die. Previously
+    // the owner-role heuristic didn't check entity type at all, meaning a
+    // player-owned squadron entry could have incorrectly rolled a PC-style
+    // defense die -- a real (if narrow) behavior fix, not just a refactor.
     const { error: trackerError } = await db.from('combat_tracker').insert({
         name: sq.name, initiative: 14, hp: `${sq.hp}/${sq.max_hp}`,
-        owner_id: vessel.owner_id, parent_id: vessel.id, squadron_id: sq.id, is_strike_craft: true
+        owner_id: vessel.owner_id, parent_id: vessel.id, squadron_id: sq.id, is_strike_craft: true, is_npc: true
     });
     if (trackerError) { console.error('Failed to inject squadron into initiative tracker:', trackerError.message); }
 
@@ -1664,6 +1683,23 @@ window.modifyShipDeckHealth = async function(vesselId, idx, delta) {
         vessel.ship_decks = decks;
         window.renderVesselDeck();
     }
+};
+
+// Pending-list follow-up (this session): edit-in-place for an existing
+// deck's type — see the render-side comment above where the <select> that
+// calls this lives. Same shape as modifyShipDeckHealth/moveShipDeckOrder
+// right around it: mutate the array entry, persist, update the local
+// cache, re-render. Doesn't touch hp/max_hp/boarding_status/id, so an
+// existing weapon's assigned_deck_id link survives a retype untouched.
+window.updateShipDeckType = async function(vesselId, idx, newType) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let decks = vessel.ship_decks || [];
+    if (!decks[idx]) return;
+    decks[idx].type = newType || 'other';
+    await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+    vessel.ship_decks = decks;
+    window.renderVesselDeck();
 };
 
 window.deleteShipDeck = async function(vesselId, idx) {
@@ -2498,21 +2534,20 @@ function rollExplodingDie(faces, canExplode) {
 (function() {
     let overlay, currentWeaponId;
 
-    function defenderProfile(combatant) {
-        return allProfiles.find(p => p.id === combatant.owner_id) || null;
-    }
+    // Pending-list follow-up (this session): now reads the real
+    // combat_tracker.is_npc column (set explicitly at insert time by every
+    // combat_tracker insert site — addCombatant, joinCombatInitiative,
+    // spawnSquadronToken, deployTemplateToInitiative) instead of inferring
+    // PC-vs-NPC from the owner's profile role + linked-character at read
+    // time. Closes the previously-flagged edge case where a DM adding their
+    // own PC through the NPC-only "+ ADD TO INITIATIVE" form would have
+    // been misread as an NPC purely from owner_id — intent is now recorded
+    // once, at the point each combatant is actually created, not
+    // re-derived every render. `!== false` treats a legacy/missing value as
+    // NPC (fails toward the manual-die branch, matching the column's own
+    // DB default), though every current insert site sets it explicitly.
     function defenderIsPC(combatant) {
-        const prof = defenderProfile(combatant);
-        // Requires BOTH a linked character sheet AND a non-DM owner. The
-        // Initiative Tracker's "+ ADD TO INITIATIVE" form (DM-only, for
-        // NPCs) sets owner_id to the DM's own profile id, same field a
-        // player's own "+ JOIN INITIATIVE" self-add uses — nothing in the
-        // data distinguishes "an NPC the DM added" from "the DM's own PC"
-        // by owner_id alone. Excluding role === 'dm' here means every
-        // DM-added combatant is treated as an NPC (manual die size), even
-        // in the rare case the DM adds their own PC through that same
-        // form — a known, flagged edge case, not silently mishandled.
-        return !!(prof && prof.role !== 'dm' && prof.character && prof.character.id);
+        return !!(combatant && combatant.is_npc === false);
     }
 
     function renderDefenseGroup() {
@@ -2638,9 +2673,13 @@ window.resolveArsenalAttack = async function(weaponId) {
     if (perkBonus.total !== 0) { atkTotal += perkBonus.total; atkBreakdown.push(`${skillName} Perks: ${perkBonus.sources.join(', ')}`); }
 
     // --- Defender roll: one core stat die (PC, explodes) or a manually-picked die size (NPC, also explodes) ---
+    // Pending-list follow-up (this session): reads the real
+    // combat_tracker.is_npc column now, same as defenderIsPC above (see its
+    // comment) — a targetProfile lookup is still needed below for the PC
+    // branch's actual stat block, just no longer for the PC/NPC decision
+    // itself.
     const targetProfile = allProfiles.find(p => p.id === target.owner_id);
-    // Same "non-DM owner + linked character" rule as the modal's defenderIsPC — see its comment above.
-    const isPC = !!(targetProfile && targetProfile.role !== 'dm' && targetProfile.character && targetProfile.character.id);
+    const isPC = !!(target && target.is_npc === false);
     let defTotal = 0, defLabel = '';
     if (isPC) {
         const statName = document.getElementById('atk-defense-stat-select').value;
@@ -2873,7 +2912,14 @@ window.addCombatant = async function(suffix) {
     
     if (!name) return;
     
-    const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId });
+    // Pending-list follow-up (this session): is_npc set explicitly here
+    // rather than inferred later from owner_id -- this form ("+ ADD TO
+    // INITIATIVE") is the DM-only NPC-add tool, so intent is unambiguous
+    // regardless of whether the DM's own profile happens to have a linked
+    // character. Closes the exact edge case the old owner-role heuristic
+    // used to flag as unresolvable ("nothing in the data distinguishes an
+    // NPC the DM added from the DM's own PC by owner_id alone").
+    const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId, is_npc: true });
     if (error) { alert("Failed to add combatant: " + error.message); return; }
     nameInput.value = ''; initInput.value = ''; hpInput.value = '10/10';
     if(typeof loadCombatTracker === 'function') loadCombatTracker();
@@ -2889,7 +2935,10 @@ window.joinCombatInitiative = async function(suffix) {
     const vitality = (myProf && myProf.character && myProf.character.vitality !== undefined) ? myProf.character.vitality : null;
     const hp = vitality !== null ? `${vitality}/${vitality}` : '10/10';
 
-    const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId });
+    // Pending-list follow-up (this session): is_npc: false set explicitly —
+    // self-add ("+ JOIN INITIATIVE") is definitionally that player's own
+    // character joining, regardless of the owner-profile heuristic.
+    const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId, is_npc: false });
     if (error) { alert("Failed to join initiative: " + error.message); return; }
     initInput.value = '';
     if(typeof loadCombatTracker === 'function') loadCombatTracker();
