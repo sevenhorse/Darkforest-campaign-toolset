@@ -15,30 +15,46 @@
 // 'general' and are only used as a last-resort fallback (see
 // processBattleRoundAutomations' weapon-selection comment) when no weapon
 // on that squadron type matches the stance's desired role at all.
+// Strike-Craft Weapon Range build (this session): every squadron weapon gets
+// a `range` field (grid px, same unit/meaning as ship_weapons' `range` --
+// see getBattleScopedTargets/launchOrdnance in js/battle-map.js), which was
+// ZERO/absent before this build (a repeatedly-flagged open gap -- see the
+// Strike Craft Grid Position, Squadron AI Stances, and Weapon Range Ring
+// checkpoints below). FLAGGED FIRST-PASS PLACEHOLDER NUMBERS, DM-tunable,
+// same convention as SQUADRON_TACTICAL_SPEED below and every other
+// first-pass balance number in this app -- NOT a rules citation. Scaled
+// against the battle grid (BATTLE_GRID_W/H = 920x760, js/battle-map.js) and
+// SQUADRON_TACTICAL_SPEED = 320/round, and differentiated by each weapon's
+// existing `role` tag per the confirmed design (short for point-defense/
+// anti-fighter dogfighting weapons, medium for general-purpose, long for
+// anti-capital ordnance/rockets that are meant to be launched from standoff
+// range): point_defense ~180, anti_fighter ~280, general ~420, anti_capital
+// ~600, and weapon_class:"ordnance" anti-capital munitions a bit further
+// still (~700) since they're explicitly standoff missiles/rockets by name.
 const STRIKE_CRAFT_DB = {
     raven: {
         label: "Raven Gen 2 MkIV", base_hp: 200,
         weapons: [
-            { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact", role: "anti_fighter" },
-            { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat", role: "general" },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital" },
-            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital" }
+            { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 280 },
+            { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat", role: "general", range: 420 },
+            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 600 },
+            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital", range: 700 }
         ]
     },
     hawk: {
         label: "Hawk Medium Bomber", base_hp: 350,
         weapons: [
-            { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact", role: "general" },
-            { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing", role: "anti_capital" },
-            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital" }
+            { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact", role: "general", range: 420 },
+            { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing", role: "anti_capital", range: 600 },
+            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital", range: 700 }
         ]
     },
     messenger: {
         label: "Messenger Shuttle", base_hp: 100,
         weapons: [
-            { name: "Dual Link .50 Cal", dice: "2d6", dmgType: "Impact", role: "anti_fighter" },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital" },
-            { name: "Point Defense System", dice: "1d4", dmgType: "Impact", role: "point_defense" }
+            { name: "Dual Link .50 Cal", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 280 },
+            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 600 },
+            { name: "Point Defense System", dice: "1d4", dmgType: "Impact", role: "point_defense", range: 180 }
         ]
     }
 };
@@ -806,9 +822,6 @@ window.renderVesselDeck = function() {
     }
 
     if (deployedContainer) {
-        let targetOptions = '<option value="">-- Target --</option>';
-        globalShipMarkersCache.forEach(m => { if(m.id !== vessel.id) targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
-
         let dHtml = '';
         const deployed = vessel.ship_deployed || [];
         if (deployed.length === 0) dHtml = '<span style="font-size:10px; color:#6b826a;">No active flights in sector.</span>';
@@ -816,7 +829,28 @@ window.renderVesselDeck = function() {
             deployed.forEach((sq, idx) => {
                 let dbStats = STRIKE_CRAFT_DB[sq.type];
                 let wpnOptions = '';
-                dbStats.weapons.forEach((w, wIdx) => { wpnOptions += `<option value="${wIdx}">${w.name} (${w.dice})</option>`; });
+                dbStats.weapons.forEach((w, wIdx) => { wpnOptions += `<option value="${wIdx}">${w.name} (${w.dice})${w.range ? ` [📏${w.range}]` : ''}</option>`; });
+
+                // Strike-Craft Weapon Range build: distance is measured from
+                // the SQUADRON'S OWN battle-map token (sqShipSelf, same
+                // lookup resolveSquadronWeaponFire below uses for the beam
+                // effect), NOT the carrier vessel's token -- since Strike
+                // Craft Grid Position gave squadrons their own independent
+                // token separate from whatever ship they launched from.
+                // The weapon and target selects here are also separate
+                // SIBLING elements (unlike renderShipWeaponsHtml's
+                // per-weapon-row layout, where each weapon's own dropdown
+                // naturally scopes to its own range) -- so the target list
+                // is scoped to whichever weapon is CURRENTLY selected
+                // (defaulting to weapon index 0 on first render), and
+                // window.updateSquadronTargetOptions (below) re-scopes it
+                // live via the weapon select's onchange.
+                const sqShipSelfForRange = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+                const firstWpn = dbStats.weapons[0];
+                const initialScoped = (sqShipSelfForRange && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelfForRange.id, firstWpn ? firstWpn.range : 0) : null;
+                const initialCandidates = initialScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id);
+                let targetOptions = '<option value="">-- Target --</option>';
+                initialCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
                 // Squadron AI Stances build (this session): an AI stance
                 // set on this squadron takes over its weapon fire entirely
@@ -845,7 +879,7 @@ window.renderVesselDeck = function() {
                        </div>`
                     : `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; display:flex; gap:6px; align-items:center;">
                            <label for="sq-wpn-select-${vessel.id}-${idx}" style="display:none;">Weapon</label>
-                           <select id="sq-wpn-select-${vessel.id}-${idx}" style="flex:2; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#ffaa00; border:1px solid #3c4e36;">${wpnOptions}</select>
+                           <select id="sq-wpn-select-${vessel.id}-${idx}" onchange="window.updateSquadronTargetOptions('${vessel.id}', ${idx})" style="flex:2; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#ffaa00; border:1px solid #3c4e36;">${wpnOptions}</select>
                            <label for="sq-target-${vessel.id}-${idx}" style="display:none;">Target</label>
                            <select id="sq-target-${vessel.id}-${idx}" style="flex:1.5; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36;">${targetOptions}</select>
                            <button class="layer-edit" onclick="window.rollSquadronWeapon('${vessel.id}', ${idx})" style="flex:1; padding:4px; font-size:9px; border-color:#ffaa00; color:#ffaa00; margin:0;">FIRE</button>
@@ -1289,6 +1323,38 @@ window.resetShipStats = async function(vesselId) {
    behavior for a squadron nobody has explicitly set a stance on. See
    window.processBattleRoundAutomations (js/battle-map.js) for where a
    non-manual stance actually gets resolved each Advance Round. */
+/* Strike-Craft Weapon Range build (this session): the manual FIRE row's
+   weapon and target selects are sibling elements, not one dropdown per
+   weapon row like renderShipWeaponsHtml -- so when the player changes which
+   weapon they're about to fire, the target list has to be rebuilt live to
+   reflect THAT weapon's own range. Mirrors the scoping logic used at initial
+   render (see renderVesselDeck's deployedContainer block above): distance
+   from the squadron's own battle-map token (sqShipSelf), not the carrier's.
+   Fails open (falls back to every other ship) if there's no battle-scoping
+   function or no token for this squadron this round -- same "don't block
+   fire over a missing token" convention as everywhere else in this build. */
+window.updateSquadronTargetOptions = function(vesselId, sqIdx) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let sq = (vessel.ship_deployed || [])[sqIdx];
+    if (!sq) return;
+    let dbStats = STRIKE_CRAFT_DB[sq.type];
+    const wpnSelect = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`);
+    const targetSelect = document.getElementById(`sq-target-${vesselId}-${sqIdx}`);
+    if (!wpnSelect || !targetSelect || !dbStats) return;
+
+    const wpn = dbStats.weapons[parseInt(wpnSelect.value, 10)];
+    const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+    const scoped = (sqShipSelf && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelf.id, wpn ? wpn.range : 0) : null;
+    const candidates = scoped || globalShipMarkersCache.filter(m => m.id !== vesselId);
+
+    const prevValue = targetSelect.value;
+    let targetOptions = '<option value="">-- Target --</option>';
+    candidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
+    targetSelect.innerHTML = targetOptions;
+    if (prevValue && candidates.some(m => m.id === prevValue)) targetSelect.value = prevValue;
+};
+
 window.setSquadronAIStance = async function(vesselId, sqIdx, stance) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -1323,6 +1389,33 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     let dbStats = STRIKE_CRAFT_DB[sq.type];
     let wpn = dbStats.weapons[wpnIdx];
     if (!wpn) return;
+
+    // Strike-Craft Weapon Range build (this session): explicit
+    // defense-in-depth re-check at fire time, mirroring window.launchOrdnance
+    // (js/battle-map.js)'s pattern for ship_weapons ordnance -- the manual
+    // target dropdown is already range-scoped (window.updateSquadronTargetOptions
+    // above), but this re-validates against CURRENT token positions in case
+    // either side moved between the dropdown populating and the FIRE click.
+    // opts.auto (the AI-stance path in processBattleRoundAutomations)
+    // already range-gates BEFORE ever calling this, per the confirmed "AI
+    // holds fire until in range" design -- so this should only trip there as
+    // a redundant safety net, and does so silently (no blocking alert()
+    // during automated round resolution) rather than the manual path's
+    // alert+refuse UX. Fails open (fires anyway) if either token's grid
+    // position can't be found -- same "don't block on a missing token"
+    // convention as every other range/position check in this build.
+    if (targetId && wpn.range) {
+        const sqShipSelfForRange = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+        const selfPos = sqShipSelfForRange ? window.getBattleTokenPosition(sqShipSelfForRange.id) : null;
+        const targetPosForRange = window.getBattleTokenPosition(targetId);
+        if (selfPos && targetPosForRange && Math.hypot(targetPosForRange.x - selfPos.x, targetPosForRange.y - selfPos.y) > wpn.range) {
+            if (opts.auto) return;
+            if (window.AudioEngine) window.AudioEngine.playError();
+            const targetShipForAlert = globalShipMarkersCache.find(m => m.id === targetId);
+            alert(`[OUT OF RANGE] ${targetShipForAlert ? targetShipForAlert.name : 'Target'} is beyond ${wpn.name}'s range (${wpn.range}).`);
+            return;
+        }
+    }
 
     let volleys = sq.count;
     if (volleys <= 0) return;
