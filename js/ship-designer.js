@@ -570,8 +570,12 @@ window.deployTemplateToInitiative = async function(id) {
     if (!t) return;
     const initInput = document.getElementById(`repo-init-${id}`);
     const initiative = initInput ? (parseInt(initInput.value) || 10) : 10;
+    // Pending-list follow-up (this session): is_npc: true set explicitly —
+    // this is the DM's own tool for injecting a vessel/template as an
+    // initiative combatant, an NPC-style entry regardless of the DM's own
+    // profile happening to have a linked character.
     const { error } = await db.from('combat_tracker').insert({
-        name: t.name, initiative, hp: `${t.max_hull || 0}/${t.max_hull || 0}`, owner_id: currentUserId
+        name: t.name, initiative, hp: `${t.max_hull || 0}/${t.max_hull || 0}`, owner_id: currentUserId, is_npc: true
     });
     if (error) { alert("Failed to inject into initiative tracker: " + error.message); return; }
     if (typeof loadCombatTracker === 'function') loadCombatTracker();
@@ -622,6 +626,18 @@ window.saveNewFleet = async function() {
     if (currentUserRole !== 'dm') return;
     const nameInput = document.getElementById('new-saved-fleet-name');
     const name = (nameInput && nameInput.value.trim()) || 'Untitled Fleet';
+
+    // Pending-list follow-up (this session): "no duplicate-fleet-name
+    // guard" — warns (doesn't hard-block) on an exact case-insensitive name
+    // collision, since a DM might genuinely want two fleets sharing a name
+    // (e.g. two variants of the same raiding party). Confirm-and-continue,
+    // matching this app's existing "DM-trusted, ask rather than forbid"
+    // pattern instead of introducing a new hard validation rule.
+    const existing = (window.globalSavedFleetsCache || []).find(f => f.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+        if (!(await window.showConfirmModal(`A saved fleet named "${existing.name}" already exists. Create another one with the same name anyway?`))) return;
+    }
+
     const { error } = await db.from('saved_fleets').insert({ name, owner_id: currentUserId, members: [] });
     if (error) { alert('Failed to save fleet: ' + error.message); return; }
     if (nameInput) nameInput.value = '';
