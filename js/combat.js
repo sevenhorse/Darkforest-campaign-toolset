@@ -2675,6 +2675,9 @@ window.resolveArsenalAttack = async function(weaponId) {
     const augBonus = typeof window.getAugmentBonusFor === 'function' ? window.getAugmentBonusFor(myProf.augments, 'skill', skillName) : { total: 0, sources: [] };
     if (augBonus.total !== 0) { atkTotal += augBonus.total; atkBreakdown.push(`${skillName} Augments: ${augBonus.sources.join(', ')}`); }
 
+    const gearBonus = typeof window.getGearBonusFor === 'function' ? window.getGearBonusFor(myProf.gear, 'skill', skillName) : { total: 0, sources: [] };
+    if (gearBonus.total !== 0) { atkTotal += gearBonus.total; atkBreakdown.push(`${skillName} Gear: ${gearBonus.sources.join(', ')}`); }
+
     // --- Defender roll: one core stat die (PC, explodes) or a manually-picked die size (NPC, also explodes) ---
     // Pending-list follow-up (this session): reads the real
     // combat_tracker.is_npc column now, same as defenderIsPC above (see its
@@ -2804,6 +2807,12 @@ window.executeDicePoolRoll = async function() {
             total += augBonus.total;
             breakdown.push(`[${statName} Augments: ${augBonus.sources.join(', ')}]`);
         }
+
+        const gearBonus = typeof window.getGearBonusFor === 'function' ? window.getGearBonusFor(myProf.gear, 'stat', statName) : { total: 0, sources: [] };
+        if (gearBonus.total !== 0) {
+            total += gearBonus.total;
+            breakdown.push(`[${statName} Gear: ${gearBonus.sources.join(', ')}]`);
+        }
     });
 
     skillCheckboxes.forEach(cb => {
@@ -2823,6 +2832,12 @@ window.executeDicePoolRoll = async function() {
         if (augBonus.total !== 0) {
             total += augBonus.total;
             breakdown.push(`[${skillName} Augments: ${augBonus.sources.join(', ')}]`);
+        }
+
+        const gearBonus = typeof window.getGearBonusFor === 'function' ? window.getGearBonusFor(myProf.gear, 'skill', skillName) : { total: 0, sources: [] };
+        if (gearBonus.total !== 0) {
+            total += gearBonus.total;
+            breakdown.push(`[${skillName} Gear: ${gearBonus.sources.join(', ')}]`);
         }
     });
 
