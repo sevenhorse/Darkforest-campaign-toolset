@@ -43,18 +43,26 @@ const STRIKE_CRAFT_DB = {
     }
 };
 
-// Strike Craft Grid Position build (this session): squadron tokens now get a
-// real tactical_speed like any other ship_markers row, since they're placed
-// as real Battle Map tokens (see spawnSquadronToken below) instead of only
+// Strike Craft Grid Position build: squadron tokens now get a real
+// tactical_speed like any other ship_markers row, since they're placed as
+// real Battle Map tokens (see spawnSquadronToken below) instead of only
 // existing as an Initiative Tracker entry + Hangar Bay panel row. No real
 // balance number exists for fighter speed yet -- this is a flagged
-// placeholder (2x the capital-ship default of 80), same "flat default the
-// DM tunes later" convention as every other first-pass number in this app
+// placeholder (2x the capital-ship default), same "flat default the DM
+// tunes later" convention as every other first-pass number in this app
 // (Battlefield Salvage's 5-ton default, the 24h gather duration, etc.).
 // There's currently no live editor for an already-deployed vessel's
 // tactical_speed (only set at ship-template deploy time) -- same gap
-// applies here, not a new one introduced by this build.
-const SQUADRON_TACTICAL_SPEED = 160;
+// applies here, not a new one introduced by that build.
+//
+// Battle Map Grid Expansion build (this session): doubled 160 -> 320,
+// matching the grid's own doubling (BATTLE_GRID_W/H, js/battle-map.js) so
+// squadrons keep covering the SAME proportional share of the map per round
+// as before, rather than suddenly taking twice as long to cross it. Only
+// affects NEWLY spawned squadron tokens from this point forward --
+// see the Grid Expansion checkpoint notes for why existing ships'
+// stored tactical_speed values were deliberately NOT bulk-updated.
+const SQUADRON_TACTICAL_SPEED = 320;
 
 /* --- PERKS & SPECIALIZATIONS ---
    The perk catalog and lookup logic moved to js/perk-designer.js — perks are
