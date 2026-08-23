@@ -134,6 +134,7 @@ async function fetchUserProfile(user) {
     initCombatTrackerRealtimeChannel();
     initColoniesRealtimeChannel();
     initShipTemplatesRealtimeChannel();
+    if (typeof initShipMarkersRealtimeChannel === 'function') initShipMarkersRealtimeChannel();
     initSystemHazardsRealtimeChannel();
     initPerkDefinitionsRealtimeChannel();
     initHazardDefinitionsRealtimeChannel();
@@ -480,6 +481,45 @@ function initShipTemplatesRealtimeChannel() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ship_templates' }, () => {
             if (typeof loadShipTemplates === 'function') loadShipTemplates();
             if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
+        })
+        .subscribe();
+}
+
+/* --- SHIP MARKERS (deployed vessels/stations/strike craft): REAL-TIME SYNC
+   (Visual Polish follow-on, this session) ---
+   Confirmed via grep before writing this: ship_markers had NO realtime
+   channel anywhere in this app. Confirmed via pg_publication_tables that it
+   was ALREADY in the supabase_realtime publication (unlike a brand new
+   table, no migration or Database > Replication dashboard step was needed
+   here — the gap was purely a missing client-side subscription). Without
+   this, a vessel's HP/shields/weapons/ownership/decks only ever updated on
+   the client that made the change — the Battle Map's token HP-color border,
+   its ship-status cards' health bars, and the Vessel Deck all showed stale
+   numbers on every OTHER connected client until something unrelated on
+   THEIR end happened to call loadGalaxyData() again. Deliberately scoped to
+   what actually matters for the Battle Map / Vessel Deck (what prompted
+   this): re-renders those two surfaces (renderBattleMapPanel's own ship-
+   status cards are covered transitively, since it calls
+   window.renderBattleShipCards internally). Does NOT touch the overworld
+   galaxy canvas (js/map.js) — a separate rendering pipeline with its own
+   existing triggers, out of scope here. Also does NOT touch combat_tracker
+   (a separate table with its own already-existing realtime channel above,
+   used for personal/NPC initiative — its `hp` field is a point-in-time
+   snapshot string, not live-linked back to ship_markers; a related but
+   different gap, flagged, not fixed by this build).
+
+   Same "echoes back to the acting client too" characteristic as every other
+   channel here (see chat_logs_stream's comment) — a client that just fired
+   a weapon will re-run this refresh redundantly on top of its own direct
+   render calls. Harmless (an extra fetch + repaint), not worth filtering
+   out, same as this app's other channels don't bother either. */
+let shipMarkersRealtimeChannel = null;
+function initShipMarkersRealtimeChannel() {
+    shipMarkersRealtimeChannel = db.channel('ship_markers_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'ship_markers' }, async () => {
+            if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
+            if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+            if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
         })
         .subscribe();
 }
