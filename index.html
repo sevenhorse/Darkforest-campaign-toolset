@@ -425,6 +425,8 @@
                                     </select>
                                     <label for="new-ship-wpn-range" style="font-size: 9px; color: #ffaaaa;" title="Battle Map targeting range, grid px. 0 = unlimited (no restriction) — the default for every weapon unless set otherwise.">Range (Battle Map grid px, 0 = unlimited):</label>
                                     <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
+                                    <label for="new-ship-wpn-deck" style="font-size: 9px; color: #ffaaaa;" title="A destroyed deck can't fire its assigned weapons — Station Designer's lightweight section-damage mechanic.">Assigned Deck (optional):</label>
+                                    <select id="new-ship-wpn-deck" style="margin:2px 0 6px 0; border-color:#ff3333;"></select>
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                                         <label for="new-ship-wpn-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
                                             <input type="checkbox" id="new-ship-wpn-explodes" checked style="margin:0;"> Exploding Dice
@@ -623,8 +625,9 @@
                                 <div style="flex:1;"><label for="new-template-hull" style="font-size:9px; color:#6b826a;">Hull:</label><input type="number" id="new-template-hull" value="100" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
                                 <div style="flex:1;"><label for="new-template-slots" style="font-size:9px; color:#6b826a;">Hardpoint Slots:</label><input type="number" id="new-template-slots" value="4" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
                             </div>
-                            <div style="display:flex; gap:6px; margin-top:6px;">
+                            <div style="display:flex; gap:6px; margin-top:6px; align-items:flex-end;">
                                 <div style="flex:1;"><label for="new-template-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed:</label><input type="number" id="new-template-speed" value="80" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
+                                <div style="flex:1;"><label for="new-template-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-bottom:8px;" title="Locks Tactical Speed to 0 (immobile on the Battle Map) and removes the Hardpoint Slots cap."><input type="checkbox" id="new-template-station" onchange="window.toggleStationFields('new-template')" style="margin:0;"> 🛰 This is a Station</label></div>
                             </div>
                             <button class="btn-reveal" onclick="window.saveNewShipTemplate()" style="margin-top:10px; border-color:#00e1ff; color:#00e1ff;">+ SAVE VESSEL PROFILE</button>
                         </div>
@@ -1183,8 +1186,9 @@
                             <input type="number" id="new-secret-template-hull" placeholder="Hull" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                             <input type="number" id="new-secret-template-slots" placeholder="Slots" value="4" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                         </div>
-                        <div style="display:flex; gap:6px; margin-top:4px;">
+                        <div style="display:flex; gap:6px; margin-top:4px; align-items:center;">
                             <input type="number" id="new-secret-template-speed" placeholder="Tactical Speed" title="Battle Map movement allowance, grid px/round" value="80" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                            <label for="new-secret-template-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; flex:1.3;" title="Locks Tactical Speed to 0 and removes the Hardpoint Slots cap."><input type="checkbox" id="new-secret-template-station" onchange="window.toggleStationFields('new-secret-template')" style="margin:0;"> 🛰 Station</label>
                         </div>
                         <button class="btn-remove" onclick="window.saveNewSecretTemplate()" style="width:100%; margin-top:6px; font-size:10px;">+ STORE IN REPOSITORY</button>
                     </div>
@@ -1230,12 +1234,12 @@
     <script src="js/db.js?v=3.23"></script>
     <script src="js/audio.js?v=3.16"></script>
     <script src="js/ui.js?v=3.26"></script>
-    <script src="js/combat.js?v=3.26"></script>
+    <script src="js/combat.js?v=3.27"></script>
     <script src="js/colonies.js?v=3.16"></script>
-    <script src="js/ship-designer.js?v=3.15"></script>
+    <script src="js/ship-designer.js?v=3.16"></script>
     <script src="js/perk-designer.js?v=3.13"></script>
     <script src="js/map.js?v=3.26"></script>
-    <script src="js/battle-map.js?v=1.9"></script>
+    <script src="js/battle-map.js?v=1.10"></script>
     <script src="js/manufacturing.js?v=1.8"></script>
 
 </body>
