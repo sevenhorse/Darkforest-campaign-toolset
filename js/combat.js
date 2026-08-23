@@ -30,6 +30,19 @@ const STRIKE_CRAFT_DB = {
     }
 };
 
+// Strike Craft Grid Position build (this session): squadron tokens now get a
+// real tactical_speed like any other ship_markers row, since they're placed
+// as real Battle Map tokens (see spawnSquadronToken below) instead of only
+// existing as an Initiative Tracker entry + Hangar Bay panel row. No real
+// balance number exists for fighter speed yet -- this is a flagged
+// placeholder (2x the capital-ship default of 80), same "flat default the
+// DM tunes later" convention as every other first-pass number in this app
+// (Battlefield Salvage's 5-ton default, the 24h gather duration, etc.).
+// There's currently no live editor for an already-deployed vessel's
+// tactical_speed (only set at ship-template deploy time) -- same gap
+// applies here, not a new one introduced by this build.
+const SQUADRON_TACTICAL_SPEED = 160;
+
 /* --- PERKS & SPECIALIZATIONS ---
    The perk catalog and lookup logic moved to js/perk-designer.js — perks are
    now a real DB-backed catalog (perk_definitions table) instead of a
@@ -474,7 +487,12 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
                     <label for="${idPrefix}wpn-target-${vessel.id}-${idx}" style="display:none;">Target</label>
-                    <select id="${idPrefix}wpn-target-${vessel.id}-${idx}" style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
+                    <select id="${idPrefix}wpn-target-${vessel.id}-${idx}"
+                        onfocus="window.showWeaponRangeRing && window.showWeaponRangeRing('${vessel.id}', ${w.range || 0})"
+                        onmouseenter="window.showWeaponRangeRing && window.showWeaponRangeRing('${vessel.id}', ${w.range || 0})"
+                        onblur="window.hideWeaponRangeRing && window.hideWeaponRangeRing()"
+                        onmouseleave="window.hideWeaponRangeRing && window.hideWeaponRangeRing()"
+                        style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
                     <label for="${idPrefix}wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
                     <input type="number" id="${idPrefix}wpn-volley-${vessel.id}-${idx}" value="1" min="1" max="${w.gun_count || 1}" title="Volley Count (max ${w.gun_count || 1} guns)" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
                     ${wClass === 'ordnance'
@@ -849,18 +867,31 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
    squadron a companion ship_markers token (visible/selectable on the map)
    and a companion combat_tracker row (visible in Initiative), linked back
    via squadron_id, WITHOUT duplicating fuel/HP into a second place that
-   could drift out of sync with the real data on the carrier. */
+   could drift out of sync with the real data on the carrier.
+
+   Strike Craft Grid Position build (this session, confirmed design): a
+   squadron's ship_markers token is now ALSO placed onto the active Battle
+   Map grid automatically on launch, if a battle is currently active — no
+   separate manual placement step, matching the precedent this token/tracker
+   spawn already set. Staggered near the carrier's own token if the carrier
+   is itself currently placed (window.addSquadronToBattleMap, battle-map.js
+   — that file owns all battle_encounters reads/writes, so this delegates
+   rather than reaching into that table directly, same cross-file convention
+   as window.checkBattleTokenDestroyed/playWeaponFireEffect/launchOrdnance).
+   No-op if no battle is active, or if a squadron was already deployed
+   before this build shipped — those don't retroactively get a token; recall
+   + relaunch picks one up. Flagged, not silently glossed over. */
 async function spawnSquadronToken(vessel, sq) {
-    const { error: tokenError } = await db.from('ship_markers').insert({
+    const { data: tokenRow, error: tokenError } = await db.from('ship_markers').insert({
         owner_id: vessel.owner_id, name: sq.name,
         x: vessel.x + (Math.random() * 80 - 40), y: vessel.y + (Math.random() * 80 - 40),
-        drive_type: 'sublight', color: '#ffaa00',
+        drive_type: 'sublight', color: '#ffaa00', tactical_speed: SQUADRON_TACTICAL_SPEED,
         cargo_inventory: window.sanitizeCargo({}),
         integrity_hull: sq.hp, max_hull: sq.max_hp,
         integrity_shields: 0, max_shields: 0, integrity_reactive: 0, max_reactive: 0,
         integrity_ablative: 0, max_ablative: 0, integrity_hardened: 0, max_hardened: 0,
         parent_id: vessel.id, is_strike_craft: true, squadron_id: sq.id
-    });
+    }).select().single();
     if (tokenError) { console.error('Failed to spawn squadron token:', tokenError.message); }
 
     const { error: trackerError } = await db.from('combat_tracker').insert({
@@ -869,13 +900,28 @@ async function spawnSquadronToken(vessel, sq) {
     });
     if (trackerError) { console.error('Failed to inject squadron into initiative tracker:', trackerError.message); }
 
+    if (!tokenError && tokenRow && typeof window.addSquadronToBattleMap === 'function') {
+        await window.addSquadronToBattleMap(vessel, sq, tokenRow.id, SQUADRON_TACTICAL_SPEED);
+    }
+
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
     if (typeof loadCombatTracker === 'function') loadCombatTracker();
 }
 
 async function despawnSquadronToken(squadronId) {
+    // Capture the marker's id BEFORE deleting it -- globalShipMarkersCache
+    // still holds the pre-delete row at this point (only loadGalaxyData(),
+    // called at the end of this function without awaiting, refreshes it),
+    // so this is a safe synchronous lookup, not a race.
+    const markerRow = globalShipMarkersCache.find(m => m.squadron_id === squadronId && m.is_strike_craft);
+
     await db.from('ship_markers').delete().eq('squadron_id', squadronId);
     await db.from('combat_tracker').delete().eq('squadron_id', squadronId);
+
+    if (markerRow && typeof window.removeBattleTokenByMarkerId === 'function') {
+        await window.removeBattleTokenByMarkerId(markerRow.id);
+    }
+
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
     if (typeof loadCombatTracker === 'function') loadCombatTracker();
 }
@@ -1231,12 +1277,28 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
             // touch this ship_markers row itself). No-op outside a battle.
             if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
 
-            // Range/Ordnance build (this session): persist which target this
-            // squadron is currently engaging. Squadrons have no grid position
-            // of their own on the Battle Map, so PD auto-fire uses this
-            // "engaged target" as a stand-in for the squadron's location —
-            // updated every time it fires, no separate "assign attack run"
-            // action exists yet.
+            // Strike Craft Grid Position build (this session): a beam flash
+            // between the squadron's own token and its target, same
+            // playWeaponFireEffect used by rollShipWeapon — no longer
+            // deliberately skipped now that squadrons have a real token to
+            // draw the beam from. Local-only, same flagged limitation as
+            // ship-weapon fire (no broadcast channel exists in this
+            // codebase — see the Animation Engine checkpoint).
+            if (typeof window.playWeaponFireEffect === 'function') {
+                const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+                if (sqShipSelf) {
+                    const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ffaa00';
+                    window.playWeaponFireEffect(sqShipSelf.id, targetShip.id, beamColor);
+                }
+            }
+
+            // Range/Ordnance build (prior session): persist which target this
+            // squadron last fired at. Strike Craft Grid Position build (this
+            // session): Point Defense no longer reads this as a position
+            // stand-in — squadrons now have a real Battle Map token, so PD
+            // checks that directly (see window.processBattleRoundAutomations,
+            // js/battle-map.js). Kept as a harmless "last engaged" record,
+            // not currently read by anything else.
             sq.target_id = targetShip.id;
             await db.from('ship_markers').update({ ship_deployed: vessel.ship_deployed }).eq('id', vessel.id);
         }
@@ -1393,6 +1455,19 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
             // battle and just hit 0 hull, auto-withdraw its token (does not
             // touch this ship_markers row itself). No-op outside a battle.
             if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
+
+            // Animation Engine build (this session): a brief beam flash on
+            // the Battle Map grid between firer and target, colored by this
+            // shot's damage type. window.playWeaponFireEffect no-ops
+            // silently if the Battle Map isn't open or either vessel isn't
+            // currently a token in an active battle, so this is safe to
+            // call unconditionally. Local-only — see the checkpoint notes
+            // for why this doesn't sync to other connected viewers the way
+            // the in-flight-ordnance animation does.
+            if (typeof window.playWeaponFireEffect === 'function') {
+                const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ff3333';
+                window.playWeaponFireEffect(vesselId, targetShip.id, beamColor);
+            }
         }
     }
 
