@@ -68,6 +68,7 @@ window.renderPerkDesignerPanel = function() {
                 p.points_grant > 0 ? `<span style="color:#00e5a3;">+${p.points_grant} free skill points</span>` : '',
                 p.shield_max_bonus > 0 ? `<span style="color:#00e1ff;">Shield Max +${p.shield_max_bonus}</span>` : '',
                 p.dr_bonus > 0 ? `<span style="color:#c9962f;">DR +${p.dr_bonus}</span>` : '',
+                p.injury_max_bonus > 0 ? `<span style="color:#ff6b6b;">Injury Max +${p.injury_max_bonus}</span>` : '',
                 (p.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ')
               ].filter(Boolean).join(' · ') || '<span style="color:#6b826a;">No effects configured.</span>';
         return `
@@ -195,6 +196,7 @@ window.deletePerkDefinition = async function(id) {
                 <div style="display:flex; gap:6px; margin-top:6px;">
                     <div style="flex:1;"><label for="perk-edit-shieldbonus" style="font-size:9px; color:#00e1ff;">Shield Max Bonus:</label><input type="number" id="perk-edit-shieldbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
                     <div style="flex:1;"><label for="perk-edit-drbonus" style="font-size:9px; color:#c9962f;">DR Bonus:</label><input type="number" id="perk-edit-drbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
+                    <div style="flex:1;"><label for="perk-edit-injurybonus" style="font-size:9px; color:#ff6b6b;">Injury Max Bonus:</label><input type="number" id="perk-edit-injurybonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
                 </div>
 
                 <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Stat/Skill Effects (auto-applied to the roller):</label>
@@ -236,6 +238,7 @@ window.deletePerkDefinition = async function(id) {
                 points_grant: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-points').value) || 0),
                 shield_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-shieldbonus').value) || 0),
                 dr_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-drbonus').value) || 0),
+                injury_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-injurybonus').value) || 0),
                 effects: flavorOnly ? [] : workingEffects
             };
 
@@ -268,6 +271,7 @@ window.deletePerkDefinition = async function(id) {
         document.getElementById('perk-edit-points').value = '0';
         document.getElementById('perk-edit-shieldbonus').value = '0';
         document.getElementById('perk-edit-drbonus').value = '0';
+        document.getElementById('perk-edit-injurybonus').value = '0';
         renderEffectsList();
         overlay.style.display = 'flex';
     };
@@ -287,6 +291,7 @@ window.deletePerkDefinition = async function(id) {
         document.getElementById('perk-edit-points').value = p.points_grant || 0;
         document.getElementById('perk-edit-shieldbonus').value = p.shield_max_bonus || 0;
         document.getElementById('perk-edit-drbonus').value = p.dr_bonus || 0;
+        document.getElementById('perk-edit-injurybonus').value = p.injury_max_bonus || 0;
         renderEffectsList();
         overlay.style.display = 'flex';
     };
