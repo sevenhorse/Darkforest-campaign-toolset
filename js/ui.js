@@ -951,9 +951,14 @@ window.renderCodexMatrix = function() {
 
     entries = entries.filter(e => {
         if (currentUserRole === 'dm') return true;
+        // Codex "hide" checkbox (this session) — an unconditional DM-only
+        // switch, checked first and separately from the DRADIS LINK:
+        // mechanic below (an entry could theoretically have both set; hidden
+        // wins regardless of scan state).
+        if (e.is_hidden) return false;
         let linkMatch = (e.subtitle || '').match(/LINK:(.+)/);
         if (linkMatch) { return window.scannedSystems && window.scannedSystems.includes(linkMatch[1].trim()); }
-        return true; 
+        return true;
     });
 
     if (entries.length === 0) { container.innerHTML = `<span style="font-size:11px; color:#6b826a;">No records located under this classification.</span>`; return; }
@@ -966,10 +971,16 @@ window.renderCodexMatrix = function() {
         let cleanSubtitle = (e.subtitle || '').replace(/\|\s*LINK:.+/, '').trim();
         let docHtml = (e.doc_data && e.doc_name) ? `<div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">📎 ATTACHMENT: ${e.doc_name} (${(e.doc_type || 'FILE').toUpperCase()})</div>` : '';
         let authorName = allProfiles.find(p => p.id === e.created_by)?.username || 'Unknown';
+        // Codex "hide" checkbox (this session) — badge is DM-view-only
+        // (isDM already gates everything else in this card that shouldn't
+        // reach a player; a hidden entry never even reaches a non-DM's
+        // `entries` array above, so there's no risk of a player seeing this
+        // badge and inferring a hidden entry exists).
+        let hiddenBadge = (isDM && e.is_hidden) ? `<span style="font-size:8px; color:#ff6b6b; border:1px solid #ff6b6b; border-radius:2px; padding:1px 5px; white-space:nowrap;" title="Hidden from players">🚫 HIDDEN</span>` : '';
         html += `
             <div class="codex-entry-card category-${e.category}">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div><strong style="color:#00e5a3; font-size:13px;">${e.title}</strong><div style="font-size:10px; color:#6b826a; margin-top:2px;">${cleanSubtitle || 'General Record'}</div></div>
+                    <div><strong style="color:#00e5a3; font-size:13px;">${e.title}</strong> ${hiddenBadge}<div style="font-size:10px; color:#6b826a; margin-top:2px;">${cleanSubtitle || 'General Record'}</div></div>
                     <div style="display:flex; gap:6px; align-items:center;">
                         ${window.renderReorderArrows(orderKey, ordered, e.id, 'moveCodexEntryOrder')}
                         <button class="layer-edit" onclick="window.openCodexFullscreen('${e.id}')" style="font-size:9px; padding:3px 8px;">⛶ FULLSCREEN</button>
@@ -1018,6 +1029,8 @@ window.editCodexEntry = function(id) {
         const linkInput = document.getElementById('new-codex-link'); if (linkInput) linkInput.value = '';
     }
     document.getElementById('new-codex-subtitle').value = sub;
+    const hiddenCheckbox = document.getElementById('new-codex-hidden');
+    if (hiddenCheckbox) hiddenCheckbox.checked = !!entry.is_hidden;
     document.getElementById('btn-save-codex-entry').innerText = "✓ UPDATE CODEX ENTRY";
     document.getElementById('btn-cancel-codex-edit').style.display = "block";
 };
@@ -1033,13 +1046,18 @@ window.saveNewCodexEntry = async function() {
     if (linkInput && linkInput.value.trim() !== '') subtitle += ` | LINK:${linkInput.value.trim()}`;
     if (!title) { alert("Please enter an entry title."); return; }
 
+    // Codex "hide" checkbox (this session) — see the form's own comment in
+    // index.html for how this differs from the DRADIS LINK: mechanic above.
+    const hiddenCheckbox = document.getElementById('new-codex-hidden');
+    const isHidden = hiddenCheckbox ? hiddenCheckbox.checked : false;
+
     if (window.editingCodexId) {
         // Never touch created_by on an edit — it should stay whoever
         // originally authored the entry, not whoever most recently edited it.
-        const payload = { category: cat, title: title, subtitle: subtitle, content: content };
+        const payload = { category: cat, title: title, subtitle: subtitle, content: content, is_hidden: isHidden };
         await db.from('codex_entries').update(payload).eq('id', window.editingCodexId);
     } else {
-        const payload = { category: cat, title: title, subtitle: subtitle, content: content, created_by: currentUserId };
+        const payload = { category: cat, title: title, subtitle: subtitle, content: content, created_by: currentUserId, is_hidden: isHidden };
         await db.from('codex_entries').insert(payload);
     }
 
@@ -1050,8 +1068,9 @@ window.cancelCodexEdit = function() {
     window.editingCodexId = null;
     document.getElementById('codex-creator-heading').innerText = "+ New Codex Entry";
     document.getElementById('new-codex-title').value = ''; document.getElementById('new-codex-subtitle').value = '';
-    document.getElementById('new-codex-content').value = ''; 
+    document.getElementById('new-codex-content').value = '';
     const linkInput = document.getElementById('new-codex-link'); if(linkInput) linkInput.value = '';
+    const hiddenCheckbox = document.getElementById('new-codex-hidden'); if (hiddenCheckbox) hiddenCheckbox.checked = false;
     document.getElementById('btn-save-codex-entry').innerText = "+ PUBLISH TO CODEX";
     document.getElementById('btn-cancel-codex-edit').style.display = "none";
 };
@@ -1064,6 +1083,96 @@ window.deleteCodexEntry = async function(id) {
     if (typeof loadCodexEntries === 'function') loadCodexEntries();
 };
 
+/* --- CODEX MARKDOWN + CHARTS (this session) ---
+   Codex entry content was 100% plain text before this build (rendered via
+   .innerText, no formatting of any kind). Confirmed design, via
+   AskUserQuestion: markdown syntax typed directly into the existing
+   content textarea (not a separate visual table-builder), rendered via the
+   marked.js CDN script now loaded in index.html (same CDN-script pattern
+   already established there for Supabase) — gets tables, bold/italic,
+   headers, and lists essentially for free as a side effect of picking
+   markdown for tables specifically. "Graphs" = real charts rendered from
+   typed-in data (not just inline image embedding), via a small custom
+   ```chart fenced-block DSL parsed out BEFORE the remaining text reaches
+   marked, then rendered into a <canvas> with Chart.js (also CDN-loaded).
+
+   Deliberately scoped to the FULLSCREEN reader only — the small card
+   preview in renderCodexMatrix keeps showing raw, un-rendered text. A
+   table or chart mid-render inside that card's 80px-clipped, overflow-
+   hidden preview box would look broken far more often than it would look
+   useful; the fullscreen reader has no such height constraint. This means
+   an entry with a table/chart will show its literal markdown/DSL syntax
+   in the card view and only render properly once opened — a deliberate
+   tradeoff, not an oversight.
+
+   No HTML sanitization is applied to marked's output (DOMPurify or
+   similar was NOT added). This is consistent with — not a new gap beyond —
+   this app's existing "DM-trusted" content model: DM-authored codex
+   content was ALREADY interpolated unescaped into the card preview's
+   innerHTML before this build (raw HTML in `content` would already have
+   rendered there), and every other DM-facing text field in this app
+   (chat, notes, blueprint descriptions) carries the same trust assumption.
+   Flagging plainly rather than silently deciding sanitization wasn't
+   needed. */
+function parseCodexChartBlock(raw) {
+    const VALID_TYPES = ['bar', 'pie', 'line', 'doughnut'];
+    let type = 'bar', title = '';
+    const labels = [], values = [];
+    (raw || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(line => {
+        const m = line.match(/^([^:]+):\s*(.+)$/);
+        if (!m) return;
+        const key = m[1].trim().toLowerCase();
+        const val = m[2].trim();
+        if (key === 'type') {
+            if (VALID_TYPES.includes(val.toLowerCase())) type = val.toLowerCase();
+        } else if (key === 'title') {
+            title = val;
+        } else {
+            const num = parseFloat(val.replace(/,/g, ''));
+            if (!isNaN(num)) { labels.push(m[1].trim()); values.push(num); }
+        }
+    });
+    return { type, title, labels, values };
+}
+
+window.renderCodexMarkdown = function(rawContent) {
+    const charts = [];
+    let chartIdx = 0;
+    // Extract ```chart fenced blocks BEFORE handing off to marked, so its
+    // own generic fenced-code-block handling never sees (and code-block-
+    // formats) them. Each is swapped for a plain-text %%codex-chart-N%%
+    // token that survives markdown parsing intact -- marked just wraps an
+    // unrecognized lone line in its own <p>, which is found-and-replaced
+    // with the real <canvas> markup afterward.
+    const withoutCharts = (rawContent || '').replace(/```chart\s*\n([\s\S]*?)```/gi, (match, body) => {
+        const id = `codex-chart-${chartIdx++}`;
+        charts.push({ id, ...parseCodexChartBlock(body) });
+        return `\n\n%%${id}%%\n\n`;
+    });
+
+    let html;
+    if (typeof marked !== 'undefined') {
+        html = (typeof marked.parse === 'function') ? marked.parse(withoutCharts) : marked(withoutCharts);
+    } else {
+        // marked.js failed to load (offline CDN, ad-blocker, etc.) --
+        // fails open to a plain-text-with-line-breaks rendering rather
+        // than an empty/broken reader.
+        html = withoutCharts.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+    }
+
+    charts.forEach(c => {
+        const canvasHtml = `<div class="codex-chart-wrap"><canvas id="${c.id}"></canvas></div>`;
+        // marked wraps the lone placeholder line in its own <p>...</p> --
+        // strip that wrapper too, not just the token itself, so a <canvas>
+        // never ends up nested inside a <p> (invalid HTML, breaks layout).
+        const wrapped = new RegExp(`<p>\\s*%%${c.id}%%\\s*</p>`);
+        if (wrapped.test(html)) html = html.replace(wrapped, canvasHtml);
+        else html = html.replace(new RegExp(`%%${c.id}%%`), canvasHtml); // fallback if no <p> wrapper was found
+    });
+
+    return { html, charts };
+};
+
 window.openCodexFullscreen = function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry) return;
     const modal = document.getElementById('codex-fullscreen-reader');
@@ -1071,8 +1180,40 @@ window.openCodexFullscreen = function(id) {
     document.getElementById('reader-category-badge').innerText = `${(entry.category || 'LORE').toUpperCase()} // ${authorName.toUpperCase()}`;
     document.getElementById('reader-title').innerText = entry.title;
     document.getElementById('reader-subtitle').innerText = (entry.subtitle || '').replace(/\|\s*LINK:.+/, '').trim() || 'UNCLASSIFIED RECORD';
-    document.getElementById('reader-body-content').innerText = entry.content || 'No narrative content recorded.';
-    
+
+    // Destroy any Chart.js instances left over from a PREVIOUSLY opened
+    // entry first -- Chart.js throws "Canvas is already in use" if a new
+    // Chart is created on a canvas id that still has a live instance
+    // attached, and canvas ids are per-entry (codex-chart-0, -1, ...) so
+    // reopening a different entry would collide with the last one's
+    // leftover instances otherwise.
+    (window.activeCodexCharts || []).forEach(c => { try { c.destroy(); } catch (e) {} });
+    window.activeCodexCharts = [];
+
+    const rendered = (typeof window.renderCodexMarkdown === 'function')
+        ? window.renderCodexMarkdown(entry.content || 'No narrative content recorded.')
+        : { html: entry.content || 'No narrative content recorded.', charts: [] };
+    document.getElementById('reader-body-content').innerHTML = `<div class="codex-markdown">${rendered.html}</div>`;
+
+    if (typeof Chart !== 'undefined') {
+        const palette = ['#00e5a3', '#00e1ff', '#ffaa00', '#ff6b6b', '#c778dd', '#7cbf3f', '#66d9ff', '#ffe066'];
+        rendered.charts.forEach(c => {
+            const canvas = document.getElementById(c.id);
+            if (!canvas || c.labels.length === 0) return; // no valid Label: Number lines -- nothing to plot, leave the empty wrapper rather than crash Chart.js on empty data
+            try {
+                window.activeCodexCharts.push(new Chart(canvas, {
+                    type: c.type,
+                    data: { labels: c.labels, datasets: [{ label: c.title || '', data: c.values, backgroundColor: palette, borderColor: '#3c4e36' }] },
+                    options: {
+                        responsive: true,
+                        plugins: { title: { display: !!c.title, text: c.title, color: '#d4c5a9' }, legend: { labels: { color: '#d4c5a9' } } },
+                        scales: (c.type === 'bar' || c.type === 'line') ? { x: { ticks: { color: '#d4c5a9' }, grid: { color: '#3c4e36' } }, y: { ticks: { color: '#d4c5a9' }, grid: { color: '#3c4e36' } } } : {}
+                    }
+                }));
+            } catch (err) { console.error('Codex chart render failed for', c.id, err); }
+        });
+    }
+
     const actionBar = document.getElementById('reader-doc-action-bar');
     if (entry.doc_data && entry.doc_name) {
         actionBar.style.display = 'block';
@@ -1081,7 +1222,11 @@ window.openCodexFullscreen = function(id) {
     modal.style.display = 'block';
 };
 
-window.closeCodexFullscreen = function() { document.getElementById('codex-fullscreen-reader').style.display = 'none'; };
+window.closeCodexFullscreen = function() {
+    document.getElementById('codex-fullscreen-reader').style.display = 'none';
+    (window.activeCodexCharts || []).forEach(c => { try { c.destroy(); } catch (e) {} });
+    window.activeCodexCharts = [];
+};
 
 window.openCodexAttachment = function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry || !entry.doc_data) return;
