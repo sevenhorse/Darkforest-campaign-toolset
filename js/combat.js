@@ -2672,6 +2672,9 @@ window.resolveArsenalAttack = async function(weaponId) {
     const perkBonus = window.getPerkBonusFor(myProf.perks, 'skill', skillName);
     if (perkBonus.total !== 0) { atkTotal += perkBonus.total; atkBreakdown.push(`${skillName} Perks: ${perkBonus.sources.join(', ')}`); }
 
+    const augBonus = typeof window.getAugmentBonusFor === 'function' ? window.getAugmentBonusFor(myProf.augments, 'skill', skillName) : { total: 0, sources: [] };
+    if (augBonus.total !== 0) { atkTotal += augBonus.total; atkBreakdown.push(`${skillName} Augments: ${augBonus.sources.join(', ')}`); }
+
     // --- Defender roll: one core stat die (PC, explodes) or a manually-picked die size (NPC, also explodes) ---
     // Pending-list follow-up (this session): reads the real
     // combat_tracker.is_npc column now, same as defenderIsPC above (see its
@@ -2795,6 +2798,12 @@ window.executeDicePoolRoll = async function() {
             total += perkBonus.total;
             breakdown.push(`[${statName} Perks: ${perkBonus.sources.join(', ')}]`);
         }
+
+        const augBonus = typeof window.getAugmentBonusFor === 'function' ? window.getAugmentBonusFor(myProf.augments, 'stat', statName) : { total: 0, sources: [] };
+        if (augBonus.total !== 0) {
+            total += augBonus.total;
+            breakdown.push(`[${statName} Augments: ${augBonus.sources.join(', ')}]`);
+        }
     });
 
     skillCheckboxes.forEach(cb => {
@@ -2808,6 +2817,12 @@ window.executeDicePoolRoll = async function() {
         if (perkBonus.total !== 0) {
             total += perkBonus.total;
             breakdown.push(`[${skillName} Perks: ${perkBonus.sources.join(', ')}]`);
+        }
+
+        const augBonus = typeof window.getAugmentBonusFor === 'function' ? window.getAugmentBonusFor(myProf.augments, 'skill', skillName) : { total: 0, sources: [] };
+        if (augBonus.total !== 0) {
+            total += augBonus.total;
+            breakdown.push(`[${skillName} Augments: ${augBonus.sources.join(', ')}]`);
         }
     });
 
