@@ -299,11 +299,15 @@ window.spawnTokenAtCenter = async function() {
     await db.from('ship_markers').insert(payload); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 
-window.spawnStarSystemAtCenter = async function() {
-    const name = document.getElementById('dm-tool-name').value || 'New System'; const luminosity = document.getElementById('dm-tool-luminosity').value; const color = document.getElementById('dm-tool-color').value;
-    await db.from('star_systems').insert({ name, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, size: 5.0, color, luminosity, ownership: 'Unclaimed', control: 'Uncontested', industry_tier: 1 });
-    if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-};
+// Pending-list follow-up (this session): window.spawnStarSystemAtCenter was
+// removed here — dead code found during an earlier bug hunt (references
+// dm-tool-luminosity/dm-tool-color DOM ids that don't exist anywhere in
+// index.html, and had zero call sites anywhere in the codebase; would have
+// thrown immediately if ever wired to a button). Deleting it rather than
+// fixing it in place, since a real fix would mean inventing new star-spawn
+// UI scope that was never asked for — see the architecture doc's Pending
+// list for the original finding. The working DM system-spawn tool uses
+// dm-tool-name/dm-tool-iff/dm-tool-drivetype and is unaffected.
 
 /* --- TOOL TOGGLES --- */
 window.toggleMeasuringTool = function() {
@@ -1312,10 +1316,20 @@ window.initGalaxyEngine = function() {
 
     function screenToWorld(sx, sy) { const rect = canvas.getBoundingClientRect(); return { x: (sx - rect.left - container.clientWidth / 2 - window.camera.x) / window.camera.zoom, y: (sy - rect.top - container.clientHeight / 2 - window.camera.y) / window.camera.zoom }; }
 
-    container.addEventListener('mousedown', (e) => {
-        if (e.target && e.target.closest && e.target.closest('.panel')) return; 
-        const worldPos = screenToWorld(e.clientX, e.clientY);
-        
+    // Mobile compatibility pass (this session): the map's pan/zoom/select
+    // interactions were mouse-only -- no touch support existed at all, so a
+    // phone/tablet user with no mouse could tap to select but never pan or
+    // zoom the galaxy view. The mousedown/mousemove/mouseup/wheel bodies
+    // below are unchanged; they're just extracted into named functions
+    // (handlePointerDown/Move/Up, applyZoomAtPoint) that take plain
+    // coordinates instead of a MouseEvent, so touchstart/touchmove/touchend
+    // can drive the exact same logic using a finger's clientX/clientY.
+    // Two-finger pinch is new (there's no mouse equivalent) and only
+    // affects zoom/pan -- it never touches ship/star dragging.
+    function handlePointerDown(clientX, clientY, targetEl, shiftKey) {
+        if (targetEl && targetEl.closest && targetEl.closest('.panel')) return;
+        const worldPos = screenToWorld(clientX, clientY);
+
         if (window.territoryDrawActive) {
             const startNode = window.activeTerritoryVertices[0]; const snapDist = 30 / window.camera.zoom;
             if (startNode && window.activeTerritoryVertices.length >= 3 && Math.hypot(worldPos.x - startNode.x, worldPos.y - startNode.y) < snapDist) { window.finishActiveTerritory(); return; }
@@ -1344,7 +1358,7 @@ window.initGalaxyEngine = function() {
             if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
         }
 
-        if (e.shiftKey || window.pingModeActive) { if(typeof window.triggerTacticalPing === 'function') window.triggerTacticalPing(worldPos.x, worldPos.y); return; }
+        if (shiftKey || window.pingModeActive) { if(typeof window.triggerTacticalPing === 'function') window.triggerTacticalPing(worldPos.x, worldPos.y); return; }
 
         if (window.measuringTapeActive) {
             if (!window.measureStartPoint) { window.measureStartPoint = worldPos; } else if (!window.measureEndPoint) { window.measureEndPoint = worldPos; } else { window.measureStartPoint = worldPos; window.measureEndPoint = null; }
@@ -1381,42 +1395,112 @@ window.initGalaxyEngine = function() {
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
             }
         }
-        window.camera.isDragging = true; window.camera.startX = e.clientX; window.camera.startY = e.clientY;
-    });
+        window.camera.isDragging = true; window.camera.startX = clientX; window.camera.startY = clientY;
+    }
 
-    window.addEventListener('mousemove', (e) => {
-        const worldPos = screenToWorld(e.clientX, e.clientY); window._lastMouseWorldX = worldPos.x; window._lastMouseWorldY = worldPos.y;
-        
+    function handlePointerMove(clientX, clientY) {
+        const worldPos = screenToWorld(clientX, clientY); window._lastMouseWorldX = worldPos.x; window._lastMouseWorldY = worldPos.y;
+
         if (window.draggedMarker) { window.draggedMarker.x = worldPos.x; window.draggedMarker.y = worldPos.y; return; }
         if (window.draggedStar) { window.draggedStar.x = worldPos.x; window.draggedStar.y = worldPos.y; return; }
 
         if (window.camera.isDragging) {
-            let dx = e.clientX - window.camera.startX; let dy = e.clientY - window.camera.startY;
+            let dx = clientX - window.camera.startX; let dy = clientY - window.camera.startY;
             window.camera.x = Math.max(-MAP_LIMIT * window.camera.zoom, Math.min(MAP_LIMIT * window.camera.zoom, window.camera.x + dx));
             window.camera.y = Math.max(-MAP_LIMIT * window.camera.zoom, Math.min(MAP_LIMIT * window.camera.zoom, window.camera.y + dy));
-            window.camera.startX = e.clientX; window.camera.startY = e.clientY;
+            window.camera.startX = clientX; window.camera.startY = clientY;
         }
-    });
+    }
 
-    window.addEventListener('mouseup', async () => {
-        if (window.draggedMarker) { 
-            await db.from('ship_markers').update({ x: window.draggedMarker.x, y: window.draggedMarker.y }).eq('id', window.draggedMarker.id); 
-            window.draggedMarker = null; if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); 
+    async function handlePointerUp() {
+        if (window.draggedMarker) {
+            await db.from('ship_markers').update({ x: window.draggedMarker.x, y: window.draggedMarker.y }).eq('id', window.draggedMarker.id);
+            window.draggedMarker = null; if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
         }
         if (window.draggedStar) { await db.from('star_systems').update({ x: window.draggedStar.x, y: window.draggedStar.y }).eq('id', window.draggedStar.id); window.draggedStar = null; }
         window.camera.isDragging = false;
-    });
+    }
+
+    function applyZoomAtPoint(mouseX, mouseY, zoomFactor) {
+        const worldX = (mouseX - window.camera.x) / window.camera.zoom; const worldY = (mouseY - window.camera.y) / window.camera.zoom;
+        const newZoom = Math.max(0.02, Math.min(15.0, window.camera.zoom * zoomFactor));
+        window.camera.x = Math.max(-MAP_LIMIT * newZoom, Math.min(MAP_LIMIT * newZoom, mouseX - worldX * newZoom));
+        window.camera.y = Math.max(-MAP_LIMIT * newZoom, Math.min(MAP_LIMIT * newZoom, mouseY - worldY * newZoom));
+        window.camera.zoom = newZoom;
+    }
+
+    function applyZoomToTarget(mouseX, mouseY, targetZoom) {
+        const worldX = (mouseX - window.camera.x) / window.camera.zoom; const worldY = (mouseY - window.camera.y) / window.camera.zoom;
+        window.camera.x = Math.max(-MAP_LIMIT * targetZoom, Math.min(MAP_LIMIT * targetZoom, mouseX - worldX * targetZoom));
+        window.camera.y = Math.max(-MAP_LIMIT * targetZoom, Math.min(MAP_LIMIT * targetZoom, mouseY - worldY * targetZoom));
+        window.camera.zoom = targetZoom;
+    }
+
+    function touchDist(touches) { return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY); }
+    function touchMid(touches, rect) {
+        return {
+            x: (touches[0].clientX + touches[1].clientX) / 2 - rect.left - container.clientWidth / 2,
+            y: (touches[0].clientY + touches[1].clientY) / 2 - rect.top - container.clientHeight / 2
+        };
+    }
+
+    container.addEventListener('mousedown', (e) => { handlePointerDown(e.clientX, e.clientY, e.target, e.shiftKey); });
+    window.addEventListener('mousemove', (e) => { handlePointerMove(e.clientX, e.clientY); });
+    window.addEventListener('mouseup', () => { handlePointerUp(); });
 
     container.addEventListener('wheel', (e) => {
         if (e.target.closest('.panel')) return; e.preventDefault();
         const mouseX = e.clientX - container.getBoundingClientRect().left - container.clientWidth / 2;
         const mouseY = e.clientY - container.getBoundingClientRect().top - container.clientHeight / 2;
-        const worldX = (mouseX - window.camera.x) / window.camera.zoom; const worldY = (mouseY - window.camera.y) / window.camera.zoom;
-        const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15; const newZoom = Math.max(0.02, Math.min(15.0, window.camera.zoom * zoomFactor));
-        window.camera.x = Math.max(-MAP_LIMIT * newZoom, Math.min(MAP_LIMIT * newZoom, mouseX - worldX * newZoom));
-        window.camera.y = Math.max(-MAP_LIMIT * newZoom, Math.min(MAP_LIMIT * newZoom, mouseY - worldY * newZoom));
-        window.camera.zoom = newZoom;
+        const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+        applyZoomAtPoint(mouseX, mouseY, zoomFactor);
     }, { passive: false });
+
+    // --- Touch: single finger = pan/select/drag (mirrors mouse exactly via
+    // the shared handlers above); two fingers = pinch-zoom (no mouse
+    // equivalent, zooms around the midpoint between the two fingers). ---
+    container.addEventListener('touchstart', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.panel')) return;
+        if (e.touches.length === 1) {
+            const t = e.touches[0];
+            handlePointerDown(t.clientX, t.clientY, t.target, false);
+        } else if (e.touches.length >= 2) {
+            // A second finger landing mid-drag cancels any single-finger
+            // drag/select in favor of starting a pinch, so a ship/star
+            // isn't left "stuck" to the cursor after the gesture changes.
+            window.camera.isDragging = false; window.draggedMarker = null; window.draggedStar = null;
+            window._pinchStartDist = touchDist(e.touches);
+            window._pinchStartZoom = window.camera.zoom;
+        }
+    }, { passive: true });
+
+    container.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1 && window._pinchStartDist) {
+            // dropped from two fingers to one -- don't resume a pan using a
+            // stale startX/startY from before the pinch.
+            window._pinchStartDist = null;
+            window.camera.startX = e.touches[0].clientX; window.camera.startY = e.touches[0].clientY;
+            return;
+        }
+        if (e.touches.length === 1 && (window.camera.isDragging || window.draggedMarker || window.draggedStar)) {
+            e.preventDefault();
+            const t = e.touches[0];
+            handlePointerMove(t.clientX, t.clientY);
+        } else if (e.touches.length >= 2 && window._pinchStartDist) {
+            e.preventDefault();
+            const rect = container.getBoundingClientRect();
+            const mid = touchMid(e.touches, rect);
+            const newDist = touchDist(e.touches);
+            const targetZoom = Math.max(0.02, Math.min(15.0, window._pinchStartZoom * (newDist / window._pinchStartDist)));
+            applyZoomToTarget(mid.x, mid.y, targetZoom);
+        }
+    }, { passive: false });
+
+    container.addEventListener('touchend', (e) => {
+        if (e.touches.length === 0) { handlePointerUp(); window._pinchStartDist = null; }
+        else if (e.touches.length === 1) { window._pinchStartDist = null; window.camera.startX = e.touches[0].clientX; window.camera.startY = e.touches[0].clientY; }
+    });
+    container.addEventListener('touchcancel', () => { handlePointerUp(); window._pinchStartDist = null; });
 
     // HUD TELEMETRY RENDERER
     window.renderHUDTelemetry = function() {
