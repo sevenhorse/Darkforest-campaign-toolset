@@ -2,30 +2,43 @@
    js/combat.js - Tactical Engine, Arsenal & Diagnostics
    ========================================================================== */
 
+// Squadron AI Stances build (this session): each weapon got an optional
+// `role` tag ('anti_fighter' | 'anti_capital' | 'point_defense' | 'general')
+// consumed by an AI-controlled squadron (window.setSquadronAIStance) to pick
+// which of its weapons fits the stance it's been given — e.g. the
+// Messenger's "Point Defense System" for Intercept Munitions, or the Raven's
+// "Ship Killer Missiles" for Attack Capital Ships/Escorts. FLAGGED JUDGMENT
+// CALL, not DM-confirmed per weapon: these are flavor-text reads of each
+// weapon's name/dice (a name like "Point Defense System" or "Ship Killer
+// Missiles" is fairly unambiguous, but e.g. "Micro Railgun" -> anti_capital
+// is a judgment call, not a stated rule). Untagged weapons default to
+// 'general' and are only used as a last-resort fallback (see
+// processBattleRoundAutomations' weapon-selection comment) when no weapon
+// on that squadron type matches the stance's desired role at all.
 const STRIKE_CRAFT_DB = {
     raven: {
         label: "Raven Gen 2 MkIV", base_hp: 200,
         weapons: [
-            { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact" },
-            { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat" },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing" },
-            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance" }
+            { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact", role: "anti_fighter" },
+            { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat", role: "general" },
+            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital" },
+            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital" }
         ]
     },
     hawk: {
         label: "Hawk Medium Bomber", base_hp: 350,
         weapons: [
-            { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact" },
-            { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing" },
-            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance" }
+            { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact", role: "general" },
+            { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing", role: "anti_capital" },
+            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital" }
         ]
     },
     messenger: {
         label: "Messenger Shuttle", base_hp: 100,
         weapons: [
-            { name: "Dual Link .50 Cal", dice: "2d6", dmgType: "Impact" },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing" },
-            { name: "Point Defense System", dice: "1d4", dmgType: "Impact" }
+            { name: "Dual Link .50 Cal", dice: "2d6", dmgType: "Impact", role: "anti_fighter" },
+            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital" },
+            { name: "Point Defense System", dice: "1d4", dmgType: "Impact", role: "point_defense" }
         ]
     }
 };
@@ -391,15 +404,28 @@ window.updateShipStance = async function(shipId, stance) {
    target/volley controls into the DOM at once. */
 window.renderShipStanceHtml = function(vessel) {
     let currentStance = vessel.ship_stance || 'Balanced';
+    // Squadron AI Stances build (this session): a read-only badge for
+    // vessel_class ('Capital'/'Escort'/unset) -- the field itself is edited
+    // via the Vessel Deck's "EDIT BASE STATS" modal (a static/setup fact
+    // about the ship, same treatment as drive_type), not from here. Shown
+    // only when actually set, since most existing ships predate this field
+    // and are legitimately unclassified rather than wrongly defaulted to
+    // one side. See window.processBattleRoundAutomations (js/battle-map.js)
+    // for the only place this field is actually READ (Attack Capital
+    // Ships/Attack Escorts squadron AI target filtering).
+    const classBadge = vessel.vessel_class
+        ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 5px;" title="Vessel classification -- used by squadron AI Stances to tell Capital Ships apart from Escorts. Set via EDIT BASE STATS.">${vessel.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>`
+        : '';
     return `
-        <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center;">
-            <label for="vessel-stance-${vessel.id}" style="font-size:10px; color:#00e5a3; font-weight:bold;">TACTICAL STANCE:</label>
+        <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center; gap:6px;">
+            <label for="vessel-stance-${vessel.id}" style="font-size:10px; color:#00e5a3; font-weight:bold; white-space:nowrap;">TACTICAL STANCE:</label>
             <select id="vessel-stance-${vessel.id}" onchange="window.updateShipStance('${vessel.id}', this.value)" style="width:160px; margin:0; padding:4px; font-size:10px; background:#040605; color:#00e5a3; border:1px solid #3c4e36;">
                 <option value="Balanced" ${currentStance === 'Balanced' ? 'selected' : ''}>Balanced (Standard)</option>
                 <option value="Aggressive" ${currentStance === 'Aggressive' ? 'selected' : ''}>Aggressive (+Dmg, -Def)</option>
                 <option value="Defensive" ${currentStance === 'Defensive' ? 'selected' : ''}>Defensive (+Def, -Dmg)</option>
                 <option value="Evasive" ${currentStance === 'Evasive' ? 'selected' : ''}>Evasive (Dodge Focus)</option>
             </select>
+            ${classBadge}
         </div>
     `;
 };
@@ -772,6 +798,39 @@ window.renderVesselDeck = function() {
                 let wpnOptions = '';
                 dbStats.weapons.forEach((w, wIdx) => { wpnOptions += `<option value="${wIdx}">${w.name} (${w.dice})</option>`; });
 
+                // Squadron AI Stances build (this session): an AI stance
+                // set on this squadron takes over its weapon fire entirely
+                // -- the manual weapon/target/FIRE row is replaced with a
+                // status readout below, rather than shown alongside it.
+                // Deliberate default, not explicitly confirmed with the DM:
+                // this avoids the ambiguity of a squadron potentially firing
+                // TWICE in one round (once from a manual click, once from
+                // automated resolution on Advance Round) given this app has
+                // no other action-economy enforcement anywhere to lean on
+                // (see this session's "attacks per turn" discussion). Easy
+                // to change to "manual stays available as an override" if
+                // that turns out to be wanted instead.
+                const aiStance = sq.ai_stance || '';
+                const AI_STANCE_LABELS = {
+                    '': 'Manual (player-controlled)',
+                    'attack_strike_craft': '🤖 Attack Strike Craft',
+                    'intercept_munitions': '🤖 Intercept Munitions',
+                    'attack_capitals': '🤖 Attack Capital Ships',
+                    'attack_escorts': '🤖 Attack Escorts'
+                };
+                const stanceOptions = Object.keys(AI_STANCE_LABELS).map(k => `<option value="${k}" ${aiStance === k ? 'selected' : ''}>${AI_STANCE_LABELS[k]}</option>`).join('');
+                const manualControlsOrStatus = aiStance
+                    ? `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; font-size:9px; color:#6b826a;">
+                           🤖 AI-controlled (${AI_STANCE_LABELS[aiStance].replace('🤖 ', '')}) — picks its own target (nearest eligible) and weapon, resolves automatically on Advance Round. Manual fire is disabled while a stance is set — switch back to Manual above to fire it yourself.
+                       </div>`
+                    : `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; display:flex; gap:6px; align-items:center;">
+                           <label for="sq-wpn-select-${vessel.id}-${idx}" style="display:none;">Weapon</label>
+                           <select id="sq-wpn-select-${vessel.id}-${idx}" style="flex:2; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#ffaa00; border:1px solid #3c4e36;">${wpnOptions}</select>
+                           <label for="sq-target-${vessel.id}-${idx}" style="display:none;">Target</label>
+                           <select id="sq-target-${vessel.id}-${idx}" style="flex:1.5; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36;">${targetOptions}</select>
+                           <button class="layer-edit" onclick="window.rollSquadronWeapon('${vessel.id}', ${idx})" style="flex:1; padding:4px; font-size:9px; border-color:#ffaa00; color:#ffaa00; margin:0;">FIRE</button>
+                       </div>`;
+
                 dHtml += `
                 <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ffaa00;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -789,14 +848,12 @@ window.renderVesselDeck = function() {
                             <button class="layer-del" onclick="window.deleteSquadron('${vessel.id}', ${idx}, true)" style="padding:2px 8px; font-size:8px;">RECORD CASUALTY</button>
                         </div>
                     </div>
-                    
-                    <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; display:flex; gap:6px; align-items:center;">
-                        <label for="sq-wpn-select-${vessel.id}-${idx}" style="display:none;">Weapon</label>
-                        <select id="sq-wpn-select-${vessel.id}-${idx}" style="flex:2; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#ffaa00; border:1px solid #3c4e36;">${wpnOptions}</select>
-                        <label for="sq-target-${vessel.id}-${idx}" style="display:none;">Target</label>
-                        <select id="sq-target-${vessel.id}-${idx}" style="flex:1.5; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36;">${targetOptions}</select>
-                        <button class="layer-edit" onclick="window.rollSquadronWeapon('${vessel.id}', ${idx})" style="flex:1; padding:4px; font-size:9px; border-color:#ffaa00; color:#ffaa00; margin:0;">FIRE</button>
+
+                    <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; display:flex; align-items:center; gap:6px;">
+                        <label for="sq-ai-stance-${vessel.id}-${idx}" style="font-size:9px; color:#c778dd; white-space:nowrap;">AI STANCE:</label>
+                        <select id="sq-ai-stance-${vessel.id}-${idx}" onchange="window.setSquadronAIStance('${vessel.id}', ${idx}, this.value)" style="flex:1; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#c778dd; border:1px solid #3c4e36;">${stanceOptions}</select>
                     </div>
+                    ${manualControlsOrStatus}
                 </div>`;
             });
         }
@@ -1143,6 +1200,14 @@ window.resetShipStats = async function(vesselId) {
                 <div style="flex:1;"><label for="maxstats-ablative" style="font-size:9px; color:#6b826a;">Ablative</label><input type="number" id="maxstats-ablative" min="0" style="border-color:#c9962f; text-align:center;"></div>
                 <div style="flex:1;"><label for="maxstats-hardened" style="font-size:9px; color:#6b826a;">Hardened</label><input type="number" id="maxstats-hardened" min="0" style="border-color:#c9962f; text-align:center;"></div>
             </div>
+            <div>
+                <label for="maxstats-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic.">Vessel Classification</label>
+                <select id="maxstats-vesselclass" style="border-color:#c9962f;">
+                    <option value="">-- Unclassified --</option>
+                    <option value="Capital">Capital Ship</option>
+                    <option value="Escort">Escort</option>
+                </select>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="maxstats-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="maxstats-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#c9962f; color:#c9962f;">SAVE CHANGES</button>
@@ -1159,7 +1224,8 @@ window.resetShipStats = async function(vesselId) {
                 max_hull: parseInt(document.getElementById('maxstats-hull').value) || 0,
                 max_reactive: parseInt(document.getElementById('maxstats-reactive').value) || 0,
                 max_ablative: parseInt(document.getElementById('maxstats-ablative').value) || 0,
-                max_hardened: parseInt(document.getElementById('maxstats-hardened').value) || 0
+                max_hardened: parseInt(document.getElementById('maxstats-hardened').value) || 0,
+                vessel_class: document.getElementById('maxstats-vesselclass').value || null
             };
             const clamped = {
                 integrity_shields: Math.min(vessel.integrity_shields !== undefined ? vessel.integrity_shields : newMax.max_shields, newMax.max_shields),
@@ -1185,19 +1251,48 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-reactive').value = vessel.max_reactive || 0;
         document.getElementById('maxstats-ablative').value = vessel.max_ablative || 0;
         document.getElementById('maxstats-hardened').value = vessel.max_hardened || 0;
+        document.getElementById('maxstats-vesselclass').value = vessel.vessel_class || '';
         overlay.style.display = 'flex';
     };
 })();
 
-window.rollSquadronWeapon = async function(vesselId, sqIdx) {
+/* Squadron AI Stances build (this session): sets/clears which stance (if
+   any) a deployed squadron uses. '' (Manual) is the default for every
+   existing and newly-launched squadron -- nothing about this build changes
+   behavior for a squadron nobody has explicitly set a stance on. See
+   window.processBattleRoundAutomations (js/battle-map.js) for where a
+   non-manual stance actually gets resolved each Advance Round. */
+window.setSquadronAIStance = async function(vesselId, sqIdx, stance) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    let sq = (vessel.ship_deployed || [])[sqIdx];
+    if (!sq) return;
+    sq.ai_stance = stance || '';
+    await db.from('ship_markers').update({ ship_deployed: vessel.ship_deployed }).eq('id', vessel.id);
+    window.renderVesselDeck();
+};
+
+/* Squadron AI Stances build (this session): the actual dice/damage/persist/
+   broadcast logic previously lived directly inside window.rollSquadronWeapon
+   and read its weapon+target selections straight from the manual FIRE row's
+   DOM elements — which meant nothing else in the codebase could resolve a
+   squadron shot without a rendered UI to read from. Extracted here as a
+   DOM-independent core (explicit wpnIdx/targetId params instead of
+   document.getElementById reads) so BOTH the manual FIRE button (still
+   window.rollSquadronWeapon, now a thin DOM-reading wrapper below) and the
+   new automated AI Stance resolution in js/battle-map.js's
+   processBattleRoundAutomations call the exact same implementation — one
+   damage-resolution path, not two that could quietly drift apart. Logic
+   itself is UNCHANGED from before this refactor. opts.auto (used by the AI
+   path) just swaps the chat broadcast's label prefix so an automated shot
+   reads distinctly from a player's own manual click in the log. */
+window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targetId, opts) {
+    opts = opts || {};
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
     let sq = (vessel.ship_deployed || [])[sqIdx];
     if (!sq) return;
 
-    let wpnIdx = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`).value;
-    let targetId = document.getElementById(`sq-target-${vesselId}-${sqIdx}`).value;
-    
     let dbStats = STRIKE_CRAFT_DB[sq.type];
     let wpn = dbStats.weapons[wpnIdx];
     if (!wpn) return;
@@ -1288,7 +1383,7 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
                 const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
                 if (sqShipSelf) {
                     const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ffaa00';
-                    window.playWeaponFireEffect(sqShipSelf.id, targetShip.id, beamColor);
+                    window.playWeaponFireEffect(sqShipSelf.id, targetShip.id, beamColor, dmgType);
                 }
             }
 
@@ -1316,8 +1411,18 @@ window.rollSquadronWeapon = async function(vesselId, sqIdx) {
     if (window.AudioEngine) window.AudioEngine.playShoot();
 
     if(typeof window.broadcastRoll === 'function') {
-        await window.broadcastRoll(`[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
+        const autoTag = opts.auto ? '🤖 [AI STANCE] ' : '';
+        await window.broadcastRoll(`${autoTag}[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
     }
+};
+
+// Thin DOM-reading wrapper — unchanged call signature/behavior for the
+// manual FIRE button (window.rollSquadronWeapon('vesselId', sqIdx) via
+// onclick), delegating to window.resolveSquadronWeaponFire above.
+window.rollSquadronWeapon = async function(vesselId, sqIdx) {
+    let wpnIdx = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`).value;
+    let targetId = document.getElementById(`sq-target-${vesselId}-${sqIdx}`).value;
+    await window.resolveSquadronWeaponFire(vesselId, sqIdx, wpnIdx, targetId);
 };
 
 window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
@@ -1466,7 +1571,7 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
             // the in-flight-ordnance animation does.
             if (typeof window.playWeaponFireEffect === 'function') {
                 const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ff3333';
-                window.playWeaponFireEffect(vesselId, targetShip.id, beamColor);
+                window.playWeaponFireEffect(vesselId, targetShip.id, beamColor, dmgType);
             }
         }
     }
@@ -1676,6 +1781,27 @@ window.DAMAGE_TYPES = {
         desc: 'Acidic or nanite-based agents that eat through even hardened plating.', shreds: 'Hardened Armor specifically — ignores it entirely', mitigatedBy: 'Reactive Armor, Ablative Armor' },
     'Healing':   { color: '#00e5a3', blockedBy: [], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Repair-drone swarms, nanite weaves, or damage-control beams — restores rather than harms.', shreds: 'Nothing — restores Shields first, then Hull', mitigatedBy: 'N/A' }
+};
+
+/* --- DAMAGE TYPE -> VISUAL EFFECT FAMILY (Animation Suite build, this
+   session) --- Groups the 12 damage types into 4 distinct battle-map fire
+   effects instead of every weapon using the same beam. Confirmed with the
+   user via AskUserQuestion: Beam / Tracer / Burst / Restorative-pulse.
+   JUDGMENT CALL FLAGGED: the user's approved grouping named 11 of the 12
+   types explicitly (Beam: Energy/Ion/Exotic/Antimatter, Tracer:
+   Impact/Piercing/Cold, Burst: Explosive/Flak/Corrosive, Pulse: Healing) —
+   'Heat' wasn't assigned to a family in that conversation. Placed it in
+   Beam here on a judgment call: its own flavor text calls it "thermal
+   lances" (a directed, sustained weapon like the other Beam types), unlike
+   Tracer's projectile/kinetic framing or Burst's area-detonation framing.
+   Flagging this plainly rather than letting it pass as fully spec'd — easy
+   to move to another family on request. Consumed by js/battle-map.js's
+   window.playWeaponFireEffect to pick which effect to play. */
+window.DAMAGE_TYPE_FAMILY = {
+    'Energy': 'beam', 'Ion': 'beam', 'Exotic': 'beam', 'Antimatter': 'beam', 'Heat': 'beam',
+    'Impact': 'tracer', 'Piercing': 'tracer', 'Cold': 'tracer',
+    'Explosive': 'burst', 'Flak': 'burst', 'Corrosive': 'burst',
+    'Healing': 'pulse'
 };
 
 window.buildDamageTypeOptionsHtml = function(selected) {
