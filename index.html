@@ -10,7 +10,7 @@
          directly in the markup). Simple DRADIS-style radar blip, matching
          the app's terminal green-on-black theme. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=3.24">
+    <link rel="stylesheet" href="style.css?v=3.25">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -629,6 +629,14 @@
                                 <div style="flex:1;"><label for="new-template-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed:</label><input type="number" id="new-template-speed" value="80" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
                                 <div style="flex:1;"><label for="new-template-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-bottom:8px;" title="Locks Tactical Speed to 0 (immobile on the Battle Map) and removes the Hardpoint Slots cap."><input type="checkbox" id="new-template-station" onchange="window.toggleStationFields('new-template')" style="margin:0;"> 🛰 This is a Station</label></div>
                             </div>
+                            <div style="margin-top:6px;">
+                                <label for="new-template-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic. Optional.">Vessel Classification:</label>
+                                <select id="new-template-vesselclass" style="font-size:11px; margin:2px 0;">
+                                    <option value="">-- Unclassified --</option>
+                                    <option value="Capital">Capital Ship</option>
+                                    <option value="Escort">Escort</option>
+                                </select>
+                            </div>
                             <button class="btn-reveal" onclick="window.saveNewShipTemplate()" style="margin-top:10px; border-color:#00e1ff; color:#00e1ff;">+ SAVE VESSEL PROFILE</button>
                         </div>
                         <div class="sheet-section">
@@ -1234,12 +1242,12 @@
     <script src="js/db.js?v=3.24"></script>
     <script src="js/audio.js?v=3.16"></script>
     <script src="js/ui.js?v=3.26"></script>
-    <script src="js/combat.js?v=3.30"></script>
+    <script src="js/combat.js?v=3.32"></script>
     <script src="js/colonies.js?v=3.16"></script>
-    <script src="js/ship-designer.js?v=3.16"></script>
+    <script src="js/ship-designer.js?v=3.17"></script>
     <script src="js/perk-designer.js?v=3.13"></script>
     <script src="js/map.js?v=3.26"></script>
-    <script src="js/battle-map.js?v=1.14"></script>
+    <script src="js/battle-map.js?v=1.16"></script>
     <script src="js/manufacturing.js?v=1.8"></script>
 
 </body>
