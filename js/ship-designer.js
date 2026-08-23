@@ -50,14 +50,22 @@ window.renderShipDesignerPanel = function() {
         const owner = allProfiles.find(p => p.id === t.owner_id);
         const weaponCount = (t.ship_weapons || []).length;
         const slots = t.hardpoint_slots || 4;
+        // Station Designer build: a station has no hardpoint cap and doesn't
+        // use drive_type (immobile, galaxy-scale FTL is irrelevant) — shown
+        // with a distinct badge/line instead of the ship-oriented ones.
+        const stationBadge = t.is_station ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">🛰 STATION</span>` : '';
+        const classLine = t.is_station
+            ? `${t.class || 'Station'} &nbsp;·&nbsp; Stationary Platform`
+            : `${t.class || 'Frigate'} &nbsp;·&nbsp; ${(t.drive_type || 'ftl_class1').replace('ftl_', 'FTL ').replace('_', ' ').replace('sublight', 'Sublight')}`;
+        const hardpointLine = t.is_station ? `Hardpoints: ${weaponCount} installed (no cap)` : `Hardpoints: ${weaponCount} / ${slots} installed`;
         html += `
             <div class="note-card">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#00e1ff; font-size:12px;">${t.name}</strong>
-                        <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${t.class || 'Frigate'} &nbsp;·&nbsp; ${(t.drive_type || 'ftl_class1').replace('ftl_', 'FTL ').replace('_', ' ').replace('sublight', 'Sublight')}</p>
+                        <strong style="color:#00e1ff; font-size:12px;">${t.name}</strong>${stationBadge}
+                        <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${classLine}</p>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Shields ${t.max_shields || 0} · Reactive ${t.max_reactive || 0} · Ablative ${t.max_ablative || 0} · Hardened ${t.max_hardened || 0} · Hull ${t.max_hull || 0}</p>
-                        <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Hardpoints: ${weaponCount} / ${slots} installed</p>
+                        <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">${hardpointLine}</p>
                         <span class="author-tag">designer: ${owner ? (owner.username || 'Commander') : 'Unknown'}</span>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:120px;">
@@ -89,9 +97,26 @@ window.moveShipTemplateOrder = function(id, direction) {
     window.renderShipDesignerPanel();
 };
 
+// Station Designer build: toggling "This is a Station" disables/zeroes the
+// Tactical Speed input (stations are locked immobile — confirmed design,
+// see the deploy/edit-modal comments below) and relabels the Hardpoint
+// Slots field to make clear it won't be enforced for a station. Shared by
+// both the "new template" form and the edit-template modal via an idPrefix.
+window.toggleStationFields = function(idPrefix) {
+    const isStation = document.getElementById(`${idPrefix}-station`).checked;
+    const speedInput = document.getElementById(`${idPrefix}-speed`);
+    const slotsInput = document.getElementById(`${idPrefix}-slots`);
+    if (speedInput) {
+        speedInput.disabled = isStation;
+        if (isStation) speedInput.value = 0;
+    }
+    if (slotsInput) slotsInput.title = isStation ? 'Ignored for stations — no hardpoint cap' : '';
+};
+
 window.saveNewShipTemplate = async function() {
     const name = document.getElementById('new-template-name').value.trim();
     if (!name) { alert("Enter a vessel designation first."); return; }
+    const isStation = document.getElementById('new-template-station').checked;
     const payload = {
         owner_id: currentUserId,
         name,
@@ -107,8 +132,11 @@ window.saveNewShipTemplate = async function() {
         // a deployed token can move before drag becomes DM-judgment-call
         // "overdrawn." Separate from drive_type/speed, which is the
         // galaxy-scale FTL travel stat and the wrong scale entirely for the
-        // 460x380 tactical grid.
-        tactical_speed: parseInt(document.getElementById('new-template-speed').value) || 80,
+        // 460x380 tactical grid. Stations are locked to 0 — confirmed
+        // design, enforced here regardless of what the (disabled) input
+        // shows, in case it was toggled out of sync somehow.
+        tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-template-speed').value) || 80),
+        is_station: isStation,
         ship_weapons: [],
         ship_decks: [],
         is_secret: false
@@ -118,6 +146,8 @@ window.saveNewShipTemplate = async function() {
 
     document.getElementById('new-template-name').value = '';
     document.getElementById('new-template-class').value = '';
+    document.getElementById('new-template-station').checked = false;
+    window.toggleStationFields('new-template');
     if (typeof loadShipTemplates === 'function') loadShipTemplates();
 };
 
@@ -148,7 +178,8 @@ window.deployShipTemplate = async function(id) {
         integrity_ablative: t.max_ablative || 0, max_ablative: t.max_ablative || 0,
         integrity_hardened: t.max_hardened || 0, max_hardened: t.max_hardened || 0,
         integrity_hull: t.max_hull || 100, max_hull: t.max_hull || 100,
-        tactical_speed: t.tactical_speed || 80,
+        tactical_speed: t.is_station ? 0 : (t.tactical_speed || 80),
+        is_station: !!t.is_station,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
         ship_decks: JSON.parse(JSON.stringify(t.ship_decks || []))
     };
@@ -199,8 +230,9 @@ window.deployShipTemplate = async function(id) {
                 <div style="flex:1;"><label for="tmpl-edit-hull" style="font-size:9px; color:#6b826a;">Hull</label><input type="number" id="tmpl-edit-hull" min="0" style="border-color:#00e1ff; text-align:center;"></div>
                 <div style="flex:1;"><label for="tmpl-edit-slots" style="font-size:9px; color:#6b826a;">Hardpoint Slots</label><input type="number" id="tmpl-edit-slots" min="0" style="border-color:#00e1ff; text-align:center;"></div>
             </div>
-            <div style="display:flex; gap:6px;">
+            <div style="display:flex; gap:6px; align-items:flex-end;">
                 <div style="flex:1;"><label for="tmpl-edit-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed</label><input type="number" id="tmpl-edit-speed" min="0" style="border-color:#00e1ff; text-align:center;"></div>
+                <div style="flex:1;"><label for="tmpl-edit-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-bottom:8px;"><input type="checkbox" id="tmpl-edit-station" onchange="window.toggleStationFields('tmpl-edit')" style="margin:0;"> 🛰 This is a Station</label></div>
             </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="tmpl-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
@@ -211,6 +243,7 @@ window.deployShipTemplate = async function(id) {
         document.getElementById('tmpl-edit-cancel-btn').addEventListener('click', () => { overlay.style.display = 'none'; });
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
         document.getElementById('tmpl-edit-save-btn').addEventListener('click', async () => {
+            const isStation = document.getElementById('tmpl-edit-station').checked;
             const updates = {
                 name: document.getElementById('tmpl-edit-name').value.trim() || 'Unnamed Vessel',
                 class: document.getElementById('tmpl-edit-class').value.trim() || 'Frigate',
@@ -221,7 +254,8 @@ window.deployShipTemplate = async function(id) {
                 max_hardened: parseInt(document.getElementById('tmpl-edit-hardened').value) || 0,
                 max_hull: parseInt(document.getElementById('tmpl-edit-hull').value) || 0,
                 hardpoint_slots: parseInt(document.getElementById('tmpl-edit-slots').value) || 4,
-                tactical_speed: parseInt(document.getElementById('tmpl-edit-speed').value) || 80
+                tactical_speed: isStation ? 0 : (parseInt(document.getElementById('tmpl-edit-speed').value) || 80),
+                is_station: isStation
             };
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -245,6 +279,8 @@ window.deployShipTemplate = async function(id) {
         document.getElementById('tmpl-edit-hull').value = t.max_hull || 0;
         document.getElementById('tmpl-edit-slots').value = t.hardpoint_slots || 4;
         document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 80;
+        document.getElementById('tmpl-edit-station').checked = !!t.is_station;
+        window.toggleStationFields('tmpl-edit');
         overlay.style.display = 'flex';
     };
 })();
@@ -256,6 +292,15 @@ window.deployShipTemplate = async function(id) {
     function renderLoadoutList() {
         const t = findAnyTemplateById(currentId);
         if (!t) return;
+
+        // Self-heal legacy decks missing a stable id — same pattern as
+        // combat.js's renderVesselDeck (ship_decks predates weapon-deck
+        // gating and has no id field otherwise).
+        t.ship_decks = t.ship_decks || [];
+        if (window.ensureDeckIds(t.ship_decks)) {
+            db.from('ship_templates').update({ ship_decks: t.ship_decks }).eq('id', currentId);
+        }
+
         const listEl = document.getElementById('tmpl-loadout-list');
         const weapons = t.ship_weapons || [];
         let html = '';
@@ -263,14 +308,21 @@ window.deployShipTemplate = async function(id) {
         weapons.forEach((w, idx) => {
             const dt = window.normalizeDamageType(w.damage_type || 'Impact');
             const info = window.DAMAGE_TYPES[dt];
+            const assignedDeck = w.assigned_deck_id ? t.ship_decks.find(d => d.id === w.assigned_deck_id) : null;
+            const deckTag = assignedDeck ? ` · <span style="color:#6b826a;">🔧 ${assignedDeck.name}</span>` : '';
             html += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
-                <span style="font-size:10px; color:#d4c5a9;">${w.name} — ${w.dice}${w.modifier} ${w.explodes ? '💥' : ''} · <span style="color:${info.color};">${dt}</span> · ${w.gun_count || 1}x guns</span>
+                <span style="font-size:10px; color:#d4c5a9;">${w.name} — ${w.dice}${w.modifier} ${w.explodes ? '💥' : ''} · <span style="color:${info.color};">${dt}</span> · ${w.gun_count || 1}x guns${deckTag}</span>
                 <button class="layer-del" onclick="window.removeTemplateWeapon(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
             </div>`;
         });
         listEl.innerHTML = html;
         const slots = t.hardpoint_slots || 4;
-        document.getElementById('tmpl-loadout-slots-label').innerText = `${weapons.length} / ${slots} hardpoints used`;
+        document.getElementById('tmpl-loadout-slots-label').innerText = t.is_station ? `${weapons.length} hardpoints (no cap — station)` : `${weapons.length} / ${slots} hardpoints used`;
+
+        const deckAssignSelect = document.getElementById('tmpl-loadout-deck');
+        if (deckAssignSelect) {
+            deckAssignSelect.innerHTML = '<option value="">-- Not deck-gated --</option>' + t.ship_decks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        }
 
         const deckListEl = document.getElementById('tmpl-decks-list');
         const decks = t.ship_decks || [];
@@ -302,6 +354,8 @@ window.deployShipTemplate = async function(id) {
                     <input type="number" id="tmpl-loadout-guns" placeholder="Guns" min="1" value="1" style="flex:1; border-color:#ff3333; text-align:center;">
                 </div>
                 <select id="tmpl-loadout-dmgtype" style="border-color:#ff3333;">${window.buildDamageTypeOptionsHtml('Impact')}</select>
+                <label for="tmpl-loadout-deck" style="font-size:9px; color:#ffaaaa; margin-top:6px; display:block;" title="A destroyed deck can't fire its assigned weapons — Station Designer's lightweight section-damage mechanic.">Assigned Deck (optional):</label>
+                <select id="tmpl-loadout-deck" style="border-color:#ff3333;"></select>
                 <label for="tmpl-loadout-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:6px;">
                     <input type="checkbox" id="tmpl-loadout-explodes" checked style="margin:0;"> Exploding Dice
                 </label>
@@ -340,7 +394,10 @@ window.deployShipTemplate = async function(id) {
         if (!t) return;
         const slots = t.hardpoint_slots || 4;
         const weapons = t.ship_weapons || [];
-        if (weapons.length >= slots) { alert(`This hull only has ${slots} hardpoint slots — expand Hardpoint Slots in Edit Stats first.`); return; }
+        // Station Designer build: no hardpoint cap for a station — confirmed
+        // design, since a battlestation-scale platform needs far more
+        // weapon batteries than any hull's slot count was meant to model.
+        if (!t.is_station && weapons.length >= slots) { alert(`This hull only has ${slots} hardpoint slots — expand Hardpoint Slots in Edit Stats first.`); return; }
 
         const name = document.getElementById('tmpl-loadout-name').value.trim();
         if (!name) { alert("Enter a weapon name."); return; }
@@ -350,8 +407,10 @@ window.deployShipTemplate = async function(id) {
         const gunCount = parseInt(document.getElementById('tmpl-loadout-guns').value) || 1;
         const dmgType = document.getElementById('tmpl-loadout-dmgtype').value;
         const explodes = document.getElementById('tmpl-loadout-explodes').checked;
+        const deckSelect = document.getElementById('tmpl-loadout-deck');
+        const assignedDeckId = (deckSelect && deckSelect.value) ? deckSelect.value : null;
 
-        weapons.push({ loc: 'Hardpoint', name, dice, modifier: mod, explodes, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: gunCount, damage_type: dmgType });
+        weapons.push({ loc: 'Hardpoint', name, dice, modifier: mod, explodes, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: gunCount, damage_type: dmgType, assigned_deck_id: assignedDeckId });
         const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', currentId);
         if (error) { alert("Failed to add weapon: " + error.message); return; }
         t.ship_weapons = weapons;
@@ -376,7 +435,7 @@ window.deployShipTemplate = async function(id) {
         if (!name) { alert("Enter a deck or subsystem name."); return; }
         const maxHp = parseInt(document.getElementById('tmpl-deck-hp').value) || 50;
         const decks = t.ship_decks || [];
-        decks.push({ name, hp: maxHp, max_hp: maxHp });
+        decks.push({ name, hp: maxHp, max_hp: maxHp, id: window.genDeckId() });
         const { error } = await db.from('ship_templates').update({ ship_decks: decks }).eq('id', currentId);
         if (error) { alert("Failed to add deck: " + error.message); return; }
         t.ship_decks = decks;
@@ -409,12 +468,14 @@ window.renderSecretRepositoryPanel = function() {
 
     window.secretShipTemplatesList.forEach(t => {
         const weaponCount = (t.ship_weapons || []).length;
+        const stationBadge = t.is_station ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">🛰 STATION</span>` : '';
+        const hardpointTag = t.is_station ? `${weaponCount} hardpoints (no cap)` : `${weaponCount}/${t.hardpoint_slots || 4} hardpoints`;
         html += `
             <div class="note-card" style="border-color:#ff3333;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>
-                        <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${t.class || 'Frigate'} · Hull ${t.max_hull || 0} · Shields ${t.max_shields || 0} · ${weaponCount}/${t.hardpoint_slots || 4} hardpoints</p>
+                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>${stationBadge}
+                        <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${t.class || 'Frigate'} · Hull ${t.max_hull || 0} · Shields ${t.max_shields || 0} · ${hardpointTag}</p>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:110px;">
                         <button class="layer-edit" onclick="window.openEditTemplateModal('${t.id}')" style="padding:3px 6px; font-size:9px;">✎</button>
@@ -447,6 +508,8 @@ window.saveNewSecretTemplate = async function() {
     if (currentUserRole !== 'dm') return;
     const name = document.getElementById('new-secret-template-name').value.trim();
     if (!name) { alert("Enter a vessel designation first."); return; }
+    const stationCheckbox = document.getElementById('new-secret-template-station');
+    const isStation = stationCheckbox ? stationCheckbox.checked : false;
     const payload = {
         owner_id: currentUserId,
         name,
@@ -455,7 +518,8 @@ window.saveNewSecretTemplate = async function() {
         max_shields: parseInt(document.getElementById('new-secret-template-shields').value) || 0,
         max_hull: parseInt(document.getElementById('new-secret-template-hull').value) || 100,
         hardpoint_slots: parseInt(document.getElementById('new-secret-template-slots').value) || 4,
-        tactical_speed: parseInt(document.getElementById('new-secret-template-speed').value) || 80,
+        tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-secret-template-speed').value) || 80),
+        is_station: isStation,
         ship_weapons: [],
         ship_decks: [],
         is_secret: true
@@ -465,6 +529,7 @@ window.saveNewSecretTemplate = async function() {
 
     document.getElementById('new-secret-template-name').value = '';
     document.getElementById('new-secret-template-class').value = '';
+    if (stationCheckbox) { stationCheckbox.checked = false; window.toggleStationFields('new-secret-template'); }
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
 };
 
