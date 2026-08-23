@@ -524,9 +524,16 @@ window.processBattleRoundAutomations = async function() {
        a payload and a squadron only gets a shot if that payload survives it
        -- an implementation-order call, not something the DM explicitly
        confirmed either way; flagging it rather than letting it pass as
-       obviously-the-only-option. No range check, same as every other
-       squadron-weapon roll in this codebase (STRIKE_CRAFT_DB weapons have
-       no `range` field at all, so nothing here is a new gap). */
+       obviously-the-only-option.
+
+       Strike-Craft Weapon Range build (later session): originally had NO
+       range check at all ("STRIKE_CRAFT_DB weapons have no range field",
+       true at the time) -- now that every squadron weapon has a real
+       `range`, this mirrors findEligiblePD/fireEligiblePD's own pattern
+       exactly: the interceptor is only eligible if its own token is within
+       its weapon's range of the position being defended (the target vessel
+       the payload is inbound on), same "range measured from the defender's
+       position, not the attacker's" semantics ship PD already used. */
     let squadronInterceptPool = [];
     globalShipMarkersCache.forEach(v => {
         (v.ship_deployed || []).forEach((sq, sqIdx) => {
@@ -534,17 +541,27 @@ window.processBattleRoundAutomations = async function() {
             const sqShip = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
             if (!sqShip) return;
             const pos = window.getBattleTokenPosition(sqShip.id);
-            if (!pos) return; // no grid token this round -- can't range-check (moot here, but keeps the shape consistent with pdPool), skip
+            if (!pos) return; // no grid token this round -- can't range-check, skip (fails open, same as every other "squadron has no grid token" check in this file)
             const dbStats = STRIKE_CRAFT_DB[sq.type];
             if (!dbStats) return;
             let wpnIdx = dbStats.weapons.findIndex(w => w.role === 'point_defense');
             if (wpnIdx < 0) wpnIdx = 0; // fallback: first listed weapon (confirmed design)
-            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], ownerId: sqShip.owner_id });
+            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], ownerId: sqShip.owner_id, position: pos });
         });
     });
 
-    function fireEligibleSquadronIntercept(ownerId) {
-        const idx = squadronInterceptPool.findIndex(entry => entry.ownerId === ownerId);
+    function findEligibleSquadronIntercept(targetPos, ownerId) {
+        for (let i = 0; i < squadronInterceptPool.length; i++) {
+            const entry = squadronInterceptPool[i];
+            if (entry.ownerId !== ownerId) continue;
+            const dist = Math.hypot(entry.position.x - targetPos.x, entry.position.y - targetPos.y);
+            if (!entry.wpn.range || dist <= entry.wpn.range) return i;
+        }
+        return -1;
+    }
+
+    function fireEligibleSquadronIntercept(targetPos, ownerId) {
+        const idx = findEligibleSquadronIntercept(targetPos, ownerId);
         if (idx < 0) return null;
         const entry = squadronInterceptPool.splice(idx, 1)[0];
         const roll = rollDamageDice(entry.wpn.dice, entry.wpn.modifier, entry.wpn.explodes);
@@ -585,7 +602,7 @@ window.processBattleRoundAutomations = async function() {
         // squadron gets a shot at the same payload if ship PD didn't
         // already destroy it -- see squadronInterceptPool/
         // fireEligibleSquadronIntercept above.
-        const sqEngagement = fireEligibleSquadronIntercept(targetVessel.owner_id);
+        const sqEngagement = fireEligibleSquadronIntercept(targetPos, targetVessel.owner_id);
         if (sqEngagement && sqEngagement.roll.total > 0) {
             chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} shoots down a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${sqEngagement.roll.total} dmg) — destroyed!`);
             continue; // payload destroyed, dropped from survivingOrdnance
@@ -755,6 +772,15 @@ window.processBattleRoundAutomations = async function() {
             Craft, anti_capital for the other two -- see STRIKE_CRAFT_DB's
             role-tag comment, js/combat.js), falling back to the squadron's
             first listed weapon if none match (confirmed design).
+         5. (New this session, Strike-Craft Weapon Range build, confirmed
+            design) Now that STRIKE_CRAFT_DB weapons carry a real `range`,
+            the squadron only actually fires if its POST-MOVE distance to
+            the target is within the picked weapon's range -- otherwise it
+            holds fire this round (having still closed distance per step 3)
+            and tries again next round as it keeps advancing. This was a
+            confirmed either/or design choice against the alternative of
+            leaving AI auto-fire completely unranged; picked so the AI
+            doesn't feel dumber than a manual player once ranges exist.
        Resolution itself goes through window.resolveSquadronWeaponFire --
        the exact same damage/persist/chat-log/beam-effect path the manual
        FIRE button uses (extracted from window.rollSquadronWeapon in the
@@ -811,12 +837,28 @@ window.processBattleRoundAutomations = async function() {
             // --- Squadron Movement + Retreat (this session): advance on target ---
             const movedTokens = moveTokenToward(sqShip.id, bestTargetPos, moveDist);
             if (movedTokens) await saveBattleTokens(movedTokens);
+            const movedSelfTok = movedTokens ? movedTokens.find(t => t.ship_marker_id === sqShip.id) : null;
+            const newSelfPos = movedSelfTok ? { x: movedSelfTok.x, y: movedSelfTok.y } : selfPos;
 
             const dbStats = STRIKE_CRAFT_DB[sq.type];
             if (!dbStats) continue;
             const desiredRole = sq.ai_stance === 'attack_strike_craft' ? 'anti_fighter' : 'anti_capital';
             let wpnIdx = dbStats.weapons.findIndex(w => w.role === desiredRole);
             if (wpnIdx < 0) wpnIdx = 0; // fallback: first listed weapon (confirmed design)
+            const wpn = dbStats.weapons[wpnIdx];
+
+            // Strike-Craft Weapon Range build (this session, confirmed
+            // design): hold fire this round if still out of range after
+            // moving -- the squadron has already closed distance above, it
+            // just doesn't get a shot off yet. wpn.range falsy (shouldn't
+            // happen now that every STRIKE_CRAFT_DB weapon has one, but
+            // fails open consistent with every other range check in this
+            // build) means unlimited, same convention as ship_weapons.
+            const postMoveDist = Math.hypot(bestTargetPos.x - newSelfPos.x, bestTargetPos.y - newSelfPos.y);
+            if (wpn && wpn.range && postMoveDist > wpn.range) {
+                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) closes on ${bestTarget.name} but is still out of ${wpn.name}'s range (${wpn.range}) -- holds fire.`);
+                continue;
+            }
 
             chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) engages ${bestTarget.name}.`);
             if (typeof window.resolveSquadronWeaponFire === 'function') {
