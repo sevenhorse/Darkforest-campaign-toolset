@@ -383,7 +383,14 @@ function rollDamageDice(diceStr, modifierStr, explodes) {
    set) previously couldn't be PD-engaged at all; now it can, from the
    moment it's placed. A squadron with no grid token at all (launched before
    this build shipped, or launched while no battle was active) still can't
-   be range-checked and is skipped — fails open, doesn't error. */
+   be range-checked and is skipped — fails open, doesn't error.
+
+   Squadron AI Stances build (this session): also resolves any deployed
+   squadron's non-manual ai_stance exactly once per round -- Intercept
+   Munitions (a standalone interceptor pool, tried per-salvo after ship PD),
+   and the 3 offensive stances (Attack Strike Craft / Attack Capital Ships /
+   Attack Escorts, nearest-target auto-fire). See the dedicated comment
+   blocks further down this function for each. */
 window.processBattleRoundAutomations = async function() {
     if (!window.globalBattleEncounterCache) return;
     const battle = window.globalBattleEncounterCache;
@@ -437,6 +444,47 @@ window.processBattleRoundAutomations = async function() {
         return { pdVessel, pdWpn, roll };
     }
 
+    /* --- Squadron AI Stances build (this session): Intercept Munitions ---
+       Confirmed design: a standalone intercept roll, separate from the
+       shared ship-mounted pdPool above (squadron weapons only ever exist in
+       the static STRIKE_CRAFT_DB catalog -- they have no ship_weapons row on
+       their own companion token at all, so they were never eligible for
+       pdPool in the first place and still aren't). Each deployed squadron
+       with ai_stance === 'intercept_munitions' contributes ONE intercept
+       attempt to this round's pool, using its role:'point_defense' weapon
+       if it has one (falling back to its first weapon otherwise -- same
+       fallback rule as the offensive stances below). Tried in the ordnance
+       loop AFTER the existing ship PD roll, i.e. ship PD gets first crack at
+       a payload and a squadron only gets a shot if that payload survives it
+       -- an implementation-order call, not something the DM explicitly
+       confirmed either way; flagging it rather than letting it pass as
+       obviously-the-only-option. No range check, same as every other
+       squadron-weapon roll in this codebase (STRIKE_CRAFT_DB weapons have
+       no `range` field at all, so nothing here is a new gap). */
+    let squadronInterceptPool = [];
+    globalShipMarkersCache.forEach(v => {
+        (v.ship_deployed || []).forEach((sq, sqIdx) => {
+            if (sq.ai_stance !== 'intercept_munitions' || (sq.count || 0) <= 0) return;
+            const sqShip = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+            if (!sqShip) return;
+            const pos = window.getBattleTokenPosition(sqShip.id);
+            if (!pos) return; // no grid token this round -- can't range-check (moot here, but keeps the shape consistent with pdPool), skip
+            const dbStats = STRIKE_CRAFT_DB[sq.type];
+            if (!dbStats) return;
+            let wpnIdx = dbStats.weapons.findIndex(w => w.role === 'point_defense');
+            if (wpnIdx < 0) wpnIdx = 0; // fallback: first listed weapon (confirmed design)
+            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], ownerId: sqShip.owner_id });
+        });
+    });
+
+    function fireEligibleSquadronIntercept(ownerId) {
+        const idx = squadronInterceptPool.findIndex(entry => entry.ownerId === ownerId);
+        if (idx < 0) return null;
+        const entry = squadronInterceptPool.splice(idx, 1)[0];
+        const roll = rollDamageDice(entry.wpn.dice, entry.wpn.modifier, entry.wpn.explodes);
+        return { entry, roll };
+    }
+
     // --- Age & resolve in-flight ordnance ---
     // Bug fix (pre-deploy review): this whole function previously had no
     // exception isolation at all, unlike its sibling processSalvageConversion
@@ -465,6 +513,19 @@ window.processBattleRoundAutomations = async function() {
         }
         if (engagement) {
             chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} fires at an inbound payload — misses.`);
+        }
+
+        // Squadron AI Stances build (this session): an Intercept Munitions
+        // squadron gets a shot at the same payload if ship PD didn't
+        // already destroy it -- see squadronInterceptPool/
+        // fireEligibleSquadronIntercept above.
+        const sqEngagement = fireEligibleSquadronIntercept(targetVessel.owner_id);
+        if (sqEngagement && sqEngagement.roll.total > 0) {
+            chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} shoots down a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${sqEngagement.roll.total} dmg) — destroyed!`);
+            continue; // payload destroyed, dropped from survivingOrdnance
+        }
+        if (sqEngagement) {
+            chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} fires at an inbound payload — misses.`);
         }
 
         const turnsLeft = salvo.turns_remaining - 1;
@@ -563,6 +624,82 @@ window.processBattleRoundAutomations = async function() {
           }
         });
     });
+
+    /* --- Squadron AI Stances build (this session): offensive stances ---
+       Runs AFTER both PD passes above, so an AI-controlled squadron never
+       fires from a position it didn't survive this round's defensive fire
+       to hold. Each deployed squadron with an ai_stance of
+       attack_strike_craft/attack_capitals/attack_escorts resolves exactly
+       once per Advance Round:
+         1. Eligible targets = current battle tokens, excluding the
+            squadron's own side (owner_id match, the same friend/foe
+            heuristic used everywhere else in this app) and filtered by
+            stance -- is_strike_craft for Attack Strike Craft, or
+            vessel_class ('Capital'/'Escort', a new ship_markers/
+            ship_templates field added in this same build) for the other
+            two. A ship with no vessel_class set is invisible to BOTH
+            Attack Capital Ships and Attack Escorts -- it isn't obviously
+            either one, so it's excluded rather than guessed into a side.
+         2. Target picked = nearest by live grid distance among eligible
+            candidates (confirmed design).
+         3. Weapon picked = this squadron type's weapon tagged with the
+            role that fits the stance (anti_fighter for Attack Strike
+            Craft, anti_capital for the other two -- see STRIKE_CRAFT_DB's
+            role-tag comment, js/combat.js), falling back to the squadron's
+            first listed weapon if none match (confirmed design).
+       Resolution itself goes through window.resolveSquadronWeaponFire --
+       the exact same damage/persist/chat-log/beam-effect path the manual
+       FIRE button uses (extracted from window.rollSquadronWeapon this same
+       build specifically so there'd be one implementation, not two). */
+    for (const v of globalShipMarkersCache.slice()) {
+        for (let sqIdx = 0; sqIdx < (v.ship_deployed || []).length; sqIdx++) {
+          try {
+            const sq = v.ship_deployed[sqIdx];
+            if (!sq || (sq.count || 0) <= 0) continue;
+            if (sq.ai_stance !== 'attack_strike_craft' && sq.ai_stance !== 'attack_capitals' && sq.ai_stance !== 'attack_escorts') continue;
+            const sqShip = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+            if (!sqShip) continue;
+            const selfPos = window.getBattleTokenPosition(sqShip.id);
+            if (!selfPos) continue; // no grid token this round -- can't range/nearest-check, skip (fails open, same as every other stance/PD check in this function)
+
+            let candidates = tokens
+                .map(tok => globalShipMarkersCache.find(m => m.id === tok.ship_marker_id))
+                .filter(Boolean)
+                .filter(m => m.id !== sqShip.id && m.owner_id !== sqShip.owner_id);
+
+            if (sq.ai_stance === 'attack_strike_craft') {
+                candidates = candidates.filter(m => m.is_strike_craft);
+            } else if (sq.ai_stance === 'attack_capitals') {
+                candidates = candidates.filter(m => !m.is_strike_craft && m.vessel_class === 'Capital');
+            } else {
+                candidates = candidates.filter(m => !m.is_strike_craft && m.vessel_class === 'Escort');
+            }
+            if (candidates.length === 0) continue; // nothing eligible this round -- silently passes, same as a manual player choosing not to fire
+
+            let bestTarget = null, bestDist = Infinity;
+            candidates.forEach(m => {
+                const pos = window.getBattleTokenPosition(m.id);
+                if (!pos) return;
+                const d = Math.hypot(pos.x - selfPos.x, pos.y - selfPos.y);
+                if (d < bestDist) { bestDist = d; bestTarget = m; }
+            });
+            if (!bestTarget) continue;
+
+            const dbStats = STRIKE_CRAFT_DB[sq.type];
+            if (!dbStats) continue;
+            const desiredRole = sq.ai_stance === 'attack_strike_craft' ? 'anti_fighter' : 'anti_capital';
+            let wpnIdx = dbStats.weapons.findIndex(w => w.role === desiredRole);
+            if (wpnIdx < 0) wpnIdx = 0; // fallback: first listed weapon (confirmed design)
+
+            chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) engages ${bestTarget.name}.`);
+            if (typeof window.resolveSquadronWeaponFire === 'function') {
+                await window.resolveSquadronWeaponFire(v.id, sqIdx, wpnIdx, bestTarget.id, { auto: true });
+            }
+          } catch (err) {
+            console.error('processBattleRoundAutomations: squadron AI stance failed, skipping this squadron this round', err);
+          }
+        }
+    }
 
     // --- Persist everything touched ---
     for (const v of touchedVessels.values()) {
@@ -1403,6 +1540,18 @@ function renderOrdnanceOverlay(grid, tokens, inFlight) {
         if (!el) {
             el = document.createElement('div');
             el.className = 'battle-ordnance-marker';
+            // Animation Suite build (this session): color the marker by the
+            // salvo's actual damage_type instead of the previous hardcoded
+            // purple. normalizeDamageType covers legacy/blank values the
+            // same way every other damage-type read in this codebase does.
+            // Computed once at marker creation (a salvo's damage type never
+            // changes mid-flight) and stashed on the element so the removal
+            // pass below can color-match the impact flash to it too.
+            const dmgType = (typeof window.normalizeDamageType === 'function') ? window.normalizeDamageType(entry.damage_type || 'Impact') : 'Impact';
+            const dmgColor = (window.DAMAGE_TYPES && window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#c778dd';
+            el.style.background = dmgColor;
+            el.style.boxShadow = `0 0 6px ${dmgColor}`;
+            el.dataset.dmgColor = dmgColor;
             grid.appendChild(el);
             battleMapOrdnanceEls[salvoId] = el;
         }
@@ -1414,7 +1563,7 @@ function renderOrdnanceOverlay(grid, tokens, inFlight) {
     battleMapPrevOrdnanceIds.forEach(id => {
         if (!currentIds.has(id) && battleMapOrdnanceEls[id]) {
             const el = battleMapOrdnanceEls[id];
-            spawnImpactFlash(grid, (parseFloat(el.style.left) || 0) + 4, (parseFloat(el.style.top) || 0) + 4);
+            spawnImpactFlash(grid, (parseFloat(el.style.left) || 0) + 4, (parseFloat(el.style.top) || 0) + 4, el.dataset.dmgColor);
             el.remove();
             delete battleMapOrdnanceEls[id];
         }
@@ -1422,19 +1571,42 @@ function renderOrdnanceOverlay(grid, tokens, inFlight) {
     battleMapPrevOrdnanceIds = currentIds;
 }
 
-function spawnImpactFlash(grid, x, y) {
+// Converts a 6-digit hex color plus a 0-1 alpha into an 8-digit #RRGGBBAA
+// string, used throughout the Animation Suite effects below to build
+// colored radial-gradient flashes from a single damage-type hex color
+// instead of hand-writing an rgba() per effect. Falls back to white if
+// handed something that isn't a hex string.
+function hexWithAlpha(hex, alpha) {
+    const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0');
+    return (hex && hex[0] === '#' ? hex : '#ffffff') + a;
+}
+
+// colorHex is optional -- callers that don't have a damage-type color handy
+// (e.g. legacy call sites) get the original hardcoded orange/red via the
+// existing .battle-impact-flash CSS default background.
+function spawnImpactFlash(grid, x, y, colorHex) {
     const flash = document.createElement('div');
     flash.className = 'battle-impact-flash';
     flash.style.left = x + 'px';
     flash.style.top = y + 'px';
+    if (colorHex) {
+        flash.style.background = `radial-gradient(circle, ${hexWithAlpha(colorHex, 0.9)}, ${hexWithAlpha(colorHex, 0)} 70%)`;
+    }
     grid.appendChild(flash);
     setTimeout(() => flash.remove(), 650);
 }
 
-/* --- DIRECT-FIRE WEAPON SHOT VISUAL (Animation Engine build, this session) ---
-   Called from js/combat.js's rollShipWeapon right after a hit resolves. A
-   brief beam between the firer's and target's current token positions,
-   colored by the shot's damage type. LOCAL to this client only -- unlike
+/* --- DIRECT-FIRE WEAPON SHOT VISUAL (Animation Engine build; effect
+   families added in the Animation Suite build, this session) ---
+   Called from js/combat.js's rollShipWeapon/rollSquadronWeapon right after
+   a hit resolves. Originally a single beam style for every weapon; now
+   dispatches by the shot's damage type (via window.DAMAGE_TYPE_FAMILY,
+   js/combat.js) into one of 4 effect families -- Beam (steady line, the
+   original look), Tracer (a traveling streak), Burst (a shell-burst at the
+   target, no line from source), or a Restorative pulse for Healing (also
+   target-only, no attack-style effect). See spawnBeamEffect/
+   spawnTracerEffect/spawnBurstEffect/spawnHealPulseEffect below for the
+   family-specific rendering. LOCAL to this client only -- unlike
    the ordnance visualization above, a direct-fire shot has no persisted
    in-flight row to piggyback sync off of, and this app has no ephemeral
    broadcast channel (every existing realtime channel here is a real DB
@@ -1449,7 +1621,7 @@ function spawnImpactFlash(grid, x, y) {
    Silently no-ops if the Battle Map isn't open, there's no active battle,
    or either vessel isn't currently a token in it — safe to call
    unconditionally after every resolved shot regardless of context. */
-window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex) {
+window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex, dmgType) {
     const grid = document.getElementById('battle-map-grid');
     if (!grid || !window.globalBattleEncounterCache) return;
     const tokens = window.globalBattleEncounterCache.tokens || [];
@@ -1460,6 +1632,33 @@ window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex)
     const half = BATTLE_TOKEN_SIZE / 2;
     const sx = sourceTok.x + half, sy = sourceTok.y + half;
     const tx = targetTok.x + half, ty = targetTok.y + half;
+    const color = colorHex || '#ff3333';
+
+    // Animation Suite build (this session): dispatch to one of 4 visual
+    // "effect families" instead of every weapon playing the same beam, per
+    // window.DAMAGE_TYPE_FAMILY (js/combat.js). dmgType is optional and new
+    // as of this build -- any caller that doesn't pass one (there
+    // shouldn't be any left in this codebase, but this keeps old/unknown
+    // call sites from breaking) falls back to the original beam look.
+    const family = (dmgType && window.DAMAGE_TYPE_FAMILY && window.DAMAGE_TYPE_FAMILY[dmgType]) || 'beam';
+    if (family === 'pulse') {
+        spawnHealPulseEffect(grid, tx, ty, color);
+    } else if (family === 'burst') {
+        spawnBurstEffect(grid, tx, ty, color);
+    } else if (family === 'tracer') {
+        spawnTracerEffect(grid, sx, sy, tx, ty, color);
+    } else {
+        spawnBeamEffect(grid, sx, sy, tx, ty, color);
+    }
+};
+
+// Beam family (Energy, Ion, Exotic, Antimatter, Heat -- see
+// window.DAMAGE_TYPE_FAMILY) -- the original/default fire effect from the
+// Animation Engine build: a steady glowing line snapped instantly between
+// firer and target, fading out. Unchanged behavior, just factored out of
+// window.playWeaponFireEffect so it's one of 4 dispatch targets instead of
+// the only effect.
+function spawnBeamEffect(grid, sx, sy, tx, ty, colorHex) {
     const dx = tx - sx, dy = ty - sy;
     const length = Math.hypot(dx, dy);
     const angle = Math.atan2(dy, dx) * (180 / Math.PI);
@@ -1469,12 +1668,93 @@ window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex)
     beam.style.left = sx + 'px';
     beam.style.top = sy + 'px';
     beam.style.width = length + 'px';
-    beam.style.background = colorHex || '#ff3333';
-    beam.style.boxShadow = `0 0 6px ${colorHex || '#ff3333'}`;
+    beam.style.background = colorHex;
+    beam.style.boxShadow = `0 0 6px ${colorHex}`;
     beam.style.transform = `rotate(${angle}deg)`;
     grid.appendChild(beam);
     setTimeout(() => beam.remove(), 400);
-};
+}
+
+// Tracer family (Impact, Piercing, Cold) -- Animation Suite build. Unlike
+// Beam, this actually travels: a small glowing dot spawned at the source
+// token, then immediately re-positioned to the target token so the
+// existing `transition: left/top` on .battle-fire-tracer animates the
+// move (same lerp-via-CSS-transition trick already used for
+// .battle-token-el and .battle-ordnance-marker elsewhere in this file).
+// `void tracer.offsetWidth` forces a layout flush between the two position
+// writes -- without it the browser can coalesce them and the dot just pops
+// straight to the target with no visible travel. Leaves an impact flash
+// (color-matched) at the target on arrival, same as ordnance impacts.
+function spawnTracerEffect(grid, sx, sy, tx, ty, colorHex) {
+    const tracer = document.createElement('div');
+    tracer.className = 'battle-fire-tracer';
+    tracer.style.left = sx + 'px';
+    tracer.style.top = sy + 'px';
+    tracer.style.background = colorHex;
+    tracer.style.boxShadow = `0 0 8px 2px ${colorHex}`;
+    grid.appendChild(tracer);
+    void tracer.offsetWidth;
+    tracer.style.left = tx + 'px';
+    tracer.style.top = ty + 'px';
+    setTimeout(() => {
+        tracer.remove();
+        spawnImpactFlash(grid, tx, ty, colorHex);
+    }, 300);
+}
+
+// Burst family (Explosive, Flak, Corrosive) -- Animation Suite build. Per
+// the confirmed design this is deliberately NOT a line from source to
+// target at all -- a shell-burst/spread effect that appears only at the
+// target, representing an area-detonation weapon rather than a directed
+// shot. A colored flash plus a small ring of shrapnel "shards" flying
+// outward at evenly-spaced angles (with a little per-shard jitter so it
+// doesn't look too mechanically uniform), each an independently animated
+// element using a --shard-angle CSS custom property consumed by the
+// battleBurstShard keyframe in style.css.
+function spawnBurstEffect(grid, x, y, colorHex) {
+    const flash = document.createElement('div');
+    flash.className = 'battle-fire-burst-flash';
+    flash.style.left = x + 'px';
+    flash.style.top = y + 'px';
+    flash.style.background = `radial-gradient(circle, ${hexWithAlpha(colorHex, 0.95)}, ${hexWithAlpha(colorHex, 0)} 70%)`;
+    grid.appendChild(flash);
+    setTimeout(() => flash.remove(), 450);
+
+    const shardCount = 6;
+    for (let i = 0; i < shardCount; i++) {
+        const shard = document.createElement('div');
+        shard.className = 'battle-fire-burst-shard';
+        shard.style.left = x + 'px';
+        shard.style.top = y + 'px';
+        shard.style.background = colorHex;
+        shard.style.setProperty('--shard-angle', `${(360 / shardCount) * i + (Math.random() * 20 - 10)}deg`);
+        grid.appendChild(shard);
+        setTimeout(() => shard.remove(), 400);
+    }
+}
+
+// Restorative pulse (Healing only) -- Animation Suite build. Per the
+// confirmed design, healing deliberately gets no attack-style beam/tracer/
+// burst at all (it isn't an attack) -- just a soft outward glow-and-ring
+// wave centered on the target, slower and gentler than the Burst family's
+// sharp shrapnel-flash treatment.
+function spawnHealPulseEffect(grid, x, y, colorHex) {
+    const glow = document.createElement('div');
+    glow.className = 'battle-heal-glow';
+    glow.style.left = x + 'px';
+    glow.style.top = y + 'px';
+    glow.style.background = `radial-gradient(circle, ${hexWithAlpha(colorHex, 0.85)}, ${hexWithAlpha(colorHex, 0)} 70%)`;
+    grid.appendChild(glow);
+    setTimeout(() => glow.remove(), 700);
+
+    const ring = document.createElement('div');
+    ring.className = 'battle-heal-pulse';
+    ring.style.left = x + 'px';
+    ring.style.top = y + 'px';
+    ring.style.borderColor = colorHex;
+    grid.appendChild(ring);
+    setTimeout(() => ring.remove(), 800);
+}
 
 /* --- DESTRUCTION EFFECT (Visual Polish build, this session) ---
    A token vanishing from the grid with zero visual event was the most
