@@ -381,14 +381,81 @@ window.broadcastTerminalCargoManifest = async function() {
 };
 
 /* --- VESSEL DECK LOGIC --- */
+// Vessel Deck Access Control build (this session): the dropdown previously
+// listed EVERY ship_markers row in the galaxy with no filtering at all --
+// any player could select and then fully view/edit any other player's ship,
+// any DM/NPC vessel, or any enemy the DM had deployed, since renderVesselDeck
+// itself had no ownership check either. Confirmed design: a non-DM player
+// can only select a vessel that's "friendly" (see window.canAccessVesselDeck
+// below) and not fog-of-war Hidden from them -- everything else is simply
+// absent from this list, not just read-only, so a player can't even tell a
+// hidden/hostile vessel exists via this dropdown. DM sees and can select
+// everything, unfiltered, same "DM bypasses all restrictions" convention as
+// the rest of this app.
 window.populateVesselDeckSelect = function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select) return;
     let html = '';
     globalShipMarkersCache.forEach(m => {
+        if (!window.canAccessVesselDeck(m)) return;
         html += `<option value="${m.id}">${m.name}</option>`;
     });
-    select.innerHTML = html || '<option value="">No active vessels found</option>';
+    select.innerHTML = html || '<option value="">No accessible vessels found</option>';
+};
+
+// IFF build (this session): "friendly" for Vessel Deck purposes mirrors the
+// Battle Map ship-status cards' existing rule (window.renderBattleShipCards,
+// js/battle-map.js: any player gets full detail on ANY other player's ship,
+// only a health-bar readout on a DM/NPC-owned one) and additionally honors
+// the new `iff` field, so the DM can mark a specific DM-owned NPC (e.g. an
+// allied escort) Friendly and have it show up for players too. DM always
+// bypasses this entirely, same convention as everywhere else in this app.
+// Fog of War (is_hidden) is checked first and separately -- a vessel hidden
+// from this viewer is inaccessible here regardless of how friendly its IFF
+// or ownership would otherwise make it, EXCEPT for the vessel's own
+// player-owner, who always sees their own ship regardless of its hidden flag
+// (matches window.isVesselVisibleToMe's own confirmed exception).
+window.canAccessVesselDeck = function(vessel) {
+    if (!vessel) return false;
+    if (currentUserRole === 'dm') return true;
+    if (typeof window.isVesselVisibleToMe === 'function' && !window.isVesselVisibleToMe(vessel)) return false;
+    if (vessel.owner_id === currentUserId) return true;
+    if (vessel.iff === 'friendly') return true;
+    const ownerProf = (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === vessel.owner_id);
+    return !!(ownerProf && ownerProf.role !== 'dm');
+};
+
+// Fog of War build (this session): the single shared visibility check used
+// everywhere a vessel could otherwise leak its presence to a non-DM client
+// -- the Battle Map grid/ship-status cards and getBattleScopedTargets
+// (js/battle-map.js), the manual weapon/squadron target dropdown fallbacks
+// and window.canAccessVesselDeck above (js/combat.js). Confirmed design:
+// hidden means invisible to EVERYONE except the DM and the vessel's own
+// player-owner (if it has one) -- not scoped to friend/foe or to one
+// specific battle, and not weakened by a vessel otherwise being "friendly."
+// Fails open (never hides) if the vessel record itself is missing, same
+// "don't hide over a data gap" convention as every other check in this app.
+window.isVesselVisibleToMe = function(vessel) {
+    if (!vessel) return true;
+    if (!vessel.is_hidden) return true;
+    if (currentUserRole === 'dm') return true;
+    return vessel.owner_id === currentUserId;
+};
+
+// Fog of War build (this session, confirmed design): a hidden vessel
+// automatically un-hides the instant it fires ANY weapon -- manual fire,
+// ordnance launch, squadron fire (manual or AI-stance), and ship/squadron
+// Point Defense all count as "firing." Called best-effort from each of
+// those resolution paths; failures here should never block the shot itself
+// (see the try/catch at each call site), matching this codebase's existing
+// "a damage roll should never be lost to an unrelated side-effect failing"
+// convention (e.g. the ordnance-resolution try/catch in
+// processBattleRoundAutomations, js/battle-map.js).
+window.revealVesselIfHidden = async function(vessel) {
+    if (!vessel || !vessel.is_hidden) return;
+    vessel.is_hidden = false;
+    await db.from('ship_markers').update({ is_hidden: false }).eq('id', vessel.id);
+    await db.from('chat_logs').insert({ sender_id: null, content: `💥 [FOG OF WAR] ${vessel.name} reveals its position by opening fire!`, message_type: 'system' });
 };
 
 window.switchVesselSubtab = function(subtab) {
@@ -506,7 +573,12 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
     let wHtml = '';
     weapons.forEach((w, idx) => {
         const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range) : null;
-        const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id);
+        // Fog of War build (this session): the battle-scoped path already
+        // filters hidden vessels (see getBattleScopedTargets, js/battle-map.js)
+        // -- this fallback (no active battle / no token) needs the same
+        // filter applied directly, or a hidden vessel would leak into the
+        // target list whenever there's no battle grid to scope against.
+        const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
         let targetOptions = '<option value="">-- No Target --</option>';
         targetCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
@@ -578,6 +650,27 @@ window.renderVesselDeck = function() {
     const vesselId = select.value;
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+
+    // Vessel Deck Access Control build (this session): defense-in-depth --
+    // populateVesselDeckSelect already excludes non-friendly/hidden vessels
+    // from the dropdown's own <option> list, but that list is only rebuilt
+    // on specific triggers (switching to the Vessel tab). renderVesselDeck
+    // itself re-runs far more often -- e.g. on every ship_markers realtime
+    // update (js/db.js) -- so if a DM flips a vessel's IFF to non-friendly
+    // or toggles it Hidden WHILE a player already has it selected, the old
+    // <option> (and the player's current selection) can still be sitting in
+    // the DOM until the next tab-switch rebuild. Re-checking here on every
+    // render, not just at selection time, closes that gap. Blanks every
+    // panel with a lock message and bails out before any further reads/
+    // writes rather than trusting the dropdown alone.
+    if (!window.canAccessVesselDeck(vessel)) {
+        const lockMsg = '<span style="font-size:10px; color:#ff3333;">🔒 DM ONLY — this vessel is not accessible from your Vessel Deck.</span>';
+        ['vessel-health-container', 'vessel-decks-container', 'vessel-weapons-container', 'vessel-ownership-container', 'vessel-salvage-container', 'vessel-manufacturing-container', 'vessel-embarked-container', 'vessel-deployed-container'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = (id === 'vessel-health-container') ? lockMsg : '';
+        });
+        return;
+    }
 
     // Station Designer build: self-heal any legacy decks (created before
     // weapon-deck-gating existed) that lack a stable id — see genDeckId/
@@ -848,7 +941,11 @@ window.renderVesselDeck = function() {
                 const sqShipSelfForRange = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
                 const firstWpn = dbStats.weapons[0];
                 const initialScoped = (sqShipSelfForRange && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelfForRange.id, firstWpn ? firstWpn.range : 0) : null;
-                const initialCandidates = initialScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id);
+                // Fog of War build (this session): same fallback-path filter
+                // as renderShipWeaponsHtml above -- getBattleScopedTargets
+                // already excludes hidden vessels when it has a grid to
+                // scope against; this covers the no-battle-token fallback.
+                const initialCandidates = initialScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
                 let targetOptions = '<option value="">-- Target --</option>';
                 initialCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
@@ -1001,7 +1098,16 @@ async function spawnSquadronToken(vessel, sq) {
         integrity_hull: sq.hp, max_hull: sq.max_hp,
         integrity_shields: 0, max_shields: 0, integrity_reactive: 0, max_reactive: 0,
         integrity_ablative: 0, max_ablative: 0, integrity_hardened: 0, max_hardened: 0,
-        parent_id: vessel.id, is_strike_craft: true, squadron_id: sq.id
+        parent_id: vessel.id, is_strike_craft: true, squadron_id: sq.id,
+        // IFF / Fog of War build (this session): inherited from the carrier
+        // at launch, not left unset -- otherwise a Friendly-tagged DM-owned
+        // carrier's own fighters would default to DM-only invisible in
+        // players' Vessel Deck despite the carrier itself being visible, and
+        // a Hidden carrier's freshly-launched squadron would immediately be
+        // visible on the grid and give the ambush away. Each squadron token
+        // still reveals independently on its own first shot (see
+        // window.revealVesselIfHidden), same as the carrier does on its own.
+        iff: vessel.iff || null, is_hidden: !!vessel.is_hidden
     }).select().single();
     if (tokenError) { console.error('Failed to spawn squadron token:', tokenError.message); }
 
@@ -1269,6 +1375,18 @@ window.resetShipStats = async function(vesselId) {
                     <option value="Escort">Escort</option>
                 </select>
             </div>
+            <div id="maxstats-dm-wrap" style="display:none; margin-top:6px; padding-top:8px; border-top:1px dashed #3c4e36;">
+                <label for="maxstats-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) -- controls whether players can see/edit this vessel in their own Vessel Deck. Friendly is visible alongside a player's own ships; Neutral/Hostile/unset stay DM-only. DM-only field.">IFF Designation (DM only)</label>
+                <select id="maxstats-iff" style="border-color:#ff6b6b;">
+                    <option value="">-- Unset (DM-only) --</option>
+                    <option value="hostile">⚠ Hostile</option>
+                    <option value="neutral">◌ Neutral</option>
+                    <option value="friendly">✓ Friendly</option>
+                </select>
+                <label for="maxstats-hidden" style="font-size:10px; color:#c778dd; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="Fog of War: removes this vessel entirely from every non-DM surface (Battle Map grid/cards, weapon target dropdowns, Vessel Deck selector) for everyone except the DM and this vessel's own player-owner. Auto-reveals the instant it fires a weapon.">
+                    <input type="checkbox" id="maxstats-hidden" style="margin:0;"> 🫥 Hidden (Fog of War) — DM only
+                </label>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="maxstats-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="maxstats-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#c9962f; color:#c9962f;">SAVE CHANGES</button>
@@ -1286,7 +1404,15 @@ window.resetShipStats = async function(vesselId) {
                 max_reactive: parseInt(document.getElementById('maxstats-reactive').value) || 0,
                 max_ablative: parseInt(document.getElementById('maxstats-ablative').value) || 0,
                 max_hardened: parseInt(document.getElementById('maxstats-hardened').value) || 0,
-                vessel_class: document.getElementById('maxstats-vesselclass').value || null
+                vessel_class: document.getElementById('maxstats-vesselclass').value || null,
+                // IFF / Fog of War build (this session): read regardless of
+                // whether the DM-only section is visible -- openEditMaxStatsModal
+                // always populates these two fields from the vessel's real
+                // current values first, so a non-DM saving the rest of this
+                // form just writes those same values back unchanged rather
+                // than silently resetting them.
+                iff: document.getElementById('maxstats-iff').value || null,
+                is_hidden: document.getElementById('maxstats-hidden').checked
             };
             const clamped = {
                 integrity_shields: Math.min(vessel.integrity_shields !== undefined ? vessel.integrity_shields : newMax.max_shields, newMax.max_shields),
@@ -1313,6 +1439,10 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-ablative').value = vessel.max_ablative || 0;
         document.getElementById('maxstats-hardened').value = vessel.max_hardened || 0;
         document.getElementById('maxstats-vesselclass').value = vessel.vessel_class || '';
+        document.getElementById('maxstats-iff').value = vessel.iff || '';
+        document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
+        const dmWrap = document.getElementById('maxstats-dm-wrap');
+        if (dmWrap) dmWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         overlay.style.display = 'flex';
     };
 })();
@@ -1346,7 +1476,9 @@ window.updateSquadronTargetOptions = function(vesselId, sqIdx) {
     const wpn = dbStats.weapons[parseInt(wpnSelect.value, 10)];
     const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
     const scoped = (sqShipSelf && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelf.id, wpn ? wpn.range : 0) : null;
-    const candidates = scoped || globalShipMarkersCache.filter(m => m.id !== vesselId);
+    // Fog of War build (this session): same fallback-path filter as the two
+    // sibling target-list builders above.
+    const candidates = scoped || globalShipMarkersCache.filter(m => m.id !== vesselId && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
 
     const prevValue = targetSelect.value;
     let targetOptions = '<option value="">-- Target --</option>';
@@ -1390,6 +1522,11 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     let wpn = dbStats.weapons[wpnIdx];
     if (!wpn) return;
 
+    // Squadrons fire from their OWN battle-map token, not the carrier's --
+    // same lookup the range check and the beam-effect code below both need,
+    // computed once here and reused (was previously duplicated inline).
+    const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+
     // Strike-Craft Weapon Range build (this session): explicit
     // defense-in-depth re-check at fire time, mirroring window.launchOrdnance
     // (js/battle-map.js)'s pattern for ship_weapons ordnance -- the manual
@@ -1405,8 +1542,7 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     // position can't be found -- same "don't block on a missing token"
     // convention as every other range/position check in this build.
     if (targetId && wpn.range) {
-        const sqShipSelfForRange = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
-        const selfPos = sqShipSelfForRange ? window.getBattleTokenPosition(sqShipSelfForRange.id) : null;
+        const selfPos = sqShipSelf ? window.getBattleTokenPosition(sqShipSelf.id) : null;
         const targetPosForRange = window.getBattleTokenPosition(targetId);
         if (selfPos && targetPosForRange && Math.hypot(targetPosForRange.x - selfPos.x, targetPosForRange.y - selfPos.y) > wpn.range) {
             if (opts.auto) return;
@@ -1419,6 +1555,12 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
 
     let volleys = sq.count;
     if (volleys <= 0) return;
+
+    // Fog of War build (this session, confirmed design): reveal the
+    // squadron's own token the moment its shot is committed (every gate
+    // above this point could still have refused to fire). Best-effort --
+    // never blocks the shot itself if this fails.
+    try { if (typeof window.revealVesselIfHidden === 'function' && sqShipSelf) await window.revealVesselIfHidden(sqShipSelf); } catch (err) { console.error('resolveSquadronWeaponFire: reveal-on-fire failed', err); }
 
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = wpn.dice.trim().match(diceRegex);
@@ -1500,7 +1642,6 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
             // ship-weapon fire (no broadcast channel exists in this
             // codebase — see the Animation Engine checkpoint).
             if (typeof window.playWeaponFireEffect === 'function') {
-                const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
                 if (sqShipSelf) {
                     const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ffaa00';
                     window.playWeaponFireEffect(sqShipSelf.id, targetShip.id, beamColor, dmgType);
@@ -1597,8 +1738,15 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
             alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
             return;
         }
-        wpn.ammo -= volleys; 
+        wpn.ammo -= volleys;
     }
+
+    // Fog of War build (this session, confirmed design): every gate above
+    // this point (deck-destroyed, mount limit, ammo) could still refuse the
+    // shot, so this is the first point the shot is actually committed --
+    // right place to reveal. Best-effort: a failure here should never lose
+    // an already-committed shot.
+    try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(vessel); } catch (err) { console.error('rollShipWeapon: reveal-on-fire failed', err); }
 
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = wpn.dice.trim().match(diceRegex);
