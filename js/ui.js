@@ -500,6 +500,7 @@ window.TERM_TAB_ACTIVITY_LABELS = {
     manufacturing: 'Reviewing Manufacturing',
     shipdesigner: 'Designing Vessel Profiles',
     perkdesigner: 'Designing Specializations',
+    augmentdesigner: 'Designing Augmentations',
     notes: 'Editing Tactical Notes',
     roster: 'Reviewing Crew Roster',
     codex: 'Reviewing Sector Lore'
@@ -518,6 +519,7 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'manufacturing' && typeof window.renderManufacturingPanel === 'function') window.renderManufacturingPanel();
     if (tabName === 'shipdesigner' && typeof window.renderShipDesignerPanel === 'function') window.renderShipDesignerPanel();
     if (tabName === 'perkdesigner' && typeof window.renderPerkDesignerPanel === 'function') window.renderPerkDesignerPanel();
+    if (tabName === 'augmentdesigner' && typeof window.renderAugmentDesignerPanel === 'function') window.renderAugmentDesignerPanel();
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
     if (tabName === 'roster' && typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
 
@@ -623,14 +625,13 @@ window.renderCharacterTerminalData = function() {
     setVal('term-vitality', c.vitality || 0); setVal('term-stress', c.stress || 0); setVal('term-adversity', c.adversity_tokens || 0);
     setVal('term-shield-current', c.shield_current || 0); setVal('term-shield-max', c.shield_max || 0); setVal('term-dr', c.dr || 0);
     setVal('term-specialties', c.specialties || ''); setVal('term-assets', c.assets || ''); setVal('term-history', c.history || ''); setVal('term-personal-history', c.personal_history || '');
-    setVal('aug-head', c.aug_head || ''); setVal('aug-torso', c.aug_torso || ''); setVal('aug-larm', c.aug_larm || '');
-    setVal('aug-rarm', c.aug_rarm || ''); setVal('aug-lleg', c.aug_lleg || ''); setVal('aug-rleg', c.aug_rleg || ''); setVal('aug-internal', c.aug_internal || '');
-    
+
     skillList.forEach(skill => { const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_'); setVal(`skill-${safeKey}`, s[safeKey] || 0); });
     window.updateInjuryMax();
     window.updateShieldDisplay();
     if (typeof window.renderArsenal === 'function') window.renderArsenal();
     if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
+    if (typeof window.renderAugmentSlots === 'function') window.renderAugmentSlots();
 };
 
 // Shield Max and DR are player-set base values (representing raw equipment,
@@ -638,20 +639,28 @@ window.renderCharacterTerminalData = function() {
 // Special Forces Trooper) added automatically on top for display — same
 // "don't make the player remember to add it" principle the roller already
 // applies to skill/stat perk bonuses.
-window.getEffectiveShieldMax = function(char, perksList) {
+window.getEffectiveShieldMax = function(char, perksList, augmentsList) {
     let base = char.shield_max || 0;
     let bonus = 0;
     (perksList || []).forEach(cp => {
         const def = typeof window.findPerkDefinition === 'function' ? window.findPerkDefinition(cp.perk_definition_id) : null;
         if (def) bonus += (def.shield_max_bonus || 0);
     });
+    (augmentsList || []).forEach(ca => {
+        const def = typeof window.findAugmentDefinition === 'function' ? window.findAugmentDefinition(ca.augment_definition_id) : null;
+        if (def) bonus += (def.shield_max_bonus || 0);
+    });
     return base + bonus;
 };
-window.getEffectiveDR = function(char, perksList) {
+window.getEffectiveDR = function(char, perksList, augmentsList) {
     let base = char.dr || 0;
     let bonus = 0;
     (perksList || []).forEach(cp => {
         const def = typeof window.findPerkDefinition === 'function' ? window.findPerkDefinition(cp.perk_definition_id) : null;
+        if (def) bonus += (def.dr_bonus || 0);
+    });
+    (augmentsList || []).forEach(ca => {
+        const def = typeof window.findAugmentDefinition === 'function' ? window.findAugmentDefinition(ca.augment_definition_id) : null;
         if (def) bonus += (def.dr_bonus || 0);
     });
     return base + bonus;
@@ -662,23 +671,24 @@ window.updateShieldDisplay = function() {
     if (!label) return;
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
-    const effMax = window.getEffectiveShieldMax(myProf.character || {}, myProf.perks);
-    const effDR = window.getEffectiveDR(myProf.character || {}, myProf.perks);
+    const effMax = window.getEffectiveShieldMax(myProf.character || {}, myProf.perks, myProf.augments);
+    const effDR = window.getEffectiveDR(myProf.character || {}, myProf.perks, myProf.augments);
     const baseMax = (myProf.character || {}).shield_max || 0;
     const baseDR = (myProf.character || {}).dr || 0;
     let bits = [];
-    if (effMax !== baseMax) bits.push(`Effective Max: ${effMax} (base ${baseMax} + perks)`);
-    if (effDR !== baseDR) bits.push(`Effective DR: ${effDR} (base ${baseDR} + perks)`);
+    if (effMax !== baseMax) bits.push(`Effective Max: ${effMax} (base ${baseMax} + perks/augments)`);
+    if (effDR !== baseDR) bits.push(`Effective DR: ${effDR} (base ${baseDR} + perks/augments)`);
     label.innerText = bits.join(' · ');
 };
 
 // "Recharge" = new encounter — shield resets to its full effective max
-// (base + perk bonuses), matching the confirmed rule that it regenerates
-// automatically between encounters rather than needing a DM repair action.
+// (base + perk/augment bonuses), matching the confirmed rule that it
+// regenerates automatically between encounters rather than needing a DM
+// repair action.
 window.rechargeShield = async function() {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first."); return; }
-    const effMax = window.getEffectiveShieldMax(myProf.character, myProf.perks);
+    const effMax = window.getEffectiveShieldMax(myProf.character, myProf.perks, myProf.augments);
     const input = document.getElementById('term-shield-current');
     if (input) input.value = effMax;
     await db.from('characters').update({ shield_current: effMax }).eq('id', myProf.character.id);
@@ -793,6 +803,90 @@ window.removeSection1Perk = async function(perkRowId) {
     if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
 };
 
+/* --- AUGMENT SLOTS (Dossier tab, Section 5) ---
+   Replaces the old 7 plain free-text fields with 7 slots, each showing its
+   currently-installed augment(s) (stacking allowed, confirmed design) plus
+   an install row: a picker of DM-approved augments valid for that slot,
+   and an optional notes field. Installing/removing on your OWN character
+   is self-service, same as Section 1 perks — no DM gate here; only the
+   catalog itself (proposing/approving a definition, in Augment Designer)
+   is gated. A row can be notes-only with no catalog augment picked at all,
+   matching how the old free-text fields let a player type anything with
+   zero mechanical backing — this is how existing pre-session data was
+   migrated in (see darkforest-architecture-reference.md). */
+window.renderAugmentSlots = function() {
+    const container = document.getElementById('augment-slots-container');
+    if (!container) return;
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    const augments = myProf.augments || [];
+
+    let html = '';
+    (window.AUGMENT_SLOT_KEYS || []).forEach(slot => {
+        const label = window.AUGMENT_SLOT_LABELS[slot] || slot;
+        const installed = augments.filter(ca => ca.slot === slot);
+        const choices = typeof window.getApprovedAugmentsForSlot === 'function' ? window.getApprovedAugmentsForSlot(slot) : [];
+        let pickerOptions = '<option value="">— No catalog augment / narrative only —</option>';
+        choices.forEach(a => { pickerOptions += `<option value="${a.id}">${a.name}</option>`; });
+
+        let installedHtml = installed.length === 0 ? '<span style="font-size:9px; color:#6b826a;">Nothing installed.</span>' : '';
+        installed.forEach(ca => {
+            const def = typeof window.findAugmentDefinition === 'function' ? window.findAugmentDefinition(ca.augment_definition_id) : null;
+            const title = def ? def.name : (ca.notes ? '(uncatalogued)' : 'Unknown');
+            installedHtml += `<div style="background:#030403; padding:5px 6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:3px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
+                <div style="flex:1;">
+                    ${def ? `<strong style="color:#00e5a3; font-size:10px;">${def.name}</strong>` : `<strong style="color:#6b826a; font-size:10px;">${title}</strong>`}
+                    ${ca.notes ? `<div style="font-size:9px; color:#d4c5a9;">${ca.notes}</div>` : ''}
+                </div>
+                <button onclick="window.removeCharacterAugment('${ca.id}')" title="Remove" style="width:auto; margin:0; padding:2px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">✕</button>
+            </div>`;
+        });
+
+        const safeSlot = slot;
+        html += `<div style="margin-bottom:10px; border-top:1px solid #3c4e36; padding-top:6px;">
+            <label style="font-size:9px; color:#6b826a;">${label}:</label>
+            <div style="margin-top:3px;">${installedHtml}</div>
+            <div style="display:flex; gap:4px; margin-top:4px;">
+                <label for="aug-slot-picker-${safeSlot}" style="display:none;">Add Augment</label>
+                <select id="aug-slot-picker-${safeSlot}" style="flex:1; margin:0; font-size:10px;">${pickerOptions}</select>
+            </div>
+            <div style="display:flex; gap:4px; margin-top:3px;">
+                <label for="aug-slot-notes-${safeSlot}" style="display:none;">Notes</label>
+                <input type="text" id="aug-slot-notes-${safeSlot}" placeholder="Notes (optional flavor)" style="flex:1; margin:0; font-size:10px;">
+                <button class="btn-deploy" onclick="window.installAugment('${safeSlot}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">+ INSTALL</button>
+            </div>
+        </div>`;
+    });
+    container.innerHTML = html;
+};
+
+window.installAugment = async function(slot) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first before installing an augment."); return; }
+    const picker = document.getElementById(`aug-slot-picker-${slot}`);
+    const notesInput = document.getElementById(`aug-slot-notes-${slot}`);
+    const augmentDefId = picker && picker.value ? picker.value : null;
+    const notes = notesInput ? notesInput.value.trim() : '';
+    if (!augmentDefId && !notes) { alert("Pick an augment from the catalog and/or enter a note — can't install a completely empty entry."); return; }
+    const { data, error } = await db.from('character_augments').insert({ character_id: myProf.character.id, slot, augment_definition_id: augmentDefId, notes: notes || null }).select().single();
+    if (error) { alert("Failed to install augment: " + error.message); return; }
+    myProf.augments = myProf.augments || [];
+    myProf.augments.push(data);
+    if (picker) picker.value = '';
+    if (notesInput) notesInput.value = '';
+    if (typeof window.renderAugmentSlots === 'function') window.renderAugmentSlots();
+    if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+};
+
+window.removeCharacterAugment = async function(rowId) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    await db.from('character_augments').delete().eq('id', rowId);
+    myProf.augments = (myProf.augments || []).filter(ca => ca.id !== rowId);
+    if (typeof window.renderAugmentSlots === 'function') window.renderAugmentSlots();
+    if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+};
+
 window.saveTerminalProfile = async function() {
     const safeGet = (id) => document.getElementById(id) ? document.getElementById(id).value : '';
 
@@ -809,8 +903,13 @@ window.saveTerminalProfile = async function() {
         stat_charisma: safeGet('stat-charisma'), stat_dexterity: safeGet('stat-dexterity'), stat_intelligence: safeGet('stat-intelligence'), stat_strength: safeGet('stat-strength'), stat_toughness: safeGet('stat-toughness'), stat_willpower: safeGet('stat-willpower'),
         vitality: parseInt(safeGet('term-vitality')) || 0, stress: parseInt(safeGet('term-stress')) || 0, adversity_tokens: parseInt(safeGet('term-adversity')) || 0,
         shield_current: parseInt(safeGet('term-shield-current')) || 0, shield_max: parseInt(safeGet('term-shield-max')) || 0, dr: parseInt(safeGet('term-dr')) || 0,
-        specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'), personal_history: safeGet('term-personal-history'),
-        aug_head: safeGet('aug-head'), aug_torso: safeGet('aug-torso'), aug_larm: safeGet('aug-larm'), aug_rarm: safeGet('aug-rarm'), aug_lleg: safeGet('aug-lleg'), aug_rleg: safeGet('aug-rleg'), aug_internal: safeGet('aug-internal')
+        specialties: safeGet('term-specialties'), assets: safeGet('term-assets'), history: safeGet('term-history'), personal_history: safeGet('term-personal-history')
+        // aug_head/aug_torso/aug_larm/aug_rarm/aug_lleg/aug_rleg/aug_internal deliberately
+        // omitted -- those 7 columns are superseded by the character_augments table
+        // (Augment Designer build) and their DOM inputs no longer exist. Leaving them
+        // out of this payload means the upsert never touches those columns again, so
+        // the pre-migration legacy text stays exactly as backfilled rather than being
+        // blanked out on the next save.
     };
     const { data: charData, error: charErr } = await db.from('characters').upsert(charPayload, { onConflict: 'profile_id' }).select().single();
     if (charErr) return;
