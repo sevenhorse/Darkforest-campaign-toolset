@@ -626,7 +626,7 @@
                                 <div style="flex:1;"><label for="new-template-slots" style="font-size:9px; color:#6b826a;">Hardpoint Slots:</label><input type="number" id="new-template-slots" value="4" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
                             </div>
                             <div style="display:flex; gap:6px; margin-top:6px; align-items:flex-end;">
-                                <div style="flex:1;"><label for="new-template-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed:</label><input type="number" id="new-template-speed" value="80" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
+                                <div style="flex:1;"><label for="new-template-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed:</label><input type="number" id="new-template-speed" value="160" min="0" style="font-size:11px; margin:2px 0; text-align:center;"></div>
                                 <div style="flex:1;"><label for="new-template-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-bottom:8px;" title="Locks Tactical Speed to 0 (immobile on the Battle Map) and removes the Hardpoint Slots cap."><input type="checkbox" id="new-template-station" onchange="window.toggleStationFields('new-template')" style="margin:0;"> 🛰 This is a Station</label></div>
                             </div>
                             <div style="margin-top:6px;">
@@ -1009,16 +1009,22 @@
                             </div>
                         </div>
 
-                        <label for="battle-map-grid" style="display:none;">Battle grid — click to place an armed token, drag a placed token to reposition, click a placed token to open it</label>
-                        <!-- Wrapper reserves the VISUALLY scaled footprint (460x380 * BATTLE_GRID_SCALE)
-                             in the flex layout; the inner grid keeps its real 460x380 box (unchanged
-                             logical coordinate space -- token x/y, weapon range, tactical_speed all
-                             still mean exactly what they meant before) and is scaled up purely via CSS
-                             transform. See js/battle-map.js's BATTLE_GRID_SCALE comment for the full
-                             reasoning (tester feedback: "make the map bigger", done visual-only so no
-                             weapon range/speed retuning is forced). -->
-                        <div id="battle-map-grid-wrap" style="width:700px; height:580px; flex-shrink:0; overflow:hidden;">
-                            <div id="battle-map-grid" style="position:relative; width:460px; height:380px; background: repeating-linear-gradient(0deg, #0a1410, #0a1410 39px, #16241c 40px), repeating-linear-gradient(90deg, #0a1410, #0a1410 39px, #16241c 40px); border:1px solid #3c4e36; overflow:hidden; cursor:crosshair; transform:scale(1.5); transform-origin:0 0;"></div>
+                        <label for="battle-map-grid" style="display:none;">Battle grid — click to place an armed token, drag a placed token to reposition, click a placed token to open it. Scroll/pan within this box to see the rest of the battlespace — the grid is larger than fits on screen at once.</label>
+                        <!-- Battle Map Grid Expansion build (this session): the inner grid's LOGICAL
+                             box doubled from 460x380 to 920x760 (js/battle-map.js's BATTLE_GRID_W/H --
+                             must match this element's width/height exactly, same requirement as
+                             before this build) at the DM's own request, since the map was feeling
+                             cluttered as mechanics stacked up on the old fixed size. Scaled up 1.5x via
+                             CSS transform same as always (BATTLE_GRID_SCALE, unchanged) -- so the fully
+                             rendered grid is now 1380x1140 CSS px, too big to fit most screens alongside
+                             the right-hand ship-status column. The wrap below switched from a
+                             fixed-and-clipped viewport (overflow:hidden) to a fixed-and-SCROLLABLE one
+                             (overflow:auto) so the DM/players pan around the larger battlespace instead
+                             of it just being cut off -- getBoundingClientRect()-based click/drag math
+                             elsewhere in this file already accounts for scroll position automatically,
+                             so nothing else needed to change for this to work. -->
+                        <div id="battle-map-grid-wrap" style="width:720px; height:600px; flex-shrink:0; overflow:auto;">
+                            <div id="battle-map-grid" style="position:relative; width:920px; height:760px; background: repeating-linear-gradient(0deg, #0a1410, #0a1410 39px, #16241c 40px), repeating-linear-gradient(90deg, #0a1410, #0a1410 39px, #16241c 40px); border:1px solid #3c4e36; overflow:hidden; cursor:crosshair; transform:scale(1.5); transform-origin:0 0;"></div>
                         </div>
 
                         <div>
@@ -1195,8 +1201,16 @@
                             <input type="number" id="new-secret-template-slots" placeholder="Slots" value="4" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                         </div>
                         <div style="display:flex; gap:6px; margin-top:4px; align-items:center;">
-                            <input type="number" id="new-secret-template-speed" placeholder="Tactical Speed" title="Battle Map movement allowance, grid px/round" value="80" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                            <input type="number" id="new-secret-template-speed" placeholder="Tactical Speed" title="Battle Map movement allowance, grid px/round" value="160" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                             <label for="new-secret-template-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; flex:1.3;" title="Locks Tactical Speed to 0 and removes the Hardpoint Slots cap."><input type="checkbox" id="new-secret-template-station" onchange="window.toggleStationFields('new-secret-template')" style="margin:0;"> 🛰 Station</label>
+                        </div>
+                        <div style="margin-top:4px;">
+                            <label for="new-secret-template-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic. Optional.">Vessel Classification:</label>
+                            <select id="new-secret-template-vesselclass" style="font-size:10px; margin:2px 0; border-color:#ff3333;">
+                                <option value="">-- Unclassified --</option>
+                                <option value="Capital">Capital Ship</option>
+                                <option value="Escort">Escort</option>
+                            </select>
                         </div>
                         <button class="btn-remove" onclick="window.saveNewSecretTemplate()" style="width:100%; margin-top:6px; font-size:10px;">+ STORE IN REPOSITORY</button>
                     </div>
@@ -1242,12 +1256,12 @@
     <script src="js/db.js?v=3.24"></script>
     <script src="js/audio.js?v=3.16"></script>
     <script src="js/ui.js?v=3.26"></script>
-    <script src="js/combat.js?v=3.32"></script>
+    <script src="js/combat.js?v=3.33"></script>
     <script src="js/colonies.js?v=3.16"></script>
-    <script src="js/ship-designer.js?v=3.17"></script>
+    <script src="js/ship-designer.js?v=3.19"></script>
     <script src="js/perk-designer.js?v=3.13"></script>
     <script src="js/map.js?v=3.26"></script>
-    <script src="js/battle-map.js?v=1.16"></script>
+    <script src="js/battle-map.js?v=1.18"></script>
     <script src="js/manufacturing.js?v=1.8"></script>
 
 </body>
