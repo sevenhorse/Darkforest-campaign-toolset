@@ -501,6 +501,7 @@ window.TERM_TAB_ACTIVITY_LABELS = {
     shipdesigner: 'Designing Vessel Profiles',
     perkdesigner: 'Designing Specializations',
     augmentdesigner: 'Designing Augmentations',
+    geardesigner: 'Designing Gear',
     notes: 'Editing Tactical Notes',
     roster: 'Reviewing Crew Roster',
     codex: 'Reviewing Sector Lore'
@@ -520,6 +521,7 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'shipdesigner' && typeof window.renderShipDesignerPanel === 'function') window.renderShipDesignerPanel();
     if (tabName === 'perkdesigner' && typeof window.renderPerkDesignerPanel === 'function') window.renderPerkDesignerPanel();
     if (tabName === 'augmentdesigner' && typeof window.renderAugmentDesignerPanel === 'function') window.renderAugmentDesignerPanel();
+    if (tabName === 'geardesigner' && typeof window.renderGearDesignerPanel === 'function') window.renderGearDesignerPanel();
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
     if (tabName === 'roster' && typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
 
@@ -632,6 +634,7 @@ window.renderCharacterTerminalData = function() {
     if (typeof window.renderArsenal === 'function') window.renderArsenal();
     if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
     if (typeof window.renderAugmentSlots === 'function') window.renderAugmentSlots();
+    if (typeof window.renderGearLoadout === 'function') window.renderGearLoadout();
 };
 
 // Shield Max and DR are player-set base values (representing raw equipment,
@@ -639,7 +642,7 @@ window.renderCharacterTerminalData = function() {
 // Special Forces Trooper) added automatically on top for display — same
 // "don't make the player remember to add it" principle the roller already
 // applies to skill/stat perk bonuses.
-window.getEffectiveShieldMax = function(char, perksList, augmentsList) {
+window.getEffectiveShieldMax = function(char, perksList, augmentsList, gearList) {
     let base = char.shield_max || 0;
     let bonus = 0;
     (perksList || []).forEach(cp => {
@@ -650,9 +653,14 @@ window.getEffectiveShieldMax = function(char, perksList, augmentsList) {
         const def = typeof window.findAugmentDefinition === 'function' ? window.findAugmentDefinition(ca.augment_definition_id) : null;
         if (def) bonus += (def.shield_max_bonus || 0);
     });
+    (gearList || []).forEach(cg => {
+        if (!cg.equipped) return;
+        const def = typeof window.findGearDefinition === 'function' ? window.findGearDefinition(cg.gear_definition_id) : null;
+        if (def) bonus += (def.shield_max_bonus || 0);
+    });
     return base + bonus;
 };
-window.getEffectiveDR = function(char, perksList, augmentsList) {
+window.getEffectiveDR = function(char, perksList, augmentsList, gearList) {
     let base = char.dr || 0;
     let bonus = 0;
     (perksList || []).forEach(cp => {
@@ -663,6 +671,37 @@ window.getEffectiveDR = function(char, perksList, augmentsList) {
         const def = typeof window.findAugmentDefinition === 'function' ? window.findAugmentDefinition(ca.augment_definition_id) : null;
         if (def) bonus += (def.dr_bonus || 0);
     });
+    (gearList || []).forEach(cg => {
+        if (!cg.equipped) return;
+        const def = typeof window.findGearDefinition === 'function' ? window.findGearDefinition(cg.gear_definition_id) : null;
+        if (def) bonus += (def.dr_bonus || 0);
+    });
+    return base + bonus;
+};
+// Injury Max = floor(Toughness die face value / 2) — the base tabletop rule —
+// plus any injury_max_bonus from approved perks/augments (e.g. "Fully
+// Synthetic +5"), same additive-bonus pattern as Shield Max/DR above. Gear
+// (e.g. a uniform's "+1 injuries") is NOT a source yet — there's no
+// armor/gear catalog in this schema, so a gear-granted bonus like that has
+// to be modeled as a small perk or augment for now; a real gear system is a
+// separate, not-yet-built feature.
+window.getEffectiveInjuryMax = function(char, perksList, augmentsList, gearList) {
+    const faces = parseInt(((char && char.stat_toughness) || 'd4').replace('d', '')) || 4;
+    let base = Math.floor(faces / 2);
+    let bonus = 0;
+    (perksList || []).forEach(cp => {
+        const def = typeof window.findPerkDefinition === 'function' ? window.findPerkDefinition(cp.perk_definition_id) : null;
+        if (def) bonus += (def.injury_max_bonus || 0);
+    });
+    (augmentsList || []).forEach(ca => {
+        const def = typeof window.findAugmentDefinition === 'function' ? window.findAugmentDefinition(ca.augment_definition_id) : null;
+        if (def) bonus += (def.injury_max_bonus || 0);
+    });
+    (gearList || []).forEach(cg => {
+        if (!cg.equipped) return;
+        const def = typeof window.findGearDefinition === 'function' ? window.findGearDefinition(cg.gear_definition_id) : null;
+        if (def) bonus += (def.injury_max_bonus || 0);
+    });
     return base + bonus;
 };
 
@@ -671,24 +710,24 @@ window.updateShieldDisplay = function() {
     if (!label) return;
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
-    const effMax = window.getEffectiveShieldMax(myProf.character || {}, myProf.perks, myProf.augments);
-    const effDR = window.getEffectiveDR(myProf.character || {}, myProf.perks, myProf.augments);
+    const effMax = window.getEffectiveShieldMax(myProf.character || {}, myProf.perks, myProf.augments, myProf.gear);
+    const effDR = window.getEffectiveDR(myProf.character || {}, myProf.perks, myProf.augments, myProf.gear);
     const baseMax = (myProf.character || {}).shield_max || 0;
     const baseDR = (myProf.character || {}).dr || 0;
     let bits = [];
-    if (effMax !== baseMax) bits.push(`Effective Max: ${effMax} (base ${baseMax} + perks/augments)`);
-    if (effDR !== baseDR) bits.push(`Effective DR: ${effDR} (base ${baseDR} + perks/augments)`);
+    if (effMax !== baseMax) bits.push(`Effective Max: ${effMax} (base ${baseMax} + perks/augments/gear)`);
+    if (effDR !== baseDR) bits.push(`Effective DR: ${effDR} (base ${baseDR} + perks/augments/gear)`);
     label.innerText = bits.join(' · ');
 };
 
 // "Recharge" = new encounter — shield resets to its full effective max
-// (base + perk/augment bonuses), matching the confirmed rule that it
+// (base + perk/augment/gear bonuses), matching the confirmed rule that it
 // regenerates automatically between encounters rather than needing a DM
 // repair action.
 window.rechargeShield = async function() {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first."); return; }
-    const effMax = window.getEffectiveShieldMax(myProf.character, myProf.perks, myProf.augments);
+    const effMax = window.getEffectiveShieldMax(myProf.character, myProf.perks, myProf.augments, myProf.gear);
     const input = document.getElementById('term-shield-current');
     if (input) input.value = effMax;
     await db.from('characters').update({ shield_current: effMax }).eq('id', myProf.character.id);
@@ -699,17 +738,21 @@ window.rechargeShield = async function() {
 // Injuries max = half the face value of whichever die is assigned to
 // Toughness (per the tabletop rules), recalculating live if that die ever
 // changes — was a flat 0-10 "Vitality" field that didn't track the actual
-// rule at all.
+// rule at all. Now also folds in any injury_max_bonus from the player's
+// approved perks/augments/equipped gear via getEffectiveInjuryMax, same as
+// shield/DR.
 window.updateInjuryMax = function() {
     const toughnessSel = document.getElementById('stat-toughness');
     const injuryInput = document.getElementById('term-vitality');
     const injuryLabel = document.getElementById('term-vitality-label');
     if (!toughnessSel || !injuryInput) return;
-    const faces = parseInt((toughnessSel.value || 'd4').replace('d', '')) || 4;
-    const max = Math.floor(faces / 2);
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    const pseudoChar = { stat_toughness: toughnessSel.value || 'd4' };
+    const baseMax = Math.floor((parseInt((toughnessSel.value || 'd4').replace('d', '')) || 4) / 2);
+    const max = window.getEffectiveInjuryMax(pseudoChar, myProf && myProf.perks, myProf && myProf.augments, myProf && myProf.gear);
     injuryInput.max = max;
     if (parseInt(injuryInput.value) > max) injuryInput.value = max;
-    if (injuryLabel) injuryLabel.innerText = `Injuries (0-${max}):`;
+    if (injuryLabel) injuryLabel.innerText = max !== baseMax ? `Injuries (0-${max}, base ${baseMax} + perks/augments/gear):` : `Injuries (0-${max}):`;
 };
 
 /* --- PERKS PANEL (Dossier tab) ---
@@ -876,6 +919,7 @@ window.installAugment = async function(slot) {
     if (notesInput) notesInput.value = '';
     if (typeof window.renderAugmentSlots === 'function') window.renderAugmentSlots();
     if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+    if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();
 };
 
 window.removeCharacterAugment = async function(rowId) {
@@ -885,6 +929,102 @@ window.removeCharacterAugment = async function(rowId) {
     myProf.augments = (myProf.augments || []).filter(ca => ca.id !== rowId);
     if (typeof window.renderAugmentSlots === 'function') window.renderAugmentSlots();
     if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+    if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();
+};
+
+/* --- GEAR LOADOUT (Dossier tab, Section 4) ---
+   Sits above the pre-existing free-text "Tactical Gear & Inventory" box
+   (characters.assets, untouched) as a flat, unslotted list — confirmed
+   design: gear doesn't get fixed slots like Body Augments do, since there's
+   no anatomical (or other) fixed structure to hang them on. Each row also
+   carries an `equipped` toggle (confirmed design: owned-but-stowed gear
+   shouldn't contribute its bonus) — only equipped rows count in
+   getGearBonusFor / shield / DR / injury max. Same self-service rule as
+   Augments: installing/removing/toggling on your OWN character needs no DM
+   approval; only the catalog itself is gated (Gear Designer tab). A row can
+   be notes-only with no catalog gear picked at all, same as Augments. */
+window.renderGearLoadout = function() {
+    const container = document.getElementById('gear-loadout-container');
+    if (!container) return;
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    const gear = myProf.gear || [];
+
+    const choices = typeof window.getApprovedGear === 'function' ? window.getApprovedGear() : [];
+    let pickerOptions = '<option value="">— No catalog gear / narrative only —</option>';
+    choices.forEach(g => { pickerOptions += `<option value="${g.id}">${g.name}</option>`; });
+
+    let installedHtml = gear.length === 0 ? '<span style="font-size:9px; color:#6b826a;">Nothing in your loadout.</span>' : '';
+    gear.forEach(cg => {
+        const def = typeof window.findGearDefinition === 'function' ? window.findGearDefinition(cg.gear_definition_id) : null;
+        const title = def ? def.name : (cg.notes ? '(uncatalogued)' : 'Unknown');
+        installedHtml += `<div style="background:#030403; padding:5px 6px; border:1px solid ${cg.equipped ? '#3c4e36' : '#6b826a'}; border-radius:2px; margin-bottom:3px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px; ${cg.equipped ? '' : 'opacity:0.6;'}">
+            <div style="flex:1;">
+                ${def ? `<strong style="color:#00e5a3; font-size:10px;">${def.name}</strong>` : `<strong style="color:#6b826a; font-size:10px;">${title}</strong>`}
+                ${!cg.equipped ? '<span style="font-size:8px; color:#6b826a;"> (stowed — not contributing bonuses)</span>' : ''}
+                ${cg.notes ? `<div style="font-size:9px; color:#d4c5a9;">${cg.notes}</div>` : ''}
+            </div>
+            <div style="display:flex; gap:3px; flex-shrink:0;">
+                <button onclick="window.toggleCharacterGearEquipped('${cg.id}')" title="${cg.equipped ? 'Stow' : 'Equip'}" style="width:auto; margin:0; padding:2px 6px; font-size:9px;">${cg.equipped ? 'STOW' : 'EQUIP'}</button>
+                <button onclick="window.removeCharacterGear('${cg.id}')" title="Remove" style="width:auto; margin:0; padding:2px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">✕</button>
+            </div>
+        </div>`;
+    });
+
+    container.innerHTML = `
+        <div style="margin-top:3px;">${installedHtml}</div>
+        <div style="display:flex; gap:4px; margin-top:4px;">
+            <label for="gear-loadout-picker" style="display:none;">Add Gear</label>
+            <select id="gear-loadout-picker" style="flex:1; margin:0; font-size:10px;">${pickerOptions}</select>
+        </div>
+        <div style="display:flex; gap:4px; margin-top:3px;">
+            <label for="gear-loadout-notes" style="display:none;">Notes</label>
+            <input type="text" id="gear-loadout-notes" placeholder="Notes (optional flavor)" style="flex:1; margin:0; font-size:10px;">
+            <button class="btn-deploy" onclick="window.addCharacterGear()" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">+ ADD</button>
+        </div>`;
+};
+
+window.addCharacterGear = async function() {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first before adding gear."); return; }
+    const picker = document.getElementById('gear-loadout-picker');
+    const notesInput = document.getElementById('gear-loadout-notes');
+    const gearDefId = picker && picker.value ? picker.value : null;
+    const notes = notesInput ? notesInput.value.trim() : '';
+    if (!gearDefId && !notes) { alert("Pick a gear item from the catalog and/or enter a note — can't add a completely empty entry."); return; }
+    const { data, error } = await db.from('character_gear').insert({ character_id: myProf.character.id, gear_definition_id: gearDefId, notes: notes || null, equipped: true }).select().single();
+    if (error) { alert("Failed to add gear: " + error.message); return; }
+    myProf.gear = myProf.gear || [];
+    myProf.gear.push(data);
+    if (picker) picker.value = '';
+    if (notesInput) notesInput.value = '';
+    if (typeof window.renderGearLoadout === 'function') window.renderGearLoadout();
+    if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+    if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();
+};
+
+window.toggleCharacterGearEquipped = async function(rowId) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    const row = (myProf.gear || []).find(cg => cg.id === rowId);
+    if (!row) return;
+    const newVal = !row.equipped;
+    const { error } = await db.from('character_gear').update({ equipped: newVal }).eq('id', rowId);
+    if (error) { alert("Failed to update gear: " + error.message); return; }
+    row.equipped = newVal;
+    if (typeof window.renderGearLoadout === 'function') window.renderGearLoadout();
+    if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+    if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();
+};
+
+window.removeCharacterGear = async function(rowId) {
+    const myProf = allProfiles.find(p => p.id === currentUserId);
+    if (!myProf) return;
+    await db.from('character_gear').delete().eq('id', rowId);
+    myProf.gear = (myProf.gear || []).filter(cg => cg.id !== rowId);
+    if (typeof window.renderGearLoadout === 'function') window.renderGearLoadout();
+    if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+    if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();
 };
 
 window.saveTerminalProfile = async function() {
@@ -928,6 +1068,7 @@ window.saveTerminalProfile = async function() {
     if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
     if (typeof window.populateCommsRecipients === 'function') window.populateCommsRecipients();
     if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
+    if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();
 
     if (typeof window.showToast === 'function') window.showToast("Character dossier & stats secured to database.");
     else alert("Character dossier & stats secured to database.");
@@ -1015,6 +1156,14 @@ window.awardSection2Perk = async function(profileId) {
     if (!perkDef) return;
     const prof = allProfiles.find(p => p.id === profileId);
     if (!prof || !prof.character || !prof.character.id) { alert("This player hasn't saved a character sheet yet — nothing to award the perk to."); return; }
+
+    // Bugfix: this insert used to run with no duplicate check at all, so
+    // clicking Award twice (or awarding a perk the player already has)
+    // silently created a second character_perks row pointing at the same
+    // definition, double-counting its effects. Guard against that here,
+    // regardless of which section the existing link is in.
+    const alreadyHas = (prof.perks || []).some(p => p.perk_definition_id === perkDefId);
+    if (alreadyHas) { alert(`${prof.username || 'This commander'} already has ${perkDef.name} — not awarding a duplicate.`); return; }
 
     const { data, error } = await db.from('character_perks').insert({ character_id: prof.character.id, perk_definition_id: perkDefId, section: 2 }).select().single();
     if (error) { alert("Failed to award perk: " + error.message); return; }
