@@ -54,6 +54,11 @@ window.renderShipDesignerPanel = function() {
         // use drive_type (immobile, galaxy-scale FTL is irrelevant) — shown
         // with a distinct badge/line instead of the ship-oriented ones.
         const stationBadge = t.is_station ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">🛰 STATION</span>` : '';
+        // Squadron AI Stances build (this session) -- see the vessel_class
+        // comment on saveNewShipTemplate (js/ship-designer.js) for what this
+        // drives mechanically (Attack Capital Ships / Attack Escorts target
+        // filtering). Purely a visibility badge here.
+        const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
         const classLine = t.is_station
             ? `${t.class || 'Station'} &nbsp;·&nbsp; Stationary Platform`
             : `${t.class || 'Frigate'} &nbsp;·&nbsp; ${(t.drive_type || 'ftl_class1').replace('ftl_', 'FTL ').replace('_', ' ').replace('sublight', 'Sublight')}`;
@@ -62,7 +67,7 @@ window.renderShipDesignerPanel = function() {
             <div class="note-card">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#00e1ff; font-size:12px;">${t.name}</strong>${stationBadge}
+                        <strong style="color:#00e1ff; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${classLine}</p>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Shields ${t.max_shields || 0} · Reactive ${t.max_reactive || 0} · Ablative ${t.max_ablative || 0} · Hardened ${t.max_hardened || 0} · Hull ${t.max_hull || 0}</p>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">${hardpointLine}</p>
@@ -137,6 +142,14 @@ window.saveNewShipTemplate = async function() {
         // shows, in case it was toggled out of sync somehow.
         tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-template-speed').value) || 80),
         is_station: isStation,
+        // Squadron AI Stances build (this session): optional, drives which
+        // targets an AI-controlled squadron's Attack Capital Ships/Attack
+        // Escorts stance will engage -- see STRIKE_CRAFT_DB's role-tag
+        // comment (js/combat.js) and processBattleRoundAutomations
+        // (js/battle-map.js) for where it's actually consumed. Purely
+        // cosmetic (the class badge on the ship's stance card) for anyone
+        // not using squadron AI.
+        vessel_class: document.getElementById('new-template-vesselclass').value || null,
         ship_weapons: [],
         ship_decks: [],
         is_secret: false
@@ -146,6 +159,7 @@ window.saveNewShipTemplate = async function() {
 
     document.getElementById('new-template-name').value = '';
     document.getElementById('new-template-class').value = '';
+    document.getElementById('new-template-vesselclass').value = '';
     document.getElementById('new-template-station').checked = false;
     window.toggleStationFields('new-template');
     if (typeof loadShipTemplates === 'function') loadShipTemplates();
@@ -180,6 +194,7 @@ window.deployShipTemplate = async function(id) {
         integrity_hull: t.max_hull || 100, max_hull: t.max_hull || 100,
         tactical_speed: t.is_station ? 0 : (t.tactical_speed || 80),
         is_station: !!t.is_station,
+        vessel_class: t.vessel_class || null,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
         ship_decks: JSON.parse(JSON.stringify(t.ship_decks || []))
     };
@@ -234,6 +249,14 @@ window.deployShipTemplate = async function(id) {
                 <div style="flex:1;"><label for="tmpl-edit-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed</label><input type="number" id="tmpl-edit-speed" min="0" style="border-color:#00e1ff; text-align:center;"></div>
                 <div style="flex:1;"><label for="tmpl-edit-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-bottom:8px;"><input type="checkbox" id="tmpl-edit-station" onchange="window.toggleStationFields('tmpl-edit')" style="margin:0;"> 🛰 This is a Station</label></div>
             </div>
+            <div>
+                <label for="tmpl-edit-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic.">Vessel Classification</label>
+                <select id="tmpl-edit-vesselclass" style="border-color:#c9962f;">
+                    <option value="">-- Unclassified --</option>
+                    <option value="Capital">Capital Ship</option>
+                    <option value="Escort">Escort</option>
+                </select>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="tmpl-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="tmpl-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#00e1ff; color:#00e1ff;">SAVE CHANGES</button>
@@ -255,7 +278,8 @@ window.deployShipTemplate = async function(id) {
                 max_hull: parseInt(document.getElementById('tmpl-edit-hull').value) || 0,
                 hardpoint_slots: parseInt(document.getElementById('tmpl-edit-slots').value) || 4,
                 tactical_speed: isStation ? 0 : (parseInt(document.getElementById('tmpl-edit-speed').value) || 80),
-                is_station: isStation
+                is_station: isStation,
+                vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null
             };
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -279,6 +303,7 @@ window.deployShipTemplate = async function(id) {
         document.getElementById('tmpl-edit-hull').value = t.max_hull || 0;
         document.getElementById('tmpl-edit-slots').value = t.hardpoint_slots || 4;
         document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 80;
+        document.getElementById('tmpl-edit-vesselclass').value = t.vessel_class || '';
         document.getElementById('tmpl-edit-station').checked = !!t.is_station;
         window.toggleStationFields('tmpl-edit');
         overlay.style.display = 'flex';
@@ -469,12 +494,17 @@ window.renderSecretRepositoryPanel = function() {
     window.secretShipTemplatesList.forEach(t => {
         const weaponCount = (t.ship_weapons || []).length;
         const stationBadge = t.is_station ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">🛰 STATION</span>` : '';
+        // Squadron AI Stances build (this session) -- see the vessel_class
+        // comment on saveNewShipTemplate (js/ship-designer.js) for what this
+        // drives mechanically (Attack Capital Ships / Attack Escorts target
+        // filtering). Purely a visibility badge here.
+        const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
         const hardpointTag = t.is_station ? `${weaponCount} hardpoints (no cap)` : `${weaponCount}/${t.hardpoint_slots || 4} hardpoints`;
         html += `
             <div class="note-card" style="border-color:#ff3333;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>${stationBadge}
+                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${t.class || 'Frigate'} · Hull ${t.max_hull || 0} · Shields ${t.max_shields || 0} · ${hardpointTag}</p>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:110px;">
