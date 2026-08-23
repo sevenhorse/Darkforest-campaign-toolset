@@ -1089,7 +1089,10 @@ window.renderCrewRoster = function() {
                         <div style="flex:1;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <div><strong style="color:#00e5a3; font-size:14px;">${char.name || p.username || 'Unknown'}</strong></div>
-                                <button class="btn-reveal" onclick="window.snapToCommander('${p.id}')" style="font-size:9px; padding:2px 6px;">LOCATE VESSEL</button>
+                                <div style="display:flex; gap:4px;">
+                                    <button class="btn-reveal" onclick="window.openDmSheetEditor('${p.id}')" style="font-size:9px; padding:2px 6px; border-color:#ff6b6b; color:#ff6b6b;">EDIT SHEET</button>
+                                    <button class="btn-reveal" onclick="window.snapToCommander('${p.id}')" style="font-size:9px; padding:2px 6px;">LOCATE VESSEL</button>
+                                </div>
                             </div>
                             <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-top:8px;">
                                 <div><label style="font-size:9px; color:#ff6b6b;">Injuries</label><input type="number" id="dm-edit-vit-${p.id}" value="${char.vitality || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
@@ -1101,7 +1104,7 @@ window.renderCrewRoster = function() {
                                 <div><label style="font-size:9px; color:#00e1ff;">Shield Max</label><input type="number" id="dm-edit-shieldmax-${p.id}" value="${char.shield_max || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
                                 <div><label style="font-size:9px; color:#c9962f;">DR</label><input type="number" id="dm-edit-dr-${p.id}" value="${char.dr || 0}" style="font-size:10px; padding:2px; margin:0;"></div>
                             </div>
-                            <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Gear Override:</label>
+                            <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Misc. Inventory Override:</label>
                             <textarea id="dm-edit-assets-${p.id}" rows="2" style="font-size:10px; margin:2px 0;">${char.assets || ''}</textarea>
                             <button class="btn-reveal" onclick="window.dmUpdatePlayerStats('${p.id}')" style="width:100%; font-size:9px; margin-top:4px; border-color:#ff6b6b; color:#ff6b6b;">APPLY OVERRIDE</button>
                             <div style="display:flex; gap:4px; margin-top:8px; border-top:1px solid #3c4e36; padding-top:6px;">
