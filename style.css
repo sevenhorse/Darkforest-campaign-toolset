@@ -192,6 +192,156 @@ canvas { display: block; width: 100%; height: 100%; }
 .battle-ship-card { background: #030403; border: 1px solid #3c4e36; border-radius: 2px; padding: 10px; }
 #salvage-panel { top: 100px; right: 20px; width: 320px; display: none; z-index: 20; max-height: 70vh; overflow-y: auto; }
 
+/* --- BATTLE MAP ANIMATION ENGINE ---
+   CSS/SVG-transform-driven animation (no canvas/sprite system), consistent
+   with the rest of battle-map.js's plain-DOM style. Confirmed scope: smooth
+   token movement, in-flight ordnance visualization, direct-fire weapon shots
+   (local-only, see js/battle-map.js playWeaponFireEffect), background
+   starfield. Strike-craft movement deliberately NOT animated this round
+   (squadrons have no real grid position -- separate deferred thread). See
+   darkforest-architecture-reference.md Animation Engine checkpoint. */
+
+/* Ship/station token markers now persist across renders (js/battle-map.js
+   diffs battleMapTokenEls instead of rebuilding innerHTML every time), so
+   changes to left/top animate instead of jumping. wireTokenDrag sets
+   transition:none during an active drag so the token tracks the mouse
+   instantly, then restores this transition on mouseup. */
+.battle-token-el { transition: left 0.5s ease, top 0.5s ease; }
+
+/* In-flight ordnance markers -- one per salvo_id, diffed against
+   in_flight_ordnance every render (synced to all clients for free via the
+   existing battle_encounters_stream postgres_changes subscription). Position
+   is lerped along the source->target line by turns_remaining; split salvos
+   fan out via a small perpendicular offset so siblings don't overlap. */
+.battle-ordnance-marker {
+    position: absolute; width: 8px; height: 8px; margin-left: -4px; margin-top: -4px;
+    border-radius: 50%; background: #c778dd; box-shadow: 0 0 6px #c778dd;
+    transition: left 0.6s ease, top 0.6s ease; pointer-events: none; z-index: 5;
+}
+
+/* Brief flash spawned where a salvo resolves (impact) or otherwise leaves
+   in_flight_ordnance (intercepted/fizzled -- outcome isn't visually
+   distinguished this round, see architecture doc). Self-removes via
+   setTimeout in spawnImpactFlash. */
+.battle-impact-flash {
+    position: absolute; width: 20px; height: 20px; margin-left: -10px; margin-top: -10px;
+    border-radius: 50%; background: radial-gradient(circle, rgba(255,170,0,0.9), rgba(255,51,51,0) 70%);
+    pointer-events: none; z-index: 6; animation: battleImpactPulse 0.6s ease-out forwards;
+}
+@keyframes battleImpactPulse {
+    0% { transform: scale(0.3); opacity: 1; }
+    100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* Direct-fire weapon shot -- a thin rotated beam drawn between the firing
+   and target token centers, colored via window.DAMAGE_TYPES[dmgType].color.
+   LOCAL-ONLY: rollShipWeapon has no ephemeral/broadcast channel to sync this
+   to other connected viewers (this codebase only has postgres_changes on
+   real tables), so only the firing client's own screen sees the beam. This
+   is a deliberate, flagged limitation, not a bug. Self-removes via
+   setTimeout in playWeaponFireEffect. */
+.battle-fire-beam {
+    position: absolute; height: 2px; transform-origin: 0 50%; pointer-events: none;
+    z-index: 7; animation: battleFireBeamFade 0.35s ease-out forwards;
+}
+@keyframes battleFireBeamFade {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+/* Background starfield -- a ::before pseudo-element on the grid itself so no
+   index.html markup change is needed; paints independently of (behind) the
+   grid's existing inline background and any tokens/effects appended later in
+   DOM order. Slow drift via background-position animation, not real particle
+   movement. */
+#battle-map-grid { position: relative; }
+#battle-map-grid::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+        radial-gradient(1px 1px at 20px 30px, #ffffff, transparent),
+        radial-gradient(1px 1px at 90px 140px, #ffffff, transparent),
+        radial-gradient(1.5px 1.5px at 160px 60px, #cfe8ff, transparent),
+        radial-gradient(1px 1px at 230px 200px, #ffffff, transparent),
+        radial-gradient(1px 1px at 300px 90px, #ffffff, transparent),
+        radial-gradient(1.5px 1.5px at 370px 250px, #cfe8ff, transparent),
+        radial-gradient(1px 1px at 40px 320px, #ffffff, transparent),
+        radial-gradient(1px 1px at 420px 40px, #ffffff, transparent);
+    background-repeat: repeat;
+    background-size: 460px 380px;
+    opacity: 0.5;
+    animation: battleStarDrift 240s linear infinite;
+}
+@keyframes battleStarDrift {
+    from { background-position: 0 0; }
+    to { background-position: -460px 380px; }
+}
+
+/* Visual Polish build (this session): a second backdrop layer for a subtle
+   parallax feel -- sparser/dimmer stars than ::before, drifting the
+   opposite direction at a much slower rate, plus two very faint nebula
+   blobs. Purely decorative, no mechanics touched. Same seamless-tiling trick
+   as ::before: the drift distance equals exactly one grid tile (460x380),
+   so the loop point never visibly jumps. */
+#battle-map-grid::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+        radial-gradient(200px 150px at 18% 22%, rgba(120, 80, 200, 0.10), transparent 70%),
+        radial-gradient(240px 170px at 78% 72%, rgba(0, 180, 220, 0.07), transparent 70%),
+        radial-gradient(0.8px 0.8px at 60px 20px, #d8ecff, transparent),
+        radial-gradient(0.8px 0.8px at 140px 260px, #d8ecff, transparent),
+        radial-gradient(1px 1px at 210px 100px, #ffffff, transparent),
+        radial-gradient(0.8px 0.8px at 280px 320px, #d8ecff, transparent),
+        radial-gradient(1px 1px at 350px 60px, #ffffff, transparent),
+        radial-gradient(0.8px 0.8px at 400px 200px, #d8ecff, transparent),
+        radial-gradient(0.8px 0.8px at 10px 350px, #d8ecff, transparent),
+        radial-gradient(1px 1px at 440px 340px, #ffffff, transparent);
+    background-repeat: repeat;
+    background-size: 460px 380px;
+    opacity: 0.4;
+    animation: battleStarDriftSlow 400s linear infinite reverse;
+}
+@keyframes battleStarDriftSlow {
+    from { background-position: 0 0; }
+    to { background-position: 460px -380px; }
+}
+
+/* Destruction effect (Visual Polish build) -- a bigger, hotter burst than
+   .battle-impact-flash (ordnance's smaller flash, still used for non-impact
+   removal like an intercepted payload), plus an expanding ring, played once
+   right before a destroyed token's element is removed from the grid. See
+   window.checkBattleTokenDestroyed / spawnDestructionEffect. */
+.battle-destruction-flash {
+    position: absolute; width: 36px; height: 36px; margin-left: -18px; margin-top: -18px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff6d8 0%, #ffaa00 35%, #ff3333 60%, rgba(255,51,51,0) 75%);
+    pointer-events: none; z-index: 8; animation: battleDestructionPulse 0.7s ease-out forwards;
+}
+@keyframes battleDestructionPulse {
+    0% { transform: scale(0.2); opacity: 1; }
+    60% { opacity: 1; }
+    100% { transform: scale(2.6); opacity: 0; }
+}
+.battle-destruction-ring {
+    position: absolute; width: 10px; height: 10px; margin-left: -5px; margin-top: -5px;
+    border-radius: 50%; border: 2px solid #ffaa00;
+    pointer-events: none; z-index: 8; animation: battleDestructionRing 0.9s ease-out forwards;
+}
+@keyframes battleDestructionRing {
+    0% { transform: scale(1); opacity: 0.9; }
+    100% { transform: scale(9); opacity: 0; }
+}
+
+/* Weapon range ring (Visual Polish build) -- shown around a firing vessel's
+   own token while a weapon's target dropdown has focus/hover, radius = that
+   weapon's range. z-index 1 so it sits above the starfield (0) but below
+   tokens (2) and every combat effect. See window.showWeaponRangeRing. */
+.battle-range-ring {
+    position: absolute; border-radius: 50%;
+    border: 1px dashed rgba(0, 229, 163, 0.55);
+    background: rgba(0, 229, 163, 0.06);
+    pointer-events: none; z-index: 1; display: none;
+}
+
 #bottom-right-presence {
     position: fixed; bottom: 20px; right: 20px; z-index: 25; width: 260px; max-height: 160px; overflow-y: auto;
 }
