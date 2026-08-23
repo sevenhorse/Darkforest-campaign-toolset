@@ -330,6 +330,24 @@ window.removeBattleToken = async function(tokenId) {
     saveBattleTokens(tokens.filter(t => t.token_id !== tokenId && !squadronTokenIds.includes(t.token_id))).then(() => window.renderBattleMapPanel());
 };
 
+/* Fog of War build (this session, confirmed design): DM-only quick toggle on
+   the Battle Map ship-status card (see the HIDE/UNHIDE button in
+   window.renderBattleShipCards below) -- a faster path than opening EDIT
+   BASE STATS (js/combat.js's Vessel Deck modal, which also has the same
+   `is_hidden` checkbox for setting it outside an active battle). Persists on
+   ship_markers directly, same field either path writes to. */
+window.toggleVesselHidden = async function(vesselId) {
+    if (currentUserRole !== 'dm') return;
+    const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    const newHidden = !vessel.is_hidden;
+    const { error } = await db.from('ship_markers').update({ is_hidden: newHidden }).eq('id', vesselId);
+    if (error) { alert('Failed to update Hidden status: ' + error.message); return; }
+    vessel.is_hidden = newHidden;
+    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+    if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+};
+
 /* Called from js/combat.js's rollShipWeapon right after a damaged vessel's
    new hull value is committed. Auto-removes a destroyed vessel's token from
    the active battle (per confirmed design) without touching the underlying
@@ -507,6 +525,14 @@ window.processBattleRoundAutomations = async function() {
         const roll = rollDamageDice(pdWpn.dice, pdWpn.modifier, pdWpn.explodes);
         if (pdWpn.ammo > 0) pdWpn.ammo -= 1;
         markTouched(pdVessel);
+        // Fog of War build (this session, confirmed design): PD firing
+        // reveals the PD ship too, same as any other weapon discharge. This
+        // helper is called from both a for-of loop and a plain .forEach
+        // below, so it isn't async itself -- fire-and-forget, same "can't
+        // await inside a forEach callback" precedent as
+        // checkBattleTokenDestroyed's own unawaited call further down this
+        // function.
+        if (typeof window.revealVesselIfHidden === 'function') window.revealVesselIfHidden(pdVessel).catch(err => console.error('fireEligiblePD: reveal-on-fire failed', err));
         return { pdVessel, pdWpn, roll };
     }
 
@@ -546,7 +572,7 @@ window.processBattleRoundAutomations = async function() {
             if (!dbStats) return;
             let wpnIdx = dbStats.weapons.findIndex(w => w.role === 'point_defense');
             if (wpnIdx < 0) wpnIdx = 0; // fallback: first listed weapon (confirmed design)
-            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], ownerId: sqShip.owner_id, position: pos });
+            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], ownerId: sqShip.owner_id, position: pos, sqShipId: sqShip.id });
         });
     });
 
@@ -565,6 +591,13 @@ window.processBattleRoundAutomations = async function() {
         if (idx < 0) return null;
         const entry = squadronInterceptPool.splice(idx, 1)[0];
         const roll = rollDamageDice(entry.wpn.dice, entry.wpn.modifier, entry.wpn.explodes);
+        // Fog of War build (this session, confirmed design): same
+        // fire-reveals-you rule as fireEligiblePD above, fire-and-forget for
+        // the same reason (called from a for-of loop, not itself async).
+        if (typeof window.revealVesselIfHidden === 'function') {
+            const sqShip = globalShipMarkersCache.find(m => m.id === entry.sqShipId);
+            if (sqShip) window.revealVesselIfHidden(sqShip).catch(err => console.error('fireEligibleSquadronIntercept: reveal-on-fire failed', err));
+        }
         return { entry, roll };
     }
 
@@ -1084,6 +1117,12 @@ window.getBattleTokenPosition = function(vesselId) {
 // firing vessel's own token are filtered out. 0/undefined preserves the
 // original "no restriction" behavior — legacy callers that don't pass a
 // range are completely unaffected.
+// Fog of War build (this session): a hidden vessel is also excluded here --
+// this is the single choke point behind BOTH ship_weapons' and squadron
+// weapons' target dropdowns (js/combat.js), so filtering here covers both
+// surfaces at once instead of duplicating the check at each call site. Uses
+// window.isVesselVisibleToMe so the vessel's own player-owner (if any) still
+// sees it in their own dropdown even while it's hidden from everyone else.
 window.getBattleScopedTargets = function(vesselId, range) {
     if (!window.globalBattleEncounterCache) return null;
     const tokens = window.globalBattleEncounterCache.tokens || [];
@@ -1092,10 +1131,10 @@ window.getBattleScopedTargets = function(vesselId, range) {
     return tokens.filter(t => t.ship_marker_id !== vesselId).filter(t => {
         if (!range) return true;
         return Math.hypot(t.x - selfToken.x, t.y - selfToken.y) <= range;
-    }).map(t => {
-        const m = globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id);
-        return m ? { id: m.id, name: m.name, is_strike_craft: m.is_strike_craft } : null;
-    }).filter(Boolean);
+    }).map(t => globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id))
+      .filter(Boolean)
+      .filter(m => (typeof window.isVesselVisibleToMe === 'function') ? window.isVesselVisibleToMe(m) : true)
+      .map(m => ({ id: m.id, name: m.name, is_strike_craft: m.is_strike_craft }));
 };
 
 /* Ordnance LAUNCH (Range/Ordnance build, this session). An ordnance-classified
@@ -1162,6 +1201,10 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
         return;
     }
     if (wpn.ammo > 0) wpn.ammo -= 1;
+
+    // Fog of War build (this session, confirmed design): reveal on launch,
+    // same as any other weapon fire. Best-effort, never blocks the launch.
+    try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(vessel); } catch (err) { console.error('launchOrdnance: reveal-on-fire failed', err); }
 
     const ordnance = (window.globalBattleEncounterCache.in_flight_ordnance || []).slice();
     ordnance.push({
@@ -1505,8 +1548,15 @@ window.renderBattleMapPanel = function() {
 
         const seenTokenIds = new Set();
         tokens.forEach(tok => {
-            seenTokenIds.add(tok.token_id);
             const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+            // Fog of War build (this session): a hidden token is simply
+            // never added to seenTokenIds -- the cleanup pass below (which
+            // removes any tokenEl NOT in that set) then deletes its DOM
+            // element on this render if it had one, or the token just never
+            // gets created in the first place. The DM and the vessel's own
+            // player-owner still see it normally.
+            if (vessel && typeof window.isVesselVisibleToMe === 'function' && !window.isVesselVisibleToMe(vessel)) return;
+            seenTokenIds.add(tok.token_id);
             const isStationTok = !!(vessel && vessel.is_station);
             const isStrikeCraftTok = !!(vessel && vessel.is_strike_craft);
             const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : ((vessel?.tactical_speed ?? 160));
@@ -1554,6 +1604,13 @@ window.renderBattleMapPanel = function() {
             tokenEl.style.color = vessel ? (vessel.color || '#00e5a3') : '#ff3333';
             tokenEl.style.cursor = isStationTok ? 'pointer' : 'grab';
             tokenEl.style.userSelect = 'none';
+            // Fog of War build (this session): the token is only ever built
+            // for a viewer who's allowed to see it at all (see the
+            // isVesselVisibleToMe skip above) -- for the DM specifically,
+            // dim it slightly so a hidden-from-players token is still
+            // visually distinguishable on their own grid, without changing
+            // anything a player (who never gets this token built) would see.
+            tokenEl.style.opacity = (vessel && vessel.is_hidden && currentUserRole === 'dm') ? '0.55' : '1';
             // Visual Polish build (this session): an outer ring in the
             // viewer's own faction color (mine/ally/DM-NPC), layered outside
             // the existing HP-color border via a second box-shadow ring
@@ -2084,7 +2141,12 @@ window.renderBattleShipCards = function(tokens) {
     // section. Filtered out regardless of caller.
     tokens = (tokens || []).filter(tok => {
         const v = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
-        return !(v && v.is_strike_craft);
+        if (v && v.is_strike_craft) return false;
+        // Fog of War build (this session): same visibility rule as the grid
+        // token rendering above -- a hidden vessel gets no status card
+        // either, except for the DM and its own player-owner.
+        if (v && typeof window.isVesselVisibleToMe === 'function' && !window.isVesselVisibleToMe(v)) return false;
+        return true;
     });
 
     if (!tokens || tokens.length === 0) {
@@ -2123,7 +2185,9 @@ window.renderBattleShipCards = function(tokens) {
                     <span style="font-size:9px; color:#6b826a;">${ownerTag}${vessel.is_strike_craft ? ' · 🛩️' : ''}</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
+                    ${vessel.is_hidden ? `<span style="font-size:9px; color:#c778dd;" title="Hidden from every non-DM viewer except this vessel's own player-owner">🫥 HIDDEN</span>` : ''}
                     ${moveLine}
+                    ${isDm ? `<button class="layer-edit" onclick="window.toggleVesselHidden('${vessel.id}')" style="font-size:8px; padding:2px 6px; border-color:#c778dd; color:#c778dd;" title="Fog of War: toggle whether this vessel is hidden from every non-DM viewer except its own player-owner">${vessel.is_hidden ? '👁 UNHIDE' : '🫥 HIDE'}</button>` : ''}
                     ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
                 </div>
             </div>`;
