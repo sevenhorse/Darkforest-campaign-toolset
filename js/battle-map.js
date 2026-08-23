@@ -62,8 +62,29 @@ window.battleMapArmedToken = null; // { ship_marker_id } while a palette entry i
 
 function genBattleTokenId() { return (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : ('tok-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)); }
 
-const BATTLE_GRID_W = 460;
-const BATTLE_GRID_H = 380;
+// Battle Map Grid Expansion build (this session): doubled from 460x380 to
+// 920x760 (DM's confirmed choice, among 3 options presented) -- growing the
+// actual LOGICAL battlespace, not just the visual zoom (see
+// BATTLE_GRID_SCALE's own comment below for that distinction; this is the
+// "actually growing the battlespace" lever it warns changing SCALE alone
+// doesn't do). Raised at the DM's own request after Squadron AI Stances
+// shipped: the grid hadn't grown since the very first Battle Map build,
+// while token count and simultaneous visual effects had grown a lot since.
+// Existing weapon `range` values are mostly 0/unset (this app's "unlimited"
+// convention) so this is lower-risk than resizing usually would be -- see
+// the Grid Expansion checkpoint notes for what WAS touched to keep relative
+// mobility consistent (SQUADRON_TACTICAL_SPEED and the tactical_speed
+// defaults for NEW ships, both doubled) and what deliberately WASN'T
+// (existing ships' already-stored tactical_speed values -- not bulk-
+// migrated; flagged, not silently left inconsistent). The index.html
+// #battle-map-grid element's inline width/height must match these two
+// constants exactly (same requirement as before this build -- see that
+// element's own comment), and #battle-map-grid-wrap switched from a fixed
+// clipped viewport to a scrollable one since the fully-scaled grid
+// (920*1.5 x 760*1.5 = 1380x1140 CSS px) no longer fits most screens at
+// once -- see that element's comment for the reasoning.
+const BATTLE_GRID_W = 920;
+const BATTLE_GRID_H = 760;
 const BATTLE_TOKEN_SIZE = 34;
 
 // Visual-only zoom (tester feedback: "make the map bigger" -- see
@@ -183,6 +204,34 @@ function clampToGrid(x, y) {
     };
 }
 
+/* Squadron Movement + Retreat build (this session): moves ONE token
+   (identified by its ship_marker_id) up to maxDist px straight toward
+   targetPos, clamped to the grid -- used by the AI Stances' offensive
+   advance-on-target and low-HP retreat-toward-carrier behavior in
+   processBattleRoundAutomations below. Reads/writes through
+   window.globalBattleEncounterCache.tokens directly (via a fresh slice,
+   same "never mutate the live array in place" convention every other
+   token-position writer in this file already follows) so a caller can
+   await saveBattleTokens() on the result and have window.
+   getBattleTokenPosition immediately reflect the new position for
+   whatever it does next (e.g. firing from the arrived-at position).
+   Returns null (no-op) if the token isn't found -- fails open, same
+   as every other "squadron has no grid token" check in this file. */
+function moveTokenToward(shipMarkerId, targetPos, maxDist) {
+    if (!window.globalBattleEncounterCache) return null;
+    const currentTokens = (window.globalBattleEncounterCache.tokens || []).slice();
+    const idx = currentTokens.findIndex(t => t.ship_marker_id === shipMarkerId);
+    if (idx < 0) return null;
+    const cur = currentTokens[idx];
+    const dx = targetPos.x - cur.x, dy = targetPos.y - cur.y;
+    const dist = Math.hypot(dx, dy);
+    const newPos = (dist <= maxDist || dist === 0)
+        ? { x: targetPos.x, y: targetPos.y }
+        : clampToGrid(cur.x + dx * (maxDist / dist), cur.y + dy * (maxDist / dist));
+    currentTokens[idx] = { ...cur, x: newPos.x, y: newPos.y };
+    return currentTokens;
+}
+
 /* --- STRIKE CRAFT GRID POSITION (this session, confirmed design) ---
    Called from js/combat.js's spawnSquadronToken right after a launched
    squadron's ship_markers row is inserted. Auto-places a token for it on
@@ -204,7 +253,7 @@ window.addSquadronToBattleMap = async function(carrierVessel, sq, markerId, tact
         ? clampToGrid(carrierPos.x + (Math.random() * 60 - 30), carrierPos.y + (Math.random() * 60 - 30))
         : staggeredTokenPos(tokens.length);
 
-    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: markerId, x: pos.x, y: pos.y, move_remaining: tacticalSpeed ?? 80 });
+    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: markerId, x: pos.x, y: pos.y, move_remaining: tacticalSpeed ?? 160 });
     await saveBattleTokens(tokens);
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
@@ -247,7 +296,7 @@ window.handleBattleGridClick = function(evt) {
 
     const placedVessel = globalShipMarkersCache.find(m => m.id === window.battleMapArmedToken.ship_marker_id);
     const tokens = (window.globalBattleEncounterCache.tokens || []).slice();
-    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: window.battleMapArmedToken.ship_marker_id, x: pos.x, y: pos.y, move_remaining: placedVessel?.tactical_speed ?? 80 });
+    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: window.battleMapArmedToken.ship_marker_id, x: pos.x, y: pos.y, move_remaining: placedVessel?.tactical_speed ?? 160 });
     window.battleMapArmedToken = null;
     saveBattleTokens(tokens).then(() => window.renderBattleMapPanel());
 };
@@ -619,38 +668,81 @@ window.processBattleRoundAutomations = async function() {
             if (typeof syncSquadronHpToParent === 'function') syncSquadronHpToParent(sqShip);
             touchedCarrierIds.add(v.id); // this carrier's ship_deployed[].hp was just updated by syncSquadronHpToParent
             chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} engages ${sq.name} for ${total} ${dmgType} dmg. ${result.log}`);
+            // Bughunt pass (this session): this block was the one damage path
+            // in this function that never called checkBattleTokenDestroyed,
+            // unlike the ordnance-impact path above (which does, plus prunes
+            // pdPool) and the manual/AI-fire paths in js/combat.js (rollShipWeapon,
+            // resolveSquadronWeaponFire). Without it, a squadron killed by
+            // automated ship PD during Advance Round kept its grid token
+            // indefinitely (sq.hp synced to 0 via syncSquadronHpToParent, but
+            // count untouched and the token still present) -- which, combined
+            // with this session's new AI-stance retreat logic, meant a dead
+            // squadron would show up as "breaking off" forever every round
+            // instead of ever leaving the grid. Called unawaited, matching the
+            // syncSquadronHpToParent call just above it in this same forEach
+            // (forEach can't be awaited); its first await is inside
+            // saveBattleTokens, which reassigns window.globalBattleEncounterCache.tokens
+            // synchronously before that await, so the removal is already
+            // reflected in the cache by the time this forEach returns and the
+            // downstream AI-stance loop runs.
+            if (typeof window.checkBattleTokenDestroyed === 'function') checkBattleTokenDestroyed(sqShip);
           } catch (err) {
             console.error('processBattleRoundAutomations: strike-craft PD engagement failed, skipping this squadron this round', sq, err);
           }
         });
     });
 
-    /* --- Squadron AI Stances build (this session): offensive stances ---
+    /* --- Squadron AI Stances build (offensive stances), extended this
+       session with Squadron Movement + Retreat ---
        Runs AFTER both PD passes above, so an AI-controlled squadron never
        fires from a position it didn't survive this round's defensive fire
        to hold. Each deployed squadron with an ai_stance of
        attack_strike_craft/attack_capitals/attack_escorts resolves exactly
        once per Advance Round:
-         1. Eligible targets = current battle tokens, excluding the
-            squadron's own side (owner_id match, the same friend/foe
+         0. (New this session, confirmed design) Below 30% HP the squadron
+            breaks off entirely -- moves toward its own carrier's current
+            token position instead of picking a target, and does NOT fire
+            this round. 30% is a first-pass placeholder threshold, not a
+            DM-tuned number (flagged in the checkpoint notes) -- easy to
+            retune to a different fraction later. Intercept Munitions
+            squadrons do NOT retreat -- confirmed design keeps them
+            stationary regardless of HP (see squadronInterceptPool above),
+            reconciling "should AI squadrons retreat" (yes) against
+            "should Intercept move" (no, stay in place) by scoping retreat
+            to the 3 offensive stances only, which are the only ones that
+            actively close distance/engage in the first place.
+         1. Otherwise, eligible targets = current battle tokens, excluding
+            the squadron's own side (owner_id match, the same friend/foe
             heuristic used everywhere else in this app) and filtered by
             stance -- is_strike_craft for Attack Strike Craft, or
             vessel_class ('Capital'/'Escort', a new ship_markers/
-            ship_templates field added in this same build) for the other
-            two. A ship with no vessel_class set is invisible to BOTH
-            Attack Capital Ships and Attack Escorts -- it isn't obviously
-            either one, so it's excluded rather than guessed into a side.
+            ship_templates field added in the original Squadron AI Stances
+            build) for the other two. A ship with no vessel_class set is
+            invisible to BOTH Attack Capital Ships and Attack Escorts -- it
+            isn't obviously either one, so it's excluded rather than
+            guessed into a side.
          2. Target picked = nearest by live grid distance among eligible
             candidates (confirmed design).
-         3. Weapon picked = this squadron type's weapon tagged with the
+         3. (New this session, confirmed design) The squadron then moves up
+            to its own tactical_speed px straight toward that target's
+            CURRENT position via moveTokenToward (defined above,
+            clampToGrid-bounded) -- move-then-fire is my own ordering call,
+            not something separately confirmed; flagged rather than implied
+            as the only sensible option. Since squadron weapons have no
+            `range` field at all, this doesn't gate whether it CAN fire --
+            it's purely so an AI-stance squadron visibly closes on its
+            target instead of sniping from a static position it never
+            approaches.
+         4. Weapon picked = this squadron type's weapon tagged with the
             role that fits the stance (anti_fighter for Attack Strike
             Craft, anti_capital for the other two -- see STRIKE_CRAFT_DB's
             role-tag comment, js/combat.js), falling back to the squadron's
             first listed weapon if none match (confirmed design).
        Resolution itself goes through window.resolveSquadronWeaponFire --
        the exact same damage/persist/chat-log/beam-effect path the manual
-       FIRE button uses (extracted from window.rollSquadronWeapon this same
-       build specifically so there'd be one implementation, not two). */
+       FIRE button uses (extracted from window.rollSquadronWeapon in the
+       original build specifically so there'd be one implementation, not
+       two). */
     for (const v of globalShipMarkersCache.slice()) {
         for (let sqIdx = 0; sqIdx < (v.ship_deployed || []).length; sqIdx++) {
           try {
@@ -661,6 +753,20 @@ window.processBattleRoundAutomations = async function() {
             if (!sqShip) continue;
             const selfPos = window.getBattleTokenPosition(sqShip.id);
             if (!selfPos) continue; // no grid token this round -- can't range/nearest-check, skip (fails open, same as every other stance/PD check in this function)
+
+            const moveDist = sqShip.tactical_speed || SQUADRON_TACTICAL_SPEED;
+
+            // --- Squadron Movement + Retreat (this session): low-HP break-off ---
+            const hpPct = sq.max_hp > 0 ? (sq.hp / sq.max_hp) : 1;
+            if (hpPct < 0.30) {
+                const carrierPos = window.getBattleTokenPosition(v.id);
+                if (carrierPos) {
+                    const movedTokens = moveTokenToward(sqShip.id, carrierPos, moveDist);
+                    if (movedTokens) await saveBattleTokens(movedTokens);
+                    chatLines.push(`🤖 [AI STANCE] ${sq.name} drops below 30% strength and breaks off, retreating toward ${v.name}.`);
+                } // carrier not on the grid -- nothing to retreat toward, holds position silently
+                continue; // no fire while retreating
+            }
 
             let candidates = tokens
                 .map(tok => globalShipMarkersCache.find(m => m.id === tok.ship_marker_id))
@@ -676,14 +782,18 @@ window.processBattleRoundAutomations = async function() {
             }
             if (candidates.length === 0) continue; // nothing eligible this round -- silently passes, same as a manual player choosing not to fire
 
-            let bestTarget = null, bestDist = Infinity;
+            let bestTarget = null, bestDist = Infinity, bestTargetPos = null;
             candidates.forEach(m => {
                 const pos = window.getBattleTokenPosition(m.id);
                 if (!pos) return;
                 const d = Math.hypot(pos.x - selfPos.x, pos.y - selfPos.y);
-                if (d < bestDist) { bestDist = d; bestTarget = m; }
+                if (d < bestDist) { bestDist = d; bestTarget = m; bestTargetPos = pos; }
             });
             if (!bestTarget) continue;
+
+            // --- Squadron Movement + Retreat (this session): advance on target ---
+            const movedTokens = moveTokenToward(sqShip.id, bestTargetPos, moveDist);
+            if (movedTokens) await saveBattleTokens(movedTokens);
 
             const dbStats = STRIKE_CRAFT_DB[sq.type];
             if (!dbStats) continue;
@@ -1032,7 +1142,7 @@ window.deployTemplateToBattle = async function() {
     const tokens = (window.globalBattleEncounterCache.tokens || []).slice();
     const pos = staggeredTokenPos(tokens.length);
     const newVessel = globalShipMarkersCache.find(m => m.id === newId);
-    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: newId, x: pos.x, y: pos.y, move_remaining: newVessel?.tactical_speed ?? 80 });
+    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: newId, x: pos.x, y: pos.y, move_remaining: newVessel?.tactical_speed ?? 160 });
     await saveBattleTokens(tokens);
     window.renderBattleMapPanel();
 };
@@ -1065,7 +1175,7 @@ window.deployFleetToBattle = async function() {
             if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
             const pos = staggeredTokenPos(tokens.length);
             const newVessel = globalShipMarkersCache.find(m => m.id === newId);
-            tokens.push({ token_id: genBattleTokenId(), ship_marker_id: newId, x: pos.x, y: pos.y, move_remaining: newVessel?.tactical_speed ?? 80 });
+            tokens.push({ token_id: genBattleTokenId(), ship_marker_id: newId, x: pos.x, y: pos.y, move_remaining: newVessel?.tactical_speed ?? 160 });
             placedCount++;
         }
     }
@@ -1196,7 +1306,7 @@ window.resetBattleMapMovement = async function() {
     if (!window.globalBattleEncounterCache) return;
     const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
         const vessel = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
-        return { ...t, move_remaining: (vessel?.tactical_speed ?? 80) };
+        return { ...t, move_remaining: (vessel?.tactical_speed ?? 160) };
     });
     await saveBattleTokens(tokens);
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
@@ -1315,7 +1425,7 @@ window.renderBattleMapPanel = function() {
             const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
             const isStationTok = !!(vessel && vessel.is_station);
             const isStrikeCraftTok = !!(vessel && vessel.is_strike_craft);
-            const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : ((vessel?.tactical_speed ?? 80));
+            const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : ((vessel?.tactical_speed ?? 160));
 
             let tokenEl = battleMapTokenEls[tok.token_id];
             if (!tokenEl) {
@@ -1337,8 +1447,8 @@ window.renderBattleMapPanel = function() {
             tokenEl.title = isStationTok
                 ? `${vessel.name} — stationary platform, immobile`
                 : isStrikeCraftTok
-                ? `${vessel.name} — strike craft, Move: ${moveRemaining}/${vessel.tactical_speed ?? 80} px remaining. Fire from the Hangar Bay panel, not this token.`
-                : `${vessel ? vessel.name : '(vessel not found)'} — Move: ${moveRemaining}${vessel ? '/' + (vessel.tactical_speed ?? 80) : ''} px remaining this round`;
+                ? `${vessel.name} — strike craft, Move: ${moveRemaining}/${vessel.tactical_speed ?? 160} px remaining. Fire from the Hangar Bay panel, not this token.`
+                : `${vessel ? vessel.name : '(vessel not found)'} — Move: ${moveRemaining}${vessel ? '/' + (vessel.tactical_speed ?? 160) : ''} px remaining this round`;
             // left/top set separately from the rest so re-applying the same
             // value every render (nothing moved) never re-triggers the CSS
             // transition -- only an ACTUAL change animates.
@@ -1908,7 +2018,7 @@ window.renderBattleShipCards = function(tokens) {
         const ownedByPlayer = !!(ownerProf && ownerProf.role !== 'dm');
         const fullDetail = isDm || ownedByPlayer;
         const canWithdraw = isDm || vessel.owner_id === currentUserId;
-        const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : (vessel.tactical_speed ?? 80);
+        const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : (vessel.tactical_speed ?? 160);
         const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
         const accentColor = fullDetail ? '#00e5a3' : '#ff3333';
         const ownerTag = ownerProf ? (ownerProf.username || 'Commander') : (isDm ? 'Unowned' : 'Unknown');
@@ -1919,7 +2029,7 @@ window.renderBattleShipCards = function(tokens) {
         // stationary-platform tooltip.
         const moveLine = vessel.is_station
             ? `<span style="font-size:9px; color:#6b826a;" title="Stationary platform — no Battle Map movement">🛰 STATIONARY</span>`
-            : `<span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 80}</span>`;
+            : `<span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>`;
 
         const header = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
