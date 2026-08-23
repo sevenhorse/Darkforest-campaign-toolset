@@ -453,11 +453,23 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         let classBadge = wClass === 'ordnance' ? `<span style="font-size:8px; color:#c778dd; border:1px solid #c778dd; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Ordnance — multi-turn flight, counter-fireable by Point Defense">☠ ORDNANCE</span>` : '';
         let pdBadge = w.is_point_defense ? `<span style="font-size:8px; color:#66d9ff; border:1px solid #66d9ff; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Point Defense — auto-fires at inbound ordnance and engaged strike craft on Advance Round">🛡 PD</span>` : '';
         let rangeBadge = w.range ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Battle Map targeting range">📏 ${w.range}</span>` : '';
+
+        // Station Designer build: a weapon optionally assigned to a deck is
+        // disabled once that deck's HP hits 0 -- see genDeckId/ensureDeckIds
+        // above. Fails open (no badge, weapon fires normally) if the
+        // assigned deck was since deleted, same "don't corrupt on a stale
+        // reference" precedent as this project's other jsonb override links.
+        let assignedDeck = w.assigned_deck_id ? (vessel.ship_decks || []).find(d => d.id === w.assigned_deck_id) : null;
+        let deckDestroyed = !!(assignedDeck && assignedDeck.hp <= 0);
+        let deckBadge = assignedDeck ? `<span style="font-size:8px; color:${deckDestroyed ? '#ff3333' : '#6b826a'}; border:1px solid ${deckDestroyed ? '#ff3333' : '#3c4e36'}; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Tied to the ${assignedDeck.name} deck — a destroyed deck can't fire its assigned weapons">🔧 ${assignedDeck.name}${deckDestroyed ? ' DESTROYED' : ''}</span>` : '';
+        let fireDisabledAttr = deckDestroyed ? 'disabled' : '';
+        let fireDisabledStyle = deckDestroyed ? ' opacity:0.4; cursor:not-allowed;' : '';
+        let fireDisabledTitle = deckDestroyed ? `title="${assignedDeck.name} deck destroyed — cannot fire"` : '';
         wHtml += `
         <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                 <div>
-                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}
+                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${deckBadge}
                     <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
@@ -466,8 +478,8 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
                     <label for="${idPrefix}wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
                     <input type="number" id="${idPrefix}wpn-volley-${vessel.id}-${idx}" value="1" min="1" max="${w.gun_count || 1}" title="Volley Count (max ${w.gun_count || 1} guns)" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
                     ${wClass === 'ordnance'
-                        ? `<button class="layer-edit" onclick="window.launchOrdnance('${vessel.id}', ${idx}, '${idPrefix}')" style="padding:4px 10px; font-size:10px; border-color:#c778dd; color:#c778dd;" title="Launches a multi-turn payload if this vessel is a token in an active battle; resolves instantly otherwise">LAUNCH</button>`
-                        : `<button class="layer-edit" onclick="window.rollShipWeapon('${vessel.id}', ${idx}, '${idPrefix}')" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">FIRE</button>`}
+                        ? `<button class="layer-edit" ${fireDisabledAttr} ${fireDisabledTitle} onclick="window.launchOrdnance('${vessel.id}', ${idx}, '${idPrefix}')" style="padding:4px 10px; font-size:10px; border-color:#c778dd; color:#c778dd;${fireDisabledStyle}" ${deckDestroyed ? '' : 'title="Launches a multi-turn payload if this vessel is a token in an active battle; resolves instantly otherwise"'}>LAUNCH</button>`
+                        : `<button class="layer-edit" ${fireDisabledAttr} ${fireDisabledTitle} onclick="window.rollShipWeapon('${vessel.id}', ${idx}, '${idPrefix}')" style="padding:4px 10px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;${fireDisabledStyle}">FIRE</button>`}
                     ${showManageButtons ? `<button class="layer-edit" onclick="window.openEditWeaponModal('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;" title="Edit weapon">✎</button>
                     <button class="layer-del" onclick="window.deleteShipWeapon('${vessel.id}', ${idx})" style="padding:4px 8px; font-size:10px;">✕</button>` : ''}
                 </div>
@@ -499,6 +511,15 @@ window.renderVesselDeck = function() {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
+    // Station Designer build: self-heal any legacy decks (created before
+    // weapon-deck-gating existed) that lack a stable id — see genDeckId/
+    // ensureDeckIds above. Persists once, silently, the first time this
+    // vessel's decks are rendered after the fix ships.
+    vessel.ship_decks = vessel.ship_decks || [];
+    if (window.ensureDeckIds(vessel.ship_decks)) {
+        db.from('ship_markers').update({ ship_decks: vessel.ship_decks }).eq('id', vessel.id);
+    }
+
     const healthContainer = document.getElementById('vessel-health-container');
     const decksContainer = document.getElementById('vessel-decks-container');
     const weaponsContainer = document.getElementById('vessel-weapons-container');
@@ -509,6 +530,15 @@ window.renderVesselDeck = function() {
     const newWpnDmgTypeSelect = document.getElementById('new-ship-wpn-dmgtype');
     if (newWpnDmgTypeSelect && newWpnDmgTypeSelect.options.length === 0) {
         newWpnDmgTypeSelect.innerHTML = window.buildDamageTypeOptionsHtml('Impact');
+    }
+
+    // Re-populated every render (not one-time like the damage-type select
+    // above) since which decks exist can change vessel to vessel and render
+    // to render — unlike DAMAGE_TYPES, which is static.
+    const newWpnDeckSelect = document.getElementById('new-ship-wpn-deck');
+    if (newWpnDeckSelect) {
+        const decks = vessel.ship_decks || [];
+        newWpnDeckSelect.innerHTML = '<option value="">-- Not deck-gated --</option>' + decks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
     }
 
     if (healthContainer) {
@@ -1236,6 +1266,21 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
 
+    // Station Designer build: a weapon tied to a deck can't fire once that
+    // deck's HP hits 0. The badge in renderShipWeaponsHtml is purely visual
+    // (and disables the button) — this is the authoritative check, since the
+    // button-disable can be bypassed by a stale render. Fails open if the
+    // assigned deck no longer exists (same "don't corrupt on a stale
+    // reference" precedent as elsewhere in this app).
+    if (wpn.assigned_deck_id) {
+        const assignedDeck = (vessel.ship_decks || []).find(d => d.id === wpn.assigned_deck_id);
+        if (assignedDeck && assignedDeck.hp <= 0) {
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`[DECK DESTROYED] ${wpn.name} is mounted on the ${assignedDeck.name} deck, which has been destroyed and can no longer fire.`);
+            return;
+        }
+    }
+
     let volleyInput = document.getElementById(`${idPrefix}wpn-volley-${vesselId}-${idx}`);
     let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
     let targetSelect = document.getElementById(`${idPrefix}wpn-target-${vesselId}-${idx}`);
@@ -1370,6 +1415,28 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     }
 };
 
+/* Station Designer build (this session): weapons can optionally be tied to a
+   specific deck (assigned_deck_id on the ship_weapons entry), so a destroyed
+   deck disables its assigned weapons -- the lightweight "independently-
+   destroyable section" mechanic confirmed for stations, reusing the existing
+   ship_decks HP tracking rather than a new sub-entity model. Needs a STABLE
+   id per deck (array index isn't safe -- moveShipDeckOrder already reorders
+   entries, which would silently reassign a weapon to a different deck).
+   ship_decks predates this and has no id field, so genDeckId/ensureDeckIds
+   self-heal legacy decks the same way this project already handles legacy
+   hyperlane nodes: an id is added the first time a deck is touched (any
+   render pass here or in ship-designer.js's loadout modal) and persisted,
+   rather than requiring every existing deck to be manually re-created. */
+function genDeckId() {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('deck-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+}
+window.genDeckId = genDeckId;
+window.ensureDeckIds = function(decks) {
+    let changed = false;
+    (decks || []).forEach(d => { if (!d.id) { d.id = genDeckId(); changed = true; } });
+    return changed;
+};
+
 window.addShipDeck = async function() {
     const select = document.getElementById('vessel-deck-select');
     const name = document.getElementById('new-deck-name').value.trim();
@@ -1384,7 +1451,7 @@ window.addShipDeck = async function() {
     if (!vessel) return;
 
     let decks = vessel.ship_decks || [];
-    decks.push({ name: name, hp: maxHp, max_hp: maxHp, type: type, boarding_status: 'secure' });
+    decks.push({ name: name, hp: maxHp, max_hp: maxHp, type: type, boarding_status: 'secure', id: genDeckId() });
 
     await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vessel.id);
     vessel.ship_decks = decks;
@@ -1721,6 +1788,8 @@ window.addShipWeapon = async function() {
     // 0 = unlimited (no Battle Map targeting restriction) — the default for
     // every new weapon and for every legacy weapon that predates this field.
     let weaponRange = rangeInput ? Math.max(0, parseInt(rangeInput.value) || 0) : 0;
+    let deckSelect = document.getElementById('new-ship-wpn-deck');
+    let assignedDeckId = (deckSelect && deckSelect.value) ? deckSelect.value : null;
 
     if (!select || !select.value) { alert("Select a vessel token first."); return; }
     if (!name) { alert("Please enter a weapon system name."); return; }
@@ -1736,7 +1805,8 @@ window.addShipWeapon = async function() {
         loc, name, dice, modifier: mod, explodes,
         ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0,
         gun_count: gunCount, damage_type: damageType,
-        weapon_class: weaponClass, is_point_defense: isPointDefense, range: weaponRange
+        weapon_class: weaponClass, is_point_defense: isPointDefense, range: weaponRange,
+        assigned_deck_id: assignedDeckId
     });
 
     await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
@@ -1751,6 +1821,7 @@ window.addShipWeapon = async function() {
     if (classSelect) classSelect.value = 'direct_fire';
     if (pdCheckbox) pdCheckbox.checked = false;
     if (rangeInput) rangeInput.value = '0';
+    if (deckSelect) deckSelect.value = '';
     window.renderVesselDeck();
 };
 
@@ -1804,6 +1875,8 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             </select>
             <label for="wpn-edit-range" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;" title="Battle Map targeting range, grid px. 0 = unlimited.">Range (Battle Map grid px, 0 = unlimited)</label>
             <input type="number" id="wpn-edit-range" min="0" style="border-color:#ff3333; text-align:center;">
+            <label for="wpn-edit-deck" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;" title="A destroyed deck can't fire its assigned weapons.">Assigned Deck (optional — ties this weapon's firing to a deck's HP)</label>
+            <select id="wpn-edit-deck" style="border-color:#ff3333;"></select>
             <div style="display:flex; justify-content:space-between; margin-top:8px;">
                 <label for="wpn-edit-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;">
                     <input type="checkbox" id="wpn-edit-explodes" style="margin:0;"> Exploding Dice
@@ -1837,6 +1910,8 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             wpn.weapon_class = document.getElementById('wpn-edit-class').value === 'ordnance' ? 'ordnance' : 'direct_fire';
             wpn.is_point_defense = document.getElementById('wpn-edit-pd').checked;
             wpn.range = Math.max(0, parseInt(document.getElementById('wpn-edit-range').value) || 0);
+            const deckSel = document.getElementById('wpn-edit-deck');
+            wpn.assigned_deck_id = (deckSel && deckSel.value) ? deckSel.value : null;
 
             let gunsVal = parseInt(document.getElementById('wpn-edit-guns').value);
             wpn.gun_count = (gunsVal && gunsVal > 0) ? gunsVal : 1;
@@ -1876,6 +1951,18 @@ window.deleteShipWeapon = async function(vesselId, idx) {
         document.getElementById('wpn-edit-class').value = wpn.weapon_class === 'ordnance' ? 'ordnance' : 'direct_fire';
         document.getElementById('wpn-edit-pd').checked = !!wpn.is_point_defense;
         document.getElementById('wpn-edit-range').value = wpn.range || 0;
+
+        // Deck dropdown re-populated fresh every open (decks can change
+        // between edits) — self-heals missing deck ids the same way
+        // renderVesselDeck does, so an old deck with no id still shows up.
+        vessel.ship_decks = vessel.ship_decks || [];
+        if (window.ensureDeckIds(vessel.ship_decks)) {
+            db.from('ship_markers').update({ ship_decks: vessel.ship_decks }).eq('id', vessel.id);
+        }
+        const deckSel = document.getElementById('wpn-edit-deck');
+        deckSel.innerHTML = '<option value="">-- Not deck-gated --</option>' + vessel.ship_decks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        deckSel.value = wpn.assigned_deck_id || '';
+
         overlay.style.display = 'flex';
     };
 })();
