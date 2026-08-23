@@ -716,6 +716,19 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
 
+    // Station Designer build (js/combat.js): same deck-gate check as
+    // rollShipWeapon, duplicated here since launchOrdnance is a separate
+    // fire path for ordnance-classified weapons. Fails open if the deck no
+    // longer exists.
+    if (wpn.assigned_deck_id) {
+        const assignedDeck = (vessel.ship_decks || []).find(d => d.id === wpn.assigned_deck_id);
+        if (assignedDeck && assignedDeck.hp <= 0) {
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`[DECK DESTROYED] ${wpn.name} is mounted on the ${assignedDeck.name} deck, which has been destroyed and can no longer launch.`);
+            return;
+        }
+    }
+
     const selfPos = window.getBattleTokenPosition(vesselId);
     if (!selfPos) {
         // Not a battle-map token right now — no grid to track a flight
@@ -858,6 +871,19 @@ function battleTokenHpColor(vessel) {
    move_remaining resets to the vessel's tactical_speed whenever the DM
    clicks ADVANCE ROUND — see resetBattleMapMovement below. */
 function wireTokenDrag(tokenEl, token) {
+    // Station Designer build: a station is fully immobile on the Battle Map
+    // (confirmed design — no move-remaining tracking, can't be repositioned
+    // by drag) rather than just defaulting to 0 speed like any other ship
+    // could. A plain click still opens the vessel terminal, same as a
+    // short/non-drag click on a normal token.
+    const stationVessel = globalShipMarkersCache.find(m => m.id === token.ship_marker_id);
+    if (stationVessel && stationVessel.is_station) {
+        tokenEl.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+        tokenEl.addEventListener('click', () => {
+            if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(token.ship_marker_id);
+        });
+        return;
+    }
     let isDragging = false, moved = false, startX, startY, initialLeft, initialTop;
     tokenEl.addEventListener('mousedown', (e) => {
         e.stopPropagation();
@@ -999,12 +1025,15 @@ window.renderBattleMapPanel = function() {
         grid.onclick = window.handleBattleGridClick;
         tokens.forEach(tok => {
             const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+            const isStationTok = !!(vessel && vessel.is_station);
             const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : ((vessel?.tactical_speed ?? 80));
             const tokenEl = document.createElement('div');
-            tokenEl.title = `${vessel ? vessel.name : '(vessel not found)'} — Move: ${moveRemaining}${vessel ? '/' + (vessel.tactical_speed ?? 80) : ''} px remaining this round`;
-            tokenEl.style.cssText = `position:absolute; left:${tok.x}px; top:${tok.y}px; width:${BATTLE_TOKEN_SIZE}px; height:${BATTLE_TOKEN_SIZE}px; border-radius:50%; background:#0a1410; border:2px solid ${battleTokenHpColor(vessel)}; display:flex; align-items:center; justify-content:center; font-size:8px; color:${vessel ? (vessel.color || '#00e5a3') : '#ff3333'}; cursor:grab; user-select:none; box-shadow:0 0 6px rgba(0,0,0,0.6); text-align:center; overflow:hidden; padding:1px;`;
+            tokenEl.title = isStationTok
+                ? `${vessel.name} — stationary platform, immobile`
+                : `${vessel ? vessel.name : '(vessel not found)'} — Move: ${moveRemaining}${vessel ? '/' + (vessel.tactical_speed ?? 80) : ''} px remaining this round`;
+            tokenEl.style.cssText = `position:absolute; left:${tok.x}px; top:${tok.y}px; width:${BATTLE_TOKEN_SIZE}px; height:${BATTLE_TOKEN_SIZE}px; border-radius:${isStationTok ? '4px' : '50%'}; background:#0a1410; border:2px solid ${battleTokenHpColor(vessel)}; display:flex; align-items:center; justify-content:center; font-size:8px; color:${vessel ? (vessel.color || '#00e5a3') : '#ff3333'}; cursor:${isStationTok ? 'pointer' : 'grab'}; user-select:none; box-shadow:0 0 6px rgba(0,0,0,0.6); text-align:center; overflow:hidden; padding:1px;`;
             tokenEl.innerText = vessel ? vessel.name.slice(0, 6) : '???';
-            if (moveRemaining < 0) {
+            if (!isStationTok && moveRemaining < 0) {
                 const moveBadge = document.createElement('div');
                 moveBadge.style.cssText = 'position:absolute; top:-8px; right:-4px; background:#ff3333; color:#030403; font-size:7px; font-weight:bold; border-radius:6px; padding:0 3px; pointer-events:none;';
                 moveBadge.innerText = '!';
@@ -1168,6 +1197,13 @@ window.renderBattleShipCards = function(tokens) {
         const accentColor = fullDetail ? '#00e5a3' : '#ff3333';
         const ownerTag = ownerProf ? (ownerProf.username || 'Commander') : (isDm ? 'Unowned' : 'Unknown');
         const expanded = battleMapExpandedCards.has(tok.token_id);
+        // Station Designer build: stations are immobile, so the move-
+        // remaining readout is dropped entirely rather than showing a
+        // meaningless "Move 0/0" — matches the Battle Map grid's own
+        // stationary-platform tooltip.
+        const moveLine = vessel.is_station
+            ? `<span style="font-size:9px; color:#6b826a;" title="Stationary platform — no Battle Map movement">🛰 STATIONARY</span>`
+            : `<span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 80}</span>`;
 
         const header = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
@@ -1177,7 +1213,7 @@ window.renderBattleShipCards = function(tokens) {
                     <span style="font-size:9px; color:#6b826a;">${ownerTag}${vessel.is_strike_craft ? ' · 🛩️' : ''}</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 80}</span>
+                    ${moveLine}
                     ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
                 </div>
             </div>`;
