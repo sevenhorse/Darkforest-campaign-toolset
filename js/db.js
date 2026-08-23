@@ -138,6 +138,7 @@ async function fetchUserProfile(user) {
     initSystemHazardsRealtimeChannel();
     initPerkDefinitionsRealtimeChannel();
     if (typeof initAugmentDefinitionsRealtimeChannel === 'function') initAugmentDefinitionsRealtimeChannel();
+    if (typeof initGearDefinitionsRealtimeChannel === 'function') initGearDefinitionsRealtimeChannel();
     initHazardDefinitionsRealtimeChannel();
     initPlanetaryModifiersRealtimeChannel();
     initHyperlanesRealtimeChannel();
@@ -164,6 +165,7 @@ async function fetchUserProfile(user) {
     if (typeof loadSystemHazards === 'function') loadSystemHazards();
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
     if (typeof loadAugmentDefinitions === 'function') loadAugmentDefinitions();
+    if (typeof loadGearDefinitions === 'function') loadGearDefinitions();
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
     loadSystemOwnershipOverrides();
@@ -181,6 +183,7 @@ async function loadAllProfiles() {
     const { data: arsenalData } = await db.from('character_arsenal').select('*');
     const { data: perkData } = await db.from('character_perks').select('*');
     const { data: augmentData } = await db.from('character_augments').select('*');
+    const { data: gearData } = await db.from('character_gear').select('*');
 
     if (profData) {
         allProfiles = profData.map(p => {
@@ -189,7 +192,8 @@ async function loadAllProfiles() {
             const a = arsenalData?.filter(ars => ars.profile_id === p.id || ars.character_id === c.id) || [];
             const pk = perkData?.filter(perk => perk.character_id === c.id) || [];
             const ag = augmentData?.filter(aug => aug.character_id === c.id) || [];
-            return { ...p, character: c, skills: s, arsenal: a, perks: pk, augments: ag };
+            const gr = gearData?.filter(g => g.character_id === c.id) || [];
+            return { ...p, character: c, skills: s, arsenal: a, perks: pk, augments: ag, gear: gr };
         });
         
         const myProf = allProfiles.find(p => p.id === currentUserId);
@@ -560,6 +564,19 @@ function initAugmentDefinitionsRealtimeChannel() {
     augmentDefinitionsRealtimeChannel = db.channel('augment_definitions_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'augment_definitions' }, () => {
             if (typeof loadAugmentDefinitions === 'function') loadAugmentDefinitions();
+        })
+        .subscribe();
+}
+
+// Gear Designer catalog -- same shape as the perk/augment channels above.
+// character_gear (the per-character loadout, including the equipped
+// toggle) has no realtime channel of its own -- same self-service,
+// uncached-live convention as character_perks/character_augments.
+let gearDefinitionsRealtimeChannel;
+function initGearDefinitionsRealtimeChannel() {
+    gearDefinitionsRealtimeChannel = db.channel('gear_definitions_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'gear_definitions' }, () => {
+            if (typeof loadGearDefinitions === 'function') loadGearDefinitions();
         })
         .subscribe();
 }
