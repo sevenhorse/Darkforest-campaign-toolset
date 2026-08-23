@@ -27,7 +27,10 @@ body {
     display: flex; justify-content: center; align-items: center; height: 100vh; text-align: center;
     background: radial-gradient(circle, #09100d 0%, #020302 100%);
 }
-#login-container { width: 380px; text-align: center; position: relative; border-color: #00e5a3; }
+/* max-width safety net (mobile pass, this session) -- fixed 380px alone
+   overflows narrow phones (~360px CSS px and below) since nothing else
+   here constrained it. */
+#login-container { width: 380px; max-width: calc(100vw - 32px); box-sizing: border-box; text-align: center; position: relative; border-color: #00e5a3; }
 
 h2, h3, h4 { color: #00e5a3; margin-top: 0; text-transform: uppercase; letter-spacing: 1px; }
 
@@ -212,7 +215,11 @@ canvas { display: block; width: 100%; height: 100%; }
    in_flight_ordnance every render (synced to all clients for free via the
    existing battle_encounters_stream postgres_changes subscription). Position
    is lerped along the source->target line by turns_remaining; split salvos
-   fan out via a small perpendicular offset so siblings don't overlap. */
+   fan out via a small perpendicular offset so siblings don't overlap.
+   background/box-shadow here are just the pre-Animation-Suite fallback --
+   js/battle-map.js's renderOrdnanceOverlay now sets both inline per-marker
+   from the salvo's actual damage_type color (window.DAMAGE_TYPES), same
+   convention as .battle-fire-beam below. */
 .battle-ordnance-marker {
     position: absolute; width: 8px; height: 8px; margin-left: -4px; margin-top: -4px;
     border-radius: 50%; background: #c778dd; box-shadow: 0 0 6px #c778dd;
@@ -221,8 +228,12 @@ canvas { display: block; width: 100%; height: 100%; }
 
 /* Brief flash spawned where a salvo resolves (impact) or otherwise leaves
    in_flight_ordnance (intercepted/fizzled -- outcome isn't visually
-   distinguished this round, see architecture doc). Self-removes via
-   setTimeout in spawnImpactFlash. */
+   distinguished this round, see architecture doc), and also reused (as of
+   the Animation Suite build) as the Tracer family's arrival flash. The
+   radial-gradient background here is just the fallback default (used when
+   no color is passed); spawnImpactFlash sets an inline color-matched
+   background whenever a damage-type/salvo color is available. Self-removes
+   via setTimeout in spawnImpactFlash. */
 .battle-impact-flash {
     position: absolute; width: 20px; height: 20px; margin-left: -10px; margin-top: -10px;
     border-radius: 50%; background: radial-gradient(circle, rgba(255,170,0,0.9), rgba(255,51,51,0) 70%);
@@ -233,13 +244,15 @@ canvas { display: block; width: 100%; height: 100%; }
     100% { transform: scale(2.2); opacity: 0; }
 }
 
-/* Direct-fire weapon shot -- a thin rotated beam drawn between the firing
-   and target token centers, colored via window.DAMAGE_TYPES[dmgType].color.
-   LOCAL-ONLY: rollShipWeapon has no ephemeral/broadcast channel to sync this
-   to other connected viewers (this codebase only has postgres_changes on
-   real tables), so only the firing client's own screen sees the beam. This
-   is a deliberate, flagged limitation, not a bug. Self-removes via
-   setTimeout in playWeaponFireEffect. */
+/* Direct-fire weapon shot, BEAM family (Energy/Ion/Exotic/Antimatter/Heat --
+   see window.DAMAGE_TYPE_FAMILY) -- a thin rotated beam drawn between the
+   firing and target token centers, colored via
+   window.DAMAGE_TYPES[dmgType].color. LOCAL-ONLY: rollShipWeapon has no
+   ephemeral/broadcast channel to sync this to other connected viewers (this
+   codebase only has postgres_changes on real tables), so only the firing
+   client's own screen sees the beam. This is a deliberate, flagged
+   limitation, not a bug -- applies to all 4 effect families below too.
+   Self-removes via setTimeout in spawnBeamEffect. */
 .battle-fire-beam {
     position: absolute; height: 2px; transform-origin: 0 50%; pointer-events: none;
     z-index: 7; animation: battleFireBeamFade 0.35s ease-out forwards;
@@ -247,6 +260,64 @@ canvas { display: block; width: 100%; height: 100%; }
 @keyframes battleFireBeamFade {
     0% { opacity: 1; }
     100% { opacity: 0; }
+}
+
+/* Direct-fire weapon shot, TRACER family (Impact/Piercing/Cold) -- Animation
+   Suite build. A small glowing dot spawned at the source token then
+   immediately repositioned to the target token; this transition is what
+   actually animates the travel (see spawnTracerEffect's `void
+   tracer.offsetWidth` layout-flush comment for why the two writes don't
+   just collapse into an instant jump). Removed on arrival in favor of a
+   color-matched .battle-impact-flash. */
+.battle-fire-tracer {
+    position: absolute; width: 6px; height: 6px; margin-left: -3px; margin-top: -3px;
+    border-radius: 50%; pointer-events: none; z-index: 7;
+    transition: left 0.3s linear, top 0.3s linear;
+}
+
+/* Direct-fire weapon shot, BURST family (Explosive/Flak/Corrosive) --
+   Animation Suite build. Deliberately no line from source at all (per the
+   confirmed design -- represents an area-detonation weapon, not a directed
+   shot): a colored flash plus several shrapnel "shards" flying outward from
+   the target, each an independent element rotated via the --shard-angle
+   custom property set inline per shard in spawnBurstEffect. */
+.battle-fire-burst-flash {
+    position: absolute; width: 30px; height: 30px; margin-left: -15px; margin-top: -15px;
+    border-radius: 50%; pointer-events: none; z-index: 7;
+    animation: battleBurstFlash 0.45s ease-out forwards;
+}
+@keyframes battleBurstFlash {
+    0% { transform: scale(0.3); opacity: 1; }
+    100% { transform: scale(2); opacity: 0; }
+}
+.battle-fire-burst-shard {
+    position: absolute; width: 3px; height: 10px; margin-left: -1.5px; margin-top: -5px;
+    border-radius: 1px; pointer-events: none; z-index: 7; transform-origin: 50% 100%;
+    animation: battleBurstShard 0.4s ease-out forwards;
+}
+@keyframes battleBurstShard {
+    0% { transform: rotate(var(--shard-angle, 0deg)) translateY(-2px) scale(1); opacity: 1; }
+    100% { transform: rotate(var(--shard-angle, 0deg)) translateY(-22px) scale(0.4); opacity: 0; }
+}
+
+/* Restorative pulse (Healing only) -- Animation Suite build. No
+   attack-style beam/tracer/burst at all, per the confirmed design (healing
+   isn't an attack): a soft glow plus a slower, gentler expanding ring than
+   Burst's sharp shrapnel-flash, both centered on the target and colored via
+   window.DAMAGE_TYPES['Healing'].color. */
+.battle-heal-glow {
+    position: absolute; width: 26px; height: 26px; margin-left: -13px; margin-top: -13px;
+    border-radius: 50%; pointer-events: none; z-index: 6;
+    animation: battleImpactPulse 0.7s ease-out forwards;
+}
+.battle-heal-pulse {
+    position: absolute; width: 16px; height: 16px; margin-left: -8px; margin-top: -8px;
+    border-radius: 50%; pointer-events: none; z-index: 7;
+    border: 2px solid; animation: battleHealPulse 0.8s ease-out forwards;
+}
+@keyframes battleHealPulse {
+    0% { transform: scale(0.5); opacity: 0.9; }
+    100% { transform: scale(4); opacity: 0; }
 }
 
 /* Background starfield -- a ::before pseudo-element on the grid itself so no
@@ -344,6 +415,7 @@ canvas { display: block; width: 100%; height: 100%; }
 
 #bottom-right-presence {
     position: fixed; bottom: 20px; right: 20px; z-index: 25; width: 260px; max-height: 160px; overflow-y: auto;
+    max-width: calc(100vw - 40px); box-sizing: border-box;
 }
 
 /* MASS EFFECT VERTICAL TERMINAL LAYOUT */
@@ -553,6 +625,33 @@ div[style*="grid-template-columns"] > div,
     border: 1px solid #3c4e36;
     box-shadow: 0 0 30px rgba(0, 229, 163, 0.05);
 }
+
+/* Codex Markdown + Charts (this session) -- .reader-body's own
+   white-space:pre-wrap above is for the plain-text fallback only; real
+   markdown-generated markup (real <p>/<table>/<ul> elements) gets its own
+   paragraph/line spacing from those tags, so this wrapper resets
+   white-space back to normal to avoid doubled-up blank lines. Table/list/
+   heading styling kept minimal and in-theme (existing terminal green/tan
+   palette) rather than pulling in a separate stylesheet for marked's
+   output. */
+.codex-markdown { white-space: normal; }
+.codex-markdown h1, .codex-markdown h2, .codex-markdown h3 { color: #00e5a3; border-bottom: 1px solid #3c4e36; padding-bottom: 4px; margin: 18px 0 8px 0; }
+.codex-markdown h1 { font-size: 20px; } .codex-markdown h2 { font-size: 17px; } .codex-markdown h3 { font-size: 15px; }
+.codex-markdown p { margin: 0 0 12px 0; }
+.codex-markdown strong { color: #ffaa00; }
+.codex-markdown em { color: #00e1ff; }
+.codex-markdown a { color: #00e1ff; }
+.codex-markdown ul, .codex-markdown ol { margin: 0 0 12px 0; padding-left: 24px; }
+.codex-markdown li { margin-bottom: 4px; }
+.codex-markdown code { background: #0a1410; border: 1px solid #3c4e36; padding: 1px 5px; border-radius: 2px; font-size: 12px; color: #00e5a3; }
+.codex-markdown pre { background: #0a1410; border: 1px solid #3c4e36; padding: 10px; border-radius: 2px; overflow-x: auto; margin: 0 0 12px 0; }
+.codex-markdown pre code { border: none; padding: 0; }
+.codex-markdown blockquote { border-left: 2px solid #00e5a3; margin: 0 0 12px 0; padding: 4px 0 4px 12px; color: #6b826a; }
+.codex-markdown table { border-collapse: collapse; width: 100%; margin: 0 0 16px 0; font-size: 13px; }
+.codex-markdown th, .codex-markdown td { border: 1px solid #3c4e36; padding: 6px 10px; text-align: left; }
+.codex-markdown th { background: rgba(0, 229, 163, 0.08); color: #00e5a3; }
+.codex-markdown tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
+.codex-chart-wrap { max-width: 560px; margin: 0 0 20px 0; background: #0a1410; border: 1px solid #3c4e36; border-radius: 2px; padding: 12px; }
 
 .term-panel-content { display: none; animation: fadeIn 0.3s; }
 .term-panel-content.active { display: block; }
@@ -783,6 +882,66 @@ div[style*="grid-template-columns"] > div,
         margin-bottom: 10px !important;
     }
     .codex-me-btn { width: auto !important; margin-right: 8px !important; margin-bottom: 0 !important; }
+
+    /* ---- Mobile compatibility pass (this session), part 2 ---- */
+
+    /* Command Terminal's own outer frame still had a 40px LEFT+RIGHT gutter
+       (25px 40px) on top of everything .term-content-area already trims --
+       eats ~80px of a ~375px-wide phone before any content starts. */
+    #character-terminal { padding: 25px 10px !important; }
+
+    /* Floating draggable panels (HUD, Combat Tracker, DM Tools, Comms
+       Array, Calendar, Scratchpad, Credits, Territory Control, Salvage)
+       are hand-positioned for a wide desktop viewport -- several sit at
+       offsets like right:360px or left:380px, which put them mostly or
+       fully off-screen once the viewport itself is only ~375px wide.
+       Rather than trying to rescue each one's desktop coordinates at a
+       smaller size, every one of them gets pinned to the same full-width,
+       capped-height slot below the top bar on mobile. If a DM has two of
+       these open at once on a phone they now simply stack on top of each
+       other (highest z-index wins, same ordering as desktop) instead of
+       one being unreachable off-screen -- closing the top one reveals
+       what's under it. This does NOT touch #login-container or the bare
+       .panel used by the System Architect modal (that one is already
+       centered/max-width:95% via its own modal wrapper, not this list).
+       Dragging (js/ui.js's DRAG handle) stays mouse-only -- these panels
+       don't need repositioning by hand on mobile since this rule pins
+       them regardless of where a previous desktop session left them. */
+    #hud-overlay, #combat-tracker-panel, #dm-tools, #comms-array-panel,
+    #calendar-control-panel, #dm-scratchpad-panel, #credits-panel,
+    #territory-control-panel, #salvage-panel {
+        position: fixed !important;
+        left: 8px !important; right: 8px !important;
+        top: 58px !important; bottom: 10px !important;
+        width: auto !important; max-width: none !important; max-height: none !important;
+    }
+
+    /* Codex Fullscreen Reader -- 40px/60px padding alone eats a third of a
+       phone's width before any text starts. */
+    #codex-fullscreen-reader { padding: 15px !important; }
+    .reader-body { padding: 15px !important; }
+    .reader-header { flex-wrap: wrap !important; gap: 8px !important; }
+
+    /* Tactical Battle Map -- included in this pass per this session's
+       scope answer (was previously deferred). The left/right columns are
+       fixed-width flex children (740px / up to 480px) that don't reflow at
+       all below 768px, and the grid-wrap inside the left column is a
+       fixed 720px box (the actual battle grid is 920x760 scaled 1.5x,
+       already scrollable via its own overflow:auto -- that scrolling is
+       unchanged, this just shrinks the VIEWPORT onto it). Token dragging
+       stays mouse-only this pass (see architecture doc) -- only layout/
+       reflow was in scope for Battle Map, not touch-drag. */
+    #battle-map-panel { padding: 12px !important; }
+    #battle-map-header { flex-wrap: wrap !important; gap: 8px !important; }
+    #battle-map-dm-controls { max-width: 100% !important; }
+    .battle-map-layout {
+        flex-direction: column !important; height: auto !important;
+        max-height: calc(100vh - 70px) !important; overflow-y: auto !important;
+    }
+    .battle-map-left-col, .battle-map-right-col {
+        flex: 1 1 auto !important; width: 100% !important; max-width: 100% !important; min-width: 0 !important;
+    }
+    #battle-map-grid-wrap { width: 100% !important; max-width: 100% !important; height: 50vh !important; }
 }
 
 /* Target ultra-short landscape screens (phones turned sideways) */
