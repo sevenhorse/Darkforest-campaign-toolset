@@ -1246,6 +1246,14 @@
                                 <option value="Escort">Escort</option>
                             </select>
                         </div>
+                        <div style="margin-top:4px;">
+                            <label for="new-secret-template-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) — controls whether players can see/edit this vessel once deployed. Friendly is visible in every player's Vessel Deck alongside their own ships; Neutral/Hostile (or left unset) stay DM-only. Editable later per-vessel from EDIT BASE STATS.">IFF Designation:</label>
+                            <select id="new-secret-template-iff" style="font-size:10px; margin:2px 0; border-color:#ff3333;">
+                                <option value="hostile" selected>⚠ Hostile</option>
+                                <option value="neutral">◌ Neutral</option>
+                                <option value="friendly">✓ Friendly</option>
+                            </select>
+                        </div>
                         <button class="btn-remove" onclick="window.saveNewSecretTemplate()" style="width:100%; margin-top:6px; font-size:10px;">+ STORE IN REPOSITORY</button>
                     </div>
                     <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; font-size:11px; color:#ff6b6b;">Stored Templates</h4>
@@ -1290,15 +1298,15 @@
     <script src="js/db.js?v=3.26"></script>
     <script src="js/audio.js?v=3.16"></script>
     <script src="js/ui.js?v=3.32"></script>
-    <script src="js/combat.js?v=3.38"></script>
+    <script src="js/combat.js?v=3.39"></script>
     <script src="js/colonies.js?v=3.16"></script>
-    <script src="js/ship-designer.js?v=3.21"></script>
+    <script src="js/ship-designer.js?v=3.22"></script>
     <script src="js/perk-designer.js?v=3.14"></script>
     <script src="js/augment-designer.js?v=1.1"></script>
     <script src="js/gear-designer.js?v=1.0"></script>
     <script src="js/dm-sheet-editor.js?v=1.0"></script>
     <script src="js/map.js?v=3.28"></script>
-    <script src="js/battle-map.js?v=1.21"></script>
+    <script src="js/battle-map.js?v=1.22"></script>
     <script src="js/manufacturing.js?v=1.8"></script>
 
 </body>
