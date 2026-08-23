@@ -140,7 +140,7 @@ window.saveNewShipTemplate = async function() {
         // 460x380 tactical grid. Stations are locked to 0 — confirmed
         // design, enforced here regardless of what the (disabled) input
         // shows, in case it was toggled out of sync somehow.
-        tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-template-speed').value) || 80),
+        tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-template-speed').value) || 160),
         is_station: isStation,
         // Squadron AI Stances build (this session): optional, drives which
         // targets an AI-controlled squadron's Attack Capital Ships/Attack
@@ -192,7 +192,7 @@ window.deployShipTemplate = async function(id) {
         integrity_ablative: t.max_ablative || 0, max_ablative: t.max_ablative || 0,
         integrity_hardened: t.max_hardened || 0, max_hardened: t.max_hardened || 0,
         integrity_hull: t.max_hull || 100, max_hull: t.max_hull || 100,
-        tactical_speed: t.is_station ? 0 : (t.tactical_speed || 80),
+        tactical_speed: t.is_station ? 0 : (t.tactical_speed || 160),
         is_station: !!t.is_station,
         vessel_class: t.vessel_class || null,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
@@ -277,7 +277,7 @@ window.deployShipTemplate = async function(id) {
                 max_hardened: parseInt(document.getElementById('tmpl-edit-hardened').value) || 0,
                 max_hull: parseInt(document.getElementById('tmpl-edit-hull').value) || 0,
                 hardpoint_slots: parseInt(document.getElementById('tmpl-edit-slots').value) || 4,
-                tactical_speed: isStation ? 0 : (parseInt(document.getElementById('tmpl-edit-speed').value) || 80),
+                tactical_speed: isStation ? 0 : (parseInt(document.getElementById('tmpl-edit-speed').value) || 160),
                 is_station: isStation,
                 vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null
             };
@@ -302,7 +302,7 @@ window.deployShipTemplate = async function(id) {
         document.getElementById('tmpl-edit-hardened').value = t.max_hardened || 0;
         document.getElementById('tmpl-edit-hull').value = t.max_hull || 0;
         document.getElementById('tmpl-edit-slots').value = t.hardpoint_slots || 4;
-        document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 80;
+        document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 160;
         document.getElementById('tmpl-edit-vesselclass').value = t.vessel_class || '';
         document.getElementById('tmpl-edit-station').checked = !!t.is_station;
         window.toggleStationFields('tmpl-edit');
@@ -548,17 +548,19 @@ window.saveNewSecretTemplate = async function() {
         max_shields: parseInt(document.getElementById('new-secret-template-shields').value) || 0,
         max_hull: parseInt(document.getElementById('new-secret-template-hull').value) || 100,
         hardpoint_slots: parseInt(document.getElementById('new-secret-template-slots').value) || 4,
-        tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-secret-template-speed').value) || 80),
+        tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-secret-template-speed').value) || 160),
         is_station: isStation,
         ship_weapons: [],
         ship_decks: [],
-        is_secret: true
+        is_secret: true,
+        vessel_class: document.getElementById('new-secret-template-vesselclass').value || null
     };
     const { error } = await db.from('ship_templates').insert(payload);
     if (error) { alert("Failed to store repository template: " + error.message); return; }
 
     document.getElementById('new-secret-template-name').value = '';
     document.getElementById('new-secret-template-class').value = '';
+    document.getElementById('new-secret-template-vesselclass').value = '';
     if (stationCheckbox) { stationCheckbox.checked = false; window.toggleStationFields('new-secret-template'); }
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
 };
