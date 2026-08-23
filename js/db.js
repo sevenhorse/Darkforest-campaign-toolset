@@ -137,6 +137,7 @@ async function fetchUserProfile(user) {
     if (typeof initShipMarkersRealtimeChannel === 'function') initShipMarkersRealtimeChannel();
     initSystemHazardsRealtimeChannel();
     initPerkDefinitionsRealtimeChannel();
+    if (typeof initAugmentDefinitionsRealtimeChannel === 'function') initAugmentDefinitionsRealtimeChannel();
     initHazardDefinitionsRealtimeChannel();
     initPlanetaryModifiersRealtimeChannel();
     initHyperlanesRealtimeChannel();
@@ -162,6 +163,7 @@ async function fetchUserProfile(user) {
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
     if (typeof loadSystemHazards === 'function') loadSystemHazards();
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
+    if (typeof loadAugmentDefinitions === 'function') loadAugmentDefinitions();
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
     loadSystemOwnershipOverrides();
@@ -178,6 +180,7 @@ async function loadAllProfiles() {
     const { data: skillData } = await db.from('character_skills').select('*');
     const { data: arsenalData } = await db.from('character_arsenal').select('*');
     const { data: perkData } = await db.from('character_perks').select('*');
+    const { data: augmentData } = await db.from('character_augments').select('*');
 
     if (profData) {
         allProfiles = profData.map(p => {
@@ -185,7 +188,8 @@ async function loadAllProfiles() {
             const s = skillData?.find(sk => sk.character_id === c.id) || {};
             const a = arsenalData?.filter(ars => ars.profile_id === p.id || ars.character_id === c.id) || [];
             const pk = perkData?.filter(perk => perk.character_id === c.id) || [];
-            return { ...p, character: c, skills: s, arsenal: a, perks: pk };
+            const ag = augmentData?.filter(aug => aug.character_id === c.id) || [];
+            return { ...p, character: c, skills: s, arsenal: a, perks: pk, augments: ag };
         });
         
         const myProf = allProfiles.find(p => p.id === currentUserId);
@@ -542,6 +546,20 @@ function initPerkDefinitionsRealtimeChannel() {
     perkDefinitionsRealtimeChannel = db.channel('perk_definitions_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'perk_definitions' }, () => {
             if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
+        })
+        .subscribe();
+}
+
+// Augment Designer catalog -- same shape as the perk channel above.
+// character_augments (the per-character installations) has no realtime
+// channel of its own -- installing/removing is self-service on your own
+// character and already patches the local cache immediately (js/ui.js),
+// same convention character_perks already uses (also uncached-live).
+let augmentDefinitionsRealtimeChannel;
+function initAugmentDefinitionsRealtimeChannel() {
+    augmentDefinitionsRealtimeChannel = db.channel('augment_definitions_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'augment_definitions' }, () => {
+            if (typeof loadAugmentDefinitions === 'function') loadAugmentDefinitions();
         })
         .subscribe();
 }
