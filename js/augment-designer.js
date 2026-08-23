@@ -87,6 +87,7 @@ window.renderAugmentDesignerPanel = function() {
             : [
                 a.shield_max_bonus > 0 ? `<span style="color:#00e1ff;">Shield Max +${a.shield_max_bonus}</span>` : '',
                 a.dr_bonus > 0 ? `<span style="color:#c9962f;">DR +${a.dr_bonus}</span>` : '',
+                a.injury_max_bonus > 0 ? `<span style="color:#ff6b6b;">Injury Max +${a.injury_max_bonus}</span>` : '',
                 (a.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ')
               ].filter(Boolean).join(' · ') || '<span style="color:#6b826a;">No effects configured.</span>';
         return `
@@ -221,6 +222,7 @@ window.deleteAugmentDefinition = async function(id) {
                 <div style="display:flex; gap:6px; margin-top:6px;">
                     <div style="flex:1;"><label for="aug-edit-shieldbonus" style="font-size:9px; color:#00e1ff;">Shield Max Bonus:</label><input type="number" id="aug-edit-shieldbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
                     <div style="flex:1;"><label for="aug-edit-drbonus" style="font-size:9px; color:#c9962f;">DR Bonus:</label><input type="number" id="aug-edit-drbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
+                    <div style="flex:1;"><label for="aug-edit-injurybonus" style="font-size:9px; color:#ff6b6b;">Injury Max Bonus:</label><input type="number" id="aug-edit-injurybonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
                 </div>
 
                 <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Stat/Skill Effects (auto-applied to the roller):</label>
@@ -265,6 +267,7 @@ window.deleteAugmentDefinition = async function(id) {
                 flavor_only: flavorOnly,
                 shield_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('aug-edit-shieldbonus').value) || 0),
                 dr_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('aug-edit-drbonus').value) || 0),
+                injury_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('aug-edit-injurybonus').value) || 0),
                 effects: flavorOnly ? [] : workingEffects
             };
 
@@ -297,6 +300,7 @@ window.deleteAugmentDefinition = async function(id) {
         document.getElementById('aug-mechanical-section').style.display = 'block';
         document.getElementById('aug-edit-shieldbonus').value = '0';
         document.getElementById('aug-edit-drbonus').value = '0';
+        document.getElementById('aug-edit-injurybonus').value = '0';
         renderEffectsList();
         overlay.style.display = 'flex';
     };
@@ -315,6 +319,7 @@ window.deleteAugmentDefinition = async function(id) {
         document.getElementById('aug-mechanical-section').style.display = a.flavor_only ? 'none' : 'block';
         document.getElementById('aug-edit-shieldbonus').value = a.shield_max_bonus || 0;
         document.getElementById('aug-edit-drbonus').value = a.dr_bonus || 0;
+        document.getElementById('aug-edit-injurybonus').value = a.injury_max_bonus || 0;
         renderEffectsList();
         overlay.style.display = 'flex';
     };
