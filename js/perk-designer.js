@@ -62,13 +62,22 @@ window.renderPerkDesignerPanel = function() {
     const renderCard = (p, listKey, siblingList) => {
         const editable = canManagePerk(p);
         const proposer = allProfiles.find(a => a.id === p.created_by);
+        // Bug fix (bug hunt, this session): these three used `> 0` to decide
+        // whether to show the bonus at all, so a negative shield/DR/injury
+        // bonus (fully accepted by the form -- none of the three number
+        // inputs have min="0", and getEffectiveShieldMax/getEffectiveDR/
+        // getEffectiveInjuryMax apply it unconditionally either way)
+        // silently rendered as "No effects configured," hiding a real
+        // mechanical penalty from the DM reviewing/approving it. Gate on
+        // `!== 0` and format the sign, same as the stat/skill effects line
+        // right below already does.
         let effectsLine = p.flavor_only
             ? '<span style="color:#c778dd;">Flavor only — no automatic mechanical effect.</span>'
             : [
                 p.points_grant > 0 ? `<span style="color:#00e5a3;">+${p.points_grant} free skill points</span>` : '',
-                p.shield_max_bonus > 0 ? `<span style="color:#00e1ff;">Shield Max +${p.shield_max_bonus}</span>` : '',
-                p.dr_bonus > 0 ? `<span style="color:#c9962f;">DR +${p.dr_bonus}</span>` : '',
-                p.injury_max_bonus > 0 ? `<span style="color:#ff6b6b;">Injury Max +${p.injury_max_bonus}</span>` : '',
+                p.shield_max_bonus ? `<span style="color:#00e1ff;">Shield Max ${p.shield_max_bonus >= 0 ? '+' : ''}${p.shield_max_bonus}</span>` : '',
+                p.dr_bonus ? `<span style="color:#c9962f;">DR ${p.dr_bonus >= 0 ? '+' : ''}${p.dr_bonus}</span>` : '',
+                p.injury_max_bonus ? `<span style="color:#ff6b6b;">Injury Max ${p.injury_max_bonus >= 0 ? '+' : ''}${p.injury_max_bonus}</span>` : '',
                 (p.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ')
               ].filter(Boolean).join(' · ') || '<span style="color:#6b826a;">No effects configured.</span>';
         return `
@@ -127,7 +136,12 @@ window.approvePerk = async function(id) {
 window.deletePerkDefinition = async function(id) {
     const p = window.findPerkDefinition(id);
     if (p && !canManagePerk(p)) return;
-    if (!(await window.showConfirmModal(`Permanently delete perk "${p ? p.name : ''}"? Any characters currently holding it will lose it.`))) return;
+    // Bug fix (bug hunt, this session): this warning claimed holders "lose"
+    // the perk, but the deletion below only removes the catalog row -- it
+    // never touches character_perks, so every character keeps a now-
+    // dangling character_perks row instead (matching what actually happens
+    // for augments/gear, whose own confirm text says so accurately).
+    if (!(await window.showConfirmModal(`Permanently delete perk "${p ? p.name : ''}"? Any character currently holding it keeps the selection record, but it loses its mechanical effects and shows as an unlinked/custom entry.`))) return;
     await db.from('perk_definitions').delete().eq('id', id);
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
 };
