@@ -196,11 +196,28 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
             
             if (cargo.perishables) {
                 let rationIdx = cargo.perishables.findIndex(i => i.name.toLowerCase().includes('ration') || i.name.toLowerCase().includes('food'));
-                if (rationIdx >= 0 && cargo.perishables[rationIdx].qty > 0) {
-                    cargo.perishables[rationIdx].qty -= 1; changed = true; rationsLogged = true;
-                } else if (rationIdx >= 0 || cargo.perishables.length > 0) {
-                    await db.from('chat_logs').insert({ sender_id: null, content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has depleted Standard Rations. Starvation protocols active.`, message_type: 'system' });
-                    if (window.AudioEngine) window.AudioEngine.playError();
+                // Bug fix (bug hunt, this session), two issues in the original:
+                // (1) rations were only ever deducted by a flat 1 per call, but
+                // processFleetGroupProduction/processSalvageConversion right
+                // below correctly consume `daysPassed` -- a multi-day jump
+                // (adjustTime 'months'/'years', applyManualTime, resetTimeline,
+                // all of which call processTimeAdvancement once per jump) was
+                // silently under-consuming rations for every day past the first.
+                // (2) the depleted-rations alert used to also fire for a vessel
+                // that never carried a ration item at all, just because it had
+                // OTHER perishables (e.g. medical supplies) aboard -- now gated
+                // strictly on a ration item actually existing (rationIdx >= 0).
+                if (rationIdx >= 0) {
+                    let item = cargo.perishables[rationIdx];
+                    if (item.qty > 0) {
+                        let consumed = Math.min(item.qty, daysPassed);
+                        item.qty -= consumed;
+                        changed = true; rationsLogged = true;
+                    }
+                    if (item.qty <= 0) {
+                        await db.from('chat_logs').insert({ sender_id: null, content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has depleted Standard Rations. Starvation protocols active.`, message_type: 'system' });
+                        if (window.AudioEngine) window.AudioEngine.playError();
+                    }
                 }
             }
             if (changed) { await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id); anyUpdated = true; }
@@ -783,14 +800,22 @@ window.renderPerksPanel = function() {
         sec1PickerOptions += `<option value="${p.id}">${p.name}</option>`;
     });
 
+    // Bug fix (bug hunt, this session): a deleted perk definition leaves a
+    // dangling character_perks row (deletePerkDefinition only removes the
+    // catalog row, same as augments/gear) -- this used to just `return` and
+    // silently drop the row from view entirely, making it permanently
+    // invisible and un-removable through the UI. Render an "Unknown"
+    // fallback the same way renderAugmentSlots/renderGearLoadout already do
+    // for the same orphaned-reference case, instead of hiding it.
     let sec1Html = section1.length === 0 ? '<span style="font-size:10px; color:#6b826a;">None selected yet.</span>' : '';
     section1.forEach(p => {
         const def = window.findPerkDefinition(p.perk_definition_id);
-        if (!def) return;
+        const name = def ? def.name : 'Unknown (deleted perk)';
+        const desc = def ? (def.description || '') : '';
         sec1Html += `<div style="background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
             <div style="flex:1;">
-                <strong style="color:#00e5a3; font-size:11px;">${def.name}</strong>
-                <div style="font-size:9px; color:#6b826a;">${def.description || ''}</div>
+                <strong style="color:${def ? '#00e5a3' : '#6b826a'}; font-size:11px;">${name}</strong>
+                <div style="font-size:9px; color:#6b826a;">${desc}</div>
             </div>
             <button onclick="window.removeSection1Perk('${p.id}')" title="Remove specialization" style="width:auto; margin:0; padding:2px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">✕</button>
         </div>`;
@@ -799,10 +824,11 @@ window.renderPerksPanel = function() {
     let sec2Html = section2.length === 0 ? '<span style="font-size:10px; color:#6b826a;">None awarded yet.</span>' : '';
     section2.forEach(p => {
         const def = window.findPerkDefinition(p.perk_definition_id);
-        if (!def) return;
+        const name = def ? def.name : 'Unknown (deleted perk)';
+        const desc = def ? (def.description || '') : '';
         sec2Html += `<div style="background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
-            <strong style="color:#ffaa00; font-size:11px;">${def.name}</strong>
-            <div style="font-size:9px; color:#6b826a;">${def.description || ''}</div>
+            <strong style="color:${def ? '#ffaa00' : '#6b826a'}; font-size:11px;">${name}</strong>
+            <div style="font-size:9px; color:#6b826a;">${desc}</div>
         </div>`;
     });
 
@@ -1255,6 +1281,15 @@ window.moveCodexEntryOrder = function(id, direction) {
     }
     entries = entries.filter(e => {
         if (currentUserRole === 'dm') return true;
+        // Bug fix (bug hunt, this session): this filter had drifted out of
+        // sync with renderCodexMatrix's own copy above -- it was missing the
+        // `is_hidden` exclusion, so a non-DM viewer's reorder-arrow click
+        // here computed a longer ordered list (including hidden entries)
+        // than what renderCodexMatrix actually displays. Reordering an entry
+        // adjacent to a hidden one would silently swap against the invisible
+        // hidden entry instead of the next visible one, making the arrow
+        // appear to do nothing from the player's point of view.
+        if (e.is_hidden) return false;
         let linkMatch = (e.subtitle || '').match(/LINK:(.+)/);
         if (linkMatch) { return window.scannedSystems && window.scannedSystems.includes(linkMatch[1].trim()); }
         return true;
@@ -1503,10 +1538,24 @@ window.executeDradisScan = async function(sysId) {
     let scanHours = 2 + bodies; 
     
     if (window.AudioEngine) window.AudioEngine.playPing();
-    
-    let oldTime = window.universeTimeHours; window.universeTimeHours += scanHours;
+
+    // Bug fix (bug hunt, this session): this used to only mutate the local
+    // window.universeTimeHours/localStorage copy and never wrote the shared
+    // campaign_clock table -- every other time-advancing path (adjustTime,
+    // applyManualTime, resetTimeline, the passive timeFlowInterval tick)
+    // does. Since processTimeAdvancement's resource/production side effects
+    // still ran for real, the DB clock and the actually-consumed resources
+    // were left decoupled: the next campaign_clock realtime sync would snap
+    // this client's clock back to the (unchanged) DB value. Use the same
+    // atomic delta RPC adjustTime/the passive tick use so the shared clock,
+    // this client's clock, and the resource side effects all agree.
+    const { data: dradisClockData, error: dradisClockError } = await db.rpc('adjust_campaign_clock', { delta_hours: scanHours });
+    if (dradisClockError || !dradisClockData || !dradisClockData[0]) { alert("DRADIS scan failed: could not advance the mission clock (" + (dradisClockError ? dradisClockError.message : "unknown error") + ")."); return; }
+    const { old_hours: oldTime, new_hours: newTime } = dradisClockData[0];
+    window.universeTimeHours = newTime;
     localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
-    window.updateCalendarDisplay(); await window.processTimeAdvancement(oldTime, window.universeTimeHours);
+    window.updateCalendarDisplay(); if (typeof window.broadcastTimeSync === 'function') window.broadcastTimeSync();
+    await window.processTimeAdvancement(oldTime, newTime);
 
     if (window.scannedSystems && !window.scannedSystems.includes(sysId)) {
         window.scannedSystems.push(sysId);
