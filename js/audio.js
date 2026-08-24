@@ -88,11 +88,22 @@ window.AudioEngine = (function() {
         '11 Scar.m4a'
     ];
 
+    // Bug fix (bug hunt, this session): unguarded localStorage access here
+    // ran as part of this whole IIFE's top-level evaluation -- in any
+    // environment where localStorage throws (locked-down browser settings,
+    // certain extensions, storage-disabled contexts), this would throw
+    // before the `return {...}` at the bottom of the IIFE is ever reached,
+    // leaving window.AudioEngine undefined and breaking every SFX call
+    // app-wide (AudioEngine.playPing()/playError()/etc.), not just music.
     let musicVolume = (function() {
-        const v = parseFloat(localStorage.getItem('odyssey_audio_volume'));
-        return isNaN(v) ? 0.4 : Math.max(0, Math.min(1, v));
+        try {
+            const v = parseFloat(localStorage.getItem('odyssey_audio_volume'));
+            return isNaN(v) ? 0.4 : Math.max(0, Math.min(1, v));
+        } catch (e) { return 0.4; }
     })();
-    let muted = localStorage.getItem('odyssey_audio_muted') === 'true';
+    let muted = (function() {
+        try { return localStorage.getItem('odyssey_audio_muted') === 'true'; } catch (e) { return false; }
+    })();
 
     let ambientAudio = null;
     let battleAudio = null;
@@ -122,8 +133,19 @@ window.AudioEngine = (function() {
 
     function applyLiveVolume() {
         const v = effectiveVolume();
-        if (ambientAudio && !ambientAudio.paused) ambientAudio.volume = v;
-        if (battleAudio && !battleAudio.paused) battleAudio.volume = v;
+        // Bug fix (bug hunt, this session): fadeTo's setInterval captures a
+        // fixed targetVol when a fade starts and unconditionally forces
+        // el.volume = targetVol on its last tick. If setMusicVolume/setMuted
+        // ran while a fade-in was still in flight (e.g. muting while a track
+        // is fading in), the fade's own ticks -- and its final forced
+        // assignment -- would keep overwriting the volume this function just
+        // set, eventually re-asserting the stale pre-mute/pre-change target
+        // once the fade completed. Cancel any in-flight fade on an element
+        // before authoritatively setting its volume here, so a live mute/
+        // volume change always wins and can't be silently undone later by an
+        // already-running fade.
+        if (ambientAudio) { if (ambientAudio._fadeInterval) { clearInterval(ambientAudio._fadeInterval); ambientAudio._fadeInterval = null; } if (!ambientAudio.paused) ambientAudio.volume = v; }
+        if (battleAudio) { if (battleAudio._fadeInterval) { clearInterval(battleAudio._fadeInterval); battleAudio._fadeInterval = null; } if (!battleAudio.paused) battleAudio.volume = v; }
     }
 
     // Simple volume ramp over plain <audio> elements (no Web Audio graph
@@ -215,6 +237,18 @@ window.AudioEngine = (function() {
             if (recordFailureAndCheckGiveUp(isAmbient)) return;
             return playNextTrack(kind); // signed-URL step failing isn't a per-track streaming glitch -- move to a different track, not a retry of this one
         }
+
+        // Bug fix (bug hunt, this session): the ambientDesired/battleActive
+        // check above only ran BEFORE this await -- createSignedUrl can take
+        // hundreds of ms, and nothing re-validated state after it resolved.
+        // A battle ending mid-fetch (stopBattleMusic, which starts the
+        // ambient bed if desired) could let this now-stale battle-track
+        // fetch land anyway, overwriting battleAudio and playing a track for
+        // a battle that already ended -- defeating the "battle bed takes
+        // priority" invariant. Re-check the same way the top-of-function
+        // guard does before committing to this track.
+        if (isAmbient) { if (!ambientDesired || battleActive) return; }
+        else { if (!battleActive) return; }
 
         const el = new Audio(signedUrl);
         el.volume = 0;
