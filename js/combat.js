@@ -525,14 +525,21 @@ window.renderShipStanceHtml = function(vessel) {
 // for an enemy/NPC vessel's card on the Battle Map, where a player can see
 // health but shouldn't be able to adjust it themselves.
 window.renderShipHealthBarsHtml = function(vessel, editable) {
+    // Bug fix (bug hunt, this session): `|| default` treats an explicit 0
+    // (e.g. a DM-configured derelict with no shield generator/reactive armor)
+    // as "missing" and silently substitutes the default max, the same falsy-
+    // zero defect max_hardened was already fixed for elsewhere (see the
+    // `!== undefined` comment on modifyShipHealth above) — generalized here
+    // to the other three stats so a real 0 max displays as "0 / 0", not
+    // "0 / 400".
     const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
-    const s_max = vessel.max_shields || 400;
+    const s_max = vessel.max_shields !== undefined ? vessel.max_shields : 400;
     const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
-    const h_max = vessel.max_hull || 300;
+    const h_max = vessel.max_hull !== undefined ? vessel.max_hull : 300;
     const r_int = vessel.integrity_reactive !== undefined ? vessel.integrity_reactive : 10;
-    const r_max = vessel.max_reactive || 10;
+    const r_max = vessel.max_reactive !== undefined ? vessel.max_reactive : 10;
     const a_int = vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : 10;
-    const a_max = vessel.max_ablative || 10;
+    const a_max = vessel.max_ablative !== undefined ? vessel.max_ablative : 10;
     const hd_int = vessel.integrity_hardened !== undefined ? vessel.integrity_hardened : 0;
     const hd_max = vessel.max_hardened || 0;
 
@@ -1025,32 +1032,6 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
-    // ECONOMY: Titanium Hull Plate constraint for healing
-    if (key === 'hull' && delta > 0) {
-        let cargo = vessel.cargo_inventory || window.sanitizeCargo({});
-        let expendables = cargo.expendables || [];
-        let platesIdx = expendables.findIndex(i => i.name.toLowerCase().includes('hull plate'));
-        let cost = Math.ceil(delta / 10);
-        
-        if (platesIdx >= 0 && expendables[platesIdx].qty >= cost) {
-            expendables[platesIdx].qty -= cost;
-            cargo.expendables = expendables;
-            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
-            vessel.cargo_inventory = cargo;
-            
-            db.from('chat_logs').insert({
-                sender_id: currentUserId,
-                content: `🔧 [REPAIR LOG] ${vessel.name} consumed ${cost}x Hull Plate(s) to restore ${delta} Hull Integrity.`,
-                message_type: 'text'
-            });
-            if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
-        } else {
-            if (window.AudioEngine) window.AudioEngine.playError();
-            alert(`Cannot repair hull! Requires at least ${cost} Titanium Armor Hull Plate(s) in Expendables cargo.`);
-            return;
-        }
-    }
-
     let dbKey = 'integrity_' + key;
     let maxKey = 'max_' + key;
     let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
@@ -1060,9 +1041,47 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     // regardless of the ship's actual (often zero) capacity.
     let max = vessel[maxKey] !== undefined ? vessel[maxKey] : 100;
 
+    // ECONOMY: Titanium Hull Plate constraint for healing
+    // Bug fix (bug hunt, this session): cost/log used to be computed from
+    // the raw requested `delta` (e.g. the "+10" button), but the actual
+    // amount restored below is clamped to `max` -- a ship healing from
+    // 295/300 to 300/300 was being charged a full 10-worth of plates (1
+    // plate) for only 5 Hull actually restored. Clamp the amount BEFORE
+    // pricing/logging it so the DM/player is only ever charged for what
+    // actually gets restored.
+    if (key === 'hull' && delta > 0) {
+        let actualDelta = Math.max(0, Math.min(delta, max - current));
+        if (actualDelta > 0) {
+            let cargo = vessel.cargo_inventory || window.sanitizeCargo({});
+            let expendables = cargo.expendables || [];
+            let platesIdx = expendables.findIndex(i => i.name.toLowerCase().includes('hull plate'));
+            let cost = Math.ceil(actualDelta / 10);
+
+            if (platesIdx >= 0 && expendables[platesIdx].qty >= cost) {
+                expendables[platesIdx].qty -= cost;
+                cargo.expendables = expendables;
+                await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
+                vessel.cargo_inventory = cargo;
+
+                db.from('chat_logs').insert({
+                    sender_id: currentUserId,
+                    content: `🔧 [REPAIR LOG] ${vessel.name} consumed ${cost}x Hull Plate(s) to restore ${actualDelta} Hull Integrity.`,
+                    message_type: 'text'
+                });
+                if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+            } else {
+                if (window.AudioEngine) window.AudioEngine.playError();
+                alert(`Cannot repair hull! Requires at least ${cost} Titanium Armor Hull Plate(s) in Expendables cargo.`);
+                return;
+            }
+        }
+        // actualDelta <= 0 means the ship is already at/above max hull --
+        // no plates consumed, fall through to the no-op clamp below.
+    }
+
     current = Math.max(0, Math.min(max, current + delta));
     let payload = {}; payload[dbKey] = current;
-    
+
     await db.from('ship_markers').update(payload).eq('id', vesselId);
     vessel[dbKey] = current;
     window.renderVesselDeck();
@@ -1305,8 +1324,14 @@ window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
     let wpn = vessel.ship_weapons[idx];
     
     if (statKey === 'ammo' && wpn.ammo >= 0) wpn.ammo = Math.max(0, Math.min(wpn.max_ammo, wpn.ammo + delta));
-    if (statKey === 'cooldown') wpn.cooldown = Math.max(0, wpn.cooldown + delta);
-    if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, wpn.overheat + delta));
+    // Bug fix (bug hunt, this session): legacy weapons predating these two
+    // fields can have cooldown/overheat === undefined; undefined + delta is
+    // NaN, and Math.max/min never recover from NaN once written to the DB
+    // (every future +/- click stays NaN forever, while `wpn.cooldown || 0`
+    // display sites silently show "0" and hide the corruption). Guard with
+    // `|| 0` the same way the ammo branch already guards its own inputs.
+    if (statKey === 'cooldown') wpn.cooldown = Math.max(0, (wpn.cooldown || 0) + delta);
+    if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, (wpn.overheat || 0) + delta));
     
     const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
     if (error) console.error("Weapon stat sync failed:", error);
@@ -1318,11 +1343,16 @@ window.resetShipStats = async function(vesselId) {
     if (!vessel) return;
     if (!(await window.showConfirmModal("Restore maximum health profiles and resupply all ammunition banks for this vessel?"))) return;
     
+    // Bug fix (bug hunt, this session): same falsy-zero defect as
+    // renderShipHealthBarsHtml above -- `|| default` would silently reset a
+    // vessel with a genuine max_shields/max_hull/max_reactive/max_ablative
+    // of 0 up to the default max instead of back to 0, persisting a
+    // current > max state to the DB.
     let payload = {
-        integrity_shields: vessel.max_shields || 400,
-        integrity_hull: vessel.max_hull || 300,
-        integrity_reactive: vessel.max_reactive || 10,
-        integrity_ablative: vessel.max_ablative || 10,
+        integrity_shields: vessel.max_shields !== undefined ? vessel.max_shields : 400,
+        integrity_hull: vessel.max_hull !== undefined ? vessel.max_hull : 300,
+        integrity_reactive: vessel.max_reactive !== undefined ? vessel.max_reactive : 10,
+        integrity_ablative: vessel.max_ablative !== undefined ? vessel.max_ablative : 10,
         integrity_hardened: vessel.max_hardened || 0
     };
     Object.assign(vessel, payload);
@@ -2060,7 +2090,7 @@ window.DAMAGE_TYPES = {
         desc: 'Electromagnetic pulse weaponry designed to overload power systems, not breach hull.', shreds: 'Shields & reactor systems — bypasses all physical armor', mitigatedBy: 'Nothing stops it, but it barely scratches Hull' },
     'Heat':      { color: '#ff3333', blockedBy: ['ablative'], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Thermal lances and incendiary ordnance that cooks through plating.', shreds: 'Unarmored hull, exposed systems', mitigatedBy: 'Ablative Armor' },
-    'Cold':      { color: '#66d9ff', blockedBy: [], bypassesLayers: [], hullMult: 1.25, shieldMode: 'normal',
+    'Cold':      { color: '#66d9ff', blockedBy: [], bypassesLayers: [], hullMult: 1, shieldMode: 'normal',
         desc: 'Cryogenic disruptors that embrittle plating rather than melting it outright.', shreds: 'Exposed Hull once armor is stripped — brittle-fracture bonus', mitigatedBy: 'Nothing specific; weak vs intact armor' },
     'Corrosive': { color: '#7cbf3f', blockedBy: ['reactive', 'ablative'], bypassesLayers: ['hardened'], hullMult: 1, shieldMode: 'normal',
         desc: 'Acidic or nanite-based agents that eat through even hardened plating.', shreds: 'Hardened Armor specifically — ignores it entirely', mitigatedBy: 'Reactive Armor, Ablative Armor' },
@@ -2187,7 +2217,11 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
     const info = window.DAMAGE_TYPES[dmgType] || window.DAMAGE_TYPES['Impact'];
 
     if (dmgType === 'Healing') {
-        let sMax = targetShip.max_shields || 400; let hMax = targetShip.max_hull || 300;
+        // Bug fix (bug hunt, this session): same falsy-zero max defect as
+        // renderShipHealthBarsHtml/resetShipStats -- a genuine max_shields/
+        // max_hull of 0 would otherwise let Healing top a ship up to the
+        // default max instead of respecting its real (zero) capacity.
+        let sMax = targetShip.max_shields !== undefined ? targetShip.max_shields : 400; let hMax = targetShip.max_hull !== undefined ? targetShip.max_hull : 300;
         let toShields = Math.min(totalDamage, Math.max(0, sMax - s)); s += toShields;
         let toHull = Math.min(totalDamage - toShields, Math.max(0, hMax - h)); h += toHull;
         log += `Repair systems restored ${toShields} Shields`; if (toHull > 0) log += ` and ${toHull} Hull`; log += `. `;
@@ -2928,7 +2962,7 @@ window.resolveArsenalAttack = async function(weaponId) {
     const targetProfile = allProfiles.find(p => p.id === target.owner_id);
     const isPC = !!(target && target.is_npc === false);
     let defTotal = 0, defLabel = '';
-    if (isPC) {
+    if (isPC && targetProfile && targetProfile.character) {
         const statName = document.getElementById('atk-defense-stat-select').value;
         const statKey = 'stat_' + statName.toLowerCase();
         const faces = parseInt((targetProfile.character[statKey] || 'd4').replace('d', '')) || 4;
@@ -2936,6 +2970,11 @@ window.resolveArsenalAttack = async function(weaponId) {
         defTotal = rollTotal;
         defLabel = `${target.name} defends with ${statName} (d${faces}: ${subRolls.join('💥')})`;
     } else {
+        // Bug fix (bug hunt, this session): a combatant can have is_npc:
+        // false (joined initiative as a PC) but no character sheet saved
+        // yet -- targetProfile.character would be undefined and crash the
+        // stat lookup above. Fall back to the manual DM-picked die-size
+        // path used for NPCs rather than throwing.
         const faces = parseInt((document.getElementById('atk-defense-die-select').value || 'd8').replace('d', '')) || 8;
         const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2);
         defTotal = rollTotal;
