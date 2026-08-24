@@ -209,7 +209,13 @@ canvas { display: block; width: 100%; height: 100%; }
    changes to left/top animate instead of jumping. wireTokenDrag sets
    transition:none during an active drag so the token tracks the mouse
    instantly, then restores this transition on mouseup. */
-.battle-token-el { transition: left 0.5s ease, top 0.5s ease; }
+/* z-index 2 (bug fix, bug hunt this session): .battle-range-ring below
+   documents the intended stacking as "starfield (0) < range ring (1) <
+   tokens (2)", but nothing here ever actually set tokens to z-index 2 --
+   they were auto-indexed, which sits BELOW the range ring's explicit
+   z-index:1, so the ring visually overlaid token markers instead of
+   sitting behind them. */
+.battle-token-el { transition: left 0.5s ease, top 0.5s ease; z-index: 2; }
 
 /* In-flight ordnance markers -- one per salvo_id, diffed against
    in_flight_ordnance every render (synced to all clients for free via the
