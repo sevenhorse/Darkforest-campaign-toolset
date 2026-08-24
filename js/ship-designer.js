@@ -462,7 +462,13 @@ window.deployShipTemplate = async function(id) {
         const t = findAnyTemplateById(currentId);
         if (!t) return;
         const slots = t.hardpoint_slots || 4;
-        const weapons = t.ship_weapons || [];
+        // Bug fix (bug hunt, this session): was `t.ship_weapons || []` with no
+        // clone -- when t.ship_weapons is already an array (always true after
+        // creation), `weapons` was the SAME reference, so weapons.push()
+        // below mutated the live cached t.ship_weapons synchronously, before
+        // the DB write even resolved (let alone succeeded). Clone so nothing
+        // is mutated until the write is confirmed.
+        const weapons = (t.ship_weapons || []).slice();
         // Station Designer build: no hardpoint cap for a station — confirmed
         // design, since a battlestation-scale platform needs far more
         // weapon batteries than any hull's slot count was meant to model.
@@ -490,9 +496,18 @@ window.deployShipTemplate = async function(id) {
     window.removeTemplateWeapon = async function(idx) {
         const t = findAnyTemplateById(currentId);
         if (!t) return;
-        const weapons = t.ship_weapons || [];
+        // Bug fix (bug hunt, this session): clone before splicing (same
+        // aliasing issue as addTemplateWeapon), and check the update's error
+        // -- this used to fall through to `t.ship_weapons = weapons` and
+        // re-render as if the delete succeeded even when the DB write
+        // failed, which could later cause a real weapon to be silently lost
+        // on the next full-column ship_weapons overwrite (e.g. a subsequent
+        // add) once the wrongly-reduced local length passed its hardpoint
+        // cap check.
+        const weapons = (t.ship_weapons || []).slice();
         weapons.splice(idx, 1);
-        await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', currentId);
+        const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', currentId);
+        if (error) { alert("Failed to remove weapon: " + error.message); return; }
         t.ship_weapons = weapons;
         renderLoadoutList();
     };
@@ -503,7 +518,9 @@ window.deployShipTemplate = async function(id) {
         const name = document.getElementById('tmpl-deck-name').value.trim();
         if (!name) { alert("Enter a deck or subsystem name."); return; }
         const maxHp = parseInt(document.getElementById('tmpl-deck-hp').value) || 50;
-        const decks = t.ship_decks || [];
+        // Bug fix (bug hunt, this session): clone before mutating, same as
+        // addTemplateWeapon above.
+        const decks = (t.ship_decks || []).slice();
         decks.push({ name, hp: maxHp, max_hp: maxHp, id: window.genDeckId() });
         const { error } = await db.from('ship_templates').update({ ship_decks: decks }).eq('id', currentId);
         if (error) { alert("Failed to add deck: " + error.message); return; }
@@ -515,9 +532,12 @@ window.deployShipTemplate = async function(id) {
     window.removeTemplateDeck = async function(idx) {
         const t = findAnyTemplateById(currentId);
         if (!t) return;
-        const decks = t.ship_decks || [];
+        // Bug fix (bug hunt, this session): clone + error-check, same as
+        // removeTemplateWeapon above.
+        const decks = (t.ship_decks || []).slice();
         decks.splice(idx, 1);
-        await db.from('ship_templates').update({ ship_decks: decks }).eq('id', currentId);
+        const { error } = await db.from('ship_templates').update({ ship_decks: decks }).eq('id', currentId);
+        if (error) { alert("Failed to remove deck: " + error.message); return; }
         t.ship_decks = decks;
         renderLoadoutList();
     };
@@ -715,10 +735,17 @@ window.addFleetMember = async function(fleetId) {
     if (!select || !select.value) { alert('Select a template first.'); return; }
     const qty = Math.max(1, parseInt(qtyInput && qtyInput.value) || 1);
 
-    const members = (fleet.members || []).slice();
-    const existing = members.find(m => m.template_id === select.value);
-    if (existing) existing.quantity += qty;
-    else members.push({ template_id: select.value, quantity: qty });
+    // Bug fix (bug hunt, this session): `.slice()` only copies the outer
+    // array -- `existing` was still the SAME member object living inside
+    // fleet.members, so `existing.quantity += qty` mutated the live cache
+    // in place before the DB write was even attempted, let alone confirmed
+    // successful (unlike updateFleetMemberQty below, which already builds
+    // an immutable copy via `.map`). Build an immutable copy here too.
+    const rawMembers = fleet.members || [];
+    const hasExisting = rawMembers.some(m => m.template_id === select.value);
+    const members = hasExisting
+        ? rawMembers.map(m => m.template_id === select.value ? { ...m, quantity: m.quantity + qty } : m)
+        : [...rawMembers, { template_id: select.value, quantity: qty }];
 
     const { error } = await db.from('saved_fleets').update({ members }).eq('id', fleetId);
     if (error) { alert('Failed to add to fleet: ' + error.message); return; }
