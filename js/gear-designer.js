@@ -89,12 +89,18 @@ window.renderGearDesignerPanel = function() {
     const renderCard = (g, listKey, siblingList) => {
         const editable = canManageGear(g);
         const proposer = allProfiles.find(p => p.id === g.created_by);
+        // Bug fix (bug hunt, this session): `> 0` hid a negative bonus (fully
+        // legal -- the form has no min="0" on these, and getEffectiveShieldMax/
+        // getEffectiveDR/getEffectiveInjuryMax apply it unconditionally
+        // regardless of sign) behind "No effects configured," masking a real
+        // mechanical penalty from the DM. Same fix applied identically to
+        // perk-designer.js and augment-designer.js's cards.
         let effectsLine = g.flavor_only
             ? '<span style="color:#c778dd;">Flavor only — no automatic mechanical effect.</span>'
             : [
-                g.shield_max_bonus > 0 ? `<span style="color:#00e1ff;">Shield Max +${g.shield_max_bonus}</span>` : '',
-                g.dr_bonus > 0 ? `<span style="color:#c9962f;">DR +${g.dr_bonus}</span>` : '',
-                g.injury_max_bonus > 0 ? `<span style="color:#ff6b6b;">Injury Max +${g.injury_max_bonus}</span>` : '',
+                g.shield_max_bonus ? `<span style="color:#00e1ff;">Shield Max ${g.shield_max_bonus >= 0 ? '+' : ''}${g.shield_max_bonus}</span>` : '',
+                g.dr_bonus ? `<span style="color:#c9962f;">DR ${g.dr_bonus >= 0 ? '+' : ''}${g.dr_bonus}</span>` : '',
+                g.injury_max_bonus ? `<span style="color:#ff6b6b;">Injury Max ${g.injury_max_bonus >= 0 ? '+' : ''}${g.injury_max_bonus}</span>` : '',
                 (g.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ')
               ].filter(Boolean).join(' · ') || '<span style="color:#6b826a;">No effects configured.</span>';
         return `
