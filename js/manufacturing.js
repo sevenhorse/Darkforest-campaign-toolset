@@ -554,9 +554,15 @@ window.approveBlueprint = async function(id) {
     window.addBpCostRow = function() {
         const sel = document.getElementById('bp-cost-name');
         const name = sel ? sel.value : '';
-        const qty = Math.max(1, parseInt(document.getElementById('bp-cost-qty').value) || 0);
+        // Bug fix (bug hunt, this session): the `qty <= 0` validation below
+        // was dead code -- qty was already floored to a minimum of 1 above
+        // BEFORE the check ran, so a blank/zero/negative input silently
+        // became qty 1 instead of triggering the intended alert. Validate
+        // the raw parsed value first, then apply the floor.
+        const rawQty = parseInt(document.getElementById('bp-cost-qty').value);
         const unit = document.getElementById('bp-cost-unit').value.trim() || 'Units';
-        if (!name || qty <= 0) { alert('Select an input and enter a positive quantity.'); return; }
+        if (!name || !(rawQty > 0)) { alert('Select an input and enter a positive quantity.'); return; }
+        const qty = rawQty;
         workingCosts.push({ name, qty, unit });
         document.getElementById('bp-cost-qty').value = '';
         renderCostList();
@@ -823,27 +829,37 @@ window.startVesselManufacturingOrder = async function(vesselId) {
     // the second resource in the list never leaves the first one already
     // spent.
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-    const rawRequirements = (bp.resource_cost || []).map(c => ({
-        name: c.name, unit: c.unit || 'Units',
-        qty: discountPct ? Math.max(1, Math.round(c.qty * (1 - discountPct / 100))) : c.qty
-    }));
-    // Aggregate by name (case-insensitive) BEFORE checking sufficiency. A
-    // blueprint can end up with more than one cost row naming the same
-    // input (the multi-tier dropdown makes picking the same entry twice an
-    // easy mistake, and nothing in the editor stops it) -- checking each
-    // row independently against the SAME un-decremented cargo snapshot
-    // would let a build pass the check even when the rows' combined total
-    // exceeds what's actually in the hold, driving that cargo item
-    // negative once every row's deduction lands. Summing up front closes
-    // that gap; found during this session's pre-deploy bug hunt.
-    const requirementsByName = new Map();
-    rawRequirements.forEach(req => {
-        const key = req.name.toLowerCase();
-        const existing = requirementsByName.get(key);
-        if (existing) existing.qty += req.qty;
-        else requirementsByName.set(key, { ...req });
+    // Aggregate by name (case-insensitive) BEFORE checking sufficiency AND
+    // before applying the discount. A blueprint can end up with more than
+    // one cost row naming the same input (the multi-tier dropdown makes
+    // picking the same entry twice an easy mistake, and nothing in the
+    // editor stops it) -- checking each row independently against the SAME
+    // un-decremented cargo snapshot would let a build pass the check even
+    // when the rows' combined total exceeds what's actually in the hold,
+    // driving that cargo item negative once every row's deduction lands.
+    // Summing up front closes that gap; found during this session's
+    // pre-deploy bug hunt.
+    //
+    // Bug fix (bug hunt, this session): the discount's `Math.max(1, ...)`
+    // floor used to be applied to each RAW row individually, before this
+    // aggregation step -- so two rows of qty 1 each (2 total) at a 50%
+    // discount became `max(1, round(0.5))=1` PER ROW, summing to 2 (no
+    // discount at all), while the same 2-total entered as a single row
+    // would correctly floor to 1. Aggregate the undiscounted raw
+    // quantities first, THEN apply the discount/floor once to each summed
+    // total, so a recipe's discount is consistent regardless of how many
+    // rows the author happened to split it across.
+    const rawTotalsByName = new Map();
+    (bp.resource_cost || []).forEach(c => {
+        const key = c.name.toLowerCase();
+        const existing = rawTotalsByName.get(key);
+        if (existing) existing.qty += c.qty;
+        else rawTotalsByName.set(key, { name: c.name, unit: c.unit || 'Units', qty: c.qty });
     });
-    const requirements = Array.from(requirementsByName.values());
+    const requirements = Array.from(rawTotalsByName.values()).map(req => ({
+        ...req,
+        qty: discountPct ? Math.max(1, Math.round(req.qty * (1 - discountPct / 100))) : req.qty
+    }));
     for (const req of requirements) {
         const found = findCargoItemAcrossBuckets(cargo, req.name);
         if (!found || found.item.qty < req.qty) {
@@ -965,10 +981,21 @@ window.cancelManufacturingOrder = async function(orderId) {
     }
     if (!ownerOk) { alert('Only the DM or the build\'s own source vessel/colony owner can cancel it.'); return; }
 
-    const hasRefund = order.source_type === 'vessel' && Array.isArray(order.resource_cost_snapshot) && order.resource_cost_snapshot.length > 0;
+    // Bug fix (bug hunt, this session): `hasRefund` used to conflate two
+    // different states -- (a) a legacy order with no resource_cost_snapshot
+    // column value at all (started before refund tracking existed), and
+    // (b) a perfectly normal, current-schema vessel order whose blueprint
+    // simply has an empty resource_cost (a supported, deliberate "time-only
+    // build" case, same as colony builds). Both produced an empty/absent
+    // snapshot array, so both got the misleading "started before refund
+    // tracking existed" message even when nothing is actually wrong. Check
+    // "does a snapshot record exist at all" separately from "does it have
+    // anything to refund."
+    const hasSnapshotRecord = order.source_type === 'vessel' && Array.isArray(order.resource_cost_snapshot);
+    const hasRefund = hasSnapshotRecord && order.resource_cost_snapshot.length > 0;
     const refundLine = hasRefund
         ? `Refunds: ${order.resource_cost_snapshot.map(r => `${r.qty}x ${r.name}`).join(', ')}.`
-        : (order.source_type === 'colony' ? 'Colony builds cost time only -- nothing to refund.' : 'No resource-cost record on this order (started before refund tracking existed) -- it will be cancelled with NO automatic refund.');
+        : (order.source_type === 'colony' || hasSnapshotRecord ? 'This build has no resource cost (time-only) -- nothing to refund.' : 'No resource-cost record on this order (started before refund tracking existed) -- it will be cancelled with NO automatic refund.');
     if (!(await window.showConfirmModal(`Cancel "${order.blueprint_name}" (${sourceName})? ${refundLine}`))) return;
 
     if (hasRefund) {
