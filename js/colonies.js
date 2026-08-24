@@ -118,10 +118,20 @@ window.deliverColonyResources = async function(id) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
+    // Bug fix (bug hunt, this session): the search key fell back to '' when
+    // resource_type was falsy, but the pushed item's name fell back to
+    // 'Raw Materials' -- for a colony with no resource_type set (an
+    // anticipated real state; the display code elsewhere falls back to
+    // 'Unspecified'), the first delivery pushed a 'Raw Materials' row, but
+    // every SUBSEQUENT delivery still searched for an item named '', never
+    // matched that existing row, and pushed a brand new duplicate 'Raw
+    // Materials' row instead of incrementing it. Use the same resolved name
+    // in both the search and the push.
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-    let existing = cargo.expendables.find(item => item.name.toLowerCase() === (colony.resource_type || '').toLowerCase());
+    let resType = colony.resource_type || 'Raw Materials';
+    let existing = cargo.expendables.find(item => item.name.toLowerCase() === resType.toLowerCase());
     if (existing) { existing.qty += (colony.resource_output || 0); }
-    else { cargo.expendables.push({ name: colony.resource_type || 'Raw Materials', qty: colony.resource_output || 0, unit: 'Units' }); }
+    else { cargo.expendables.push({ name: resType, qty: colony.resource_output || 0, unit: 'Units' }); }
 
     await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
     vessel.cargo_inventory = cargo;
