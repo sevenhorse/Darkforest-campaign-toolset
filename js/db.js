@@ -106,7 +106,21 @@ window.handleLogin = async function() {
 async function fetchUserProfile(user) {
     currentUserId = user.id; currentUserEmail = user.email;
     const { data, error } = await db.from('profiles').select('*').eq('id', user.id).single();
-    if (error) return;
+    // Bug fix (bug hunt, this session): this used to just `return` on error,
+    // leaving window._loginInProgress stuck at true forever (it's only reset
+    // in handleLogin's own sign-in-error branch, not here). A transient
+    // network blip or RLS hiccup on this SELECT right after a successful
+    // sign-in would leave the login screen frozen with no feedback, and
+    // every subsequent login click would silently no-op at the
+    // `_loginInProgress` guard in handleLogin -- only a full page reload
+    // could recover. Reset the guard and surface an error the same way the
+    // sign-in-error branch does.
+    if (error) {
+        window._loginInProgress = false;
+        const errorDiv = document.getElementById('error-message');
+        if (errorDiv) { errorDiv.innerText = "Access Denied: failed to load your profile (" + error.message + "). Please try again."; errorDiv.style.display = 'block'; }
+        return;
+    }
 
     currentUserRole = data.role;
     
@@ -367,10 +381,19 @@ async function checkAnomalyProximity(ship) {
     for (let anomaly of anomalies) {
         let dist = Math.hypot(ship.x - anomaly.x, ship.y - anomaly.y);
         if (dist < DRADIS_RANGE) {
+            // Bug fix (bug hunt, this session): mark the anomaly revealed in
+            // the local cache BEFORE the awaits, not after. This can be
+            // called repeatedly while a ship sits inside DRADIS_RANGE of the
+            // same anomaly (e.g. once per movement tick); the old ordering
+            // let every overlapping call still see 'Hidden Anomaly' during
+            // its own DB round-trip, so a ship lingering near an anomaly for
+            // more than one tick could fire the update/chat-log/klaxon
+            // sequence multiple times for what should be a single one-time
+            // reveal.
+            anomaly.luminosity = 'Revealed Anomaly'; anomaly.color = '#ff3333';
             await db.from('star_systems').update({ luminosity: 'Revealed Anomaly', color: '#ff3333' }).eq('id', anomaly.id);
             await db.from('chat_logs').insert({ sender_id: null, content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' detected a subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}.`, message_type: 'system' });
             if (window.AudioEngine) window.AudioEngine.playKlaxon();
-            anomaly.luminosity = 'Revealed Anomaly'; anomaly.color = '#ff3333';
         }
     }
 }
