@@ -111,9 +111,17 @@ window.SYSTEM_HAZARD_MAX_RADIUS = window.HAZARD_IMPLICIT_RADIUS;
    OWNER's own client, so viewer and ship-owner are always the same person
    there — no cross-client divergence in practice. */
 window.isPositionSensorVisible = function(x, y) {
+    // Bug fix (bug hunt, this session, confirmed design): this doc comment
+    // has always said the DM "sees everything," but the code only relaxed
+    // the ownership filter for a DM (any ship's range counted, not just
+    // owned/allied) -- it still required SOME ship within 300 units of the
+    // point, so a DM querying a location with no nearby fleet got the same
+    // fowTier 1 (hidden) result as a player. Confirmed: DM should be
+    // unconditionally omniscient, matching the comment literally.
+    if (currentUserRole === 'dm') return true;
     for (let m of globalShipMarkersCache) {
         if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
-        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied') || currentUserRole === 'dm') {
+        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied')) {
             if (Math.hypot(m.x - x, m.y - y) <= 300) return true;
         }
     }
@@ -1351,7 +1359,16 @@ window.initGalaxyEngine = function() {
 
         if (window.jumpPlottingActive && window.activeJumpShip) {
             let snapTarget = null; let allSystems = proceduralSystems.concat(globalDbSystemsCache);
-            for (let s of allSystems) { if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < 40) { snapTarget = { x: s.x, y: s.y, name: s.name, hazard: s.hazard }; break; } }
+            // Bug fix (bug hunt, this session): every other click hit-test in
+            // this handler scales its tolerance by window.camera.zoom so the
+            // on-screen (pixel) target size stays constant (see starHitRadius/
+            // tokenHitRadius/planetHitRadius below, and the hyperlane/territory
+            // snap radii above) -- this one used a bare 40 world-unit radius,
+            // which is sub-pixel when zoomed far out (jump snapping silently
+            // never triggers) and hundreds of screen pixels when zoomed far in
+            // (snaps to a star nowhere near the actual click).
+            const jumpSnapRadius = Math.max(15, 40 / window.camera.zoom);
+            for (let s of allSystems) { if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < jumpSnapRadius) { snapTarget = { x: s.x, y: s.y, name: s.name, hazard: s.hazard }; break; } }
             if (snapTarget) { window.jumpTargetPoint = { x: snapTarget.x, y: snapTarget.y, name: snapTarget.name, hazard: snapTarget.hazard }; }
             else { window.jumpTargetPoint = { x: worldPos.x, y: worldPos.y, name: `Sector (${Math.round(worldPos.x)}, ${Math.round(worldPos.y)})`, hazard: 'None' }; }
             if (window.AudioEngine) window.AudioEngine.playConfirm();
@@ -1370,7 +1387,17 @@ window.initGalaxyEngine = function() {
 
         if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD) {
             for (let s of allSystems) {
-                if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < 250 && s.type !== 'Nebula') { 
+                // Bug fix (bug hunt, this session): the render loop only ever
+                // draws a system's planets/moons at FOW tier 3 (DRADIS-scanned)
+                // AND when it's the camera-focused system (window._radarFocusedSystem,
+                // set in the render loop below) -- this hit-test never checked
+                // either condition, so a player could click near a completely
+                // unscanned system (rendered as just a dim tier-1 dot, but its
+                // real x/y is always known client-side) and still select and
+                // see full body data (resources/atmosphere/gravity) that was
+                // never actually revealed. Gate the hit-test the same way.
+                if (window.getFowTier(s) !== 3 || (window._radarFocusedSystem && s.id !== window._radarFocusedSystem.id)) continue;
+                if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < 250 && s.type !== 'Nebula') {
                     for (let b of window.getSystemBodies(s)) {
                         let angle = b.baseAngle + (time * b.speed); let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
                         if (Math.hypot(bx - worldPos.x, by - worldPos.y) < (b.isStar ? starHitRadius : planetHitRadius)) { 
