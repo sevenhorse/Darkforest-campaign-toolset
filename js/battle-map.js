@@ -682,6 +682,13 @@ window.processBattleRoundAutomations = async function() {
             // shooting after its own death. Prune it the moment it's
             // confirmed destroyed rather than leaving stale entries.
             pdPool = pdPool.filter(entry => entry.vesselId !== targetVessel.id);
+            // Bug fix (bug hunt, this session): same stale-pool problem
+            // applies to squadronInterceptPool -- a squadron destroyed by
+            // this impact could otherwise still "intercept" a later salvo
+            // this same automation pass, since its pool entry is keyed off
+            // sqShipId which stays resolvable in globalShipMarkersCache even
+            // after the token is gone. Prune by sqShipId, mirroring pdPool.
+            squadronInterceptPool = squadronInterceptPool.filter(entry => entry.sqShipId !== targetVessel.id);
             continue; // consumed on impact, dropped from survivingOrdnance
         }
 
@@ -1411,9 +1418,10 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
                 const dx = (upEvt.clientX - startX) / BATTLE_GRID_SCALE, dy = (upEvt.clientY - startY) / BATTLE_GRID_SCALE;
                 const pos = clampToGrid(initialLeft + dx, initialTop + dy);
                 const distMoved = Math.hypot(pos.x - initialLeft, pos.y - initialTop);
+                const dragVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
                 const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
                     if (t.token_id !== tokenId) return t;
-                    const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : 80;
+                    const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : (dragVessel?.tactical_speed ?? 160);
                     return { ...t, x: pos.x, y: pos.y, move_remaining: Math.round((prevRemaining - distMoved) * 10) / 10 };
                 });
                 saveBattleTokens(tokens).then(() => window.renderBattleMapPanel());
