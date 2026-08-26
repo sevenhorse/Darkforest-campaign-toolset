@@ -282,19 +282,51 @@ window.spawnTokenAtCenter = async function() {
         payload.integrity_reactive = 10; payload.max_reactive = 10;
         payload.integrity_ablative = 10; payload.max_ablative = 10;
         payload.integrity_hardened = 15; payload.max_hardened = 15;
+        // Weapon Cooldowns build (this session): reconciled against the DM's
+        // original paper stat sheet for the Jupiter Heavy Cruiser.
+        // CONFIRMED (AskUserQuestion): damage_type values are LEFT AS-IS —
+        // the paper lists two damage types per weapon (e.g. "heat/piercing")
+        // but this engine only supports one, and whoever set this preset up
+        // originally already made that single-type call; not revisited here.
+        // gun_count IS raised to match the paper's physical mount/tube
+        // counts (a real balance swing, confirmed explicitly, not a small
+        // data fix — a bigger single-volley ceiling per weapon than before).
+        // cooldown_period is new: "every turn" -> 0, "every other turn" -> 1,
+        // "once every N turns" -> N-1 (fires on turn 1, ready again on turn
+        // N). range is new too, first-pass placeholder mapping of the
+        // paper's short/medium/long/cone bands onto this app's existing
+        // range convention (short=300, medium=450, long=650, ordnance
+        // long=700 matching STRIKE_CRAFT_DB's own anti_capital-ordnance
+        // distinction) — a dual-band weapon ("short/med", "medium/long")
+        // uses the HIGHER band, a judgment call, not DM-confirmed per weapon.
+        // System Lockdown/AOE build (this session, follow-on to the above):
+        // the Spinal EMP Cannon's "bypasses armor, affects shield" flavor was
+        // already covered by the pre-existing Ion damage type (hullMult
+        // 0.25, bypassesLayers reactive/ablative/hardened) -- no change
+        // needed there. New this pass: system_lockdown (flat d20 vs DC16,
+        // fail = one random system disabled 1d4 rounds; strike craft/
+        // Escort-class instead get an instant, no-check PERMANENT disable of
+        // all three systems) and self_damage_on_consecutive_fire (1d4 Heat
+        // to own hull if fired two rounds running) on the EMP Cannon; a real
+        // multi-token aoe_radius splash (100px) on Capitol Killer Tubes only
+        // (NOT Flak Guns, per confirmed design) applied per-payload. Still
+        // NOT added: the paper's embarked air group (12x Raven, 12x Hawk,
+        // 48x Messenger, 48x "Messenger Gunship" — the last of which isn't
+        // even an existing STRIKE_CRAFT_DB type) — noticed but out of scope,
+        // flagging rather than silently populating ship_hangar with a guess.
         payload.ship_weapons = [
-            { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Piercing" },
-            { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 2, damage_type: "Piercing" },
-            { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Energy" },
-            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0, gun_count: 8, damage_type: "Explosive", weapon_class: "ordnance" },
-            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Antimatter", weapon_class: "ordnance" },
-            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak", is_point_defense: true },
-            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak", is_point_defense: true },
-            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 6, damage_type: "Flak", is_point_defense: true },
-            { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, gun_count: 4, damage_type: "Flak" },
-            { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 3, damage_type: "Heat" },
-            { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Antimatter" },
-            { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: 1, damage_type: "Ion" }
+            { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 32, damage_type: "Piercing", range: 450 },
+            { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, cooldown_period: 1, gun_count: 12, damage_type: "Piercing", range: 650 },
+            { loc: "Spinal", name: "Gamma Lance", dice: "1d20", modifier: "+0", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, cooldown_period: 4, gun_count: 2, damage_type: "Energy", range: 650 },
+            { loc: "Tubes", name: "Ship Killer Tubes", dice: "1d12", modifier: "+0", explodes: false, ammo: 48, max_ammo: 48, cooldown: 0, overheat: 0, cooldown_period: 3, gun_count: 48, damage_type: "Explosive", weapon_class: "ordnance", range: 700 },
+            { loc: "Tubes", name: "Capitol Killer Tubes", dice: "1d20", modifier: "+0", explodes: false, ammo: 24, max_ammo: 24, cooldown: 0, overheat: 0, cooldown_period: 5, gun_count: 24, damage_type: "Antimatter", weapon_class: "ordnance", range: 700, aoe_radius: 100 },
+            { loc: "PDC", name: "PDC Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 36, damage_type: "Flak", is_point_defense: true, range: 300 },
+            { loc: "PDL", name: "PDL Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 12, max_ammo: 12, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 36, damage_type: "Flak", is_point_defense: true, range: 450 },
+            { loc: "PDG", name: "PDG Grid", dice: "1d4", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 36, damage_type: "Flak", is_point_defense: true, range: 650 },
+            { loc: "Turrets", name: "Flak Guns", dice: "1d6", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 12, damage_type: "Flak", range: 300 },
+            { loc: "Turrets", name: "Rapid Plasma Repeaters", dice: "1d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 6, damage_type: "Heat", range: 450 },
+            { loc: "Spinal", name: "Thanix Enforcer", dice: "2d20", modifier: "+5", explodes: true, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, cooldown_period: 4, gun_count: 2, damage_type: "Antimatter", range: 650 },
+            { loc: "Spinal", name: "Spinal EMP Cannon", dice: "2d12", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 1, damage_type: "Ion", range: 650, system_lockdown: { checkDC: 16 }, self_damage_on_consecutive_fire: { dice: '1d4', damage_type: 'Heat' } }
         ];
         payload.ship_decks = [
             { name: "Bridge / CIC", hp: 100, max_hp: 100, type: "bridge", boarding_status: "secure" },
