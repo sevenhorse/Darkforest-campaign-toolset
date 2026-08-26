@@ -286,6 +286,9 @@
                                 <div id="dice-roller-skills" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-height: 110px; overflow-y: auto; margin-bottom: 8px;"></div>
                                 <label for="roll-extra-mod" style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Additional Modifier (added to the final roll total):</label>
                                 <input type="number" id="roll-extra-mod" value="0" style="margin:2px 0;" placeholder="e.g. +2 or -1">
+                                <label for="roll-advantage-cb" style="font-size:10px; color:#ffd166; display:flex; align-items:center; gap:4px; cursor:pointer; margin:4px 0 8px 0;" title="Every selected stat's die is rolled twice (each explodes independently) and the higher total is kept, with both rolls shown in the breakdown.">
+                                    <input type="checkbox" id="roll-advantage-cb" style="width:auto; margin:0;"> ⭐ Roll with Advantage
+                                </label>
                                 <button class="btn-reveal" onclick="window.executeDicePoolRoll()" style="width:100%; font-size:12px;">ROLL COMBINED POOL</button>
                                 <div id="dice-roll-result-box" style="margin-top: 12px; display:none; color:#00e5a3; background:#030403; padding:8px; border:1px solid #00e5a3;"></div>
                             </div>
@@ -432,6 +435,8 @@
                                     </select>
                                     <label for="new-ship-wpn-range" style="font-size: 9px; color: #ffaaaa;" title="Battle Map targeting range, grid px. 0 = unlimited (no restriction) — the default for every weapon unless set otherwise.">Range (Battle Map grid px, 0 = unlimited):</label>
                                     <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
+                                    <label for="new-ship-wpn-cooldown" style="font-size: 9px; color: #ffaaaa;" title="Turns this weapon needs to recharge after firing. Auto-applied to Cooldown the moment it's fired. 0 = no cooldown (fires every turn, same as before this field existed).">Cooldown Period (turns, 0 = none):</label>
+                                    <input type="number" id="new-ship-wpn-cooldown" min="0" value="0" placeholder="0 = none" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
                                     <label for="new-ship-wpn-deck" style="font-size: 9px; color: #ffaaaa;" title="A destroyed deck can't fire its assigned weapons — Station Designer's lightweight section-damage mechanic.">Assigned Deck (optional):</label>
                                     <select id="new-ship-wpn-deck" style="margin:2px 0 6px 0; border-color:#ff3333;"></select>
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1298,15 +1303,15 @@
     <script src="js/db.js?v=3.27"></script>
     <script src="js/audio.js?v=3.17"></script>
     <script src="js/ui.js?v=3.33"></script>
-    <script src="js/combat.js?v=3.40"></script>
+    <script src="js/combat.js?v=3.44"></script>
     <script src="js/colonies.js?v=3.17"></script>
     <script src="js/ship-designer.js?v=3.23"></script>
     <script src="js/perk-designer.js?v=3.15"></script>
     <script src="js/augment-designer.js?v=1.2"></script>
     <script src="js/gear-designer.js?v=1.1"></script>
     <script src="js/dm-sheet-editor.js?v=1.0"></script>
-    <script src="js/map.js?v=3.29"></script>
-    <script src="js/battle-map.js?v=1.23"></script>
+    <script src="js/map.js?v=3.31"></script>
+    <script src="js/battle-map.js?v=1.26"></script>
     <script src="js/manufacturing.js?v=1.9"></script>
 
 </body>
