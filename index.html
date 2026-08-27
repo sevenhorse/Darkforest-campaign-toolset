@@ -10,7 +10,7 @@
          directly in the markup). Simple DRADIS-style radar blip, matching
          the app's terminal green-on-black theme. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=3.28">
+    <link rel="stylesheet" href="style.css?v=3.29">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Codex Markdown/Charts (this session): marked.js for markdown-to-HTML
@@ -426,6 +426,13 @@
                                         <label for="new-ship-wpn-guns" style="display:none;">Guns</label>
                                         <input type="number" id="new-ship-wpn-guns" min="1" value="1" placeholder="Guns" style="flex:1; margin:0; text-align:center; border-color:#ff3333;">
                                     </div>
+                                    <label for="new-ship-wpn-standby-max" style="font-size: 9px; color: #ffaaaa;" title="Tiered Ammo: a per-weapon spare-mag reserve, refilled from ship cargo and reloaded into Ready. Blank/0 = weapon doesn't use this tier at all.">Standby Reserve (Tiered Ammo, 0 = unused):</label>
+                                    <div style="display:flex; gap:6px; margin-bottom:6px;">
+                                        <label for="new-ship-wpn-standby-max" style="display:none;">Standby Max</label>
+                                        <input type="number" id="new-ship-wpn-standby-max" min="0" placeholder="Standby Max (0 = unused)" style="flex:1; margin:0; text-align:center; border-color:#ff9d4d;">
+                                        <label for="new-ship-wpn-ammotype" style="display:none;">Ammo Type</label>
+                                        <input type="text" id="new-ship-wpn-ammotype" placeholder="Ammo Type (Kinetic Rounds)" style="flex:1.4; margin:0; text-align:center; border-color:#ff9d4d;">
+                                    </div>
                                     <label for="new-ship-wpn-dmgtype" style="font-size: 9px; color: #ffaaaa;">Damage Type:</label>
                                     <select id="new-ship-wpn-dmgtype" style="margin:2px 0 6px 0; border-color:#ff3333;"></select>
                                     <label for="new-ship-wpn-class" style="font-size: 9px; color: #ffaaaa;">Weapon Class (governs turn-to-hit/counter-fire behavior on the Battle Map):</label>
@@ -437,6 +444,13 @@
                                     <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
                                     <label for="new-ship-wpn-cooldown" style="font-size: 9px; color: #ffaaaa;" title="Turns this weapon needs to recharge after firing. Auto-applied to Cooldown the moment it's fired. 0 = no cooldown (fires every turn, same as before this field existed).">Cooldown Period (turns, 0 = none):</label>
                                     <input type="number" id="new-ship-wpn-cooldown" min="0" value="0" placeholder="0 = none" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
+                                    <label for="new-ship-wpn-reloadcd" style="font-size: 9px; color: #ffaaaa;" title="Only relevant if Standby Reserve above is set. RELOAD (Standby -> Ready) sets this weapon's Cooldown to this many rounds, same field firing uses.">Reload Cooldown (rounds, Tiered Ammo only):</label>
+                                    <input type="number" id="new-ship-wpn-reloadcd" min="0" value="1" placeholder="1" style="margin:2px 0 6px 0; border-color:#ff9d4d; text-align:center;">
+                                    <label for="new-ship-wpn-ordpattern" style="font-size: 9px; color: #ffaaaa;" title="Only relevant for Ordnance-class weapons (see Weapon Class above).">Ordnance Pattern (Ordnance weapons only):</label>
+                                    <select id="new-ship-wpn-ordpattern" style="margin:2px 0 6px 0; border-color:#ff9d4d;">
+                                        <option value="multi" selected>Multi-Hit (splits into 6 payloads, current default)</option>
+                                        <option value="single">Single Warhead (no split, heavier per-hit damage)</option>
+                                    </select>
                                     <label for="new-ship-wpn-deck" style="font-size: 9px; color: #ffaaaa;" title="A destroyed deck can't fire its assigned weapons — Station Designer's lightweight section-damage mechanic.">Assigned Deck (optional):</label>
                                     <select id="new-ship-wpn-deck" style="margin:2px 0 6px 0; border-color:#ff3333;"></select>
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1125,9 +1139,9 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
                         <label for="dm-tool-iff" style="font-size: 10px; color: #6b826a;">IFF Signature:</label>
                         <select id="dm-tool-iff" style="width: 150px; font-size: 10px; background:#0a1410; color:#00e5a3; border: 1px solid #3c4e36;">
-                            <option value="allied">Allied (Green/Cyan)</option>
+                            <option value="friendly">Friendly (Green/Cyan)</option>
                             <option value="hostile" style="color:#ff3333;">Hostile (Red)</option>
-                            <option value="neutral" style="color:#ffaa00;">Neutral (Amber)</option>
+                            <option value="neutral" style="color:#c9962f;">Neutral (Amber)</option>
                         </select>
                     </div>
 
@@ -1302,16 +1316,17 @@
     <!-- MAIN JAVASCRIPT LINKS -->
     <script src="js/db.js?v=3.27"></script>
     <script src="js/audio.js?v=3.17"></script>
-    <script src="js/ui.js?v=3.33"></script>
-    <script src="js/combat.js?v=3.44"></script>
+    <script src="js/ui.js?v=3.34"></script>
+    <script src="js/combat.js?v=3.48"></script>
+    <script src="js/squadrons.js?v=1.2"></script>
     <script src="js/colonies.js?v=3.17"></script>
-    <script src="js/ship-designer.js?v=3.23"></script>
+    <script src="js/ship-designer.js?v=3.24"></script>
     <script src="js/perk-designer.js?v=3.15"></script>
     <script src="js/augment-designer.js?v=1.2"></script>
     <script src="js/gear-designer.js?v=1.1"></script>
     <script src="js/dm-sheet-editor.js?v=1.0"></script>
-    <script src="js/map.js?v=3.31"></script>
-    <script src="js/battle-map.js?v=1.26"></script>
+    <script src="js/map.js?v=3.33"></script>
+    <script src="js/battle-map.js?v=1.29"></script>
     <script src="js/manufacturing.js?v=1.9"></script>
 
 </body>
