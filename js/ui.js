@@ -530,7 +530,8 @@ window.TERM_TAB_ACTIVITY_LABELS = {
     geardesigner: 'Designing Gear',
     notes: 'Editing Tactical Notes',
     roster: 'Reviewing Crew Roster',
-    codex: 'Reviewing Sector Lore'
+    codex: 'Reviewing Sector Lore',
+    secretrepo: 'Designing NPC Vessels'
 };
 
 window.switchTermTab = function(tabName) {
@@ -555,6 +556,16 @@ window.switchTermTab = function(tabName) {
     if (tabName === 'geardesigner' && typeof window.renderGearDesignerPanel === 'function') window.renderGearDesignerPanel();
     if (tabName === 'codex') window.switchCodexCategory(window.activeCodexCategory || 'factions');
     if (tabName === 'roster' && typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
+    // DM note #7 build (this session): re-render both list sections every
+    // time the tab opens (cheap, idempotent, matches every other tab's own
+    // convention above) rather than relying on whatever load happened at
+    // login -- also resets to the list view, never lands mid-edit on stale
+    // data from a previous session.
+    if (tabName === 'secretrepo') {
+        if (typeof window.closeSecretRepoEditor === 'function') window.closeSecretRepoEditor();
+        if (typeof window.renderSecretRepositoryPanel === 'function') window.renderSecretRepositoryPanel();
+        if (typeof window.renderSavedFleetsPanel === 'function') window.renderSavedFleetsPanel();
+    }
 
     const activityLabel = window.TERM_TAB_ACTIVITY_LABELS[tabName];
     if (activityLabel && typeof window.broadcastActivity === 'function') window.broadcastActivity(activityLabel);
