@@ -454,10 +454,27 @@ canvas { display: block; width: 100%; height: 100%; }
    220px) left for it -- and #character-terminal's overflow:hidden then
    clipped the excess instead of showing a scrollbar, which reads as a
    width:100% button being "cut in half." min-width:0 down this whole chain
-   lets every level actually shrink to the space it's given. */
+   lets every level actually shrink to the space it's given.
+
+   GAP CLOSED (polish pass, this session): the original selector list only
+   ever matched inline `display: grid` rows (`div[style*="grid-template-
+   columns"]`) -- it never covered the ~66 inline `display:flex` rows also
+   scattered through the Dossier & Stats tab (e.g. the Injuries/Stress/
+   Adversity row, the Shield/DR/RECHARGE row), which are just as subject to
+   the same min-width:auto default as a grid item. Traced the actual DOM
+   chain around the SAVE DOSSIER & STATS button in index.html this pass to
+   confirm this specifically, rather than widen the selector list blindly
+   again -- still not live-browser-verified (no way to load this app with
+   real campaign data from this session), so still worth an actual look
+   after this deploy, but this closes a concrete, real gap rather than
+   guessing further. */
 .term-panel-content,
 div[style*="grid-template-columns"],
 div[style*="grid-template-columns"] > div,
+div[style*="display: flex"],
+div[style*="display:flex"],
+div[style*="display: flex"] > *,
+div[style*="display:flex"] > *,
 .sheet-section,
 .skill-grid, .augment-grid,
 .skill-grid > *, .augment-grid > * {
