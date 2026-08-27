@@ -140,6 +140,7 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-colonies" onclick="window.switchTermTab('colonies')"><span class="tab-text">Colonies & Fleets</span> <span class="tab-badge" id="badge-colonies">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-manufacturing" onclick="window.switchTermTab('manufacturing')" style="border-color:#c9962f; color:#c9962f;"><span class="tab-text">Manufacturing</span> <span class="tab-badge" id="badge-manufacturing">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-shipdesigner" onclick="window.switchTermTab('shipdesigner')"><span class="tab-text">Ship Designer</span> <span class="tab-badge" id="badge-shipdesigner">0</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-secretrepo" onclick="window.switchTermTab('secretrepo')" style="display:none; border-color:#ff3333; color:#ff6b6b;"><span class="tab-text">Secret Repository</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-perkdesigner" onclick="window.switchTermTab('perkdesigner')"><span class="tab-text">Perk Designer</span> <span class="tab-badge" id="badge-perkdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-augmentdesigner" onclick="window.switchTermTab('augmentdesigner')"><span class="tab-text">Augment Designer</span> <span class="tab-badge" id="badge-augmentdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-geardesigner" onclick="window.switchTermTab('geardesigner')"><span class="tab-text">Gear Designer</span> <span class="tab-badge" id="badge-geardesigner">0</span></button>
@@ -672,6 +673,78 @@
                     </div>
                 </div>
 
+                <!-- SECRET REPOSITORY TAB (DM-only; full-screen NPC design, DM note #7) -->
+                <div id="term-panel-secretrepo" class="term-panel-content">
+                    <div id="secretrepo-list-view">
+                        <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Hidden vessel templates — never visible to players. Enforced at the database level via RLS, not just hidden in this UI.</p>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div class="sheet-section" style="border-color:#ff3333; background:rgba(255,51,51,0.04);">
+                                <h4 style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px;">+ Design New NPC Vessel</h4>
+                                <label for="new-secret-template-name" style="font-size:9px; color:#ffaaaa;">Vessel Designation:</label>
+                                <input type="text" id="new-secret-template-name" placeholder="e.g. Void Raider" style="font-size:11px; margin:2px 0; border-color:#ff3333;">
+                                <div style="display:flex; gap:6px; margin-top:4px;">
+                                    <input type="text" id="new-secret-template-class" placeholder="Class" style="flex:1; font-size:10px; margin:2px 0; border-color:#ff3333;">
+                                    <select id="new-secret-template-drive" style="flex:1.3; font-size:10px; margin:2px 0; border-color:#ff3333;"></select>
+                                </div>
+                                <div style="display:flex; gap:6px; margin-top:4px;">
+                                    <input type="number" id="new-secret-template-shields" placeholder="Shields" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                                    <input type="number" id="new-secret-template-hull" placeholder="Hull" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                                    <input type="number" id="new-secret-template-slots" placeholder="Slots" value="4" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                                </div>
+                                <div style="display:flex; gap:6px; margin-top:4px; align-items:center;">
+                                    <input type="number" id="new-secret-template-speed" placeholder="Tactical Speed" title="Battle Map movement allowance, grid px/round" value="160" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                                    <label for="new-secret-template-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; flex:1.3;" title="Locks Tactical Speed to 0 and removes the Hardpoint Slots cap."><input type="checkbox" id="new-secret-template-station" onchange="window.toggleStationFields('new-secret-template')" style="margin:0;"> 🛰 Station</label>
+                                </div>
+                                <div style="margin-top:4px;">
+                                    <label for="new-secret-template-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic. Optional.">Vessel Classification:</label>
+                                    <select id="new-secret-template-vesselclass" style="font-size:10px; margin:2px 0; border-color:#ff3333;">
+                                        <option value="">-- Unclassified --</option>
+                                        <option value="Capital">Capital Ship</option>
+                                        <option value="Escort">Escort</option>
+                                    </select>
+                                </div>
+                                <div style="margin-top:4px;">
+                                    <label for="new-secret-template-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) — controls whether players can see/edit this vessel once deployed. Friendly is visible in every player's Vessel Deck alongside their own ships; Neutral/Hostile (or left unset) stay DM-only. Editable later per-vessel from EDIT BASE STATS.">IFF Designation:</label>
+                                    <select id="new-secret-template-iff" style="font-size:10px; margin:2px 0; border-color:#ff3333;">
+                                        <option value="hostile" selected>⚠ Hostile</option>
+                                        <option value="neutral">◌ Neutral</option>
+                                        <option value="friendly">✓ Friendly</option>
+                                    </select>
+                                </div>
+                                <button class="btn-remove" onclick="window.saveNewSecretTemplate()" style="width:100%; margin-top:6px; font-size:10px;">+ STORE IN REPOSITORY</button>
+                            </div>
+                            <div class="sheet-section">
+                                <h4 style="border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#ff6b6b;">Stored Templates</h4>
+                                <div id="secret-templates-list-container" style="max-height:480px; overflow-y:auto;"></div>
+                            </div>
+                        </div>
+
+                        <div class="sheet-section" style="margin-top:20px;">
+                            <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; font-size:11px; color:#c778dd;">Saved Fleets</h4>
+                            <p style="font-size:9px; color:#6b826a; margin:0 0 6px 0;">Reusable compositions of the templates above — deploy a whole fleet to an active battle in one click from the Battle Map's DM controls, instead of placing each vessel individually every time.</p>
+                            <div style="display:flex; gap:6px; margin-bottom:8px;">
+                                <label for="new-saved-fleet-name" style="display:none;">Fleet Name</label>
+                                <input type="text" id="new-saved-fleet-name" placeholder="e.g. Void Raider Squadron" style="flex:1; font-size:10px; margin:0; border-color:#c778dd;">
+                                <button class="btn-deploy" onclick="window.saveNewFleet()" style="width:auto; font-size:9px; margin:0; padding:4px 10px; border-color:#c778dd; color:#c778dd;">+ NEW FLEET</button>
+                            </div>
+                            <div id="saved-fleets-list-container" style="max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Full-screen single-template editor (DM note #7 build, this session):
+                         reuses the Vessel Deck's visual language (health-section layout,
+                         weapon card styling) but NOT its literal rendering functions --
+                         those are wired to live combat state (FIRE/LAUNCH buttons, target
+                         dropdowns, delta-based health mutation via window.modifyShipHealth)
+                         that doesn't exist for a design-time template. Content is built
+                         entirely by window.renderSecretRepoEditorPanel (js/ship-designer.js)
+                         into the container below. -->
+                    <div id="secretrepo-editor-view" style="display:none;">
+                        <button class="layer-edit" onclick="window.closeSecretRepoEditor()" style="margin-bottom:12px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">← BACK TO REPOSITORY</button>
+                        <div id="secretrepo-editor-container"></div>
+                    </div>
+                </div>
+
                 <!-- PERK DESIGNER TAB -->
                 <div id="term-panel-perkdesigner" class="term-panel-content">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; background:#040605; padding:10px; border:1px solid #3c4e36; border-radius:2px;">
@@ -1124,7 +1197,6 @@
                 <div class="hud-tabs" style="margin-bottom: 10px;">
                     <button class="hud-tab-btn active" id="dm-subtab-btn-spawn" onclick="window.switchDmSubtab('spawn')">⭐ SPAWN</button>
                     <button class="hud-tab-btn" id="dm-subtab-btn-map" onclick="window.switchDmSubtab('map')">🗺️ MAP TOOLS</button>
-                    <button class="hud-tab-btn" id="dm-subtab-btn-repo" onclick="window.switchDmSubtab('repo')">🔒 REPOSITORY</button>
                     <button class="hud-tab-btn" id="dm-subtab-btn-maint" onclick="window.switchDmSubtab('maint')">⚙️ MAINT</button>
                 </div>
 
@@ -1239,55 +1311,6 @@
                     <div id="hazard-zone-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;"></div>
                 </div>
 
-                <div id="dm-panel-repo" class="dm-subpanel">
-                    <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Hidden vessel templates — never visible to players. Enforced at the database level via RLS, not just hidden in this UI.</p>
-                    <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px; margin-bottom:10px;">
-                        <label for="new-secret-template-name" style="font-size:9px; color:#ffaaaa;">Vessel Designation:</label>
-                        <input type="text" id="new-secret-template-name" placeholder="e.g. Void Raider" style="font-size:11px; margin:2px 0; border-color:#ff3333;">
-                        <div style="display:flex; gap:6px; margin-top:4px;">
-                            <input type="text" id="new-secret-template-class" placeholder="Class" style="flex:1; font-size:10px; margin:2px 0; border-color:#ff3333;">
-                            <select id="new-secret-template-drive" style="flex:1.3; font-size:10px; margin:2px 0; border-color:#ff3333;"></select>
-                        </div>
-                        <div style="display:flex; gap:6px; margin-top:4px;">
-                            <input type="number" id="new-secret-template-shields" placeholder="Shields" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
-                            <input type="number" id="new-secret-template-hull" placeholder="Hull" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
-                            <input type="number" id="new-secret-template-slots" placeholder="Slots" value="4" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
-                        </div>
-                        <div style="display:flex; gap:6px; margin-top:4px; align-items:center;">
-                            <input type="number" id="new-secret-template-speed" placeholder="Tactical Speed" title="Battle Map movement allowance, grid px/round" value="160" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
-                            <label for="new-secret-template-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; flex:1.3;" title="Locks Tactical Speed to 0 and removes the Hardpoint Slots cap."><input type="checkbox" id="new-secret-template-station" onchange="window.toggleStationFields('new-secret-template')" style="margin:0;"> 🛰 Station</label>
-                        </div>
-                        <div style="margin-top:4px;">
-                            <label for="new-secret-template-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic. Optional.">Vessel Classification:</label>
-                            <select id="new-secret-template-vesselclass" style="font-size:10px; margin:2px 0; border-color:#ff3333;">
-                                <option value="">-- Unclassified --</option>
-                                <option value="Capital">Capital Ship</option>
-                                <option value="Escort">Escort</option>
-                            </select>
-                        </div>
-                        <div style="margin-top:4px;">
-                            <label for="new-secret-template-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) — controls whether players can see/edit this vessel once deployed. Friendly is visible in every player's Vessel Deck alongside their own ships; Neutral/Hostile (or left unset) stay DM-only. Editable later per-vessel from EDIT BASE STATS.">IFF Designation:</label>
-                            <select id="new-secret-template-iff" style="font-size:10px; margin:2px 0; border-color:#ff3333;">
-                                <option value="hostile" selected>⚠ Hostile</option>
-                                <option value="neutral">◌ Neutral</option>
-                                <option value="friendly">✓ Friendly</option>
-                            </select>
-                        </div>
-                        <button class="btn-remove" onclick="window.saveNewSecretTemplate()" style="width:100%; margin-top:6px; font-size:10px;">+ STORE IN REPOSITORY</button>
-                    </div>
-                    <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; font-size:11px; color:#ff6b6b;">Stored Templates</h4>
-                    <div id="secret-templates-list-container" style="max-height:280px; overflow-y:auto;"></div>
-
-                    <h4 style="margin:14px 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; font-size:11px; color:#c778dd;">Saved Fleets</h4>
-                    <p style="font-size:9px; color:#6b826a; margin:0 0 6px 0;">Reusable compositions of the templates above — deploy a whole fleet to an active battle in one click from the Battle Map's DM controls, instead of placing each vessel individually every time.</p>
-                    <div style="display:flex; gap:6px; margin-bottom:8px;">
-                        <label for="new-saved-fleet-name" style="display:none;">Fleet Name</label>
-                        <input type="text" id="new-saved-fleet-name" placeholder="e.g. Void Raider Squadron" style="flex:1; font-size:10px; margin:0; border-color:#c778dd;">
-                        <button class="btn-deploy" onclick="window.saveNewFleet()" style="width:auto; font-size:9px; margin:0; padding:4px 10px; border-color:#c778dd; color:#c778dd;">+ NEW FLEET</button>
-                    </div>
-                    <div id="saved-fleets-list-container" style="max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;"></div>
-                </div>
-
                 <div id="dm-panel-maint" class="dm-subpanel">
                     <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Emergency Maintenance.</p>
                     <button class="btn-remove" onclick="window.resetTimeline()">⏳ RESET IN-UNIVERSE TIMELINE</button>
@@ -1314,18 +1337,18 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.27"></script>
+    <script src="js/db.js?v=3.28"></script>
     <script src="js/audio.js?v=3.17"></script>
-    <script src="js/ui.js?v=3.34"></script>
-    <script src="js/combat.js?v=3.48"></script>
-    <script src="js/squadrons.js?v=1.2"></script>
+    <script src="js/ui.js?v=3.35"></script>
+    <script src="js/combat.js?v=3.49"></script>
+    <script src="js/squadrons.js?v=1.3"></script>
     <script src="js/colonies.js?v=3.17"></script>
-    <script src="js/ship-designer.js?v=3.24"></script>
+    <script src="js/ship-designer.js?v=3.25"></script>
     <script src="js/perk-designer.js?v=3.15"></script>
     <script src="js/augment-designer.js?v=1.2"></script>
     <script src="js/gear-designer.js?v=1.1"></script>
     <script src="js/dm-sheet-editor.js?v=1.0"></script>
-    <script src="js/map.js?v=3.33"></script>
+    <script src="js/map.js?v=3.34"></script>
     <script src="js/battle-map.js?v=1.29"></script>
     <script src="js/manufacturing.js?v=1.9"></script>
 
