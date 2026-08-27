@@ -34,6 +34,15 @@
     }
     function finish(result) {
         overlay.style.display = 'none';
+        // Polish pass (this session): playCancel existed in audio.js but was
+        // never wired to anything. This is the single shared "declined"
+        // path for every confirm modal in the app (Cancel click, clicking
+        // outside the overlay, or Escape) -- one hook here covers all of
+        // them. Deliberately NOT playing a sound on the CONFIRM path
+        // (result === true), since a confirmed action already leads into
+        // its own more specific sound (playShoot on a fire-override, etc.)
+        // -- avoids stacking two sounds on one click.
+        if (!result && window.AudioEngine) window.AudioEngine.playCancel();
         if (resolver) { resolver(result); resolver = null; }
     }
     window.showConfirmModal = function(message) {
@@ -525,6 +534,11 @@ window.TERM_TAB_ACTIVITY_LABELS = {
 };
 
 window.switchTermTab = function(tabName) {
+    // Polish pass (this session): playClick existed in audio.js but was
+    // never wired to anything. Tab switching is the single highest-traffic
+    // UI action in the app and a natural fit for a light click cue -- one
+    // hook here covers every Command Terminal tab switch.
+    if (window.AudioEngine) window.AudioEngine.playClick();
     document.querySelectorAll('.term-tab-btn-vert').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.term-panel-content').forEach(p => p.classList.remove('active'));
     const activeBtn = document.getElementById(`term-tab-btn-${tabName}`); if (activeBtn) activeBtn.classList.add('active');
