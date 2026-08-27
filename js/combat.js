@@ -2,97 +2,11 @@
    js/combat.js - Tactical Engine, Arsenal & Diagnostics
    ========================================================================== */
 
-// Squadron AI Stances build (this session): each weapon got an optional
-// `role` tag ('anti_fighter' | 'anti_capital' | 'point_defense' | 'general')
-// consumed by an AI-controlled squadron (window.setSquadronAIStance) to pick
-// which of its weapons fits the stance it's been given — e.g. the
-// Messenger's "Point Defense System" for Intercept Munitions, or the Raven's
-// "Ship Killer Missiles" for Attack Capital Ships/Escorts. FLAGGED JUDGMENT
-// CALL, not DM-confirmed per weapon: these are flavor-text reads of each
-// weapon's name/dice (a name like "Point Defense System" or "Ship Killer
-// Missiles" is fairly unambiguous, but e.g. "Micro Railgun" -> anti_capital
-// is a judgment call, not a stated rule). Untagged weapons default to
-// 'general' and are only used as a last-resort fallback (see
-// processBattleRoundAutomations' weapon-selection comment) when no weapon
-// on that squadron type matches the stance's desired role at all.
-// Strike-Craft Weapon Range build (this session): every squadron weapon gets
-// a `range` field (grid px, same unit/meaning as ship_weapons' `range` --
-// see getBattleScopedTargets/launchOrdnance in js/battle-map.js), which was
-// ZERO/absent before this build (a repeatedly-flagged open gap -- see the
-// Strike Craft Grid Position, Squadron AI Stances, and Weapon Range Ring
-// checkpoints below). FLAGGED FIRST-PASS PLACEHOLDER NUMBERS, DM-tunable,
-// same convention as SQUADRON_TACTICAL_SPEED below and every other
-// first-pass balance number in this app -- NOT a rules citation. Scaled
-// against the battle grid (BATTLE_GRID_W/H = 920x760, js/battle-map.js) and
-// SQUADRON_TACTICAL_SPEED = 320/round, and differentiated by each weapon's
-// existing `role` tag per the confirmed design (short for point-defense/
-// anti-fighter dogfighting weapons, medium for general-purpose, long for
-// anti-capital ordnance/rockets that are meant to be launched from standoff
-// range): point_defense ~180, anti_fighter ~280, general ~420, anti_capital
-// ~600, and weapon_class:"ordnance" anti-capital munitions a bit further
-// still (~700) since they're explicitly standoff missiles/rockets by name.
-// Weapon Cooldowns build (this session): `cooldown_period` on a weapon
-// entry is new -- how many rounds it needs after firing before it's ready
-// again (auto-applied to the squadron's own per-instance
-// `sq.weapon_cooldowns[wpnIdx]` counter on fire, decremented on Advance
-// Round, same soft-override-on-fire convention ship_weapons' cooldown
-// already used). FLAGGED FIRST-PASS PLACEHOLDER, DM-tunable, and
-// DELIBERATELY ONLY SET ON THE TWO ORDNANCE WEAPONS (missiles) -- the DM's
-// own framing was "missiles and torpedoes as well as SOME guns," but which
-// specific guns wasn't specified, and defaulting a cooldown onto an
-// existing, already-balanced direct-fire weapon would be a real balance
-// change nobody asked for yet. Every weapon without a `cooldown_period` (or
-// with it at 0) behaves exactly as before -- opt-in per weapon, not a
-// blanket new restriction. Tell me which specific guns should get one and
-// I'll set real values.
-const STRIKE_CRAFT_DB = {
-    raven: {
-        label: "Raven Gen 2 MkIV", base_hp: 200,
-        weapons: [
-            { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 280 },
-            { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat", role: "general", range: 420 },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital", range: 700, cooldown_period: 4 }
-        ]
-    },
-    hawk: {
-        label: "Hawk Medium Bomber", base_hp: 350,
-        weapons: [
-            { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact", role: "general", range: 420 },
-            { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital", range: 700, cooldown_period: 4 }
-        ]
-    },
-    messenger: {
-        label: "Messenger Shuttle", base_hp: 100,
-        weapons: [
-            { name: "Dual Link .50 Cal", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 280 },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Point Defense System", dice: "1d4", dmgType: "Impact", role: "point_defense", range: 180 }
-        ]
-    }
-};
 
-// Strike Craft Grid Position build: squadron tokens now get a real
-// tactical_speed like any other ship_markers row, since they're placed as
-// real Battle Map tokens (see spawnSquadronToken below) instead of only
-// existing as an Initiative Tracker entry + Hangar Bay panel row. No real
-// balance number exists for fighter speed yet -- this is a flagged
-// placeholder (2x the capital-ship default), same "flat default the DM
-// tunes later" convention as every other first-pass number in this app
-// (Battlefield Salvage's 5-ton default, the 24h gather duration, etc.).
-// There's currently no live editor for an already-deployed vessel's
-// tactical_speed (only set at ship-template deploy time) -- same gap
-// applies here, not a new one introduced by that build.
-//
-// Battle Map Grid Expansion build (this session): doubled 160 -> 320,
-// matching the grid's own doubling (BATTLE_GRID_W/H, js/battle-map.js) so
-// squadrons keep covering the SAME proportional share of the map per round
-// as before, rather than suddenly taking twice as long to cross it. Only
-// affects NEWLY spawned squadron tokens from this point forward --
-// see the Grid Expansion checkpoint notes for why existing ships'
-// stored tactical_speed values were deliberately NOT bulk-updated.
-const SQUADRON_TACTICAL_SPEED = 320;
+// STRIKE_CRAFT_DB catalog + SQUADRON_TACTICAL_SPEED moved to js/squadrons.js
+// on 2026-08-27 (Priority 2 split). See that file for the catalog and its
+// design-rationale comments.
+
 
 /* --- PERKS & SPECIALIZATIONS ---
    The perk catalog and lookup logic moved to js/perk-designer.js — perks are
@@ -429,6 +343,31 @@ window.populateVesselDeckSelect = function() {
 // or ownership would otherwise make it, EXCEPT for the vessel's own
 // player-owner, who always sees their own ship regardless of its hidden flag
 // (matches window.isVesselVisibleToMe's own confirmed exception).
+/* Polish pass (this session): the single shared IFF->color mapping. Before
+   this, the quick-spawn form (js/map.js) had this exact ternary inlined for
+   ships created there, but window.deployShipTemplate (js/ship-designer.js) --
+   the actual "spawn a ship" path used by templates/Secret Repository NPCs --
+   never derived color from IFF at all, always falling back to a hardcoded
+   cyan. That's the real cause of the DM-reported "spawned ship tokens
+   appear as cyan even when tagged hostile": templates have no `color` field
+   of their own today, so every deployed template hit that hardcoded
+   fallback regardless of its IFF. Fixed at the deploy path only (see
+   deployShipTemplate) -- deliberately NOT also applied when a live vessel's
+   IFF is edited later via Edit Base Stats, to avoid silently overwriting a
+   color someone set on purpose via this same quick-spawn form. */
+/* IFF unification (this session): now delegates to window.IFF_COLORS
+   (js/ship-designer.js, loads before this file) instead of its own
+   slightly-different ternary -- that one had hostile matching but neutral
+   was '#ffaa00' amber vs the canonical badge's '#c9962f' gold, and
+   "friendly" wasn't a real case at all (default '#00e1ff' cyan stood in for
+   it everywhere). Null/unset still falls back to that same cyan default,
+   matching every spawn path's existing "untagged ship reads as friendly-ish"
+   convention -- only the three real, non-null tags now match the Vessel
+   Deck badge exactly. */
+window.getIffColor = function(iff) {
+    return (window.IFF_COLORS && window.IFF_COLORS[iff]) || '#00e1ff';
+};
+
 window.canAccessVesselDeck = function(vessel) {
     if (!vessel) return false;
     if (currentUserRole === 'dm') return true;
@@ -610,6 +549,14 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         let pdBadge = w.is_point_defense ? `<span style="font-size:8px; color:#66d9ff; border:1px solid #66d9ff; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Point Defense — auto-fires at inbound ordnance and engaged strike craft on Advance Round">🛡 PD</span>` : '';
         let rangeBadge = w.range ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Battle Map targeting range">📏 ${w.range}</span>` : '';
         let cooldownPeriodBadge = w.cooldown_period ? `<span style="font-size:8px; color:#ff9d4d; border:1px solid #ff9d4d; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Firing auto-sets Cooldown to this many turns">⏱ ${w.cooldown_period}</span>` : '';
+        // Single Warhead Ordnance build (this session): opt-in per-weapon
+        // alternative to the default multi-hit (6-payload split) ordnance
+        // pattern -- see window.scaleOrdnanceDice/SINGLE_WARHEAD_DICE_MULT
+        // (js/battle-map.js) and the split-skip check in
+        // processBattleRoundAutomations for the actual mechanic. Badge only
+        // shown for ordnance-classed weapons that opted in; every existing
+        // weapon defaults to undefined/'multi' with zero visual change.
+        let singlePatternBadge = (wClass === 'ordnance' && w.ordnance_pattern === 'single') ? `<span style="font-size:8px; color:#ff3333; border:1px solid #ff3333; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Single Warhead — does not split into 6 payloads; heavier per-hit damage, no redundancy against interception">⊕ SINGLE</span>` : '';
 
         // Station Designer build: a weapon optionally assigned to a deck is
         // disabled once that deck's HP hits 0 -- see genDeckId/ensureDeckIds
@@ -626,7 +573,7 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                 <div>
-                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${cooldownPeriodBadge}${deckBadge}
+                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${cooldownPeriodBadge}${singlePatternBadge}${deckBadge}
                     <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
@@ -659,6 +606,16 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
                     <div style="font-size:9px; color:#ffaa00; margin-bottom:4px;">OVERHEAT: ${w.overheat || 0}/10</div>
                     <div style="display:flex; justify-content:center; gap:4px;"><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', -1)" style="width:20px; padding:2px; margin:0; font-size:10px;">-</button><button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'overheat', 1)" style="width:20px; padding:2px; margin:0; font-size:10px;">+</button></div>
                 </div>
+                ${(w.max_standby_ammo > 0 && w.ammo >= 0) ? `
+                <div style="flex:1; text-align:center; background:#0a1410; border:1px solid #3c4e36; border-radius:2px; padding:4px;">
+                    <div style="font-size:9px; color:#6b826a; margin-bottom:4px;" title="Deep Reserves cargo item this weapon draws from: ${w.ammo_type || 'Kinetic Rounds'}">STANDBY: ${w.standby_ammo || 0}/${w.max_standby_ammo}</div>
+                    <div style="display:flex; justify-content:center; gap:3px; flex-wrap:wrap;">
+                        <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'standby', -1)" style="width:18px; padding:2px; margin:0; font-size:9px;">-</button>
+                        <button onclick="window.modifyShipWeaponStat('${vessel.id}', ${idx}, 'standby', 1)" style="width:18px; padding:2px; margin:0; font-size:9px;">+</button>
+                        <button onclick="window.resupplyShipWeaponStandby('${vessel.id}', ${idx})" style="padding:2px 5px; margin:0; font-size:8px;" title="Transfer ${w.ammo_type || 'Kinetic Rounds'} from ship cargo (Deep Reserves) into Standby">RESUPPLY</button>
+                        <button onclick="window.reloadShipWeaponReady('${vessel.id}', ${idx})" style="padding:2px 5px; margin:0; font-size:8px; border-color:#ff9d4d; color:#ff9d4d;" title="Move Standby ammo into the ready magazine — costs a Cooldown, same as firing">RELOAD</button>
+                    </div>
+                </div>` : ''}
             </div>
         </div>`;
     });
@@ -1124,236 +1081,12 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     window.renderVesselDeck();
 };
 
-/* --- STRIKE CRAFT MAP/INITIATIVE PRESENCE ---
-   The hangar/deployed system above (ship_hangar / ship_deployed JSONB on the
-   carrier) is the single source of truth for squadron HP and fuel — it
-   already existed and already works. This layer just gives a DEPLOYED
-   squadron a companion ship_markers token (visible/selectable on the map)
-   and a companion combat_tracker row (visible in Initiative), linked back
-   via squadron_id, WITHOUT duplicating fuel/HP into a second place that
-   could drift out of sync with the real data on the carrier.
 
-   Strike Craft Grid Position build (this session, confirmed design): a
-   squadron's ship_markers token is now ALSO placed onto the active Battle
-   Map grid automatically on launch, if a battle is currently active — no
-   separate manual placement step, matching the precedent this token/tracker
-   spawn already set. Staggered near the carrier's own token if the carrier
-   is itself currently placed (window.addSquadronToBattleMap, battle-map.js
-   — that file owns all battle_encounters reads/writes, so this delegates
-   rather than reaching into that table directly, same cross-file convention
-   as window.checkBattleTokenDestroyed/playWeaponFireEffect/launchOrdnance).
-   No-op if no battle is active, or if a squadron was already deployed
-   before this build shipped — those don't retroactively get a token; recall
-   + relaunch picks one up. Flagged, not silently glossed over. */
-async function spawnSquadronToken(vessel, sq) {
-    const { data: tokenRow, error: tokenError } = await db.from('ship_markers').insert({
-        owner_id: vessel.owner_id, name: sq.name,
-        x: vessel.x + (Math.random() * 80 - 40), y: vessel.y + (Math.random() * 80 - 40),
-        drive_type: 'sublight', color: '#ffaa00', tactical_speed: SQUADRON_TACTICAL_SPEED,
-        cargo_inventory: window.sanitizeCargo({}),
-        integrity_hull: sq.hp, max_hull: sq.max_hp,
-        integrity_shields: 0, max_shields: 0, integrity_reactive: 0, max_reactive: 0,
-        integrity_ablative: 0, max_ablative: 0, integrity_hardened: 0, max_hardened: 0,
-        parent_id: vessel.id, is_strike_craft: true, squadron_id: sq.id,
-        // IFF / Fog of War build (this session): inherited from the carrier
-        // at launch, not left unset -- otherwise a Friendly-tagged DM-owned
-        // carrier's own fighters would default to DM-only invisible in
-        // players' Vessel Deck despite the carrier itself being visible, and
-        // a Hidden carrier's freshly-launched squadron would immediately be
-        // visible on the grid and give the ambush away. Each squadron token
-        // still reveals independently on its own first shot (see
-        // window.revealVesselIfHidden), same as the carrier does on its own.
-        iff: vessel.iff || null, is_hidden: !!vessel.is_hidden
-    }).select().single();
-    if (tokenError) { console.error('Failed to spawn squadron token:', tokenError.message); }
+// Squadron commission/launch/recall/deploy functions (spawnSquadronToken,
+// despawnSquadronToken, syncSquadronHpToParent, commissionSquadron,
+// launchSquadron, recallSquadron, deleteSquadron, modifySquadronLoiter)
+// moved to js/squadrons.js on 2026-08-27 (Priority 2 split).
 
-    // Pending-list follow-up (this session): is_npc: true set explicitly —
-    // a strike craft squadron isn't anyone's "character" for Ground Combat
-    // To-Hit's defense-roll purposes even when player-owned, so it always
-    // gets the manual-die NPC branch rather than a core-stat die. Previously
-    // the owner-role heuristic didn't check entity type at all, meaning a
-    // player-owned squadron entry could have incorrectly rolled a PC-style
-    // defense die -- a real (if narrow) behavior fix, not just a refactor.
-    const { error: trackerError } = await db.from('combat_tracker').insert({
-        name: sq.name, initiative: 14, hp: `${sq.hp}/${sq.max_hp}`,
-        owner_id: vessel.owner_id, parent_id: vessel.id, squadron_id: sq.id, is_strike_craft: true, is_npc: true
-    });
-    if (trackerError) { console.error('Failed to inject squadron into initiative tracker:', trackerError.message); }
-
-    if (!tokenError && tokenRow && typeof window.addSquadronToBattleMap === 'function') {
-        await window.addSquadronToBattleMap(vessel, sq, tokenRow.id, SQUADRON_TACTICAL_SPEED);
-    }
-
-    if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-    if (typeof loadCombatTracker === 'function') loadCombatTracker();
-}
-
-async function despawnSquadronToken(squadronId) {
-    // Capture the marker's id BEFORE deleting it -- globalShipMarkersCache
-    // still holds the pre-delete row at this point (only loadGalaxyData(),
-    // called at the end of this function without awaiting, refreshes it),
-    // so this is a safe synchronous lookup, not a race.
-    const markerRow = globalShipMarkersCache.find(m => m.squadron_id === squadronId && m.is_strike_craft);
-
-    await db.from('ship_markers').delete().eq('squadron_id', squadronId);
-    await db.from('combat_tracker').delete().eq('squadron_id', squadronId);
-
-    if (markerRow && typeof window.removeBattleTokenByMarkerId === 'function') {
-        await window.removeBattleTokenByMarkerId(markerRow.id);
-    }
-
-    if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-    if (typeof loadCombatTracker === 'function') loadCombatTracker();
-}
-
-// Strike craft tokens got their own integrity_hull as a one-time snapshot at
-// spawn time so they could render/take damage like any other ship_markers
-// row — but the REAL squadron HP (shown in the carrier's Hangar Bay panel,
-// and what bingo-fuel recall/casualty logic reads) lives in the parent's
-// ship_deployed[].hp. Without this, damage taken via ship-to-ship weapon
-// fire against a strike craft token would silently never reach the actual
-// squadron record — exactly the kind of dual-source drift this whole
-// system was designed to avoid. Called after any damage resolution against
-// a target that turns out to be a strike craft.
-async function syncSquadronHpToParent(targetShip) {
-    if (!targetShip.is_strike_craft || !targetShip.parent_id || !targetShip.squadron_id) return;
-    const parent = globalShipMarkersCache.find(m => m.id === targetShip.parent_id);
-    if (!parent) return;
-    const deployed = parent.ship_deployed || [];
-    const sq = deployed.find(s => s.id === targetShip.squadron_id);
-    if (!sq) return;
-    sq.hp = Math.max(0, Math.min(sq.max_hp, targetShip.integrity_hull));
-    await db.from('ship_markers').update({ ship_deployed: deployed }).eq('id', parent.id);
-    parent.ship_deployed = deployed;
-    if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
-}
-
-window.commissionSquadron = async function() {
-    const select = document.getElementById('vessel-deck-select');
-    if (!select || !select.value) { alert("Select a vessel to commission to."); return; }
-    
-    const vesselId = select.value;
-    const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    const name = document.getElementById('new-squadron-name').value.trim();
-    const type = document.getElementById('new-squadron-type').value;
-    const count = parseInt(document.getElementById('new-squadron-size').value) || 4;
-
-    if (!name) { alert("Enter a callsign for this squadron."); return; }
-
-    let hangar = vessel.ship_hangar || [];
-    let dbStats = STRIKE_CRAFT_DB[type];
-    
-    let sqId = 'sq_' + Math.random().toString(36).substr(2, 9);
-    hangar.push({
-        id: sqId, name: name, type: type, count: count,
-        hp: dbStats.base_hp * count, max_hp: dbStats.base_hp * count, loiter: 4
-    });
-
-    await db.from('ship_markers').update({ ship_hangar: hangar }).eq('id', vessel.id);
-    vessel.ship_hangar = hangar;
-
-    document.getElementById('new-squadron-name').value = '';
-    window.renderVesselDeck();
-    
-    await db.from('chat_logs').insert({
-        sender_id: currentUserId,
-        content: `🔧 [HANGAR OPS] ${name} (${count}x ${dbStats.label}) commissioned aboard ${vessel.name}.`,
-        message_type: 'text'
-    });
-};
-
-window.launchSquadron = async function(vesselId, idx) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let hangar = vessel.ship_hangar || [];
-    let deployed = vessel.ship_deployed || [];
-
-    let sq = hangar.splice(idx, 1)[0];
-    if (sq) {
-        sq.loiter = 4;
-        deployed.push(sq);
-        await db.from('ship_markers').update({ ship_hangar: hangar, ship_deployed: deployed }).eq('id', vessel.id);
-        vessel.ship_hangar = hangar;
-        vessel.ship_deployed = deployed;
-        window.renderVesselDeck();
-
-        if (window.AudioEngine) window.AudioEngine.playWarp();
-        await spawnSquadronToken(vessel, sq);
-
-        await db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `🛫 [FLIGHT OPS] ${sq.name} launched from ${vessel.name}. Cleared hot for 4 turns.`,
-            message_type: 'text'
-        });
-    }
-};
-
-window.recallSquadron = async function(vesselId, idx) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let hangar = vessel.ship_hangar || [];
-    let deployed = vessel.ship_deployed || [];
-
-    let sq = deployed.splice(idx, 1)[0];
-    if (sq) {
-        hangar.push(sq);
-        await db.from('ship_markers').update({ ship_hangar: hangar, ship_deployed: deployed }).eq('id', vessel.id);
-        vessel.ship_hangar = hangar;
-        vessel.ship_deployed = deployed;
-        window.renderVesselDeck();
-        await despawnSquadronToken(sq.id);
-
-        await db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `🛬 [FLIGHT OPS] ${sq.name} recovered to ${vessel.name} hangar bay.`,
-            message_type: 'text'
-        });
-    }
-};
-
-window.deleteSquadron = async function(vesselId, idx, isDeployed) {
-    if (!(await window.showConfirmModal(isDeployed ? "Record this squadron as destroyed in combat?" : "Decommission this squadron from the hangar?"))) return;
-    
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-
-    let targetArray = isDeployed ? (vessel.ship_deployed || []) : (vessel.ship_hangar || []);
-    let sq = targetArray.splice(idx, 1)[0];
-
-    let updatePayload = isDeployed ? { ship_deployed: targetArray } : { ship_hangar: targetArray };
-    await db.from('ship_markers').update(updatePayload).eq('id', vesselId);
-    
-    if (isDeployed) vessel.ship_deployed = targetArray;
-    else vessel.ship_hangar = targetArray;
-
-    if (isDeployed && sq) await despawnSquadronToken(sq.id);
-
-    window.renderVesselDeck();
-
-    if (isDeployed && sq) {
-        await db.from('chat_logs').insert({
-            sender_id: currentUserId,
-            content: `💥 [KIA REPORT] ${sq.name} destroyed in combat.`,
-            message_type: 'text'
-        });
-    }
-};
-
-window.modifySquadronLoiter = async function(vesselId, idx, delta) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    let deployed = vessel.ship_deployed || [];
-    if (deployed[idx]) {
-        deployed[idx].loiter = Math.max(0, Math.min(10, deployed[idx].loiter + delta));
-        await db.from('ship_markers').update({ ship_deployed: deployed }).eq('id', vesselId);
-        vessel.ship_deployed = deployed;
-        window.renderVesselDeck();
-    }
-};
 
 window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
@@ -1369,9 +1102,111 @@ window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
     // `|| 0` the same way the ammo branch already guards its own inputs.
     if (statKey === 'cooldown') wpn.cooldown = Math.max(0, (wpn.cooldown || 0) + delta);
     if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, (wpn.overheat || 0) + delta));
-    
+    // Tiered Ammo build (this session): manual DM override for the Standby
+    // reserve, same "a button pair exists for every tracked stat regardless
+    // of its 'real' in-fiction mechanism" convention as ammo/cooldown/overheat
+    // above. Only meaningful once a weapon has opted in via max_standby_ammo.
+    if (statKey === 'standby') wpn.standby_ammo = Math.max(0, Math.min(wpn.max_standby_ammo || 0, (wpn.standby_ammo || 0) + delta));
+
     const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
     if (error) console.error("Weapon stat sync failed:", error);
+    window.renderVesselDeck();
+};
+
+/* Tiered Ammo build (this session, confirmed design): Ready (existing
+   ammo/max_ammo, unchanged) -> Standby (new, per-weapon spare mag) -> Deep
+   Reserves (ship-wide cargo, not per-weapon). Two separate actions, mirroring
+   the Hull Plate-consumes-cargo-to-repair convention already established in
+   window.modifyShipHealth above:
+     - RESUPPLY (this function): Standby <- Deep Reserves. Instant, NOT
+       round-gated (same "anytime, as long as the resource is there" rule
+       Hull Plate repair already uses) -- transfers 1:1 from a named cargo
+       expendable (wpn.ammo_type, default "Kinetic Rounds" -- the exact
+       cargo item every vessel's default loadout already includes but no
+       weapon-firing code has ever consumed until now) into Standby, capped
+       at max_standby_ammo. FLAGGED FIRST-PASS PLACEHOLDER ratio (1:1),
+       DM-tunable, same as every other first-pass balance number in this app.
+     - RELOAD (window.reloadShipWeaponReady, below): Ready <- Standby. The
+       "manual action that costs a round" (confirmed design) -- reuses
+       wpn.cooldown, the exact field firing already uses, rather than
+       inventing a separate turn-economy concept.
+   Neither RESUPPLY nor RELOAD is available for an infinite-ammo weapon
+   (wpn.ammo < 0) or a weapon that hasn't opted into Standby at all
+   (max_standby_ammo <= 0) -- renderShipWeaponsHtml already hides both
+   buttons in that case, this is the defense-in-depth backstop. */
+window.resupplyShipWeaponStandby = async function(vesselId, idx) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
+    let wpn = vessel.ship_weapons[idx];
+    if (!(wpn.max_standby_ammo > 0) || wpn.ammo < 0) return;
+
+    let deficit = wpn.max_standby_ammo - (wpn.standby_ammo || 0);
+    if (deficit <= 0) { alert(`${wpn.name}'s Standby reserve is already full.`); return; }
+
+    const ammoType = wpn.ammo_type || 'Kinetic Rounds';
+    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+    let bucketName = null, itemRef = null;
+    for (const bucket of ['expendables', 'perishables', 'misc']) {
+        const found = (cargo[bucket] || []).find(i => i.name.toLowerCase() === ammoType.toLowerCase());
+        if (found) { bucketName = bucket; itemRef = found; break; }
+    }
+    if (!itemRef || itemRef.qty <= 0) {
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`[NO SUPPLY] No "${ammoType}" in cargo to resupply ${wpn.name}'s Standby reserve.`);
+        return;
+    }
+
+    let transferQty = Math.min(deficit, itemRef.qty);
+    itemRef.qty -= transferQty;
+    if (itemRef.qty <= 0) cargo[bucketName] = cargo[bucketName].filter(i => i !== itemRef);
+    wpn.standby_ammo = (wpn.standby_ammo || 0) + transferQty;
+
+    const { error } = await db.from('ship_markers').update({ cargo_inventory: cargo, ship_weapons: vessel.ship_weapons }).eq('id', vessel.id);
+    if (error) { console.error('resupplyShipWeaponStandby: save failed', error); return; }
+    vessel.cargo_inventory = cargo;
+
+    await db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `🔧 [RESUPPLY] ${vessel.name} transfers ${transferQty}x ${ammoType} from Deep Reserves to ${wpn.name}'s Standby magazine (${wpn.standby_ammo}/${wpn.max_standby_ammo}).`,
+        message_type: 'text'
+    });
+    if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+    window.renderVesselDeck();
+};
+
+window.reloadShipWeaponReady = async function(vesselId, idx) {
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
+    let wpn = vessel.ship_weapons[idx];
+    if (!(wpn.max_standby_ammo > 0) || wpn.ammo < 0) return;
+
+    if ((wpn.standby_ammo || 0) <= 0) {
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`[NO RESERVE] ${wpn.name}'s Standby magazine is empty — RESUPPLY from cargo first.`);
+        return;
+    }
+    let deficit = wpn.max_ammo - wpn.ammo;
+    if (deficit <= 0) { alert(`${wpn.name} is already fully loaded.`); return; }
+
+    if (wpn.cooldown > 0) {
+        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is already on cooldown! Reloading now will OVERRIDE and restart its timer. Proceed?`))) return;
+    }
+
+    let transferQty = Math.min(deficit, wpn.standby_ammo);
+    wpn.ammo += transferQty;
+    wpn.standby_ammo -= transferQty;
+    // REPLACES rather than stacks, same convention firing's own cooldown_period
+    // auto-set uses -- reloading again before this clears just restarts it.
+    wpn.cooldown = wpn.reload_cooldown_period > 0 ? wpn.reload_cooldown_period : 1;
+
+    const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vessel.id);
+    if (error) { console.error('reloadShipWeaponReady: save failed', error); return; }
+
+    await db.from('chat_logs').insert({
+        sender_id: currentUserId,
+        content: `🔄 [RELOAD] ${vessel.name} reloads ${wpn.name} from Standby (+${transferQty} — now ${wpn.ammo}/${wpn.max_ammo}). Cooldown: ${wpn.cooldown} round(s).`,
+        message_type: 'text'
+    });
     window.renderVesselDeck();
 };
 
@@ -1395,10 +1230,15 @@ window.resetShipStats = async function(vesselId) {
     Object.assign(vessel, payload);
     
     if (vessel.ship_weapons) {
-        vessel.ship_weapons.forEach(w => { 
-            if(w.ammo >= 0) w.ammo = w.max_ammo; 
-            w.cooldown = 0; 
-            w.overheat = 0; 
+        vessel.ship_weapons.forEach(w => {
+            if(w.ammo >= 0) w.ammo = w.max_ammo;
+            w.cooldown = 0;
+            w.overheat = 0;
+            // Tiered Ammo build (this session): "resupply all ammunition banks"
+            // now covers Standby too, not just Ready -- Deep Reserves (ship
+            // cargo) is intentionally NOT touched by this reset, same as Hull
+            // Plate cargo isn't refilled by a stats reset either.
+            if (w.max_standby_ammo > 0) w.standby_ammo = w.max_standby_ammo;
         });
         payload.ship_weapons = vessel.ship_weapons;
     }
@@ -1514,449 +1354,12 @@ window.resetShipStats = async function(vesselId) {
     };
 })();
 
-/* Squadron AI Stances build (this session): sets/clears which stance (if
-   any) a deployed squadron uses. '' (Manual) is the default for every
-   existing and newly-launched squadron -- nothing about this build changes
-   behavior for a squadron nobody has explicitly set a stance on. See
-   window.processBattleRoundAutomations (js/battle-map.js) for where a
-   non-manual stance actually gets resolved each Advance Round. */
-/* Strike-Craft Weapon Range build (this session): the manual FIRE row's
-   weapon and target selects are sibling elements, not one dropdown per
-   weapon row like renderShipWeaponsHtml -- so when the player changes which
-   weapon they're about to fire, the target list has to be rebuilt live to
-   reflect THAT weapon's own range. Mirrors the scoping logic used at initial
-   render (see renderVesselDeck's deployedContainer block above): distance
-   from the squadron's own battle-map token (sqShipSelf), not the carrier's.
-   Fails open (falls back to every other ship) if there's no battle-scoping
-   function or no token for this squadron this round -- same "don't block
-   fire over a missing token" convention as everywhere else in this build. */
-window.updateSquadronTargetOptions = function(vesselId, sqIdx) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    let sq = (vessel.ship_deployed || [])[sqIdx];
-    if (!sq) return;
-    let dbStats = STRIKE_CRAFT_DB[sq.type];
-    const wpnSelect = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`);
-    const targetSelect = document.getElementById(`sq-target-${vesselId}-${sqIdx}`);
-    if (!wpnSelect || !targetSelect || !dbStats) return;
 
-    const wpn = dbStats.weapons[parseInt(wpnSelect.value, 10)];
-    const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
-    const scoped = (sqShipSelf && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelf.id, wpn ? wpn.range : 0) : null;
-    // Fog of War build (this session): same fallback-path filter as the two
-    // sibling target-list builders above.
-    const candidates = scoped || globalShipMarkersCache.filter(m => m.id !== vesselId && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
+// Squadron target-scoping/AI-stance/weapon-fire/ordnance functions
+// (updateSquadronTargetOptions, setSquadronAIStance, resolveSquadronWeaponFire,
+// rollSquadronWeapon, launchSquadronOrdnance, launchSquadronOrdnanceFromUI)
+// moved to js/squadrons.js on 2026-08-27 (Priority 2 split).
 
-    const prevValue = targetSelect.value;
-    let targetOptions = '<option value="">-- Target --</option>';
-    candidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
-    targetSelect.innerHTML = targetOptions;
-    if (prevValue && candidates.some(m => m.id === prevValue)) targetSelect.value = prevValue;
-
-    // Squadron Ordnance build (this session): the shared FIRE/LAUNCH button
-    // pair toggles here too, same weapon-select onchange hook -- switching to
-    // an ordnance-classified weapon (Ship Killer / Capitol Killer Missiles)
-    // swaps which button is visible, mirroring renderShipWeaponsHtml's
-    // static per-row FIRE-vs-LAUNCH choice but done live since this row has
-    // one shared button pair for whichever weapon is currently selected.
-    const fireBtn = document.getElementById(`sq-fire-btn-${vesselId}-${sqIdx}`);
-    const launchBtn = document.getElementById(`sq-launch-btn-${vesselId}-${sqIdx}`);
-    if (fireBtn && launchBtn) {
-        const isOrdnance = !!(wpn && wpn.weapon_class === 'ordnance');
-        fireBtn.style.display = isOrdnance ? 'none' : '';
-        launchBtn.style.display = isOrdnance ? '' : 'none';
-    }
-
-    // Weapon Cooldowns build (this session): keep the cooldown badge in
-    // sync with whichever weapon is now selected -- same live-toggle hook
-    // as the FIRE/LAUNCH swap just above.
-    const cdBadge = document.getElementById(`sq-cooldown-badge-${vesselId}-${sqIdx}`);
-    if (cdBadge) {
-        const cdNow = (sq.weapon_cooldowns && sq.weapon_cooldowns[wpnSelect.value]) || 0;
-        cdBadge.textContent = `CD:${cdNow}`;
-        cdBadge.style.display = cdNow > 0 ? '' : 'none';
-    }
-};
-
-window.setSquadronAIStance = async function(vesselId, sqIdx, stance) {
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    let sq = (vessel.ship_deployed || [])[sqIdx];
-    if (!sq) return;
-    sq.ai_stance = stance || '';
-    await db.from('ship_markers').update({ ship_deployed: vessel.ship_deployed }).eq('id', vessel.id);
-    window.renderVesselDeck();
-};
-
-/* Squadron AI Stances build (this session): the actual dice/damage/persist/
-   broadcast logic previously lived directly inside window.rollSquadronWeapon
-   and read its weapon+target selections straight from the manual FIRE row's
-   DOM elements — which meant nothing else in the codebase could resolve a
-   squadron shot without a rendered UI to read from. Extracted here as a
-   DOM-independent core (explicit wpnIdx/targetId params instead of
-   document.getElementById reads) so BOTH the manual FIRE button (still
-   window.rollSquadronWeapon, now a thin DOM-reading wrapper below) and the
-   new automated AI Stance resolution in js/battle-map.js's
-   processBattleRoundAutomations call the exact same implementation — one
-   damage-resolution path, not two that could quietly drift apart. Logic
-   itself is UNCHANGED from before this refactor. opts.auto (used by the AI
-   path) just swaps the chat broadcast's label prefix so an automated shot
-   reads distinctly from a player's own manual click in the log. */
-window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targetId, opts) {
-    opts = opts || {};
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    let sq = (vessel.ship_deployed || [])[sqIdx];
-    if (!sq) return;
-
-    let dbStats = STRIKE_CRAFT_DB[sq.type];
-    let wpn = dbStats.weapons[wpnIdx];
-    if (!wpn) return;
-
-    // Weapon Cooldowns build (this session): same soft-override convention
-    // ship_weapons' own cooldown check already uses (rollShipWeapon above) --
-    // automated AI-stance fire hard-skips (no one to confirm an override
-    // mid-tick, same rule ship PD's automated pool already follows), manual
-    // FIRE warns and allows an override. State lives on the squadron
-    // instance itself (sq.weapon_cooldowns), not on `wpn` -- STRIKE_CRAFT_DB
-    // is a shared catalog, not per-instance data, so every squadron of the
-    // same type tracks its own cooldowns independently.
-    const wpnCooldownNow = (sq.weapon_cooldowns && sq.weapon_cooldowns[wpnIdx]) || 0;
-    if (wpnCooldownNow > 0) {
-        if (opts.auto) return;
-        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown (${wpnCooldownNow} more turn(s))! Firing will OVERRIDE. Proceed?`))) return;
-    }
-
-    // Squadrons fire from their OWN battle-map token, not the carrier's --
-    // same lookup the range check and the beam-effect code below both need,
-    // computed once here and reused (was previously duplicated inline).
-    const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
-
-    // System Lockdown build (this session): Weapons-disabled gate, checked
-    // on the squadron's own companion token (that's what would have been
-    // targeted and hit by an EMP shot, not the carrier). Fails open if the
-    // squadron has no token at all -- same "can't check what doesn't exist"
-    // convention as everything else here.
-    if (sqShipSelf && sqShipSelf.disabled_weapons_until > 0) {
-        if (opts.auto) return;
-        if (window.AudioEngine) window.AudioEngine.playError();
-        alert(`[WEAPONS DISABLED] ${sq.name}'s weapons are offline for ${sqShipSelf.disabled_weapons_until} more round(s).`);
-        return;
-    }
-
-    // Strike-Craft Weapon Range build (this session): explicit
-    // defense-in-depth re-check at fire time, mirroring window.launchOrdnance
-    // (js/battle-map.js)'s pattern for ship_weapons ordnance -- the manual
-    // target dropdown is already range-scoped (window.updateSquadronTargetOptions
-    // above), but this re-validates against CURRENT token positions in case
-    // either side moved between the dropdown populating and the FIRE click.
-    // opts.auto (the AI-stance path in processBattleRoundAutomations)
-    // already range-gates BEFORE ever calling this, per the confirmed "AI
-    // holds fire until in range" design -- so this should only trip there as
-    // a redundant safety net, and does so silently (no blocking alert()
-    // during automated round resolution) rather than the manual path's
-    // alert+refuse UX. Fails open (fires anyway) if either token's grid
-    // position can't be found -- same "don't block on a missing token"
-    // convention as every other range/position check in this build.
-    if (targetId && wpn.range) {
-        const selfPos = sqShipSelf ? window.getBattleTokenPosition(sqShipSelf.id) : null;
-        const targetPosForRange = window.getBattleTokenPosition(targetId);
-        if (selfPos && targetPosForRange && Math.hypot(targetPosForRange.x - selfPos.x, targetPosForRange.y - selfPos.y) > wpn.range) {
-            if (opts.auto) return;
-            if (window.AudioEngine) window.AudioEngine.playError();
-            const targetShipForAlert = globalShipMarkersCache.find(m => m.id === targetId);
-            alert(`[OUT OF RANGE] ${targetShipForAlert ? targetShipForAlert.name : 'Target'} is beyond ${wpn.name}'s range (${wpn.range}).`);
-            return;
-        }
-    }
-
-    let volleys = sq.count;
-    if (volleys <= 0) return;
-
-    // Weapon Cooldowns build (this session): the shot is now committed --
-    // start this weapon's reload clock on the SQUADRON instance (not the
-    // shared catalog entry). Replaces rather than stacks, same rule
-    // rollShipWeapon's own auto-set uses.
-    if (wpn.cooldown_period > 0) {
-        sq.weapon_cooldowns = sq.weapon_cooldowns || {};
-        sq.weapon_cooldowns[wpnIdx] = wpn.cooldown_period;
-    }
-
-    // Fog of War build (this session, confirmed design): reveal the
-    // squadron's own token the moment its shot is committed (every gate
-    // above this point could still have refused to fire). Best-effort --
-    // never blocks the shot itself if this fails.
-    try { if (typeof window.revealVesselIfHidden === 'function' && sqShipSelf) await window.revealVesselIfHidden(sqShipSelf); } catch (err) { console.error('resolveSquadronWeaponFire: reveal-on-fire failed', err); }
-
-    const diceRegex = /^(\d*)d(\d+)$/i;
-    const match = wpn.dice.trim().match(diceRegex);
-    if (!match) return;
-
-    let baseNumDice = parseInt(match[1]) || 1;
-    let numDice = baseNumDice * volleys;
-    let diceFaces = parseInt(match[2]);
-
-    let canExplode = wpn.explodes && diceFaces >= 2;
-
-    let total = 0;
-    let breakdown = [];
-
-    for (let i = 0; i < numDice; i++) {
-        let rollTotal = 0;
-        let subRolls = [];
-        let currentRoll;
-        do {
-            currentRoll = Math.floor(Math.random() * diceFaces) + 1;
-            rollTotal += currentRoll;
-            subRolls.push(currentRoll);
-        } while (currentRoll === diceFaces && canExplode);
-        total += rollTotal;
-        breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
-    }
-
-    const breakdownText = breakdown.join(' + ');
-
-    let targetShip = null;
-    let combatLog = ``;
-    let dmgType = window.normalizeDamageType(wpn.dmgType || 'Impact');
-
-    if (targetId) {
-        targetShip = globalShipMarkersCache.find(m => m.id === targetId);
-        if (targetShip) {
-            let tStance = targetShip.ship_stance || 'Balanced';
-            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
-            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
-            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
-
-            let categoryMult = 1;
-            if (dmgType !== 'Healing') {
-                if (targetShip.is_strike_craft) {
-                    categoryMult = (dmgType === 'Flak') ? 2 : 0.5;
-                    combatLog += `[TARGET: STRIKE CRAFT] ${dmgType} effectiveness x${categoryMult}. `;
-                } else if (dmgType === 'Flak') {
-                    categoryMult = 0.4;
-                    combatLog += `[TARGET: SHIP] Flak is a poor fit for capital-scale armor (x${categoryMult}). `;
-                }
-            }
-            total = Math.ceil(total * categoryMult);
-
-            const result = window.resolveShipDamage(targetShip, dmgType, total);
-            combatLog += result.log;
-
-            await db.from('ship_markers').update({
-                integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
-                integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened
-            }).eq('id', targetShip.id);
-            Object.assign(targetShip, {
-                integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
-                integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened
-            });
-            await syncSquadronHpToParent(targetShip);
-
-            // Tactical Battle Map: if this target is a token in the active
-            // battle and just hit 0 hull, auto-withdraw its token (does not
-            // touch this ship_markers row itself). No-op outside a battle.
-            if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
-
-            // Strike Craft Grid Position build (this session): a beam flash
-            // between the squadron's own token and its target, same
-            // playWeaponFireEffect used by rollShipWeapon — no longer
-            // deliberately skipped now that squadrons have a real token to
-            // draw the beam from. Local-only, same flagged limitation as
-            // ship-weapon fire (no broadcast channel exists in this
-            // codebase — see the Animation Engine checkpoint).
-            if (typeof window.playWeaponFireEffect === 'function') {
-                if (sqShipSelf) {
-                    const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ffaa00';
-                    window.playWeaponFireEffect(sqShipSelf.id, targetShip.id, beamColor, dmgType);
-                }
-            }
-
-            // Range/Ordnance build (prior session): persist which target this
-            // squadron last fired at. Strike Craft Grid Position build (this
-            // session): Point Defense no longer reads this as a position
-            // stand-in — squadrons now have a real Battle Map token, so PD
-            // checks that directly (see window.processBattleRoundAutomations,
-            // js/battle-map.js). Kept as a harmless "last engaged" record,
-            // not currently read by anything else.
-            sq.target_id = targetShip.id;
-        }
-    }
-
-    // Weapon Cooldowns build (this session): persisting ship_deployed is now
-    // unconditional -- a "fire into the void" shot (no target) still needs
-    // to start its weapon_cooldowns clock, which the old target-only persist
-    // here would have silently dropped. sq.target_id's own persistence rides
-    // along in the same write, unchanged.
-    if (wpn.cooldown_period > 0 || targetShip) {
-        await db.from('ship_markers').update({ ship_deployed: vessel.ship_deployed }).eq('id', vessel.id);
-    }
-
-    let targetString = targetShip ? ` at ${targetShip.name}` : ``;
-    let breakdownString = `
-        <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
-            <strong>Damage Type:</strong> ${dmgType}<br>
-            <strong>Base Output:</strong> ${breakdownText} = <strong style="color:#ff3333;">${total} Dmg</strong><br>
-            ${targetShip ? `<strong>Target Report:</strong> ${combatLog}` : ''}
-        </div>
-    `;
-
-    if (window.AudioEngine) window.AudioEngine.playShoot();
-
-    if(typeof window.broadcastRoll === 'function') {
-        const autoTag = opts.auto ? '🤖 [AI STANCE] ' : '';
-        await window.broadcastRoll(`${autoTag}[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
-    }
-};
-
-// Thin DOM-reading wrapper — unchanged call signature/behavior for the
-// manual FIRE button (window.rollSquadronWeapon('vesselId', sqIdx) via
-// onclick), delegating to window.resolveSquadronWeaponFire above.
-window.rollSquadronWeapon = async function(vesselId, sqIdx) {
-    let wpnIdx = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`).value;
-    let targetId = document.getElementById(`sq-target-${vesselId}-${sqIdx}`).value;
-    await window.resolveSquadronWeaponFire(vesselId, sqIdx, wpnIdx, targetId);
-};
-
-/* Squadron Ordnance build (this session): mirrors window.launchOrdnance
-   (js/battle-map.js, ship_weapons' own ordnance path) for a squadron's
-   weapon_class:'ordnance' entries (Ship Killer / Capitol Killer Missiles)
-   instead of resolveSquadronWeaponFire's instant-resolve. Called from BOTH
-   the manual LAUNCH button (window.launchSquadronOrdnanceFromUI below) and
-   the AI-stance offensive loop in processBattleRoundAutomations (opts.auto)
-   -- one implementation, not two, same convention resolveSquadronWeaponFire
-   itself already established.
-
-   Confirmed design (this session): the payload's dice DO scale with the
-   squadron's own unit count (sq.count), same multiplier a normal squadron
-   FIRE already applies -- NOT left flat like ship_weapons' own ordnance,
-   which ignores gun-count/volley entirely. Flagging plainly: this stacks
-   with the pre-existing "splits into 6 independent payloads, each carrying
-   the FULL dice profile" mechanic (processBattleRoundAutomations,
-   js/battle-map.js) -- a 3-unit squadron's "2d12" becomes "6d12" BEFORE the
-   split, so up to 6x that already-tripled damage can land if every payload
-   survives interception. This was the explicitly-flagged tradeoff of the
-   confirmed option (over the ship-ordnance-style "ignore unit count"
-   alternative), not an oversight — no rebalancing was requested or
-   attempted here. */
-window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId, opts) {
-    opts = opts || {};
-    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
-    let sq = (vessel.ship_deployed || [])[sqIdx];
-    if (!sq) return;
-
-    let dbStats = STRIKE_CRAFT_DB[sq.type];
-    let wpn = dbStats && dbStats.weapons[wpnIdx];
-    if (!wpn) return;
-
-    const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
-    const selfPos = sqShipSelf ? window.getBattleTokenPosition(sqShipSelf.id) : null;
-    if (!selfPos) {
-        // Not a battle-map token right now (pre-build legacy launch, or
-        // launched outside an active battle) -- no grid to track a flight
-        // against, so this falls back to the old instant-resolve behavior,
-        // same pattern window.launchOrdnance uses for ship weapons.
-        return window.resolveSquadronWeaponFire(vesselId, sqIdx, wpnIdx, targetId, opts);
-    }
-
-    // System Lockdown build (this session): same Weapons-disabled gate as
-    // resolveSquadronWeaponFire's own check above, checked on the squadron's
-    // own companion token.
-    if (sqShipSelf.disabled_weapons_until > 0) {
-        if (opts.auto) return;
-        if (window.AudioEngine) window.AudioEngine.playError();
-        alert(`[WEAPONS DISABLED] ${sq.name}'s weapons are offline for ${sqShipSelf.disabled_weapons_until} more round(s).`);
-        return;
-    }
-
-    // Weapon Cooldowns build (this session): same soft-override convention
-    // as resolveSquadronWeaponFire's own check above (and every other
-    // cooldown check in this app) -- automated AI-stance fire hard-skips,
-    // manual LAUNCH warns and allows an override.
-    const ordCooldownNow = (sq.weapon_cooldowns && sq.weapon_cooldowns[wpnIdx]) || 0;
-    if (ordCooldownNow > 0) {
-        if (opts.auto) return;
-        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown (${ordCooldownNow} more turn(s))! Launching will OVERRIDE. Proceed?`))) return;
-    }
-
-    if (!targetId) { if (!opts.auto) alert('Select a target first.'); return; }
-    let targetVessel = globalShipMarkersCache.find(m => m.id === targetId);
-    if (!targetVessel) return;
-    const targetPos = window.getBattleTokenPosition(targetId);
-    if (!targetPos) { if (!opts.auto) alert('Target is not on the battle grid.'); return; }
-
-    // Defense-in-depth re-check, same reasoning as resolveSquadronWeaponFire's
-    // own range re-check above -- the AI-stance path already range-gates
-    // BEFORE ever calling this (see processBattleRoundAutomations), so this
-    // should only trip here for the manual path, or as a redundant safety
-    // net if either token moved between dropdown-populate and click/tick.
-    if (wpn.range && Math.hypot(targetPos.x - selfPos.x, targetPos.y - selfPos.y) > wpn.range) {
-        if (opts.auto) return;
-        if (window.AudioEngine) window.AudioEngine.playError();
-        alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${wpn.range}).`);
-        return;
-    }
-
-    let volleys = sq.count;
-    if (volleys <= 0) return;
-
-    // Weapon Cooldowns build (this session): the launch is now committed --
-    // start this weapon's reload clock on the squadron instance, same rule
-    // resolveSquadronWeaponFire's own auto-set uses.
-    if (wpn.cooldown_period > 0) {
-        sq.weapon_cooldowns = sq.weapon_cooldowns || {};
-        sq.weapon_cooldowns[wpnIdx] = wpn.cooldown_period;
-    }
-
-    const diceRegex = /^(\d*)d(\d+)$/i;
-    const match = (wpn.dice || '').trim().match(diceRegex);
-    if (!match) { console.error('launchSquadronOrdnance: malformed weapon dice, aborting', wpn); return; }
-    let baseNumDice = parseInt(match[1]) || 1;
-    let diceFaces = parseInt(match[2]);
-    let numDice = baseNumDice * volleys; // confirmed design: scales with unit count
-    const scaledDice = `${numDice}d${diceFaces}`;
-
-    // Fog of War build (confirmed design, inherited from every other fire
-    // path in this app): reveal the squadron's own token the moment its
-    // shot is committed. Best-effort, never blocks the launch.
-    try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(sqShipSelf); } catch (err) { console.error('launchSquadronOrdnance: reveal-on-fire failed', err); }
-
-    const ordnance = (window.globalBattleEncounterCache.in_flight_ordnance || []).slice();
-    ordnance.push({
-        salvo_id: (typeof genBattleTokenId === 'function') ? genBattleTokenId() : `${Date.now()}-${Math.random()}`,
-        source_vessel_id: sqShipSelf.id, source_vessel_name: sq.name,
-        source_weapon_name: wpn.name, dice: scaledDice, modifier: 0, explodes: !!wpn.explodes,
-        damage_type: wpn.dmgType || 'Impact',
-        target_vessel_id: targetId, target_vessel_name: targetVessel.name,
-        turns_remaining: 3, split: false
-    });
-    window.globalBattleEncounterCache.in_flight_ordnance = ordnance;
-    await db.from('battle_encounters').update({ in_flight_ordnance: ordnance }).eq('id', window.globalBattleEncounterCache.id);
-
-    // Same "last engaged target" bookkeeping regular squadron fire already
-    // records -- informational only, nothing currently reads it back for
-    // ordnance specifically.
-    sq.target_id = targetId;
-    await db.from('ship_markers').update({ ship_deployed: vessel.ship_deployed }).eq('id', vessel.id);
-
-    if (window.AudioEngine) window.AudioEngine.playShoot();
-    const autoTag = opts.auto ? '🤖 [AI STANCE] ' : '';
-    await db.from('chat_logs').insert({ sender_id: null, content: `${autoTag}☠️ [ORDNANCE] ${sq.name} launches ${wpn.name} (x${volleys} units) at ${targetVessel.name} — impact in 3 rounds.`, message_type: 'system' });
-    window.renderVesselDeck();
-    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
-};
-
-// Thin DOM-reading wrapper for the manual ☠ LAUNCH button, same relationship
-// to window.launchSquadronOrdnance that window.rollSquadronWeapon has to
-// window.resolveSquadronWeaponFire above.
-window.launchSquadronOrdnanceFromUI = async function(vesselId, sqIdx) {
-    let wpnIdx = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`).value;
-    let targetId = document.getElementById(`sq-target-${vesselId}-${sqIdx}`).value;
-    await window.launchSquadronOrdnance(vesselId, sqIdx, wpnIdx, targetId);
-};
 
 /* System Lockdown build (this session): opt-in per-weapon effect (only the
    Jupiter-class Spinal EMP Cannon has `wpn.system_lockdown = {checkDC: 16}`
@@ -2651,6 +2054,27 @@ window.addShipWeapon = async function() {
     let deckSelect = document.getElementById('new-ship-wpn-deck');
     let assignedDeckId = (deckSelect && deckSelect.value) ? deckSelect.value : null;
 
+    // Tiered Ammo build (this session, confirmed design): Standby is an
+    // opt-in per-weapon spare-mag tier, independent of Ready (the existing
+    // ammo/max_ammo fields, unchanged) -- 0/blank = weapon not using the
+    // tiered system at all (RESUPPLY/RELOAD stay hidden), same "opt-in,
+    // zero effect on existing data" convention as cooldown_period/range.
+    let standbyMaxInput = document.getElementById('new-ship-wpn-standby-max');
+    let standbyMax = (standbyMaxInput && parseInt(standbyMaxInput.value) > 0) ? parseInt(standbyMaxInput.value) : 0;
+    let ammoTypeInput = document.getElementById('new-ship-wpn-ammotype');
+    let ammoType = (ammoTypeInput && ammoTypeInput.value.trim()) ? ammoTypeInput.value.trim() : 'Kinetic Rounds';
+    // RELOAD (Standby -> Ready) "costs a round" by setting this weapon's own
+    // cooldown field, same mechanism firing already uses -- FLAGGED
+    // FIRST-PASS PLACEHOLDER default of 1 round, DM-tunable.
+    let reloadCdInput = document.getElementById('new-ship-wpn-reloadcd');
+    let reloadCooldownPeriod = reloadCdInput && reloadCdInput.value.trim() !== '' ? Math.max(0, parseInt(reloadCdInput.value) || 0) : 1;
+    // Single Warhead Ordnance build (this session): only meaningful for
+    // weapon_class:'ordnance' weapons -- see window.scaleOrdnanceDice
+    // (js/battle-map.js). Defaults to 'multi', the existing 6-payload-split
+    // behavior, for every weapon that doesn't explicitly opt into 'single'.
+    let ordPatternSelect = document.getElementById('new-ship-wpn-ordpattern');
+    let ordnancePattern = (ordPatternSelect && ordPatternSelect.value === 'single') ? 'single' : 'multi';
+
     if (!select || !select.value) { alert("Select a vessel token first."); return; }
     if (!name) { alert("Please enter a weapon system name."); return; }
     if (!dice) dice = '1d10';
@@ -2666,7 +2090,9 @@ window.addShipWeapon = async function() {
         ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0, cooldown_period: weaponCooldownPeriod,
         gun_count: gunCount, damage_type: damageType,
         weapon_class: weaponClass, is_point_defense: isPointDefense, range: weaponRange,
-        assigned_deck_id: assignedDeckId
+        assigned_deck_id: assignedDeckId,
+        standby_ammo: 0, max_standby_ammo: standbyMax, ammo_type: ammoType,
+        reload_cooldown_period: reloadCooldownPeriod, ordnance_pattern: ordnancePattern
     });
 
     await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
@@ -2683,6 +2109,10 @@ window.addShipWeapon = async function() {
     if (rangeInput) rangeInput.value = '0';
     if (cooldownInput) cooldownInput.value = '0';
     if (deckSelect) deckSelect.value = '';
+    if (standbyMaxInput) standbyMaxInput.value = '';
+    if (ammoTypeInput) ammoTypeInput.value = '';
+    if (reloadCdInput) reloadCdInput.value = '1';
+    if (ordPatternSelect) ordPatternSelect.value = 'multi';
     window.renderVesselDeck();
 };
 
@@ -2748,6 +2178,20 @@ window.deleteShipWeapon = async function(vesselId, idx) {
                     <input type="checkbox" id="wpn-edit-pd" style="margin:0;"> Point Defense
                 </label>
             </div>
+            <label style="font-size:9px; color:#ff9d4d; margin-top:10px; display:block; border-top:1px dashed #3c4e36; padding-top:6px;">Tiered Ammo — Standby Reserve (0 = not used, hides RESUPPLY/RELOAD)</label>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="wpn-edit-standby" style="font-size:9px; color:#ffaaaa;">Standby (current)</label><input type="number" id="wpn-edit-standby" min="0" style="border-color:#ff9d4d; text-align:center;"></div>
+                <div style="flex:1;"><label for="wpn-edit-standbymax" style="font-size:9px; color:#ffaaaa;">Standby Max</label><input type="number" id="wpn-edit-standbymax" min="0" style="border-color:#ff9d4d; text-align:center;"></div>
+            </div>
+            <label for="wpn-edit-ammotype" style="font-size:9px; color:#ffaaaa;" title="Which cargo expendable RESUPPLY draws from (Deep Reserves).">Ammo Type (Deep Reserves cargo item name)</label>
+            <input type="text" id="wpn-edit-ammotype" placeholder="Kinetic Rounds" style="border-color:#ff9d4d;">
+            <label for="wpn-edit-reloadcd" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;" title="RELOAD (Standby -> Ready) sets this weapon's Cooldown to this many rounds, same field firing uses.">Reload Cooldown (rounds)</label>
+            <input type="number" id="wpn-edit-reloadcd" min="0" style="border-color:#ff9d4d; text-align:center;">
+            <label for="wpn-edit-ordpattern" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;" title="Only relevant for Ordnance-class weapons.">Ordnance Pattern (Ordnance weapons only)</label>
+            <select id="wpn-edit-ordpattern" style="border-color:#ff9d4d;">
+                <option value="multi">Multi-Hit (splits into 6 payloads, current default)</option>
+                <option value="single">Single Warhead (no split, heavier per-hit damage)</option>
+            </select>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="wpn-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="wpn-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0;">SAVE CHANGES</button>
@@ -2790,6 +2234,15 @@ window.deleteShipWeapon = async function(vesselId, idx) {
                 wpn.max_ammo = Math.max(wpn.ammo, maxAmmo);
             }
 
+            // Tiered Ammo build (this session): Standby Max clamps Standby
+            // (current) down if it would otherwise exceed the new max, same
+            // clamp-down-on-edit convention as Edit Vessel Base Stats above.
+            wpn.max_standby_ammo = Math.max(0, parseInt(document.getElementById('wpn-edit-standbymax').value) || 0);
+            wpn.standby_ammo = Math.max(0, Math.min(wpn.max_standby_ammo, parseInt(document.getElementById('wpn-edit-standby').value) || 0));
+            wpn.ammo_type = document.getElementById('wpn-edit-ammotype').value.trim() || 'Kinetic Rounds';
+            wpn.reload_cooldown_period = Math.max(0, parseInt(document.getElementById('wpn-edit-reloadcd').value) || 0);
+            wpn.ordnance_pattern = document.getElementById('wpn-edit-ordpattern').value === 'single' ? 'single' : 'multi';
+
             const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', currentVesselId);
             if (error) { alert("Failed to save weapon changes: " + error.message); return; }
             overlay.style.display = 'none';
@@ -2816,6 +2269,11 @@ window.deleteShipWeapon = async function(vesselId, idx) {
         document.getElementById('wpn-edit-pd').checked = !!wpn.is_point_defense;
         document.getElementById('wpn-edit-range').value = wpn.range || 0;
         document.getElementById('wpn-edit-cooldown').value = wpn.cooldown_period || 0;
+        document.getElementById('wpn-edit-standby').value = wpn.standby_ammo || 0;
+        document.getElementById('wpn-edit-standbymax').value = wpn.max_standby_ammo || 0;
+        document.getElementById('wpn-edit-ammotype').value = wpn.ammo_type || 'Kinetic Rounds';
+        document.getElementById('wpn-edit-reloadcd').value = (wpn.reload_cooldown_period !== undefined && wpn.reload_cooldown_period !== null) ? wpn.reload_cooldown_period : 1;
+        document.getElementById('wpn-edit-ordpattern').value = wpn.ordnance_pattern === 'single' ? 'single' : 'multi';
 
         // Deck dropdown re-populated fresh every open (decks can change
         // between edits) — self-heals missing deck ids the same way
