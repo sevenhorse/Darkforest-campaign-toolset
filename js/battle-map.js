@@ -86,6 +86,12 @@ function genBattleTokenId() { return (window.crypto && window.crypto.randomUUID)
 const BATTLE_GRID_W = 920;
 const BATTLE_GRID_H = 760;
 const BATTLE_TOKEN_SIZE = 34;
+// Polish pass (this session, DM-reported): strike craft tokens were
+// rendering at the exact same size as capital ships/stations (both used
+// BATTLE_TOKEN_SIZE) -- the DM's "emblem needs to be much smaller" note.
+// FLAGGED FIRST-PASS SIZE, DM-tunable, same as every other placeholder
+// constant in this app.
+const BATTLE_STRIKE_CRAFT_TOKEN_SIZE = 20;
 
 // Visual-only zoom (tester feedback: "make the map bigger" -- see
 // darkforest-architecture-reference.md's Battle Map layout addendum). The
@@ -232,47 +238,15 @@ function moveTokenToward(shipMarkerId, targetPos, maxDist) {
     return currentTokens;
 }
 
-/* --- STRIKE CRAFT GRID POSITION (this session, confirmed design) ---
-   Called from js/combat.js's spawnSquadronToken right after a launched
-   squadron's ship_markers row is inserted. Auto-places a token for it on
-   the active Battle Map grid — no separate manual placement step, matching
-   the precedent the ship_markers/combat_tracker rows already set. No-op if
-   no battle is currently active (a squadron can launch anytime, not just
-   during an engagement); that squadron simply won't have a grid presence
-   until it's recalled and relaunched during an active battle, or a future
-   sync action is built — flagged, not silently patched over here. */
-window.addSquadronToBattleMap = async function(carrierVessel, sq, markerId, tacticalSpeed) {
-    if (!window.globalBattleEncounterCache) return;
-    const tokens = (window.globalBattleEncounterCache.tokens || []).slice();
 
-    // Stagger near the carrier's own token if it's currently placed;
-    // otherwise fall back to the same staggered-corner placement used for
-    // any other freshly-deployed vessel.
-    const carrierPos = window.getBattleTokenPosition ? window.getBattleTokenPosition(carrierVessel.id) : null;
-    const pos = carrierPos
-        ? clampToGrid(carrierPos.x + (Math.random() * 60 - 30), carrierPos.y + (Math.random() * 60 - 30))
-        : staggeredTokenPos(tokens.length);
+// addSquadronToBattleMap / removeBattleTokenByMarkerId moved to
+// js/squadrons.js on 2026-08-27 (Priority 2 split). NOTE: the three
+// squadron-specific helpers still nested inside
+// window.processBattleRoundAutomations below (squadronWeaponCooldown,
+// findEligibleSquadronIntercept, fireEligibleSquadronIntercept) were
+// deliberately NOT moved -- they share closure state with this file's
+// non-squadron PD pool logic. See js/squadrons.js's header comment.
 
-    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: markerId, x: pos.x, y: pos.y, move_remaining: tacticalSpeed ?? 160 });
-    await saveBattleTokens(tokens);
-    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
-};
-
-/* Called from js/combat.js's despawnSquadronToken (recall or destroyed-in-
-   combat) to clean up the grid token created above. No confirm dialog —
-   this is automatic housekeeping tied to an action the player/DM already
-   confirmed (recalling or recording a casualty), same "silent auto-removal"
-   pattern as window.checkBattleTokenDestroyed. No-op if there's no active
-   battle or no matching token (e.g. the squadron launched before this build
-   shipped and never got one). */
-window.removeBattleTokenByMarkerId = async function(markerId) {
-    if (!window.globalBattleEncounterCache) return;
-    const tokens = window.globalBattleEncounterCache.tokens || [];
-    const tok = tokens.find(t => t.ship_marker_id === markerId);
-    if (!tok) return;
-    await saveBattleTokens(tokens.filter(t => t.token_id !== tok.token_id));
-    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
-};
 
 window.armTokenForPlacement = function(shipMarkerId) {
     window.battleMapArmedToken = { ship_marker_id: shipMarkerId };
@@ -790,7 +764,14 @@ window.processBattleRoundAutomations = async function() {
 
         // Survives to next round.
         const updated = { ...salvo, turns_remaining: turnsLeft };
-        if (!salvo.split && turnsLeft === 2) {
+        // Single Warhead Ordnance build (this session): a 'single'-pattern
+        // salvo never splits, regardless of turnsLeft -- it just ages down
+        // and resolves as ONE impact roll, same as every salvo behaved
+        // before the 6-way split mechanic existed. ordnance_pattern is
+        // undefined on any salvo launched before this build shipped, so
+        // `!== 'single'` (not `=== 'multi'`) is the correct check -- an old
+        // in-flight salvo keeps splitting exactly as it already would have.
+        if (!salvo.split && salvo.ordnance_pattern !== 'single' && turnsLeft === 2) {
             // This is the "after turn 1" point — split into 6 independent payloads.
             const parentId = salvo.salvo_id;
             for (let i = 1; i <= 6; i++) {
@@ -1298,6 +1279,31 @@ window.getBattleScopedTargets = function(vesselId, range) {
    instead. Aging, the turn-1 split into 6, PD auto-fire, and impact
    resolution all happen in window.processBattleRoundAutomations, called
    from combat.js's advanceCombatRound. */
+/* Single Warhead Ordnance build (this session, confirmed design): an
+   ordnance-classed weapon can opt into wpn.ordnance_pattern = 'single'
+   (default/undefined = 'multi', today's existing 6-payload-split behavior,
+   unchanged for every pre-existing weapon). A 'single' salvo skips the
+   turn-1 split entirely (see the split check in
+   window.processBattleRoundAutomations below) -- to compensate for losing
+   that redundancy, its dice COUNT (not die size) is scaled up once at
+   LAUNCH time and baked into the snapshotted salvo, same "computed once,
+   never re-derived later" convention as launchSquadronOrdnance's own
+   unit-count scaling. FLAGGED FIRST-PASS PLACEHOLDER MULTIPLIER,
+   DM-tunable, same as every other first-pass balance number in this app.
+   Shared by both js/battle-map.js's own launchOrdnance and
+   js/squadrons.js's launchSquadronOrdnance (confirmed this session) --
+   exposed on window since squadrons.js may load before or after this file
+   and only ever reads it at call time, not parse time. */
+window.SINGLE_WARHEAD_DICE_MULT = 3;
+function scaleOrdnanceDice(diceStr, mult) {
+    const m = (diceStr || '').trim().match(/^(\d*)d(\d+)$/i);
+    if (!m) return diceStr; // malformed -- fail open, leave unscaled rather than throwing
+    const baseNumDice = parseInt(m[1]) || 1;
+    const diceFaces = parseInt(m[2]);
+    return `${baseNumDice * mult}d${diceFaces}`;
+}
+window.scaleOrdnanceDice = scaleOrdnanceDice;
+
 window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     idPrefix = idPrefix || '';
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
@@ -1371,14 +1377,17 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     // same as any other weapon fire. Best-effort, never blocks the launch.
     try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(vessel); } catch (err) { console.error('launchOrdnance: reveal-on-fire failed', err); }
 
+    const isSinglePattern = wpn.ordnance_pattern === 'single';
+    const salvoDice = isSinglePattern ? scaleOrdnanceDice(wpn.dice, window.SINGLE_WARHEAD_DICE_MULT) : wpn.dice;
+
     const ordnance = (window.globalBattleEncounterCache.in_flight_ordnance || []).slice();
     ordnance.push({
         salvo_id: genBattleTokenId(),
         source_vessel_id: vesselId, source_vessel_name: vessel.name,
-        source_weapon_name: wpn.name, dice: wpn.dice, modifier: wpn.modifier, explodes: !!wpn.explodes,
+        source_weapon_name: wpn.name, dice: salvoDice, modifier: wpn.modifier, explodes: !!wpn.explodes,
         damage_type: wpn.damage_type || 'Impact',
         target_vessel_id: targetId, target_vessel_name: targetVessel.name,
-        turns_remaining: 3, split: false,
+        turns_remaining: 3, split: false, ordnance_pattern: isSinglePattern ? 'single' : 'multi',
         // AOE build (this session): opt-in per-weapon splash radius (only
         // the Jupiter-class Capitol Killer Tubes have wpn.aoe_radius set, in
         // js/map.js), snapshotted onto the salvo same as every other weapon
@@ -1393,7 +1402,8 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
 
     if (window.AudioEngine) window.AudioEngine.playShoot();
-    await db.from('chat_logs').insert({ sender_id: null, content: `☠️ [ORDNANCE] ${vessel.name} launches ${wpn.name} at ${targetVessel.name} — impact in 3 rounds.`, message_type: 'system' });
+    const patternTag = isSinglePattern ? ' [SINGLE WARHEAD]' : '';
+    await db.from('chat_logs').insert({ sender_id: null, content: `☠️ [ORDNANCE]${patternTag} ${vessel.name} launches ${wpn.name} at ${targetVessel.name} — impact in 3 rounds.`, message_type: 'system' });
     window.renderVesselDeck();
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
@@ -1765,8 +1775,9 @@ window.renderBattleMapPanel = function() {
             // transition -- only an ACTUAL change animates.
             tokenEl.style.left = tok.x + 'px';
             tokenEl.style.top = tok.y + 'px';
-            tokenEl.style.width = BATTLE_TOKEN_SIZE + 'px';
-            tokenEl.style.height = BATTLE_TOKEN_SIZE + 'px';
+            const tokenSize = isStrikeCraftTok ? BATTLE_STRIKE_CRAFT_TOKEN_SIZE : BATTLE_TOKEN_SIZE;
+            tokenEl.style.width = tokenSize + 'px';
+            tokenEl.style.height = tokenSize + 'px';
             tokenEl.style.borderRadius = isStationTok ? '4px' : '50%';
             tokenEl.style.background = '#0a1410';
             // Strike Craft Grid Position build: a dashed border is the only
@@ -1777,7 +1788,12 @@ window.renderBattleMapPanel = function() {
             tokenEl.style.display = 'flex';
             tokenEl.style.alignItems = 'center';
             tokenEl.style.justifyContent = 'center';
-            tokenEl.style.fontSize = '8px';
+            // Polish pass (this session): strike craft tokens are now much
+            // smaller (BATTLE_STRIKE_CRAFT_TOKEN_SIZE above) -- a bit bigger
+            // relative font so the single emoji glyph doesn't look lost, and
+            // the name text drops entirely below (an emblem, not a label;
+            // the full name still shows in the hover title set above).
+            tokenEl.style.fontSize = isStrikeCraftTok ? '11px' : '8px';
             tokenEl.style.color = vessel ? (vessel.color || '#00e5a3') : '#ff3333';
             tokenEl.style.cursor = isStationTok ? 'pointer' : 'grab';
             tokenEl.style.userSelect = 'none';
@@ -1801,7 +1817,9 @@ window.renderBattleMapPanel = function() {
             tokenEl.style.zIndex = '2';
 
             tokenEl.innerHTML = '';
-            tokenEl.appendChild(document.createTextNode(vessel ? (isStrikeCraftTok ? '🛩️' : '') + vessel.name.slice(0, isStrikeCraftTok ? 4 : 6) : '???'));
+            tokenEl.appendChild(document.createTextNode(
+                !vessel ? '???' : isStrikeCraftTok ? '🛩️' : vessel.name.slice(0, 6)
+            ));
             if (!isStationTok && moveRemaining < 0) {
                 const moveBadge = document.createElement('div');
                 moveBadge.style.cssText = 'position:absolute; top:-8px; right:-4px; background:#ff3333; color:#030403; font-size:7px; font-weight:bold; border-radius:6px; padding:0 3px; pointer-events:none;';
@@ -2384,6 +2402,7 @@ window.renderBattleShipCards = function(tokens) {
             <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #3c4e36;">
                 ${window.renderShipWeaponsHtml(vessel, { idPrefix: 'bm-', showManageButtons: false })}
             </div>
+            ${typeof window.renderCompactHangarHtml === 'function' ? window.renderCompactHangarHtml(vessel) : ''}
         </div>`;
     }).join('');
 };
