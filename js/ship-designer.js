@@ -191,11 +191,17 @@ window.saveNewShipTemplate = async function() {
 
 window.deleteShipTemplate = async function(id) {
     const t = findAnyTemplateById(id);
-    if (t && !canManageTemplate(t)) return;
-    if (!(await window.showConfirmModal(`Permanently delete vessel profile "${t ? t.name : ''}"?`))) return;
+    if (t && !canManageTemplate(t)) return false;
+    if (!(await window.showConfirmModal(`Permanently delete vessel profile "${t ? t.name : ''}"?`))) return false;
     await db.from('ship_templates').delete().eq('id', id);
     if (typeof loadShipTemplates === 'function') loadShipTemplates();
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
+    // Return value added this session for window.deleteSecretRepoTemplateAndClose
+    // below, which needs to know whether the delete actually happened (vs. the
+    // DM cancelling the confirm modal) before deciding whether to leave the
+    // full-screen editor. Purely additive -- every existing caller already
+    // ignores this function's return value.
+    return true;
 };
 
 window.deployShipTemplate = async function(id) {
@@ -581,8 +587,7 @@ window.renderSecretRepositoryPanel = function() {
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${t.class || 'Frigate'} · Hull ${t.max_hull || 0} · Shields ${t.max_shields || 0} · ${hardpointTag}</p>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:110px;">
-                        <button class="layer-edit" onclick="window.openEditTemplateModal('${t.id}')" style="padding:3px 6px; font-size:9px;">✎</button>
-                        <button class="layer-edit" onclick="window.openTemplateLoadoutModal('${t.id}')" style="padding:3px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">⚔</button>
+                        <button class="layer-edit" onclick="window.openSecretRepoEditor('${t.id}')" style="padding:3px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">OPEN ▸</button>
                         <button class="layer-del" onclick="window.deleteShipTemplate('${t.id}')" style="padding:3px 6px; font-size:9px;">✕</button>
                     </div>
                 </div>
@@ -663,6 +668,506 @@ window.deployTemplateToInitiative = async function(id) {
     if (typeof loadCombatTracker === 'function') loadCombatTracker();
     if (window.AudioEngine) window.AudioEngine.playPing();
 };
+
+/* --- SECRET REPOSITORY FULL-SCREEN EDITOR (DM note #7 build, this session) ---
+   Replaces the old two-popup edit flow (openEditTemplateModal +
+   openTemplateLoadoutModal) for Secret Repository templates ONLY -- the
+   public Ship Designer's own templates keep using those two modals
+   unchanged, per the DM's explicit scope choice (this is DM-side only).
+   Lives in its own Command Terminal tab (term-panel-secretrepo, index.html)
+   so it gets the same full-screen real estate as the Vessel Deck, which is
+   literally what was asked for ("same full screen function as the vessel
+   deck"). Visually modeled on the Vessel Deck's layout, but does NOT call
+   its actual rendering functions (renderShipStanceHtml/HealthBars/Weapons)
+   -- those are wired to live combat state (FIRE/LAUNCH buttons, target
+   dropdowns, delta-based health mutation via window.modifyShipHealth) that
+   doesn't exist for a design-time template with no "current" damage and no
+   combat stance (DM-confirmed: stance dropped entirely, health shown as
+   plain editable max-value numbers, not bars that would always read 100%).
+
+   Real bug found and fixed as part of this build: the OLD template weapon
+   form (still used by the public Ship Designer, untouched) only captured
+   name/dice/mod/guns/damage_type/deck/explodes -- missing loc, range,
+   cooldown_period, weapon_class, is_point_defense, ammo/max_ammo, the
+   tiered-ammo standby fields, reload_cooldown_period, and ordnance_pattern
+   entirely. Every one of those matters in actual combat (Battle Map
+   targeting range, Point Defense eligibility, cooldowns, ammo limits...),
+   so a DM designing a serious NPC in the repository had no way to set them
+   and had to deploy-then-edit-live just to reach the full weapon editor --
+   almost certainly why "spawn and then edit" was the DM's actual workflow
+   despite the repository already existing. This editor's weapon add/edit
+   forms now match window.addShipWeapon/openEditWeaponModal (js/combat.js)
+   field-for-field, so a template built here needs no further live editing
+   for anything the weapon system itself tracks. */
+let editingRepoTemplateId = null;
+
+window.openSecretRepoEditor = function(id) {
+    const t = findAnyTemplateById(id);
+    if (!t) return;
+    editingRepoTemplateId = id;
+    document.getElementById('secretrepo-list-view').style.display = 'none';
+    document.getElementById('secretrepo-editor-view').style.display = 'block';
+    window.renderSecretRepoEditorPanel();
+};
+
+window.closeSecretRepoEditor = function() {
+    editingRepoTemplateId = null;
+    const listView = document.getElementById('secretrepo-list-view');
+    const editorView = document.getElementById('secretrepo-editor-view');
+    if (listView) listView.style.display = 'block';
+    if (editorView) editorView.style.display = 'none';
+};
+
+window.deleteSecretRepoTemplateAndClose = async function() {
+    if (!editingRepoTemplateId) return;
+    // Bug caught before shipping (this session): deleteShipTemplate shows its
+    // own confirm modal and can be cancelled -- only close the editor if the
+    // delete actually went through, or cancelling would still kick the DM
+    // back to the list as if it had succeeded.
+    const deleted = await window.deleteShipTemplate(editingRepoTemplateId);
+    if (deleted) window.closeSecretRepoEditor();
+};
+
+function renderSecretRepoWeaponCard(w, idx) {
+    const dt = window.normalizeDamageType(w.damage_type || 'Impact');
+    const info = window.DAMAGE_TYPES[dt];
+    const wClass = w.weapon_class === 'ordnance' ? 'ordnance' : 'direct_fire';
+    const classBadge = wClass === 'ordnance' ? '<span style="font-size:8px; color:#c778dd; border:1px solid #c778dd; border-radius:2px; padding:1px 4px; margin-left:4px;">☠ ORDNANCE</span>' : '';
+    const pdBadge = w.is_point_defense ? '<span style="font-size:8px; color:#66d9ff; border:1px solid #66d9ff; border-radius:2px; padding:1px 4px; margin-left:4px;">🛡 PD</span>' : '';
+    const rangeBadge = w.range ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;">📏 ${w.range}</span>` : '';
+    const cooldownBadge = w.cooldown_period ? `<span style="font-size:8px; color:#ff9d4d; border:1px solid #ff9d4d; border-radius:2px; padding:1px 4px; margin-left:4px;">⏱ ${w.cooldown_period}</span>` : '';
+    const singleBadge = (wClass === 'ordnance' && w.ordnance_pattern === 'single') ? '<span style="font-size:8px; color:#ff3333; border:1px solid #ff3333; border-radius:2px; padding:1px 4px; margin-left:4px;">⊕ SINGLE</span>' : '';
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    const assignedDeck = (w.assigned_deck_id && t) ? (t.ship_decks || []).find(d => d.id === w.assigned_deck_id) : null;
+    const deckBadge = assignedDeck ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;">🔧 ${assignedDeck.name}</span>` : '';
+    const ammoLabel = w.ammo < 0 ? 'INF' : `${w.ammo}/${w.max_ammo}`;
+    const standbyLabel = w.max_standby_ammo > 0 ? ` · Standby ${w.standby_ammo || 0}/${w.max_standby_ammo} (${w.ammo_type || 'Kinetic Rounds'})` : '';
+    return `<div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+                <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${cooldownBadge}${singleBadge}${deckBadge}
+                <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span style="color:${info.color};">${dt}</span> · Ammo: ${ammoLabel}${standbyLabel}</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <button class="layer-edit" onclick="window.openSecretRepoWeaponEditModal(${idx})" style="padding:4px 8px; font-size:10px;" title="Edit weapon">✎</button>
+                <button class="layer-del" onclick="window.removeSecretRepoWeapon(${idx})" style="padding:4px 8px; font-size:10px;">✕</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+window.renderSecretRepoEditorPanel = function() {
+    const container = document.getElementById('secretrepo-editor-container');
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!container || !t) return;
+
+    t.ship_weapons = t.ship_weapons || [];
+    t.ship_decks = t.ship_decks || [];
+    if (window.ensureDeckIds(t.ship_decks)) {
+        db.from('ship_templates').update({ ship_decks: t.ship_decks }).eq('id', t.id);
+    }
+
+    const stationBadge = t.is_station ? '<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">🛰 STATION</span>' : '';
+    const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
+    const iffBadge = window.renderIffBadge(t.iff);
+    const weaponCount = t.ship_weapons.length;
+    const hardpointTag = t.is_station ? `${weaponCount} hardpoints (no cap — station)` : `${weaponCount} / ${t.hardpoint_slots || 4} hardpoints used`;
+
+    let weaponsHtml = t.ship_weapons.length === 0
+        ? '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>'
+        : t.ship_weapons.map((w, idx) => renderSecretRepoWeaponCard(w, idx)).join('');
+
+    let decksHtml = t.ship_decks.length === 0
+        ? '<span style="font-size:10px; color:#6b826a;">No internal decks configured.</span>'
+        : t.ship_decks.map((d, idx) => `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
+            <span style="font-size:10px; color:#d4c5a9;">${d.name} — ${d.hp}/${d.max_hp} HP</span>
+            <button class="layer-del" onclick="window.removeSecretRepoDeck(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
+        </div>`).join('');
+
+    const deckOptions = '<option value="">-- Not deck-gated --</option>' + t.ship_decks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+
+    container.innerHTML = `
+        <div class="sheet-section" style="border-color:#ff3333;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                <h3 style="color:#ff6b6b; margin:0;">${t.name}${stationBadge}${classBadge}${iffBadge}</h3>
+                <button class="layer-del" onclick="window.deleteSecretRepoTemplateAndClose()" style="padding:4px 10px; font-size:9px;">🗑 DELETE TEMPLATE</button>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-top:12px;">
+                <div><label for="repo-edit-name" style="font-size:9px; color:#ffaaaa;">Vessel Designation:</label><input type="text" id="repo-edit-name" value="${t.name || ''}" style="border-color:#ff3333;"></div>
+                <div><label for="repo-edit-class" style="font-size:9px; color:#ffaaaa;">Class:</label><input type="text" id="repo-edit-class" value="${t.class || ''}" style="border-color:#ff3333;"></div>
+                <div><label for="repo-edit-drive" style="font-size:9px; color:#ffaaaa;">Drive Type:</label><select id="repo-edit-drive" style="border-color:#ff3333;">
+                    <option value="ftl_class1" ${t.drive_type === 'ftl_class1' ? 'selected' : ''}>Class 1 Warp Drive</option>
+                    <option value="ftl_class2" ${t.drive_type === 'ftl_class2' ? 'selected' : ''}>Class 2 Hyperdrive</option>
+                    <option value="ftl_fold" ${t.drive_type === 'ftl_fold' ? 'selected' : ''}>Experimental Fold Drive</option>
+                    <option value="sublight" ${t.drive_type === 'sublight' ? 'selected' : ''}>Sublight Thrusters</option>
+                </select></div>
+                <div><label for="repo-edit-vesselclass" style="font-size:9px; color:#c9962f;">Vessel Classification:</label><select id="repo-edit-vesselclass" style="border-color:#ff3333;">
+                    <option value="" ${!t.vessel_class ? 'selected' : ''}>-- Unclassified --</option>
+                    <option value="Capital" ${t.vessel_class === 'Capital' ? 'selected' : ''}>Capital Ship</option>
+                    <option value="Escort" ${t.vessel_class === 'Escort' ? 'selected' : ''}>Escort</option>
+                </select></div>
+                <div><label for="repo-edit-iff" style="font-size:9px; color:#ff6b6b;">IFF Designation:</label><select id="repo-edit-iff" style="border-color:#ff3333;">
+                    <option value="" ${!t.iff ? 'selected' : ''}>-- Unset (DM-only) --</option>
+                    <option value="hostile" ${t.iff === 'hostile' ? 'selected' : ''}>⚠ Hostile</option>
+                    <option value="neutral" ${t.iff === 'neutral' ? 'selected' : ''}>◌ Neutral</option>
+                    <option value="friendly" ${t.iff === 'friendly' ? 'selected' : ''}>✓ Friendly</option>
+                </select></div>
+                <div style="display:flex; gap:10px; align-items:flex-end;">
+                    <div style="flex:1;"><label for="repo-edit-speed" style="font-size:9px; color:#ffaaaa;">Tactical Speed:</label><input type="number" id="repo-edit-speed" value="${t.tactical_speed || 160}" min="0" style="border-color:#ff3333; text-align:center;"></div>
+                    <div style="flex:1;"><label for="repo-edit-slots" style="font-size:9px; color:#ffaaaa;">Hardpoint Slots:</label><input type="number" id="repo-edit-slots" value="${t.hardpoint_slots || 4}" min="0" style="border-color:#ff3333; text-align:center;"></div>
+                </div>
+            </div>
+            <label for="repo-edit-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:10px;" title="Locks Tactical Speed to 0 and removes the Hardpoint Slots cap.">
+                <input type="checkbox" id="repo-edit-station" ${t.is_station ? 'checked' : ''} onchange="window.toggleStationFields('repo-edit')" style="margin:0;"> 🛰 This is a Station
+            </label>
+
+            <h4 style="margin:16px 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#ff6b6b;">Base Stats (design max values)</h4>
+            <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
+                <div><label for="repo-edit-shields" style="font-size:9px; color:#00e1ff;">Shields:</label><input type="number" id="repo-edit-shields" value="${t.max_shields || 0}" min="0" style="border-color:#00e1ff; text-align:center;"></div>
+                <div><label for="repo-edit-reactive" style="font-size:9px; color:#ffaa00;">Reactive:</label><input type="number" id="repo-edit-reactive" value="${t.max_reactive || 0}" min="0" style="border-color:#ffaa00; text-align:center;"></div>
+                <div><label for="repo-edit-ablative" style="font-size:9px; color:#ffaa00;">Ablative:</label><input type="number" id="repo-edit-ablative" value="${t.max_ablative || 0}" min="0" style="border-color:#ffaa00; text-align:center;"></div>
+                <div><label for="repo-edit-hardened" style="font-size:9px; color:#c9962f;">Hardened:</label><input type="number" id="repo-edit-hardened" value="${t.max_hardened || 0}" min="0" style="border-color:#c9962f; text-align:center;"></div>
+                <div><label for="repo-edit-hull" style="font-size:9px; color:#ff3333;">Hull:</label><input type="number" id="repo-edit-hull" value="${t.max_hull || 0}" min="0" style="border-color:#ff3333; text-align:center;"></div>
+            </div>
+            <button class="btn-reveal" onclick="window.saveSecretRepoIdentityStats()" style="margin-top:10px; border-color:#ff6b6b; color:#ff6b6b;">SAVE CHANGES</button>
+        </div>
+
+        <div class="sheet-section" style="margin-top:16px; border-color:#ff3333;">
+            <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#ff6b6b;">Weapons <span style="font-size:9px; color:#6b826a; font-weight:normal;">${hardpointTag}</span></h4>
+            <div id="secretrepo-weapons-list" style="margin-bottom:10px;">${weaponsHtml}</div>
+            <div style="background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
+                <label for="repo-wpn-name" style="font-size:9px; color:#ffaaaa;">Add Weapon</label>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="repo-wpn-loc" placeholder="Mount Loc" style="flex:1; border-color:#ff3333;">
+                    <input type="text" id="repo-wpn-name" placeholder="Weapon Name" style="flex:2; border-color:#ff3333;">
+                </div>
+                <div style="display:flex; gap:6px; margin-top:4px;">
+                    <input type="text" id="repo-wpn-dice" placeholder="1d10" style="flex:1; border-color:#ff3333; text-align:center;">
+                    <input type="text" id="repo-wpn-mod" placeholder="+0" style="flex:1; border-color:#ff3333; text-align:center;">
+                    <input type="number" id="repo-wpn-guns" placeholder="Guns" min="1" value="1" style="flex:1; border-color:#ff3333; text-align:center;">
+                </div>
+                <select id="repo-wpn-dmgtype" style="margin-top:4px;">${window.buildDamageTypeOptionsHtml('Impact')}</select>
+                <div style="display:flex; gap:6px; margin-top:4px;">
+                    <select id="repo-wpn-class" style="flex:1;">
+                        <option value="direct_fire">Direct Fire</option>
+                        <option value="ordnance">Ordnance</option>
+                    </select>
+                    <select id="repo-wpn-deck" style="flex:1;">${deckOptions}</select>
+                </div>
+                <div style="display:flex; gap:6px; margin-top:4px;">
+                    <div style="flex:1;"><label for="repo-wpn-range" style="font-size:8px; color:#6b826a;" title="Battle Map targeting range, 0 = unlimited">Range</label><input type="number" id="repo-wpn-range" min="0" placeholder="0=unlimited" style="text-align:center;"></div>
+                    <div style="flex:1;"><label for="repo-wpn-cooldown" style="font-size:8px; color:#6b826a;" title="Turns to recharge after firing, 0 = none">Cooldown</label><input type="number" id="repo-wpn-cooldown" min="0" placeholder="0" style="text-align:center;"></div>
+                </div>
+                <div style="display:flex; gap:6px; margin-top:4px;">
+                    <div style="flex:1;"><label for="repo-wpn-ammo" style="font-size:8px; color:#6b826a;" title="Ready ammo capacity, blank = infinite">Ready Ammo</label><input type="number" id="repo-wpn-ammo" min="0" placeholder="blank=INF" style="text-align:center;"></div>
+                    <label for="repo-wpn-pd" style="flex:1; font-size:10px; color:#66d9ff; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:12px;"><input type="checkbox" id="repo-wpn-pd" style="margin:0;"> Point Defense</label>
+                </div>
+                <details style="margin-top:6px;">
+                    <summary style="font-size:9px; color:#ff9d4d; cursor:pointer;">Tiered Ammo / Ordnance (optional)</summary>
+                    <div style="display:flex; gap:6px; margin-top:4px;">
+                        <div style="flex:1;"><label for="repo-wpn-standbymax" style="font-size:8px; color:#ff9d4d;" title="0 = not used, hides RESUPPLY/RELOAD once deployed">Standby Max</label><input type="number" id="repo-wpn-standbymax" min="0" placeholder="0" style="text-align:center;"></div>
+                        <div style="flex:1;"><label for="repo-wpn-ammotype" style="font-size:8px; color:#ff9d4d;">Ammo Type</label><input type="text" id="repo-wpn-ammotype" placeholder="Kinetic Rounds"></div>
+                        <div style="flex:1;"><label for="repo-wpn-reloadcd" style="font-size:8px; color:#ff9d4d;" title="RELOAD sets Cooldown to this many rounds">Reload CD</label><input type="number" id="repo-wpn-reloadcd" min="0" placeholder="1" style="text-align:center;"></div>
+                    </div>
+                    <select id="repo-wpn-ordpattern" style="margin-top:4px;">
+                        <option value="multi">Multi-Hit (6 payloads, default)</option>
+                        <option value="single">Single Warhead</option>
+                    </select>
+                </details>
+                <label for="repo-wpn-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:6px;">
+                    <input type="checkbox" id="repo-wpn-explodes" checked style="margin:0;"> Exploding Dice
+                </label>
+                <button class="btn-remove" onclick="window.addSecretRepoWeapon()" style="width:100%; margin-top:6px; font-size:10px;">+ ADD HARDPOINT</button>
+            </div>
+        </div>
+
+        <div class="sheet-section" style="margin-top:16px; border-color:#00e1ff;">
+            <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#00e1ff;">Internal Decks</h4>
+            <div id="secretrepo-decks-list" style="margin-bottom:10px;">${decksHtml}</div>
+            <div style="background:#030403; padding:8px; border:1px solid #00e1ff; border-radius:2px;">
+                <label for="repo-deck-name" style="font-size:9px; color:#6b826a;">Add Deck / Subsystem</label>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="repo-deck-name" placeholder="e.g. Engineering, Bridge..." style="flex:2; border-color:#00e1ff;">
+                    <input type="number" id="repo-deck-hp" placeholder="Max HP" value="50" style="flex:1; border-color:#00e1ff; text-align:center;">
+                </div>
+                <button class="btn-reveal" onclick="window.addSecretRepoDeck()" style="width:100%; margin-top:6px; font-size:10px; border-color:#00e1ff; color:#00e1ff;">+ ADD DECK</button>
+            </div>
+        </div>
+
+        <div class="sheet-section" style="margin-top:16px;">
+            <h4 style="margin:0 0 10px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#d4c5a9;">Deploy</h4>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <button class="btn-deploy" onclick="window.deployShipTemplate('${t.id}')" style="flex:2; margin:0;">🚀 DEPLOY TO MAP</button>
+                <label for="repo-init-${t.id}" style="display:none;">Initiative</label>
+                <input type="number" id="repo-init-${t.id}" value="10" style="flex:1; margin:0; text-align:center;">
+                <button class="btn-remove" onclick="window.deployTemplateToInitiative('${t.id}')" style="flex:2; margin:0;">⚔ TO TRACKER</button>
+            </div>
+        </div>
+    `;
+    window.toggleStationFields('repo-edit');
+};
+
+window.saveSecretRepoIdentityStats = async function() {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const isStation = document.getElementById('repo-edit-station').checked;
+    const payload = {
+        name: document.getElementById('repo-edit-name').value.trim() || t.name,
+        class: document.getElementById('repo-edit-class').value.trim() || 'Frigate',
+        drive_type: document.getElementById('repo-edit-drive').value,
+        max_shields: parseInt(document.getElementById('repo-edit-shields').value) || 0,
+        max_reactive: parseInt(document.getElementById('repo-edit-reactive').value) || 0,
+        max_ablative: parseInt(document.getElementById('repo-edit-ablative').value) || 0,
+        max_hardened: parseInt(document.getElementById('repo-edit-hardened').value) || 0,
+        max_hull: parseInt(document.getElementById('repo-edit-hull').value) || 0,
+        hardpoint_slots: parseInt(document.getElementById('repo-edit-slots').value) || 4,
+        tactical_speed: isStation ? 0 : (parseInt(document.getElementById('repo-edit-speed').value) || 160),
+        is_station: isStation,
+        vessel_class: document.getElementById('repo-edit-vesselclass').value || null,
+        iff: document.getElementById('repo-edit-iff').value || null
+    };
+    const { error } = await db.from('ship_templates').update(payload).eq('id', editingRepoTemplateId);
+    if (error) { alert("Failed to save template: " + error.message); return; }
+    Object.assign(t, payload);
+    window.renderSecretRepoEditorPanel();
+    if (typeof window.renderSecretRepositoryPanel === 'function') window.renderSecretRepositoryPanel();
+    if (window.AudioEngine) window.AudioEngine.playPing();
+};
+
+window.addSecretRepoWeapon = async function() {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const slots = t.hardpoint_slots || 4;
+    const weapons = (t.ship_weapons || []).slice();
+    if (!t.is_station && weapons.length >= slots) { alert(`This hull only has ${slots} hardpoint slots — expand Hardpoint Slots above first.`); return; }
+
+    const name = document.getElementById('repo-wpn-name').value.trim();
+    if (!name) { alert("Enter a weapon name."); return; }
+    const loc = document.getElementById('repo-wpn-loc').value.trim() || 'Hardpoint';
+    let dice = document.getElementById('repo-wpn-dice').value.trim().toLowerCase() || '1d10';
+    let mod = document.getElementById('repo-wpn-mod').value.trim() || '+0';
+    if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
+    const gunCount = parseInt(document.getElementById('repo-wpn-guns').value) || 1;
+    const damageType = document.getElementById('repo-wpn-dmgtype').value;
+    const explodes = document.getElementById('repo-wpn-explodes').checked;
+    const weaponClass = document.getElementById('repo-wpn-class').value === 'ordnance' ? 'ordnance' : 'direct_fire';
+    const isPointDefense = document.getElementById('repo-wpn-pd').checked;
+    const weaponRange = Math.max(0, parseInt(document.getElementById('repo-wpn-range').value) || 0);
+    const cooldownPeriod = Math.max(0, parseInt(document.getElementById('repo-wpn-cooldown').value) || 0);
+    const deckSelect = document.getElementById('repo-wpn-deck');
+    const assignedDeckId = (deckSelect && deckSelect.value) ? deckSelect.value : null;
+    const ammoStr = document.getElementById('repo-wpn-ammo').value.trim();
+    const ammoVal = ammoStr === '' ? -1 : Math.max(0, parseInt(ammoStr) || 0);
+    const standbyMax = Math.max(0, parseInt(document.getElementById('repo-wpn-standbymax').value) || 0);
+    const ammoType = document.getElementById('repo-wpn-ammotype').value.trim() || 'Kinetic Rounds';
+    const reloadCdInput = document.getElementById('repo-wpn-reloadcd').value.trim();
+    const reloadCooldownPeriod = reloadCdInput !== '' ? Math.max(0, parseInt(reloadCdInput) || 0) : 1;
+    const ordnancePattern = document.getElementById('repo-wpn-ordpattern').value === 'single' ? 'single' : 'multi';
+
+    weapons.push({
+        loc, name, dice, modifier: mod, explodes,
+        ammo: ammoVal, max_ammo: ammoVal, cooldown: 0, overheat: 0, cooldown_period: cooldownPeriod,
+        gun_count: gunCount, damage_type: damageType,
+        weapon_class: weaponClass, is_point_defense: isPointDefense, range: weaponRange,
+        assigned_deck_id: assignedDeckId,
+        standby_ammo: 0, max_standby_ammo: standbyMax, ammo_type: ammoType,
+        reload_cooldown_period: reloadCooldownPeriod, ordnance_pattern: ordnancePattern
+    });
+
+    const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', editingRepoTemplateId);
+    if (error) { alert("Failed to add weapon: " + error.message); return; }
+    t.ship_weapons = weapons;
+    document.getElementById('repo-wpn-name').value = '';
+    document.getElementById('repo-wpn-loc').value = '';
+    window.renderSecretRepoEditorPanel();
+};
+
+window.removeSecretRepoWeapon = async function(idx) {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const weapons = (t.ship_weapons || []).slice();
+    weapons.splice(idx, 1);
+    const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', editingRepoTemplateId);
+    if (error) { alert("Failed to remove weapon: " + error.message); return; }
+    t.ship_weapons = weapons;
+    window.renderSecretRepoEditorPanel();
+};
+
+window.addSecretRepoDeck = async function() {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const name = document.getElementById('repo-deck-name').value.trim();
+    if (!name) { alert("Enter a deck or subsystem name."); return; }
+    const maxHp = parseInt(document.getElementById('repo-deck-hp').value) || 50;
+    const decks = (t.ship_decks || []).slice();
+    decks.push({ name, hp: maxHp, max_hp: maxHp, id: window.genDeckId() });
+    const { error } = await db.from('ship_templates').update({ ship_decks: decks }).eq('id', editingRepoTemplateId);
+    if (error) { alert("Failed to add deck: " + error.message); return; }
+    t.ship_decks = decks;
+    document.getElementById('repo-deck-name').value = '';
+    window.renderSecretRepoEditorPanel();
+};
+
+window.removeSecretRepoDeck = async function(idx) {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const decks = (t.ship_decks || []).slice();
+    decks.splice(idx, 1);
+    const { error } = await db.from('ship_templates').update({ ship_decks: decks }).eq('id', editingRepoTemplateId);
+    if (error) { alert("Failed to remove deck: " + error.message); return; }
+    t.ship_decks = decks;
+    window.renderSecretRepoEditorPanel();
+};
+
+/* --- Secret Repository weapon EDIT modal -- mirrors combat.js's live
+   openEditWeaponModal field-for-field (see the build note above), just
+   targeting ship_templates via editingRepoTemplateId instead of a live
+   vessel's ship_markers row. Kept as a small popup rather than inline,
+   matching how the Vessel Deck itself edits an existing weapon (✎ button
+   -> small modal) -- "full screen" was never about eliminating every
+   modal, just the two disconnected ones this replaced. */
+(function() {
+    let overlay, currentIdx;
+    function ensureModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'secretrepo-wpn-edit-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:400px; max-width:94vw; max-height:88vh; overflow-y:auto; border-color:#ff3333;">
+            <h4 style="color:#ff6b6b; margin-top:0;">Edit Weapon</h4>
+            <label for="rwe-loc" style="font-size:9px; color:#ffaaaa;">Mount Location</label>
+            <input type="text" id="rwe-loc" style="border-color:#ff3333;">
+            <label for="rwe-name" style="font-size:9px; color:#ffaaaa;">Weapon Name</label>
+            <input type="text" id="rwe-name" style="border-color:#ff3333;">
+            <div style="display:flex; gap:6px;">
+                <input type="text" id="rwe-dice" placeholder="1d10" style="flex:1; border-color:#ff3333; text-align:center;">
+                <input type="text" id="rwe-mod" placeholder="+0" style="flex:1; border-color:#ff3333; text-align:center;">
+                <input type="number" id="rwe-guns" placeholder="Guns" min="1" style="flex:1; border-color:#ff3333; text-align:center;">
+            </div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+                <input type="number" id="rwe-ammo" placeholder="Ready Ammo (blank=INF)" style="flex:1; border-color:#ff3333; text-align:center;">
+                <input type="number" id="rwe-maxammo" placeholder="Max Ammo" style="flex:1; border-color:#ff3333; text-align:center;">
+            </div>
+            <label for="rwe-dmgtype" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Damage Type</label>
+            <select id="rwe-dmgtype" style="border-color:#ff3333;">${window.buildDamageTypeOptionsHtml('Impact')}</select>
+            <label for="rwe-class" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Weapon Class</label>
+            <select id="rwe-class" style="border-color:#ff3333;">
+                <option value="direct_fire">Direct Fire (standard)</option>
+                <option value="ordnance">Ordnance (missile/torpedo)</option>
+            </select>
+            <label for="rwe-range" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Range (Battle Map grid px, 0 = unlimited)</label>
+            <input type="number" id="rwe-range" min="0" style="border-color:#ff3333; text-align:center;">
+            <label for="rwe-cooldown" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Cooldown Period (turns, 0 = none)</label>
+            <input type="number" id="rwe-cooldown" min="0" style="border-color:#ff3333; text-align:center;">
+            <label for="rwe-deck" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Assigned Deck (optional)</label>
+            <select id="rwe-deck" style="border-color:#ff3333;"></select>
+            <div style="display:flex; justify-content:space-between; margin-top:8px;">
+                <label for="rwe-explodes" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="rwe-explodes" style="margin:0;"> Exploding Dice</label>
+                <label for="rwe-pd" style="font-size:10px; color:#ffaaaa; display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="rwe-pd" style="margin:0;"> Point Defense</label>
+            </div>
+            <label style="font-size:9px; color:#ff9d4d; margin-top:10px; display:block; border-top:1px dashed #3c4e36; padding-top:6px;">Tiered Ammo — Standby Reserve (0 = not used)</label>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="rwe-standby" style="font-size:9px; color:#ffaaaa;">Standby (current)</label><input type="number" id="rwe-standby" min="0" style="border-color:#ff9d4d; text-align:center;"></div>
+                <div style="flex:1;"><label for="rwe-standbymax" style="font-size:9px; color:#ffaaaa;">Standby Max</label><input type="number" id="rwe-standbymax" min="0" style="border-color:#ff9d4d; text-align:center;"></div>
+            </div>
+            <label for="rwe-ammotype" style="font-size:9px; color:#ffaaaa;">Ammo Type</label>
+            <input type="text" id="rwe-ammotype" placeholder="Kinetic Rounds" style="border-color:#ff9d4d;">
+            <label for="rwe-reloadcd" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Reload Cooldown (rounds)</label>
+            <input type="number" id="rwe-reloadcd" min="0" style="border-color:#ff9d4d; text-align:center;">
+            <label for="rwe-ordpattern" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Ordnance Pattern (ordnance weapons only)</label>
+            <select id="rwe-ordpattern" style="border-color:#ff9d4d;">
+                <option value="multi">Multi-Hit (6 payloads, default)</option>
+                <option value="single">Single Warhead</option>
+            </select>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button id="rwe-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
+                <button id="rwe-save-btn" class="btn-reveal" style="flex:1; margin-top:0;">SAVE CHANGES</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('rwe-cancel-btn').addEventListener('click', () => { overlay.style.display = 'none'; });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+        document.getElementById('rwe-save-btn').addEventListener('click', async () => {
+            const t = findAnyTemplateById(editingRepoTemplateId);
+            if (!t || !t.ship_weapons || !t.ship_weapons[currentIdx]) { overlay.style.display = 'none'; return; }
+            const weapons = t.ship_weapons.slice();
+            let wpn = Object.assign({}, weapons[currentIdx]);
+
+            wpn.loc = document.getElementById('rwe-loc').value.trim() || 'Hardpoint';
+            wpn.name = document.getElementById('rwe-name').value.trim() || wpn.name;
+            let dice = document.getElementById('rwe-dice').value.trim().toLowerCase();
+            wpn.dice = dice || wpn.dice;
+            let mod = document.getElementById('rwe-mod').value.trim();
+            if (mod && !mod.startsWith('+') && !mod.startsWith('-')) mod = '+' + mod;
+            wpn.modifier = mod || '+0';
+            wpn.explodes = document.getElementById('rwe-explodes').checked;
+            wpn.damage_type = document.getElementById('rwe-dmgtype').value;
+            wpn.weapon_class = document.getElementById('rwe-class').value === 'ordnance' ? 'ordnance' : 'direct_fire';
+            wpn.is_point_defense = document.getElementById('rwe-pd').checked;
+            wpn.range = Math.max(0, parseInt(document.getElementById('rwe-range').value) || 0);
+            wpn.cooldown_period = Math.max(0, parseInt(document.getElementById('rwe-cooldown').value) || 0);
+            const deckSel = document.getElementById('rwe-deck');
+            wpn.assigned_deck_id = (deckSel && deckSel.value) ? deckSel.value : null;
+
+            let gunsVal = parseInt(document.getElementById('rwe-guns').value);
+            wpn.gun_count = (gunsVal && gunsVal > 0) ? gunsVal : 1;
+
+            let ammoStr = document.getElementById('rwe-ammo').value.trim();
+            let maxAmmoStr = document.getElementById('rwe-maxammo').value.trim();
+            if (ammoStr === '') {
+                wpn.ammo = -1; wpn.max_ammo = -1;
+            } else {
+                wpn.ammo = Math.max(0, parseInt(ammoStr) || 0);
+                let maxAmmo = maxAmmoStr !== '' ? parseInt(maxAmmoStr) || wpn.ammo : (wpn.max_ammo && wpn.max_ammo > 0 ? wpn.max_ammo : wpn.ammo);
+                wpn.max_ammo = Math.max(wpn.ammo, maxAmmo);
+            }
+
+            wpn.max_standby_ammo = Math.max(0, parseInt(document.getElementById('rwe-standbymax').value) || 0);
+            wpn.standby_ammo = Math.max(0, Math.min(wpn.max_standby_ammo, parseInt(document.getElementById('rwe-standby').value) || 0));
+            wpn.ammo_type = document.getElementById('rwe-ammotype').value.trim() || 'Kinetic Rounds';
+            wpn.reload_cooldown_period = Math.max(0, parseInt(document.getElementById('rwe-reloadcd').value) || 0);
+            wpn.ordnance_pattern = document.getElementById('rwe-ordpattern').value === 'single' ? 'single' : 'multi';
+
+            weapons[currentIdx] = wpn;
+            const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', editingRepoTemplateId);
+            if (error) { alert("Failed to save weapon changes: " + error.message); return; }
+            t.ship_weapons = weapons;
+            overlay.style.display = 'none';
+            window.renderSecretRepoEditorPanel();
+        });
+    }
+
+    window.openSecretRepoWeaponEditModal = function(idx) {
+        const t = findAnyTemplateById(editingRepoTemplateId);
+        if (!t || !t.ship_weapons || !t.ship_weapons[idx]) return;
+        const wpn = t.ship_weapons[idx];
+        ensureModal();
+        currentIdx = idx;
+        document.getElementById('rwe-loc').value = wpn.loc || '';
+        document.getElementById('rwe-name').value = wpn.name || '';
+        document.getElementById('rwe-dice').value = wpn.dice || '';
+        document.getElementById('rwe-mod').value = wpn.modifier || '';
+        document.getElementById('rwe-guns').value = wpn.gun_count || 1;
+        document.getElementById('rwe-ammo').value = wpn.ammo < 0 ? '' : wpn.ammo;
+        document.getElementById('rwe-maxammo').value = wpn.max_ammo < 0 ? '' : wpn.max_ammo;
+        document.getElementById('rwe-dmgtype').value = window.normalizeDamageType(wpn.damage_type || 'Impact');
+        document.getElementById('rwe-class').value = wpn.weapon_class === 'ordnance' ? 'ordnance' : 'direct_fire';
+        document.getElementById('rwe-range').value = wpn.range || 0;
+        document.getElementById('rwe-cooldown').value = wpn.cooldown_period || 0;
+        const deckSel = document.getElementById('rwe-deck');
+        deckSel.innerHTML = '<option value="">-- Not deck-gated --</option>' + (t.ship_decks || []).map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        deckSel.value = wpn.assigned_deck_id || '';
+        document.getElementById('rwe-explodes').checked = !!wpn.explodes;
+        document.getElementById('rwe-pd').checked = !!wpn.is_point_defense;
+        document.getElementById('rwe-standby').value = wpn.standby_ammo || 0;
+        document.getElementById('rwe-standbymax').value = wpn.max_standby_ammo || 0;
+        document.getElementById('rwe-ammotype').value = wpn.ammo_type || 'Kinetic Rounds';
+        document.getElementById('rwe-reloadcd').value = wpn.reload_cooldown_period !== undefined ? wpn.reload_cooldown_period : 1;
+        document.getElementById('rwe-ordpattern').value = wpn.ordnance_pattern === 'single' ? 'single' : 'multi';
+        overlay.style.display = 'flex';
+    };
+})();
+
 
 /* --- SAVED FLEETS (Battlefield Salvage/Battle Map follow-on, this session) ---
    Solves "don't make me re-deploy the same 4-ship raider squadron one
