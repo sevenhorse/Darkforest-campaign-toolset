@@ -132,6 +132,12 @@ async function fetchUserProfile(user) {
         document.getElementById('user-role').classList.add('role-dm');
         document.getElementById('user-role').innerText = 'OVERSEER (DM)';
         document.getElementById('dm-tools').style.display = 'block';
+        // DM note #7 build (this session): Secret Repository's full-screen
+        // editor tab lives in the Command Terminal now (same nav as Vessel
+        // Deck/Ship Designer), not the floating DM Tools panel -- gated here
+        // the same way every other DM-only element on this screen already is.
+        const secretRepoTabBtn = document.getElementById('term-tab-btn-secretrepo');
+        if (secretRepoTabBtn) secretRepoTabBtn.style.display = 'flex';
         document.getElementById('dm-time-controls-box').style.display = 'block';
         document.getElementById('dm-scratchpad-toggle-btn').style.display = 'inline-block';
         document.getElementById('territory-tool-toggle-btn').style.display = 'inline-block';
