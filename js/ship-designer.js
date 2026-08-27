@@ -209,7 +209,15 @@ window.deployShipTemplate = async function(id) {
         drive_type: t.drive_type || 'ftl_class1',
         x: -window.camera.x / window.camera.zoom,
         y: -window.camera.y / window.camera.zoom,
-        color: t.color || '#00e1ff',
+        // Polish pass (this session): was `t.color || '#00e1ff'` -- since no
+        // template ever has a `color` field of its own (no color picker
+        // exists in the template editor), EVERY deployed template hit that
+        // hardcoded cyan fallback regardless of its IFF. Now derives from
+        // the template's own iff (window.getIffColor, js/combat.js) instead,
+        // matching the color the quick-spawn form already uses for the same
+        // IFF value -- this is the actual fix for "spawned ship tokens
+        // appear as cyan even when tagged hostile."
+        color: t.color || (typeof window.getIffColor === 'function' ? window.getIffColor(t.iff) : '#00e1ff'),
         cargo_inventory: newCargo,
         integrity_shields: t.max_shields || 0, max_shields: t.max_shields || 0,
         integrity_reactive: t.max_reactive || 0, max_reactive: t.max_reactive || 0,
