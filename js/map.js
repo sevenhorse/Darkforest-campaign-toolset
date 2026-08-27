@@ -121,7 +121,7 @@ window.isPositionSensorVisible = function(x, y) {
     if (currentUserRole === 'dm') return true;
     for (let m of globalShipMarkersCache) {
         if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
-        if (m.owner_id === currentUserId || (m.cargo_inventory && m.cargo_inventory.iff === 'allied')) {
+        if (m.owner_id === currentUserId || m.iff === 'friendly') {
             if (Math.hypot(m.x - x, m.y - y) <= 300) return true;
         }
     }
@@ -264,17 +264,20 @@ window.commitArchitectSystem = async function() {
 window.spawnTokenAtCenter = async function() {
     const driveType = document.getElementById('dm-tool-drivetype').value || 'ftl_class1'; 
     const name = document.getElementById('dm-tool-name').value || 'Task Force Black'; 
-    const iffStatus = document.getElementById('dm-tool-iff') ? document.getElementById('dm-tool-iff').value : 'allied';
-    
+    const iffStatus = document.getElementById('dm-tool-iff') ? document.getElementById('dm-tool-iff').value : 'friendly';
+
     let isJupiter = false;
     if (name.toLowerCase().includes("task force black") || name.toLowerCase().includes("horizon")) {
         isJupiter = await window.showConfirmModal(`Deploy '${name}' as a Jupiter-Class Heavy Cruiser? (Auto-fills weapons, health, and decks)`);
     }
-    
-    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {}; 
-    newCargo.iff = iffStatus;
-    
-    let payload = { owner_id: currentUserId, name: name, drive_type: driveType, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, color: iffStatus === 'hostile' ? '#ff3333' : (iffStatus === 'neutral' ? '#ffaa00' : '#00e1ff'), cargo_inventory: newCargo };
+
+    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {};
+
+    // IFF unification (this session): quick-spawned ships now write the real
+    // ship_markers.iff column directly instead of the old cargo_inventory.iff
+    // sub-field -- see the architecture doc for the full writeup of why two
+    // parallel IFF systems existed and why this one was chosen as canonical.
+    let payload = { owner_id: currentUserId, name: name, drive_type: driveType, iff: iffStatus, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, color: (typeof window.getIffColor === 'function' ? window.getIffColor(iffStatus) : '#00e1ff'), cargo_inventory: newCargo };
 
     if (isJupiter) {
         payload.integrity_shields = 400; payload.max_shields = 400;
@@ -1009,7 +1012,7 @@ window.startJumpPlottingMode = function() {
 window.cancelJumpPlotting = function() { window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 window.setDriveSpeedKey = function(key) { if (driveSpeeds[key]) { window.selectedDriveTypeKey = key; window.selectedDriveSpeed = driveSpeeds[key].speed; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); } };
 window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId) { window.selectedDriveTypeKey = newDriveType; window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; let cargo = ship.cargo_inventory || {}; cargo.iff = newIff; await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', shipId); ship.cargo_inventory = cargo; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; const iffValue = newIff || null; await db.from('ship_markers').update({ iff: iffValue }).eq('id', shipId); ship.iff = iffValue; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 
 /* --- MASTER-TO-SUB-TOKEN DOCKING ---
    A docked craft stops rendering/being independently selectable on the map
@@ -1635,10 +1638,18 @@ window.initGalaxyEngine = function() {
                 content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br>${hazardBadge}<span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br><span style="color: #6b826a;">Control:</span> ${s.control || 'None'}<br><span style="color: #00e5a3; font-size:9px; margin-top:6px; display:block;">✓ DRADIS TELEMETRY COMPLETE</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}</div>`;
             }
         } else if (dynamicTarget.type === 'ship') {
-            const m = dynamicTarget.data; let iff = m.cargo_inventory && m.cargo_inventory.iff ? m.cargo_inventory.iff : 'allied'; let iffColor = iff === 'hostile' ? '#ff3333' : (iff === 'neutral' ? '#ffaa00' : '#00e5a3');
-            
+            // IFF unification (this session): now reads/writes the real ship_markers.iff
+            // column instead of the old cargo_inventory.iff sub-field. Unlike the old
+            // field this one can be genuinely null (never tagged) -- previously that
+            // state was silently mislabeled "Allied" to every viewer including players;
+            // now it shows no tag at all here (matching window.renderIffBadge's own
+            // convention elsewhere) and the DM-only dropdown gets an explicit "Unset"
+            // option so a ship can be deliberately un-tagged again, not just cycled
+            // between the three real designations.
+            const m = dynamicTarget.data; let iff = m.iff || null; let iffColor = iff ? ((window.IFF_COLORS && window.IFF_COLORS[iff]) || '#00e1ff') : '#6b826a'; let iffTag = iff ? ` [${iff.toUpperCase()}]` : '';
+
             let driveOptionsHtml = ''; Object.keys(driveSpeeds).forEach(k => { driveOptionsHtml += `<option value="${k}" ${m.drive_type === k ? 'selected' : ''}>${driveSpeeds[k].label}</option>`; });
-            let dmIffBox = currentUserRole === 'dm' ? `<div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">IFF Tag:</label><select onchange="window.updateShipIff('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:${iffColor}; border:1px solid ${iffColor}; margin:2px 0;"><option value="allied" ${iff === 'allied' ? 'selected' : ''} style="color:#00e5a3;">Allied</option><option value="hostile" ${iff === 'hostile' ? 'selected' : ''} style="color:#ff3333;">Hostile</option><option value="neutral" ${iff === 'neutral' ? 'selected' : ''} style="color:#ffaa00;">Neutral</option></select></div>` : '';
+            let dmIffBox = currentUserRole === 'dm' ? `<div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">IFF Tag:</label><select onchange="window.updateShipIff('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:${iffColor}; border:1px solid ${iffColor}; margin:2px 0;"><option value="" ${!iff ? 'selected' : ''} style="color:#6b826a;">-- Unset --</option><option value="friendly" ${iff === 'friendly' ? 'selected' : ''} style="color:#00e5a3;">✓ Friendly</option><option value="neutral" ${iff === 'neutral' ? 'selected' : ''} style="color:#c9962f;">◌ Neutral</option><option value="hostile" ${iff === 'hostile' ? 'selected' : ''} style="color:#ff3333;">⚠ Hostile</option></select></div>` : '';
 
             let jumpPlotterBox = '';
             if (window.jumpPlottingActive && window.activeJumpShip && window.activeJumpShip.id === m.id) {
@@ -1703,7 +1714,7 @@ window.initGalaxyEngine = function() {
                 </div>`;
             }
 
-            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name} [${iff.toUpperCase()}]</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${(currentUserRole === 'dm' || m.owner_id === currentUserId) ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
+            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name}${iffTag}</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${(currentUserRole === 'dm' || m.owner_id === currentUserId) ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
             let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button>${(window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id]) ? `<button class="btn-remove" onclick="window.deletePlanetOverride('${p.id}')" style="font-size:9px; padding:4px; margin-top:4px; width:100%;">🗑️ CLEAR OVERRIDE (revert to default)</button>` : ''}</div>` : '';
@@ -1860,7 +1871,11 @@ window.initGalaxyEngine = function() {
         for (let m of globalShipMarkersCache) {
             if (m.docked_to) continue; // docked craft render as part of their master, not as their own token
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
-            const size = 10 / window.camera.zoom; let iffColor = (m.cargo_inventory && m.cargo_inventory.iff === 'hostile') ? '#ff3333' : '#00e5a3';
+            // IFF unification (this session): was reading cargo_inventory.iff and only
+            // ever distinguished hostile-vs-everything-else -- a 'neutral' tag rendered
+            // identically to a friendly one on this view, silently. Now reads the real
+            // iff column through the shared 3-way (+unset) color helper.
+            const size = 10 / window.camera.zoom; let iffColor = typeof window.getIffColor === 'function' ? window.getIffColor(m.iff) : '#00e1ff';
 
             // FEATURE: Faction-based token ownership — visually distinguish "mine" from
             // "another player's" from "Overseer/NPC asset" so the drag-permission
