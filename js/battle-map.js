@@ -2004,19 +2004,32 @@ window.renderBattleMapPanel = function() {
     const placedIds = new Set(tokens.map(t => t.ship_marker_id));
     const palette = document.getElementById('battle-map-palette');
     if (palette) {
-        // Same rule for both roles: your own vessels not yet placed. For a
-        // DM this naturally surfaces "NPC" markers, since every NPC ship in
-        // this app is owned by the DM's own account (same convention the
-        // Ground Combat To-Hit build already established for combat_tracker
-        // PC-vs-NPC detection) — no separate NPC query needed.
-        const candidates = globalShipMarkersCache.filter(m => !m.is_strike_craft && m.owner_id === currentUserId && !placedIds.has(m.id));
+        // Bug fix (2026-08-29, DM report): a DM prepping an encounter needs
+        // to place a PLAYER's vessel (e.g. their primary combat ship), not
+        // just their own NPC markers -- but every NPC in this app is ALSO
+        // owned by the DM's own account, so the old "your own vessels only"
+        // rule (still correct for a player's own self-service placement)
+        // silently hid every PC ship from the DM's palette with no error,
+        // just an empty/wrong-looking list. globalShipMarkersCache already
+        // holds every vessel regardless of owner (js/map.js's
+        // loadGalaxyData does an unfiltered `.select('*')`), so this is a
+        // pure display-filter fix, no new query needed. A non-DM player
+        // keeps the old own-vessels-only behavior unchanged.
+        const candidates = globalShipMarkersCache.filter(m => !m.is_strike_craft && !placedIds.has(m.id) && (isDm || m.owner_id === currentUserId));
         if (candidates.length === 0) {
             palette.innerHTML = '<span style="font-size:9px; color:#6b826a;">No available vessels to place.</span>';
         } else {
             palette.innerHTML = candidates.map(m => {
                 const armed = window.battleMapArmedToken && window.battleMapArmedToken.ship_marker_id === m.id;
+                // DM view only: label another player's vessel with their
+                // username (from live presence, the only owner->name lookup
+                // already loaded in this app -- offline owners just show no
+                // suffix rather than a stale/guessed name) so a DM looking
+                // at a mixed NPC+PC list can tell them apart at a glance.
+                const ownerPresence = (isDm && m.owner_id !== currentUserId) ? (onlineUsersMap[m.owner_id] || [])[0] : null;
+                const ownerSuffix = ownerPresence ? ` <span style="color:#6b826a;">— ${ownerPresence.username}</span>` : '';
                 return `<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 6px; background:#030403; border:1px solid ${armed ? '#00e5a3' : '#3c4e36'}; border-radius:2px;">
-                    <span style="font-size:9px; color:#d4c5a9;">${m.name}</span>
+                    <span style="font-size:9px; color:#d4c5a9;">${m.name}${ownerSuffix}</span>
                     ${armed
                         ? `<button class="layer-edit" onclick="window.cancelTokenPlacement()" style="font-size:8px; padding:2px 6px;">CANCEL</button>`
                         : `<button class="btn-deploy" onclick="window.armTokenForPlacement('${m.id}')" style="font-size:8px; padding:2px 6px;">+ PLACE</button>`}
