@@ -10,7 +10,7 @@
          directly in the markup). Simple DRADIS-style radar blip, matching
          the app's terminal green-on-black theme. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=3.30">
+    <link rel="stylesheet" href="style.css?v=3.31">
     <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Codex Markdown/Charts (this session): marked.js for markdown-to-HTML
@@ -896,6 +896,27 @@
 
     <!-- 5. MAIN APP CONTAINER -->
     <div id="app-container">
+        <!-- Mobile Nav Drawer (this session, DM-confirmed design): only ever
+             shown/used below the 768px mobile breakpoint (js/ui.js's
+             window.setupMobileNavLayout gates every bit of this on
+             matchMedia) -- a desktop viewport never sees the toggle button,
+             the backdrop, or a populated drawer. #top-bar, #bottom-toggle-bar,
+             and #hud-overlay's REAL elements (not clones) get moved into
+             #mobile-nav-drawer-body by JS on mobile, and moved back to their
+             original spot (marked by the *-anchor spans below) the instant
+             the viewport isn't mobile anymore -- so every existing id/onclick/
+             JS reference keeps working unchanged either way. -->
+        <button id="mobile-nav-toggle-btn" onclick="window.toggleMobileNav()" aria-label="Open menu">☰</button>
+        <div id="mobile-nav-backdrop" onclick="window.toggleMobileNav(false)"></div>
+        <div id="mobile-nav-drawer">
+            <div id="mobile-nav-drawer-header">
+                <strong>MENU</strong>
+                <button onclick="window.toggleMobileNav(false)" style="width:auto; padding:4px 10px;">✕ CLOSE</button>
+            </div>
+            <div id="mobile-nav-drawer-body"></div>
+        </div>
+
+        <span id="top-bar-anchor" hidden></span>
         <div id="top-bar">
             <div style="display: flex; align-items: center; gap: 10px;">
                 <h3 style="margin: 0; color: #00e5a3; font-size: 14px; white-space: nowrap;">INTREPID HORIZON // DRADIS</h3>
@@ -942,6 +963,7 @@
              else in the top bar (search, MEASURE/PING/ROUTES/TERRITORIES/RADAR,
              clock, DOSSIER/CARGO/COMMS/SCRATCHPAD, role badge, Disconnect)
              stays put per explicit instruction. -->
+        <span id="bottom-toggle-bar-anchor" hidden></span>
         <div id="bottom-toggle-bar">
             <button onclick="window.openFullCodexTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">CODEX</button>
             <button onclick="window.toggleCombatTracker()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff6b6b; color: #ff6b6b; font-size: 10px;">COMBAT</button>
@@ -1322,6 +1344,7 @@
                 </div>
             </div>
 
+            <span id="hud-overlay-anchor" hidden></span>
             <div id="hud-overlay" class="panel">
                 <div id="hud-overlay-header" class="panel-header-drag">
                     <div class="hud-tabs">
@@ -1339,7 +1362,7 @@
     <!-- MAIN JAVASCRIPT LINKS -->
     <script src="js/db.js?v=3.28"></script>
     <script src="js/audio.js?v=3.17"></script>
-    <script src="js/ui.js?v=3.35"></script>
+    <script src="js/ui.js?v=3.36"></script>
     <script src="js/combat.js?v=3.50"></script>
     <script src="js/squadrons.js?v=1.4"></script>
     <script src="js/colonies.js?v=3.17"></script>
@@ -1348,7 +1371,7 @@
     <script src="js/augment-designer.js?v=1.2"></script>
     <script src="js/gear-designer.js?v=1.1"></script>
     <script src="js/dm-sheet-editor.js?v=1.0"></script>
-    <script src="js/map.js?v=3.34"></script>
+    <script src="js/map.js?v=3.35"></script>
     <script src="js/battle-map.js?v=1.33"></script>
     <script src="js/manufacturing.js?v=1.9"></script>
 
