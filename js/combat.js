@@ -532,7 +532,7 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
     if (weapons.length === 0) return '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>';
     let wHtml = '';
     weapons.forEach((w, idx) => {
-        const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range) : null;
+        const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range, { firerVessel: vessel, wpn: w }) : null;
         // Fog of War build (this session): the battle-scoped path already
         // filters hidden vessels (see getBattleScopedTargets, js/battle-map.js)
         // -- this fallback (no active battle / no token) needs the same
@@ -884,7 +884,7 @@ window.renderVesselDeck = function() {
                         <div style="font-size:9px; color:#6b826a;">${dbStats.label} | Units: ${sq.count} | Max HP: ${dbStats.base_hp * sq.count}</div>
                     </div>
                     <div style="display:flex; gap:6px;">
-                        <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx})" style="padding:4px 10px; font-size:9px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH WING</button>
+                        <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx}, false)" style="padding:4px 10px; font-size:9px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH WING</button>
                         <button class="layer-del" onclick="window.deleteSquadron('${vessel.id}', ${idx}, false)" style="padding:4px 8px; font-size:9px;">✕</button>
                     </div>
                 </div>`;
@@ -919,7 +919,7 @@ window.renderVesselDeck = function() {
                 // live via the weapon select's onchange.
                 const sqShipSelfForRange = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
                 const firstWpn = dbStats.weapons[0];
-                const initialScoped = (sqShipSelfForRange && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelfForRange.id, firstWpn ? firstWpn.range : 0) : null;
+                const initialScoped = (sqShipSelfForRange && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelfForRange.id, firstWpn ? firstWpn.range : 0, { firerVessel: sqShipSelfForRange, wpn: firstWpn }) : null;
                 // Fog of War build (this session): same fallback-path filter
                 // as renderShipWeaponsHtml above -- getBattleScopedTargets
                 // already excludes hidden vessels when it has a grid to
