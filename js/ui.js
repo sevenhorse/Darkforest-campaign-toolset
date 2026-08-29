@@ -524,6 +524,28 @@ window.toggleMobileNav = function(forceState) {
     const open = (typeof forceState === 'boolean') ? forceState : !drawer.classList.contains('open');
     drawer.classList.toggle('open', open);
     backdrop.classList.toggle('open', open);
+    if (open) {
+        // Opening the drawer (by any means -- hamburger tap or otherwise)
+        // clears the "new stuff in here" indicator set by flagMobileNavUpdate,
+        // same as reading a notification dismisses its badge.
+        const btn = document.getElementById('mobile-nav-toggle-btn');
+        if (btn) btn.classList.remove('has-update');
+    }
+};
+
+/* Revision (tester feedback, post-launch): renderHUDTelemetry used to call
+   window.toggleMobileNav(true) directly every time the selected target
+   changed, auto-popping the drawer open on mobile. A DM-confirmed design
+   choice going in, but real non-DM mobile testing showed it made ordinary
+   map exploration unusable -- quoted verbatim from the tester: "For some
+   reason clicking on any star attempts to open the menu, meaning I have to
+   play minesweeper just to navigate." Replaced with this: a quiet visual
+   flag on the hamburger button instead of a forced open, so selecting a
+   target on mobile no longer steals the screen -- the player can glance at
+   the badge and open the drawer on their own terms. */
+window.flagMobileNavUpdate = function() {
+    const btn = document.getElementById('mobile-nav-toggle-btn');
+    if (btn) btn.classList.add('has-update');
 };
 
 window.setupMobileNavLayout = function() {
