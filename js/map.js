@@ -1569,26 +1569,29 @@ window.initGalaxyEngine = function() {
     window.renderHUDTelemetry = function() {
         const content = document.getElementById('hud-content'); if (!content) return;
 
-        // Mobile Nav Drawer build (this session, DM-confirmed design):
-        // auto-open the drawer on a NEW target selection. On mobile,
-        // Telemetry now lives inside the closed-by-default nav drawer
-        // instead of always-visible like desktop (see js/ui.js's
-        // window.toggleMobileNav/window.setupMobileNavLayout) -- without
-        // this, tapping a star/ship would silently update content the
-        // player can't see behind a closed drawer. Keyed on a cheap
-        // identity string rather than reference equality: selectedTarget is
-        // a fresh object literal on every click (see this file's click
-        // handlers above), so `!==` would fire on every re-render too (an
-        // IFF change, a drive-type change, jumpToBookmark, etc.) and yank
-        // the drawer back open while someone's mid-edit inside it -- only a
-        // genuinely NEW selection should pop it open. toggleMobileNav
-        // itself only ever affects the mobile-only drawer/backdrop
-        // elements, which don't exist in an open state on desktop, so this
-        // is a no-op there regardless.
+        // Mobile Nav Drawer build (this session) -- REVISED (2026-08-29,
+        // real non-DM tester report on mobile: "clicking on any star
+        // attempts to open the menu, meaning I have to play minesweeper
+        // just to navigate"). The original build force-opened the whole
+        // drawer on every new selection, on the DM-confirmed theory that it
+        // should match desktop's always-visible Telemetry panel -- but on a
+        // touchscreen that meant every exploratory tap on the map yanked a
+        // half-screen drawer over it, which had to be closed again before
+        // the next tap. Real usage said that assumption was wrong, so this
+        // now flags a small non-blocking dot on the hamburger button
+        // instead of force-opening anything -- the map stays tappable, and
+        // whoever wants the details taps the menu themselves.
+        // window.flagMobileNavUpdate (js/ui.js) is a no-op on desktop, same
+        // as toggleMobileNav was. Still keyed on a cheap identity string
+        // rather than reference equality: selectedTarget is a fresh object
+        // literal on every click (see this file's click handlers above), so
+        // `!==` would fire on every re-render too (an IFF change, a
+        // drive-type change, jumpToBookmark, etc.), not just a genuinely
+        // NEW selection.
         const _mobileNavSelKey = window.selectedTarget ? `${window.selectedTarget.type}:${(window.selectedTarget.data && (window.selectedTarget.data.id || window.selectedTarget.data.name)) || ''}` : null;
         if (_mobileNavSelKey && _mobileNavSelKey !== window._lastMobileNavAutoOpenKey) {
             window._lastMobileNavAutoOpenKey = _mobileNavSelKey;
-            if (typeof window.toggleMobileNav === 'function') window.toggleMobileNav(true);
+            if (typeof window.flagMobileNavUpdate === 'function') window.flagMobileNavUpdate();
         }
 
         if (window.activeHudTab === 'bookmarks') {
