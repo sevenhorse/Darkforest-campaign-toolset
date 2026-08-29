@@ -1870,6 +1870,13 @@ window.initGalaxyEngine = function() {
 
         for (let m of globalShipMarkersCache) {
             if (m.docked_to) continue; // docked craft render as part of their master, not as their own token
+            // DM note #6 fix (this session): a strike-craft token launched from
+            // the Battle Map's hangar control is tactical-only -- it still exists
+            // as a real ship_markers row (Battle Map grid token, initiative entry,
+            // HP tracking all depend on it), it just shouldn't show up on THIS
+            // canvas. A squadron launched from the Vessel Deck is unaffected and
+            // keeps rendering here as before.
+            if (m.hide_from_galaxy_map) continue;
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
             // IFF unification (this session): was reading cargo_inventory.iff and only
             // ever distinguished hostile-vs-everything-else -- a 'neutral' tag rendered
