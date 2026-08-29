@@ -977,6 +977,7 @@ document.addEventListener('click', (e) => {
 
 window.clearSelectedTarget = function() {
     window.selectedTarget = null;
+    window._lastMobileNavAutoOpenKey = null; // Mobile Nav Drawer build -- so re-selecting the same target later still auto-opens the drawer
     if (window.jumpPlottingActive) window.cancelJumpPlotting();
     if (window.measuringTapeActive) window.toggleMeasuringTool();
     if (window.hyperlaneDrawActive) window.cancelDrawingHyperlane();
@@ -1567,7 +1568,29 @@ window.initGalaxyEngine = function() {
     // HUD TELEMETRY RENDERER
     window.renderHUDTelemetry = function() {
         const content = document.getElementById('hud-content'); if (!content) return;
-        
+
+        // Mobile Nav Drawer build (this session, DM-confirmed design):
+        // auto-open the drawer on a NEW target selection. On mobile,
+        // Telemetry now lives inside the closed-by-default nav drawer
+        // instead of always-visible like desktop (see js/ui.js's
+        // window.toggleMobileNav/window.setupMobileNavLayout) -- without
+        // this, tapping a star/ship would silently update content the
+        // player can't see behind a closed drawer. Keyed on a cheap
+        // identity string rather than reference equality: selectedTarget is
+        // a fresh object literal on every click (see this file's click
+        // handlers above), so `!==` would fire on every re-render too (an
+        // IFF change, a drive-type change, jumpToBookmark, etc.) and yank
+        // the drawer back open while someone's mid-edit inside it -- only a
+        // genuinely NEW selection should pop it open. toggleMobileNav
+        // itself only ever affects the mobile-only drawer/backdrop
+        // elements, which don't exist in an open state on desktop, so this
+        // is a no-op there regardless.
+        const _mobileNavSelKey = window.selectedTarget ? `${window.selectedTarget.type}:${(window.selectedTarget.data && (window.selectedTarget.data.id || window.selectedTarget.data.name)) || ''}` : null;
+        if (_mobileNavSelKey && _mobileNavSelKey !== window._lastMobileNavAutoOpenKey) {
+            window._lastMobileNavAutoOpenKey = _mobileNavSelKey;
+            if (typeof window.toggleMobileNav === 'function') window.toggleMobileNav(true);
+        }
+
         if (window.activeHudTab === 'bookmarks') {
             let html = '<div style="font-size:11px;"><h4 style="margin:0 0 8px 0; color:#00e5a3;">Saved Bookmarks</h4>';
             if (bookmarkedTargets.length === 0) { html += '<span style="color:#6b826a; font-size:10px;">No saved bookmarks. Click bookmark on any target telemetry.</span>'; } 
