@@ -594,10 +594,26 @@ window.processBattleRoundAutomations = async function() {
     // friend/foe detection. Without this check an ENEMY's point defense
     // could "intercept" a payload aimed at someone else's ship, which isn't
     // what "allied escort" means.
-    function findEligiblePD(targetPos, ownerId) {
+    //
+    // Bug fix (2026-08-29, caught live during the DM's own test battle): the
+    // "PD vs deployed strike craft" block below this function used to call
+    // fireEligiblePD(targetPos, sqShip.owner_id) -- i.e. it asked "find PD
+    // belonging to THIS SAME strike craft's own owner", which is backwards
+    // for anti-fighter fire and made every ship's point defense shoot down
+    // its OWN launched squadrons every round (confirmed live: "Task Force
+    // Black's PDC Grid engages Ghost", Ghost being Task Force Black's own
+    // Raven). Ordnance interception (the other caller, above) legitimately
+    // wants SAME-owner PD protecting a threatened ship, so the shared
+    // pool-search couldn't just flip its default -- added an opts.enemyOnly
+    // flag instead so each caller states which relationship it actually
+    // means, rather than smuggling "enemy of" through a param named for
+    // "owner of".
+    function findEligiblePD(targetPos, ownerId, opts) {
+        const enemyOnly = !!(opts && opts.enemyOnly);
         for (let i = 0; i < pdPool.length; i++) {
             const entry = pdPool[i];
-            if (entry.ownerId !== ownerId) continue;
+            const sameOwner = entry.ownerId === ownerId;
+            if (enemyOnly ? sameOwner : !sameOwner) continue;
             const v = globalShipMarkersCache.find(m => m.id === entry.vesselId);
             const w = v && v.ship_weapons[entry.weaponIdx];
             if (!w) continue;
@@ -607,8 +623,8 @@ window.processBattleRoundAutomations = async function() {
         return -1;
     }
 
-    function fireEligiblePD(targetPos, ownerId) {
-        const idx = findEligiblePD(targetPos, ownerId);
+    function fireEligiblePD(targetPos, ownerId, opts) {
+        const idx = findEligiblePD(targetPos, ownerId, opts);
         if (idx < 0) return null;
         const entry = pdPool.splice(idx, 1)[0];
         const pdVessel = globalShipMarkersCache.find(m => m.id === entry.vesselId);
@@ -898,7 +914,9 @@ window.processBattleRoundAutomations = async function() {
             if (!sqShip) return;
             const targetPos = window.getBattleTokenPosition(sqShip.id);
             if (!targetPos) return; // squadron has no grid token this round (pre-build legacy launch, or launched outside a battle) — can't be range-checked, skip
-            const engagement = fireEligiblePD(targetPos, sqShip.owner_id);
+            // enemyOnly: true -- this is anti-fighter fire, we want the OPPOSING
+            // side's PD shooting at this strike craft, not its own carrier's.
+            const engagement = fireEligiblePD(targetPos, sqShip.owner_id, { enemyOnly: true });
             if (!engagement) return;
             if (engagement.roll.total <= 0) {
                 chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} fires at ${sq.name} — misses.`);
