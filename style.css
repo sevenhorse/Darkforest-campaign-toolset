@@ -23,6 +23,16 @@ body {
     color: #00e5a3; text-transform: uppercase; letter-spacing: 1px; font-weight: bold;
 }
 
+/* Mobile Nav Drawer (this session, DM-confirmed design) -- base/desktop
+   state. Hidden unconditionally here so a desktop viewport never shows the
+   toggle button, backdrop, or drawer even for an instant before JS runs;
+   the mobile media query below is the ONLY place any of this becomes
+   visible. See index.html's own comment on this feature for the full
+   picture -- #top-bar/#bottom-toggle-bar/#hud-overlay are the same real
+   elements either way, just relocated by js/ui.js's
+   window.setupMobileNavLayout on a mobile-width viewport. */
+#mobile-nav-toggle-btn, #mobile-nav-backdrop, #mobile-nav-drawer { display: none; }
+
 #login-wrapper {
     display: flex; justify-content: center; align-items: center; height: 100vh; text-align: center;
     background: radial-gradient(circle, #09100d 0%, #020302 100%);
@@ -930,7 +940,15 @@ div[style*="display:flex"] > *,
        Dragging (js/ui.js's DRAG handle) stays mouse-only -- these panels
        don't need repositioning by hand on mobile since this rule pins
        them regardless of where a previous desktop session left them. */
-    #hud-overlay, #combat-tracker-panel, #dm-tools, #comms-array-panel,
+    /* #hud-overlay REMOVED from this list (this session) -- it's no longer
+       one of the "opened on demand, pin it full-screen while open" panels.
+       It's always-on and has no show/hide toggle at all (confirmed via grep
+       -- see js/ui.js/js/map.js), which is exactly why pinning IT full-
+       screen broke mobile: it permanently covered the map instead of just
+       covering it while a DM had it open like every panel below. It now
+       lives inside #mobile-nav-drawer-body instead -- see the Mobile Nav
+       Drawer block further down this file. */
+    #combat-tracker-panel, #dm-tools, #comms-array-panel,
     #calendar-control-panel, #dm-scratchpad-panel, #credits-panel,
     #territory-control-panel, #salvage-panel {
         position: fixed !important;
@@ -1026,6 +1044,68 @@ div[style*="display:flex"] > *,
     select[style*="height:22px"], select[style*="height: 22px"],
     input[style*="height:20px"], input[style*="height: 20px"] {
         height: 30px !important;
+    }
+
+    /* ---- Mobile compatibility pass, part 4 (this session): Nav Drawer ----
+       DM-confirmed design, replacing the always-on full-screen Telemetry
+       panel and the cramped top/bottom button ribbons with a hamburger-
+       triggered slide-out drawer, mobile only -- desktop's own #top-bar/
+       #bottom-toggle-bar/#hud-overlay rules elsewhere in this file are
+       completely unchanged and still apply verbatim whenever this media
+       query doesn't match. */
+    #mobile-nav-toggle-btn {
+        display: block; position: fixed; top: 8px; left: 8px; z-index: 61;
+        width: 40px; height: 40px; padding: 0; margin: 0; font-size: 20px; line-height: 38px;
+        background: #040605; border: 1px solid #00e5a3; color: #00e5a3; border-radius: 4px;
+        text-align: center;
+    }
+    #mobile-nav-backdrop {
+        position: fixed; inset: 0; z-index: 58; background: rgba(0,0,0,0.6);
+        opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+    }
+    #mobile-nav-backdrop.open { display: block; opacity: 1; pointer-events: auto; }
+    #mobile-nav-drawer {
+        display: flex; flex-direction: column;
+        position: fixed; top: 0; left: 0; bottom: 0; width: min(86vw, 340px);
+        background: rgba(8,12,16,0.98); border-right: 1px solid #3c4e36; box-shadow: 0 0 20px rgba(0,0,0,0.6);
+        z-index: 59; transform: translateX(-100%); transition: transform 0.25s ease;
+        overflow-y: auto; overscroll-behavior: contain;
+    }
+    #mobile-nav-drawer.open { transform: translateX(0); }
+    #mobile-nav-drawer-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 12px; border-bottom: 1px solid #3c4e36; color: #00e5a3;
+        position: sticky; top: 0; background: rgba(8,12,16,0.98); z-index: 1;
+    }
+    #mobile-nav-drawer-body { padding: 8px 10px 24px; }
+
+    /* Once #top-bar/#bottom-toggle-bar are living inside the drawer body
+       they need to behave like stacked, full-width flow content instead of
+       their desktop single-row/fixed-position layout (a 50px-tall
+       horizontal-scroll ribbon and a bottom-floating pill respectively). */
+    #mobile-nav-drawer-body #top-bar, #mobile-nav-drawer-body #bottom-toggle-bar {
+        position: static !important; left: auto !important; bottom: auto !important; transform: none !important;
+        display: flex !important; flex-direction: column !important; align-items: stretch !important;
+        height: auto !important; min-height: 0 !important; max-width: none !important;
+        overflow: visible !important; white-space: normal !important; gap: 8px !important;
+        padding: 4px 0 14px !important; margin: 0 !important; border: none !important; box-shadow: none !important;
+        background: transparent !important;
+    }
+    #mobile-nav-drawer-body #top-bar > div {
+        flex-direction: column !important; align-items: stretch !important; width: 100% !important; gap: 8px !important;
+    }
+    #mobile-nav-drawer-body #top-bar div[style*="width: 160px"] { width: 100% !important; }
+    #mobile-nav-drawer-body #top-bar button, #mobile-nav-drawer-body #bottom-toggle-bar button {
+        width: 100% !important;
+    }
+
+    /* #hud-overlay drops its desktop absolute-positioned small-corner-box
+       layout entirely once it's flow content inside the drawer. */
+    #mobile-nav-drawer-body #hud-overlay {
+        position: static !important; width: 100% !important; max-width: none !important;
+        max-height: none !important; top: auto !important; left: auto !important; right: auto !important; bottom: auto !important;
+        box-shadow: none !important; margin-top: 14px !important; border: none !important;
+        border-top: 1px solid #3c4e36 !important; border-radius: 0 !important; padding: 14px 0 0 !important;
     }
 }
 
