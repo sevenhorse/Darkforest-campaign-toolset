@@ -815,7 +815,24 @@ div[style*="display:flex"] > *,
         -webkit-overflow-scrolling: touch;
     }
 
-    .term-tab-btn-vert {
+    /* SECURITY FIX (2026-08-29, real tester report on mobile: "SIR I CAN
+       SEE YOUR SECRET REPOSITORY") -- this rule used to apply to EVERY
+       .term-tab-btn-vert unconditionally, `!important` and all. That's
+       fine for the ~10 tabs that are always visible, but
+       #term-tab-btn-secretrepo is the one tab gated DM-only via a plain
+       (non-!important) inline `style="display:none"` (js/db.js sets it to
+       `display:flex` only `if (data.role === 'dm')` at login) -- on
+       desktop that inline style correctly beats this class's own
+       non-!important base rule, but this MOBILE override's `!important`
+       beat the inline style right back, force-showing (and therefore
+       force-CLICKABLE -- window.switchTermTab('secretrepo') has no role
+       check of its own either) the DM's secret NPC stat block editor to
+       every player on a phone. Excludes any tab button whose inline style
+       still says display:none, same attribute-selector technique this
+       file's own part-3 rules already use for spaced/unspaced inline CSS
+       -- so if another DM-only tab is ever added the same way, this
+       won't repeat the mistake. */
+    .term-tab-btn-vert:not([style*="display:none"]):not([style*="display: none"]) {
         display: inline-flex !important;
         width: auto !important;
         margin-right: 8px !important;
@@ -1058,6 +1075,16 @@ div[style*="display:flex"] > *,
         width: 40px; height: 40px; padding: 0; margin: 0; font-size: 20px; line-height: 38px;
         background: #040605; border: 1px solid #00e5a3; color: #00e5a3; border-radius: 4px;
         text-align: center;
+    }
+    /* Quiet "something changed in here" indicator, added to replace the
+       force-auto-open-on-target-selection behavior (reverted per tester
+       feedback -- see js/ui.js's flagMobileNavUpdate comment). A small dot,
+       not a modal/popup: doesn't move anything on screen or interrupt
+       whatever the player is doing, just invites a glance at the drawer. */
+    #mobile-nav-toggle-btn.has-update::after {
+        content: ''; position: absolute; top: -3px; right: -3px;
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #ffb020; border: 2px solid #040605;
     }
     #mobile-nav-backdrop {
         position: fixed; inset: 0; z-index: 58; background: rgba(0,0,0,0.6);
