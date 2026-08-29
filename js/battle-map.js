@@ -107,6 +107,103 @@ const BATTLE_STRIKE_CRAFT_TOKEN_SIZE = 20;
 // weapon's range value, unlike actually growing the battlespace would.
 const BATTLE_GRID_SCALE = 1.5;
 
+/* Weapon Range Tiers build (this session, DM-confirmed design): four range
+   bands, replacing the old ad hoc per-weapon placeholder numbers (300/450/
+   650/700) with values derived from the grid's own size. LONG/MEDIUM/SHORT
+   are 33% / 16.5% / 8.25% of the battle grid's DIAGONAL (sqrt(920^2+760^2)
+   ~= 1193px), rounded to clean numbers -- the DM's own explicit pick of
+   "diagonal" as what counts as the map's overall size, out of diagonal/
+   width/average offered. The 4th tier (missiles/torpedoes, and a strike
+   craft's own effective reach) isn't a number here at all: ship-mounted
+   ordnance tubes get range 0 (unlimited launch distance, DM-confirmed)
+   since they already travel over multiple turns via the existing
+   ordnance-aging mechanic rather than hitting instantly, and a strike
+   craft closes distance every round via moveTokenToward instead of
+   needing a long weapon range to begin with. See getEffectiveWeaponRange
+   and getUplinkedEnemyIds below for the two new rules built on top of
+   these tiers (strike-craft-vs-capital short-range requirement, and the
+   Messenger squadron's target-uplink exception to it). */
+window.BATTLE_RANGE_TIERS = { LONG: 400, MEDIUM: 200, SHORT: 100 };
+
+/* Squadron Target Uplink build (this session, DM-described mechanic, exact
+   trigger/scope/duration NOT explicitly spec'd beyond "gets close enough" --
+   my own concrete reading, flagged plainly per standing instruction 5:
+   a Messenger-type squadron (STRIKE_CRAFT_DB's `messenger` entry) within
+   SHORT range of an enemy ship "uplinks" that ship for its OWN side (same
+   owner_id as the Messenger) for the rest of THIS round only -- recomputed
+   fresh every time this is called, nothing persists across rounds. Returns
+   a Set of ship_marker ids (enemy ships currently uplinked for forOwnerId).
+   Deliberately does not care about the Messenger's own ai_stance -- this is
+   read as a passive sensor/spotter effect of just being close, not an
+   attack action, so a Manual-stance Messenger still projects it. */
+function getUplinkedEnemyIds(forOwnerId) {
+    if (!window.globalBattleEncounterCache) return new Set();
+    const tokens = window.globalBattleEncounterCache.tokens || [];
+    const messengerPositions = [];
+    tokens.forEach(t => {
+        const marker = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
+        if (!marker || !marker.is_strike_craft || marker.owner_id !== forOwnerId) return;
+        const carrier = globalShipMarkersCache.find(c => c.id === marker.parent_id);
+        const sq = carrier && (carrier.ship_deployed || []).find(s => s.id === marker.squadron_id);
+        if (sq && sq.type === 'messenger') messengerPositions.push({ x: t.x, y: t.y });
+    });
+    const uplinked = new Set();
+    if (messengerPositions.length === 0) return uplinked;
+    tokens.forEach(t => {
+        const target = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
+        if (!target || target.owner_id === forOwnerId) return; // only enemy ships get uplinked
+        const isClose = messengerPositions.some(mp => Math.hypot(mp.x - t.x, mp.y - t.y) <= window.BATTLE_RANGE_TIERS.SHORT);
+        if (isClose) uplinked.add(target.id);
+    });
+    return uplinked;
+}
+window.getUplinkedEnemyIds = getUplinkedEnemyIds;
+
+/* Weapon Range Tiers + Squadron Target Uplink builds (this session):
+   computes the ACTUAL max range (px) for `wpn` fired by `firerVessel` at
+   `targetVessel` this round, folding in both new rules on top of whatever
+   `wpn.range` already says (0 = unlimited, existing convention unchanged):
+     1. (DM-confirmed, applies to BOTH manual fire and AI-stance auto-fire)
+        A strike craft (`firerVessel.is_strike_craft`) attacking anything
+        that ISN'T itself a strike craft is hard-capped at SHORT range,
+        regardless of its own weapon's listed range and regardless of the
+        squadron's own type/size -- "must close to within short range to
+        hit," full stop, unless rule 2 below already granted an exception.
+        Deliberately keyed on `!targetVessel.is_strike_craft` rather than
+        `vessel_class === 'Capital'/'Escort'` -- most live ships don't have
+        `vessel_class` set yet (see Pending list), and gating on it here
+        would let an untagged capital ship get sniped at full weapon range
+        by accident, which reads as a worse bug than being slightly broader
+        than "escort/capital" than asked.
+     2. (My own reading of "the messenger... allows medium and long range
+        weapons to hit regardless of distance" -- not explicitly scoped to
+        ship guns vs. squadron weapons in what was described, so applied to
+        both here; flagging this as a judgment call, not a confirmed spec)
+        If `targetVessel` is currently uplinked for `firerVessel`'s side
+        (see getUplinkedEnemyIds above) AND `wpn`'s own range already
+        qualifies as medium-or-long tier (>= MEDIUM), that weapon ignores
+        range entirely against this target this round -- checked BEFORE
+        rule 1, so it also lets a strike craft's medium/long weapon skip
+        the short-range-vs-capital requirement once uplinked. A weapon
+        that's short-tier or already unlimited gets no benefit from an
+        uplink -- there's nothing for it to extend. */
+function getEffectiveWeaponRange(wpn, firerVessel, targetVessel) {
+    const tiers = window.BATTLE_RANGE_TIERS || { LONG: 400, MEDIUM: 200, SHORT: 100 };
+    const baseRange = (wpn && wpn.range) || 0; // 0 = unlimited, existing convention
+
+    if (firerVessel && targetVessel && baseRange >= tiers.MEDIUM) {
+        const uplinked = getUplinkedEnemyIds(firerVessel.owner_id);
+        if (uplinked.has(targetVessel.id)) return 0; // unlimited this round
+    }
+
+    if (firerVessel && firerVessel.is_strike_craft && targetVessel && !targetVessel.is_strike_craft) {
+        return baseRange > 0 ? Math.min(baseRange, tiers.SHORT) : tiers.SHORT;
+    }
+
+    return baseRange;
+}
+window.getEffectiveWeaponRange = getEffectiveWeaponRange;
+
 /* --- ANIMATION ENGINE (built a prior session, confirmed scope: in-flight
    ordnance visualization, smooth token movement, direct-fire shot flashes, a
    decorative starfield backdrop — CSS/SVG-transform-driven per the DM's own
@@ -911,9 +1008,25 @@ window.processBattleRoundAutomations = async function() {
             if (!sq || (sq.count || 0) <= 0) continue;
             if (sq.ai_stance !== 'attack_strike_craft' && sq.ai_stance !== 'attack_capitals' && sq.ai_stance !== 'attack_escorts') continue;
             const sqShip = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
-            if (!sqShip) continue;
+            // Squadron Movement Diagnostics build (this session): the two
+            // checks below (!sqShip and !selfPos) used to fail completely
+            // silently -- a stance-set squadron with neither a strike-craft
+            // token at all (never launched onto ANY battle map, just sitting
+            // in ship_deployed) nor a token ON THIS battle's grid specifically
+            // would just do nothing, every round, with zero feedback anywhere
+            // in the chat log. That silence was itself reported as "squadrons
+            // don't move" with no way to tell whether that's a real bug or an
+            // unlaunched squadron -- these two lines exist purely to make
+            // that distinction visible without changing any behavior.
+            if (!sqShip) {
+                chatLines.push(`🤖 [AI STANCE] ${sq.name} has an AI stance set but was never launched onto a battle map (no strike-craft token exists) -- holds position.`);
+                continue;
+            }
             const selfPos = window.getBattleTokenPosition(sqShip.id);
-            if (!selfPos) continue; // no grid token this round -- can't range/nearest-check, skip (fails open, same as every other stance/PD check in this function)
+            if (!selfPos) {
+                chatLines.push(`🤖 [AI STANCE] ${sq.name} has an AI stance set but has no token on THIS battle's grid this round -- holds position.`);
+                continue; // no grid token this round -- can't range/nearest-check, skip (fails open, same as every other stance/PD check in this function)
+            }
 
             const moveDist = sqShip.tactical_speed || SQUADRON_TACTICAL_SPEED;
 
@@ -941,7 +1054,18 @@ window.processBattleRoundAutomations = async function() {
             } else {
                 candidates = candidates.filter(m => !m.is_strike_craft && m.vessel_class === 'Escort');
             }
-            if (candidates.length === 0) continue; // nothing eligible this round -- silently passes, same as a manual player choosing not to fire
+            // Squadron Movement Diagnostics build (this session): was a
+            // silent `continue` -- now logs why, same reasoning as the
+            // !sqShip/!selfPos checks above. Most likely cause: no ship on
+            // the grid has a DIFFERENT owner_id than this squadron (the
+            // app's existing friend/foe convention -- see findEligiblePD's
+            // comment above) matching this stance's class filter, e.g. two
+            // NPC-side ships that both have no owner_id assigned look like
+            // the same "side" to this check.
+            if (candidates.length === 0) {
+                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) has no eligible enemy target on the grid this round -- holds position.`);
+                continue; // nothing eligible this round -- same as a manual player choosing not to fire
+            }
 
             let bestTarget = null, bestDist = Infinity, bestTargetPos = null;
             candidates.forEach(m => {
@@ -1006,12 +1130,23 @@ window.processBattleRoundAutomations = async function() {
             // fails open consistent with every other range check in this
             // build) means unlimited, same convention as ship_weapons.
             const postMoveDist = Math.hypot(bestTargetPos.x - newSelfPos.x, bestTargetPos.y - newSelfPos.y);
-            if (wpn && wpn.range && postMoveDist > wpn.range) {
+            // Weapon Range Tiers build (this session): was a raw wpn.range
+            // check -- now folds in the strike-craft-vs-capital short-range
+            // cap and the Messenger uplink exception (getEffectiveWeaponRange
+            // above), same rule the manual FIRE path enforces.
+            const effRangeForFire = getEffectiveWeaponRange(wpn, sqShip, bestTarget);
+            if (wpn && effRangeForFire && postMoveDist > effRangeForFire) {
                 chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) closes on ${bestTarget.name} but is still out of ${wpn.name}'s range (${wpn.range}) -- holds fire.`);
                 continue;
             }
 
-            chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) engages ${bestTarget.name}.`);
+            // Squadron Target Uplink build (this session): cheap chat-log
+            // tell so an uplinked shot doesn't look like a silent range-rule
+            // violation to whoever's watching the log -- no other visual
+            // indicator exists yet for which enemy ships are uplinked this
+            // round (flagged, not built -- see Pending list).
+            const uplinkNote = (wpn.range > 0 && effRangeForFire === 0) ? ' (target uplinked!)' : '';
+            chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) engages ${bestTarget.name}${uplinkNote}.`);
             // Squadron Ordnance build (this session): an ordnance-classified
             // pick (see the weapon-selection comment above) routes through
             // the tracked multi-turn launch instead of an instant-resolve
@@ -1252,14 +1387,28 @@ window.getBattleTokenPosition = function(vesselId) {
 // surfaces at once instead of duplicating the check at each call site. Uses
 // window.isVesselVisibleToMe so the vessel's own player-owner (if any) still
 // sees it in their own dropdown even while it's hidden from everyone else.
-window.getBattleScopedTargets = function(vesselId, range) {
+// Weapon Range Tiers build (this session): now takes an optional `opts`
+// ({ firerVessel, wpn }) so the per-CANDIDATE effective range (short-range-
+// vs-capital cap, target-uplink exception -- see getEffectiveWeaponRange
+// above) can be applied instead of one flat `range` for every candidate.
+// Every existing caller was updated to pass it; `range` alone still works
+// as a plain flat-distance filter for any caller that doesn't (none left,
+// kept for safety/back-compat rather than assuming every call site here
+// and in every other file got updated).
+window.getBattleScopedTargets = function(vesselId, range, opts) {
     if (!window.globalBattleEncounterCache) return null;
     const tokens = window.globalBattleEncounterCache.tokens || [];
     const selfToken = tokens.find(t => t.ship_marker_id === vesselId);
     if (!selfToken) return null;
+    const firerVessel = (opts && opts.firerVessel) || globalShipMarkersCache.find(m => m.id === vesselId);
+    const wpn = opts && opts.wpn;
     return tokens.filter(t => t.ship_marker_id !== vesselId).filter(t => {
-        if (!range) return true;
-        return Math.hypot(t.x - selfToken.x, t.y - selfToken.y) <= range;
+        const targetVessel = globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id);
+        const effRange = (wpn && typeof getEffectiveWeaponRange === 'function')
+            ? getEffectiveWeaponRange(wpn, firerVessel, targetVessel)
+            : range;
+        if (!effRange) return true;
+        return Math.hypot(t.x - selfToken.x, t.y - selfToken.y) <= effRange;
     }).map(t => globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id))
       .filter(Boolean)
       .filter(m => (typeof window.isVesselVisibleToMe === 'function') ? window.isVesselVisibleToMe(m) : true)
@@ -1348,9 +1497,10 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     const targetPos = window.getBattleTokenPosition(targetId);
     if (!targetPos) { alert('Target is not on the battle grid.'); return; }
 
-    if (wpn.range && Math.hypot(targetPos.x - selfPos.x, targetPos.y - selfPos.y) > wpn.range) {
+    const launchEffRange = getEffectiveWeaponRange(wpn, vessel, targetVessel);
+    if (launchEffRange && Math.hypot(targetPos.x - selfPos.x, targetPos.y - selfPos.y) > launchEffRange) {
         if (window.AudioEngine) window.AudioEngine.playError();
-        alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${wpn.range}).`);
+        alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${launchEffRange}).`);
         return;
     }
 
