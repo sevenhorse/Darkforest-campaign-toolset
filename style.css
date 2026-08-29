@@ -965,6 +965,68 @@ div[style*="display:flex"] > *,
         flex: 1 1 auto !important; width: 100% !important; max-width: 100% !important; min-width: 0 !important;
     }
     #battle-map-grid-wrap { width: 100% !important; max-width: 100% !important; height: 50vh !important; }
+
+    /* ---- Mobile compatibility pass, part 3 (this session): DM-reported,
+       after live phone use of "part 2" above -- text/buttons too small to
+       read or tap, elements overflowing into horizontal scroll, and
+       layouts breaking/overlapping, explicitly broader than just the
+       Battle Map. Three systemic fixes below, each targeting an inline-
+       style PATTERN used dozens to hundreds of times across every panel
+       in this app (Ship Designer, Perk/Augment/Gear/Manufacturing
+       catalogs, Colonies, Territory Control, Hyperlanes, Saved Fleets, DM
+       Tools, every weapon/squadron row, etc.), same technique as the
+       div[style*="grid-template-columns"] rule already established above
+       -- rather than chasing individual container ids one at a time the
+       way "part 2" did for just the 4 cargo/vessel containers. NONE of
+       this has been checked on a real device yet -- reasoned from the
+       actual inline-style strings this codebase renders (grepped, not
+       guessed), same disclaimer every other first-pass build in this app
+       gets; worth a real phone check before trusting it's actually fixed. */
+
+    /* 1. The dominant "title/badges on the left, action buttons on the
+       right" card-row layout (~59 raw justify-content:space-between
+       occurrences across 12 files) has no wrap by default, so on a ~375px
+       phone it crams a title, several badges, and 1-3 buttons into one
+       line -- the direct cause of overflow/illegible-cramming/overlap.
+       Attribute-selector matches only INLINE styles, so this does not
+       touch #top-bar/#bottom-toggle-bar (their space-between comes from
+       this stylesheet, not an inline style) -- those two already use a
+       deliberate horizontal-scroll-ribbon pattern instead of wrapping and
+       are left alone on purpose. */
+    div[style*="justify-content:space-between"], div[style*="justify-content: space-between"] {
+        flex-wrap: wrap !important;
+        row-gap: 6px !important;
+    }
+
+    /* 2. This app's whole visual language runs on 8-10px inline
+       font-size (500+ occurrences) -- fine at arm's length with a mouse,
+       genuinely too small to read on a phone. Bumped a few px each,
+       mobile-only; 11px+ text (button labels, headers, etc.) was already
+       legible and is untouched. */
+    [style*="font-size:8px"], [style*="font-size: 8px"],
+    [style*="font-size:9px"], [style*="font-size: 9px"] {
+        font-size: 11px !important;
+    }
+    [style*="font-size:10px"], [style*="font-size: 10px"] {
+        font-size: 12px !important;
+    }
+
+    /* 3. Tap targets: buttons and small form controls across the app
+       routinely use 2-4px padding and a couple of hardcoded ~20px select/
+       input heights sized for a mouse pointer, not a fingertip -- floors
+       the tappable height without forcing a specific width, so dense
+       multi-button/multi-select rows (which now also wrap per fix 1
+       above) still fit. */
+    button, .layer-edit, .layer-del, .btn-reveal, .btn-deploy, .btn-remove, .btn-wipe {
+        min-height: 34px !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+    }
+    select[style*="height:20px"], select[style*="height: 20px"],
+    select[style*="height:22px"], select[style*="height: 22px"],
+    input[style*="height:20px"], input[style*="height: 20px"] {
+        height: 30px !important;
+    }
 }
 
 /* Target ultra-short landscape screens (phones turned sideways) */
