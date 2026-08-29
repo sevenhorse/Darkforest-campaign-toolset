@@ -83,7 +83,7 @@ const STRIKE_CRAFT_DB = {
             { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 280 },
             { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat", role: "general", range: 420 },
             { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital", range: 700, cooldown_period: 4 }
+            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital", range: 0, cooldown_period: 4 }
         ]
     },
     hawk: {
@@ -91,7 +91,7 @@ const STRIKE_CRAFT_DB = {
         weapons: [
             { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact", role: "general", range: 420 },
             { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital", range: 700, cooldown_period: 4 }
+            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital", range: 0, cooldown_period: 4 }
         ]
     },
     messenger: {
@@ -148,7 +148,7 @@ const SQUADRON_TACTICAL_SPEED = 320;
    No-op if no battle is active, or if a squadron was already deployed
    before this build shipped — those don't retroactively get a token; recall
    + relaunch picks one up. Flagged, not silently glossed over. */
-async function spawnSquadronToken(vessel, sq) {
+async function spawnSquadronToken(vessel, sq, hideFromOverworld) {
     const { data: tokenRow, error: tokenError } = await db.from('ship_markers').insert({
         owner_id: vessel.owner_id, name: sq.name,
         x: vessel.x + (Math.random() * 80 - 40), y: vessel.y + (Math.random() * 80 - 40),
@@ -166,7 +166,14 @@ async function spawnSquadronToken(vessel, sq) {
         // visible on the grid and give the ambush away. Each squadron token
         // still reveals independently on its own first shot (see
         // window.revealVesselIfHidden), same as the carrier does on its own.
-        iff: vessel.iff || null, is_hidden: !!vessel.is_hidden
+        iff: vessel.iff || null, is_hidden: !!vessel.is_hidden,
+        // DM note #6 fix (this session): true only when launched from the
+        // Battle Map's compact hangar control -- keeps this token off the
+        // galaxy map canvas (js/map.js) while it's tactical-only, independent
+        // of is_hidden (Fog of War stealth, unrelated semantics). Stays true
+        // until explicitly recalled and relaunched from the Vessel Deck --
+        // does NOT auto-clear when the battle itself ends (DM-confirmed).
+        hide_from_galaxy_map: !!hideFromOverworld
     }).select().single();
     if (tokenError) { console.error('Failed to spawn squadron token:', tokenError.message); }
 
@@ -267,7 +274,7 @@ window.commissionSquadron = async function() {
     });
 };
 
-window.launchSquadron = async function(vesselId, idx) {
+window.launchSquadron = async function(vesselId, idx, hideFromOverworld) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
@@ -284,7 +291,7 @@ window.launchSquadron = async function(vesselId, idx) {
         window.renderVesselDeck();
 
         if (window.AudioEngine) window.AudioEngine.playWarp();
-        await spawnSquadronToken(vessel, sq);
+        await spawnSquadronToken(vessel, sq, hideFromOverworld);
 
         await db.from('chat_logs').insert({
             sender_id: currentUserId,
@@ -354,7 +361,7 @@ window.renderCompactHangarHtml = function(vessel) {
         const dbStats = STRIKE_CRAFT_DB[sq.type];
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:9px; color:#d4c5a9;">
             <span>${sq.name} <span style="color:#6b826a;">${dbStats ? dbStats.label : sq.type} x${sq.count}</span></span>
-            <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx})" style="padding:2px 8px; font-size:8px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH</button>
+            <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx}, true)" style="padding:2px 8px; font-size:8px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH</button>
         </div>`;
     });
     deployed.forEach((sq, idx) => {
@@ -438,7 +445,7 @@ window.updateSquadronTargetOptions = function(vesselId, sqIdx) {
 
     const wpn = dbStats.weapons[parseInt(wpnSelect.value, 10)];
     const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
-    const scoped = (sqShipSelf && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelf.id, wpn ? wpn.range : 0) : null;
+    const scoped = (sqShipSelf && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelf.id, wpn ? wpn.range : 0, { firerVessel: sqShipSelf, wpn: wpn }) : null;
     // Fog of War build (this session): same fallback-path filter as the two
     // sibling target-list builders above.
     const candidates = scoped || globalShipMarkersCache.filter(m => m.id !== vesselId && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
@@ -554,14 +561,20 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     // alert+refuse UX. Fails open (fires anyway) if either token's grid
     // position can't be found -- same "don't block on a missing token"
     // convention as every other range/position check in this build.
-    if (targetId && wpn.range) {
+    if (targetId) {
         const selfPos = sqShipSelf ? window.getBattleTokenPosition(sqShipSelf.id) : null;
         const targetPosForRange = window.getBattleTokenPosition(targetId);
-        if (selfPos && targetPosForRange && Math.hypot(targetPosForRange.x - selfPos.x, targetPosForRange.y - selfPos.y) > wpn.range) {
+        const targetShipForAlert = globalShipMarkersCache.find(m => m.id === targetId);
+        // Weapon Range Tiers build (this session): was a raw wpn.range check
+        // -- now folds in the strike-craft-vs-capital short-range cap and
+        // the Messenger uplink exception (getEffectiveWeaponRange,
+        // js/battle-map.js), same rule the AI-stance auto-fire path
+        // enforces (processBattleRoundAutomations).
+        const effRange = (typeof window.getEffectiveWeaponRange === 'function') ? window.getEffectiveWeaponRange(wpn, sqShipSelf, targetShipForAlert) : wpn.range;
+        if (effRange && selfPos && targetPosForRange && Math.hypot(targetPosForRange.x - selfPos.x, targetPosForRange.y - selfPos.y) > effRange) {
             if (opts.auto) return;
             if (window.AudioEngine) window.AudioEngine.playError();
-            const targetShipForAlert = globalShipMarkersCache.find(m => m.id === targetId);
-            alert(`[OUT OF RANGE] ${targetShipForAlert ? targetShipForAlert.name : 'Target'} is beyond ${wpn.name}'s range (${wpn.range}).`);
+            alert(`[OUT OF RANGE] ${targetShipForAlert ? targetShipForAlert.name : 'Target'} is beyond ${wpn.name}'s range (${effRange}).`);
             return;
         }
     }
@@ -789,10 +802,11 @@ window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId
     // BEFORE ever calling this (see processBattleRoundAutomations), so this
     // should only trip here for the manual path, or as a redundant safety
     // net if either token moved between dropdown-populate and click/tick.
-    if (wpn.range && Math.hypot(targetPos.x - selfPos.x, targetPos.y - selfPos.y) > wpn.range) {
+    const launchEffRange = (typeof window.getEffectiveWeaponRange === 'function') ? window.getEffectiveWeaponRange(wpn, sqShipSelf, targetVessel) : wpn.range;
+    if (launchEffRange && Math.hypot(targetPos.x - selfPos.x, targetPos.y - selfPos.y) > launchEffRange) {
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
-        alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${wpn.range}).`);
+        alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${launchEffRange}).`);
         return;
     }
 
