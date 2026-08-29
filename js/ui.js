@@ -496,6 +496,64 @@ makePanelDraggable('dm-scratchpad-panel', 'dm-scratchpad-header', 'odyssey_scrat
 makePanelDraggable('territory-control-panel', 'territory-control-header', 'odyssey_territory_pos');
 makePanelDraggable('credits-panel', 'credits-header', 'odyssey_credits_pos');
 
+/* Mobile Nav Drawer (this session, DM-confirmed design): #top-bar,
+   #bottom-toggle-bar, and #hud-overlay (Telemetry/Bookmarks/Recents) get
+   physically moved into #mobile-nav-drawer-body on a phone-width viewport,
+   and moved straight back to their original HTML position (each marked by
+   an invisible *-anchor span, see index.html) the moment the viewport
+   isn't mobile anymore. These are the REAL elements, not clones -- every
+   existing id, onclick handler, and JS reference elsewhere in this app
+   (getElementById('measuring-tape-toggle-btn'), 'user-role', 'hud-content',
+   etc.) keeps resolving and working exactly as before, just relocated in
+   the DOM tree. Desktop is unaffected either way: matchMedia gates every
+   move, so a desktop browser window never triggers the mobile branch, and
+   style.css's base rule hides the toggle button/backdrop/drawer entirely
+   outside the same breakpoint regardless of what JS does to the DOM.
+
+   Why hud-overlay specifically needed this (not just a mobile CSS tweak):
+   confirmed via grep that it has no show/hide toggle anywhere in this
+   codebase at all -- it's the one floating panel that's ALWAYS on screen.
+   An earlier mobile pass pinned every floating panel (this one included)
+   to a near-full-screen slot so none would render off-screen on a narrow
+   phone -- correct for a panel you open on demand, wrong for one that's
+   permanently visible, since it then permanently covers the map. */
+window.toggleMobileNav = function(forceState) {
+    const drawer = document.getElementById('mobile-nav-drawer');
+    const backdrop = document.getElementById('mobile-nav-backdrop');
+    if (!drawer || !backdrop) return;
+    const open = (typeof forceState === 'boolean') ? forceState : !drawer.classList.contains('open');
+    drawer.classList.toggle('open', open);
+    backdrop.classList.toggle('open', open);
+};
+
+window.setupMobileNavLayout = function() {
+    const drawerBody = document.getElementById('mobile-nav-drawer-body');
+    const moves = [
+        { el: document.getElementById('top-bar'), anchor: document.getElementById('top-bar-anchor') },
+        { el: document.getElementById('bottom-toggle-bar'), anchor: document.getElementById('bottom-toggle-bar-anchor') },
+        { el: document.getElementById('hud-overlay'), anchor: document.getElementById('hud-overlay-anchor') },
+    ];
+    if (!drawerBody || moves.some(m => !m.el || !m.anchor)) return; // markup not present yet/at all -- fail closed, no-op rather than throw
+    function apply(isMobile) {
+        moves.forEach(({ el, anchor }) => {
+            if (isMobile) {
+                drawerBody.appendChild(el); // no-op if already the last child there
+            } else {
+                anchor.parentNode.insertBefore(el, anchor.nextSibling); // no-op if already right there
+            }
+        });
+        if (!isMobile) window.toggleMobileNav(false); // leaving mobile width -- don't leave the drawer/backdrop stuck "open" under desktop's own layout
+    }
+    const mq = window.matchMedia('(max-width: 768px)');
+    apply(mq.matches);
+    // addEventListener('change', ...) over the older addListener -- this
+    // app has no legacy-browser requirement anywhere else, matching every
+    // other matchMedia-free (i.e. brand new) API choice already made in
+    // this session's own mobile passes.
+    mq.addEventListener('change', (e) => apply(e.matches));
+};
+window.setupMobileNavLayout();
+
 window.resetUiLayout = function() {
     Object.keys(localStorage).forEach(k => { if (k.startsWith('odyssey_') && !k.includes('universe_time') && !k.includes('scanned')) localStorage.removeItem(k); });
     location.reload();
