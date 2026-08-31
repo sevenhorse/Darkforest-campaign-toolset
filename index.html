@@ -1230,6 +1230,20 @@
                     
                     <button class="btn-reveal" onclick="window.openSystemArchitect()" style="font-size: 11px; border-color: #00e5a3; color: #00e5a3; margin-bottom: 10px;">🌌 OPEN SYSTEM ARCHITECT (CUSTOM STAR)</button>
 
+                    <!-- Custom Star Tracker (QOL request, 2026-08-31): DM-only
+                         index of every star this DM has placed via System
+                         Architect, so they don't have to pan/hunt across the
+                         galaxy to find one again. Read-only list + LOCATE --
+                         full edit/rename/destroy already lives in the
+                         "OVERSEER STAR EDITOR" box that appears in Telemetry
+                         once a custom star is selected (see renderHUDTelemetry
+                         in js/map.js), so this isn't duplicating that. -->
+                    <div style="margin: 4px 0 10px; border-top:1px solid #3c4e36; padding-top:8px;">
+                        <label for="dm-custom-stars-search" style="font-size:10px; color:#6b826a; display:block; margin-bottom:4px;">Your Custom Stars:</label>
+                        <input type="text" id="dm-custom-stars-search" oninput="window.renderDmCustomStarsList()" placeholder="🔍 Search by name..." style="width:100%; font-size:10px; margin:0 0 6px;">
+                        <div id="dm-custom-stars-list-container" style="max-height:160px; overflow-y:auto; border:1px solid #3c4e36; border-radius:2px; padding:4px; background:#030403;"></div>
+                    </div>
+
                     <label for="dm-tool-name" style="font-size: 10px; color: #6b826a;">Fleet / Token Designation:</label>
                     <input type="text" id="dm-tool-name" value="Task Force Black">
 
@@ -1374,7 +1388,7 @@
     <script src="js/augment-designer.js?v=1.3"></script>
     <script src="js/gear-designer.js?v=1.2"></script>
     <script src="js/dm-sheet-editor.js?v=1.1"></script>
-    <script src="js/map.js?v=3.37"></script>
+    <script src="js/map.js?v=3.39"></script>
     <script src="js/battle-map.js?v=1.33"></script>
     <script src="js/manufacturing.js?v=1.9"></script>
 
