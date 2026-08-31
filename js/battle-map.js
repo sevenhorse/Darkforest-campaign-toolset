@@ -2104,6 +2104,13 @@ window.renderBattleMapPanel = function() {
             }).join('');
         }
     }
+
+    // Manual Damage Application build (this session): keep the DM Tools
+    // "MANUAL DMG" subtab's Firer/Target dropdowns in sync with whatever's
+    // actually deployed right now -- cheap, idempotent, called unconditionally
+    // same as every other tail-of-render refresh in this codebase (e.g. the
+    // Custom Star Tracker refresh in window.loadGalaxyData).
+    if (typeof window.renderManualDamagePanel === 'function') window.renderManualDamagePanel();
 };
 
 /* --- ORDNANCE FLIGHT VISUALIZATION (Animation Engine build, this session) ---
