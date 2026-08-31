@@ -700,6 +700,11 @@ window.switchDmSubtab = function(subtab) {
     document.querySelectorAll('#dm-tools .dm-subpanel').forEach(p => p.classList.remove('active'));
     const btn = document.getElementById(`dm-subtab-btn-${subtab}`); if (btn) btn.classList.add('active');
     const panel = document.getElementById(`dm-panel-${subtab}`); if (panel) panel.classList.add('active');
+    // Manual Damage Application build (this session): (re)populate the
+    // Firer/Target dropdowns fresh every time this subtab opens, same
+    // "cheap, idempotent, never stale" convention switchTermTab's own
+    // per-tab hooks already use (see e.g. 'secretrepo' above).
+    if (subtab === 'manualdmg' && typeof window.renderManualDamagePanel === 'function') window.renderManualDamagePanel();
 };
 
 window.TERM_TAB_ACTIVITY_LABELS = {
@@ -750,6 +755,12 @@ window.switchTermTab = function(tabName) {
         if (typeof window.closeSecretRepoEditor === 'function') window.closeSecretRepoEditor();
         if (typeof window.renderSecretRepositoryPanel === 'function') window.renderSecretRepositoryPanel();
         if (typeof window.renderSavedFleetsPanel === 'function') window.renderSavedFleetsPanel();
+    }
+    // Strike Craft Designer build (this session): same "reset to list view,
+    // re-render fresh" convention as Secret Repository just above.
+    if (tabName === 'strikecraft') {
+        if (typeof window.closeStrikeCraftEditor === 'function') window.closeStrikeCraftEditor();
+        if (typeof window.renderStrikeCraftDesignerPanel === 'function') window.renderStrikeCraftDesignerPanel();
     }
 
     const activityLabel = window.TERM_TAB_ACTIVITY_LABELS[tabName];
