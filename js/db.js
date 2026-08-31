@@ -138,6 +138,10 @@ async function fetchUserProfile(user) {
         // the same way every other DM-only element on this screen already is.
         const secretRepoTabBtn = document.getElementById('term-tab-btn-secretrepo');
         if (secretRepoTabBtn) secretRepoTabBtn.style.display = 'flex';
+        // Strike Craft Designer build (this session): same DM-only tab-reveal
+        // convention as Secret Repository just above.
+        const strikeCraftTabBtn = document.getElementById('term-tab-btn-strikecraft');
+        if (strikeCraftTabBtn) strikeCraftTabBtn.style.display = 'flex';
         document.getElementById('dm-time-controls-box').style.display = 'block';
         document.getElementById('dm-scratchpad-toggle-btn').style.display = 'inline-block';
         document.getElementById('territory-tool-toggle-btn').style.display = 'inline-block';
@@ -186,6 +190,7 @@ async function fetchUserProfile(user) {
     if (typeof loadPerkDefinitions === 'function') loadPerkDefinitions();
     if (typeof loadAugmentDefinitions === 'function') loadAugmentDefinitions();
     if (typeof loadGearDefinitions === 'function') loadGearDefinitions();
+    if (typeof window.loadStrikeCraftTemplates === 'function') window.loadStrikeCraftTemplates();
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
     loadSystemOwnershipOverrides();
