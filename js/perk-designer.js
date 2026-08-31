@@ -53,11 +53,20 @@ window.getPerkBonusFor = function(charPerksList, targetType, targetName) {
 window.renderPerkDesignerPanel = function() {
     const container = document.getElementById('perk-designer-list-container');
     if (!container) return;
-    let html = '';
-    if (perkDefinitionsList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No perks defined yet.</span>';
 
-    const pending = window.applySavedOrder('perks_pending', perkDefinitionsList.filter(p => p.status === 'draft'));
-    const approved = window.applySavedOrder('perks_approved', perkDefinitionsList.filter(p => p.status === 'approved'));
+    // Search bar (QOL request, 2026-08-31): filters the SAME list that feeds
+    // the pending/approved split below, by name or description, case-
+    // insensitive. The pending/approved-count badge deliberately reads from
+    // the unfiltered perkDefinitionsList further down instead of these
+    // filtered arrays, so it doesn't fluctuate while someone is mid-search.
+    const searchEl = document.getElementById('perk-designer-search');
+    const searchTerm = searchEl ? searchEl.value.trim().toLowerCase() : '';
+    const sourceList = searchTerm
+        ? perkDefinitionsList.filter(p => (p.name || '').toLowerCase().includes(searchTerm) || (p.description || '').toLowerCase().includes(searchTerm))
+        : perkDefinitionsList;
+
+    const pending = window.applySavedOrder('perks_pending', sourceList.filter(p => p.status === 'draft'));
+    const approved = window.applySavedOrder('perks_approved', sourceList.filter(p => p.status === 'approved'));
 
     const renderCard = (p, listKey, siblingList) => {
         const editable = canManagePerk(p);
@@ -100,19 +109,29 @@ window.renderPerkDesignerPanel = function() {
             </div>`;
     };
 
-    html = '';
-    if (pending.length > 0) {
-        html += `<h4 style="color:#ffaa00; font-size:11px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h4>`;
-        pending.forEach(p => html += renderCard(p, 'perks_pending', pending));
+    let html = '';
+    if (perkDefinitionsList.length === 0) {
+        html = '<span style="font-size:10px; color:#6b826a;">No perks defined yet.</span>';
+    } else if (searchTerm && pending.length === 0 && approved.length === 0) {
+        html = `<span style="font-size:10px; color:#6b826a;">No perks match "${searchEl.value.trim()}".</span>`;
+    } else {
+        if (pending.length > 0) {
+            html += `<h4 style="color:#ffaa00; font-size:11px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h4>`;
+            pending.forEach(p => html += renderCard(p, 'perks_pending', pending));
+        }
+        html += `<h4 style="color:#00e5a3; font-size:11px; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-top:14px;">Approved Perks (${approved.length})</h4>`;
+        if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">None approved yet.</span>';
+        approved.forEach(p => html += renderCard(p, 'perks_approved', approved));
     }
-    html += `<h4 style="color:#00e5a3; font-size:11px; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-top:14px;">Approved Perks (${approved.length})</h4>`;
-    if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">None approved yet.</span>';
-    approved.forEach(p => html += renderCard(p, 'perks_approved', approved));
 
     container.innerHTML = html;
 
+    // Badge intentionally reads unfiltered totals (not pending/approved
+    // above, which are search-narrowed) so it stays stable while searching.
+    const totalPending = perkDefinitionsList.filter(p => p.status === 'draft').length;
+    const totalApproved = perkDefinitionsList.filter(p => p.status === 'approved').length;
     const badge = document.getElementById('badge-perkdesigner');
-    if (badge) badge.innerText = pending.length > 0 ? `${pending.length} pending` : approved.length;
+    if (badge) badge.innerText = totalPending > 0 ? `${totalPending} pending` : totalApproved;
 };
 window.movePerkDefinitionOrder = function(id, direction) {
     const p = window.findPerkDefinition(id);
