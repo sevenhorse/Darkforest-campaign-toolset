@@ -208,7 +208,17 @@ window.deployShipTemplate = async function(id) {
     const t = findAnyTemplateById(id);
     if (!t) return;
 
-    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {};
+    // QOL build (2026-08-31): templates can now carry their own hangar/cargo
+    // (Secret Repository), so deploy pulls from the template instead of
+    // always starting blank -- same "carries over" treatment ship_weapons/
+    // ship_decks already got. A template with nothing set still falls back
+    // to sanitizeCargo's generic starter loadout, unchanged from before.
+    let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo(JSON.parse(JSON.stringify(t.cargo_inventory || {}))) : {};
+    // Fresh per-instance squadron ids so two ships deployed from the same
+    // template never share a squadron id (launch/recall/damage lookups are
+    // scoped to one vessel's own hangar array, but distinct ids are cheap
+    // insurance against any future cross-vessel assumption).
+    const newHangar = (t.ship_hangar || []).map(sq => ({ ...JSON.parse(JSON.stringify(sq)), id: 'sq_' + Math.random().toString(36).substr(2, 9) }));
     const payload = {
         owner_id: currentUserId,
         name: t.name,
@@ -241,7 +251,8 @@ window.deployShipTemplate = async function(id) {
         // STATS modal (js/combat.js), independent of the source template.
         iff: t.iff || null,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
-        ship_decks: JSON.parse(JSON.stringify(t.ship_decks || []))
+        ship_decks: JSON.parse(JSON.stringify(t.ship_decks || [])),
+        ship_hangar: newHangar
     };
     // .select().single() added this session (Tactical Battle Map build) so
     // callers can learn the new marker's id — e.g. to immediately place it
@@ -566,6 +577,7 @@ window.renderSecretRepositoryPanel = function() {
     if (currentUserRole !== 'dm') return;
     const container = document.getElementById('secret-templates-list-container');
     if (!container) return;
+    window.populateNewTemplateCopySourceOptions();
     let html = '';
     if (window.secretShipTemplatesList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">Repository empty — no hidden templates stored.</span>';
 
@@ -618,18 +630,32 @@ window.saveNewSecretTemplate = async function() {
     if (!name) { alert("Enter a vessel designation first."); return; }
     const stationCheckbox = document.getElementById('new-secret-template-station');
     const isStation = stationCheckbox ? stationCheckbox.checked : false;
+    // Copy-From-Existing build (QOL request, 2026-08-31): if the DM used the
+    // Copy From Existing dropdown or the deployed-name-match prompt above,
+    // window.applyStatSnapshotToNewTemplateForm stashed the parts that have
+    // no field on this quick-create form (ship_weapons/ship_decks/
+    // ship_hangar/cargo_inventory) here rather than on a visible input.
+    // Cleared after use either way so a later un-copied save doesn't
+    // silently reuse stale data.
+    const extras = window._pendingNewTemplateExtras || {};
+    window._pendingNewTemplateExtras = null;
     const payload = {
         owner_id: currentUserId,
         name,
         class: document.getElementById('new-secret-template-class').value.trim() || 'Frigate',
         drive_type: document.getElementById('new-secret-template-drive').value,
         max_shields: parseInt(document.getElementById('new-secret-template-shields').value) || 0,
+        max_reactive: parseInt(document.getElementById('new-secret-template-reactive').value) || 0,
+        max_ablative: parseInt(document.getElementById('new-secret-template-ablative').value) || 0,
+        max_hardened: parseInt(document.getElementById('new-secret-template-hardened').value) || 0,
         max_hull: parseInt(document.getElementById('new-secret-template-hull').value) || 100,
         hardpoint_slots: parseInt(document.getElementById('new-secret-template-slots').value) || 4,
         tactical_speed: isStation ? 0 : (parseInt(document.getElementById('new-secret-template-speed').value) || 160),
         is_station: isStation,
-        ship_weapons: [],
-        ship_decks: [],
+        ship_weapons: extras.ship_weapons || [],
+        ship_decks: extras.ship_decks || [],
+        ship_hangar: extras.ship_hangar || [],
+        cargo_inventory: extras.cargo_inventory || null,
         is_secret: true,
         vessel_class: document.getElementById('new-secret-template-vesselclass').value || null,
         // IFF build (this session): Secret Repository templates are almost
@@ -646,10 +672,145 @@ window.saveNewSecretTemplate = async function() {
 
     document.getElementById('new-secret-template-name').value = '';
     document.getElementById('new-secret-template-class').value = '';
+    document.getElementById('new-secret-template-reactive').value = '0';
+    document.getElementById('new-secret-template-ablative').value = '0';
+    document.getElementById('new-secret-template-hardened').value = '0';
     document.getElementById('new-secret-template-vesselclass').value = '';
     document.getElementById('new-secret-template-iff').value = 'hostile';
+    document.getElementById('new-secret-template-copysource').value = '';
+    window.clearNewTemplateCopyHint();
     if (stationCheckbox) { stationCheckbox.checked = false; window.toggleStationFields('new-secret-template'); }
     if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
+};
+
+/* --- Copy From Existing / Copy From Deployed (QOL request, 2026-08-31) ---
+   Two related asks bundled together: (1) a manual dropdown to clone stats
+   from any ship "already made" (both the public Ship Designer's templates
+   and this repository's own), and (2) an auto-detect that offers to copy a
+   currently-deployed ship's stats when the Name field matches one exactly
+   -- e.g. a DM who always names generic reinforcements "Raider Frigate"
+   and wants to duplicate the one already on the map instead of retyping it.
+   DM-confirmed design: always copies the DESIGN BASELINE (max/undamaged
+   values, full ammo, 0 cooldown, decks/hangar at max HP), never a deployed
+   ship's current battle damage -- a template represents a fresh stat
+   block, not a memorialized snapshot of whatever state it happened to be
+   in when copied. Confirmed to overwrite every stat field on this form
+   except the Name the DM already typed. ship_weapons/ship_decks/
+   ship_hangar/cargo_inventory have no field on this quick-create form, so
+   they're staged in window._pendingNewTemplateExtras and picked up by
+   saveNewSecretTemplate above instead. */
+window.populateNewTemplateCopySourceOptions = function() {
+    const sel = document.getElementById('new-secret-template-copysource');
+    if (!sel) return;
+    const secretOpts = (window.secretShipTemplatesList || []).map(t => `<option value="secret:${t.id}">${t.name}</option>`).join('');
+    const publicOpts = (shipTemplatesList || []).map(t => `<option value="public:${t.id}">${t.name}</option>`).join('');
+    sel.innerHTML = '<option value="">-- Don\'t copy, start blank --</option>'
+        + (secretOpts ? `<optgroup label="Secret Repository">${secretOpts}</optgroup>` : '')
+        + (publicOpts ? `<optgroup label="Public Ship Designer">${publicOpts}</optgroup>` : '');
+};
+
+function buildTemplateCopySnapshot(source, isLiveDeployed) {
+    // max_shields/max_reactive/max_ablative/max_hardened/max_hull are
+    // already the undamaged design ceiling on BOTH ship_templates and
+    // ship_markers (integrity_* holds current/damaged values separately)
+    // -- reading only the max_* columns here is what makes this "always
+    // baseline, never current damage" by construction, no extra reset math
+    // needed for the health layers themselves.
+    const weapons = JSON.parse(JSON.stringify(source.ship_weapons || [])).map(w => ({
+        ...w,
+        ammo: (w.max_ammo !== undefined && w.max_ammo !== null) ? w.max_ammo : w.ammo,
+        cooldown: 0, overheat: 0, standby_ammo: 0
+    }));
+    const decks = JSON.parse(JSON.stringify(source.ship_decks || [])).map(d => ({
+        id: d.id || window.genDeckId(), name: d.name, hp: d.max_hp, max_hp: d.max_hp
+    }));
+    const hangar = JSON.parse(JSON.stringify(source.ship_hangar || [])).map(sq => ({
+        ...sq, id: 'sq_' + Math.random().toString(36).substr(2, 9), hp: sq.max_hp
+    }));
+    const cargo = source.cargo_inventory ? JSON.parse(JSON.stringify(source.cargo_inventory)) : null;
+    return {
+        class: isLiveDeployed ? '' : (source.class || ''),
+        drive_type: source.drive_type || 'ftl_class1',
+        max_shields: source.max_shields || 0,
+        max_reactive: source.max_reactive || 0,
+        max_ablative: source.max_ablative || 0,
+        max_hardened: source.max_hardened || 0,
+        max_hull: source.max_hull || 100,
+        hardpoint_slots: isLiveDeployed ? Math.max(4, weapons.length) : (source.hardpoint_slots || 4),
+        tactical_speed: source.tactical_speed || 160,
+        is_station: !!source.is_station,
+        vessel_class: source.vessel_class || '',
+        iff: source.iff || 'hostile',
+        ship_weapons: weapons,
+        ship_decks: decks,
+        ship_hangar: hangar,
+        cargo_inventory: cargo
+    };
+}
+
+function applyStatSnapshotToNewTemplateForm(snapshot, sourceLabel) {
+    document.getElementById('new-secret-template-class').value = snapshot.class;
+    document.getElementById('new-secret-template-drive').value = snapshot.drive_type;
+    document.getElementById('new-secret-template-shields').value = snapshot.max_shields;
+    document.getElementById('new-secret-template-reactive').value = snapshot.max_reactive;
+    document.getElementById('new-secret-template-ablative').value = snapshot.max_ablative;
+    document.getElementById('new-secret-template-hardened').value = snapshot.max_hardened;
+    document.getElementById('new-secret-template-hull').value = snapshot.max_hull;
+    document.getElementById('new-secret-template-slots').value = snapshot.hardpoint_slots;
+    document.getElementById('new-secret-template-speed').value = snapshot.tactical_speed;
+    document.getElementById('new-secret-template-vesselclass').value = snapshot.vessel_class;
+    document.getElementById('new-secret-template-iff').value = snapshot.iff;
+    const stationCheckbox = document.getElementById('new-secret-template-station');
+    if (stationCheckbox) { stationCheckbox.checked = snapshot.is_station; window.toggleStationFields('new-secret-template'); }
+
+    window._pendingNewTemplateExtras = {
+        ship_weapons: snapshot.ship_weapons, ship_decks: snapshot.ship_decks,
+        ship_hangar: snapshot.ship_hangar, cargo_inventory: snapshot.cargo_inventory
+    };
+
+    const note = document.getElementById('new-secret-template-copynote');
+    if (note) {
+        note.style.display = 'block';
+        note.innerText = `Copied from ${sourceLabel}: ${snapshot.ship_weapons.length} weapon(s), ${snapshot.ship_decks.length} deck(s), ${snapshot.ship_hangar.length} squadron(s), cargo${snapshot.cargo_inventory ? '' : ' (none)'} -- will be included when you STORE IN REPOSITORY.`;
+    }
+}
+
+window.applyTemplateCopyToNewForm = function() {
+    const sel = document.getElementById('new-secret-template-copysource');
+    if (!sel || !sel.value) return;
+    const [scope, id] = sel.value.split(':');
+    const list = scope === 'public' ? (shipTemplatesList || []) : (window.secretShipTemplatesList || []);
+    const source = list.find(t => t.id === id);
+    if (!source) { alert("Couldn't find that template -- try re-opening the Secret Repository tab."); return; }
+    applyStatSnapshotToNewTemplateForm(buildTemplateCopySnapshot(source, false), source.name);
+};
+
+window.checkDeployedNameMatch = function() {
+    const nameInput = document.getElementById('new-secret-template-name');
+    const hint = document.getElementById('new-secret-template-namehint');
+    if (!nameInput || !hint) return;
+    const name = nameInput.value.trim().toLowerCase();
+    if (!name || typeof globalShipMarkersCache === 'undefined') { hint.style.display = 'none'; return; }
+    const match = globalShipMarkersCache.find(m => (m.name || '').trim().toLowerCase() === name && !m.is_strike_craft);
+    if (!match) { hint.style.display = 'none'; return; }
+    hint.style.display = 'block';
+    hint.innerHTML = `Found a deployed ship named "${match.name}" — <button class="layer-edit" onclick="window.applyDeployedShipCopyToNewForm('${match.id}')" style="padding:2px 6px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">COPY ITS STATS</button>`;
+};
+
+window.clearNewTemplateCopyHint = function() {
+    const hint = document.getElementById('new-secret-template-namehint');
+    if (hint) hint.style.display = 'none';
+    const note = document.getElementById('new-secret-template-copynote');
+    if (note) note.style.display = 'none';
+    window._pendingNewTemplateExtras = null;
+};
+
+window.applyDeployedShipCopyToNewForm = function(markerId) {
+    if (typeof globalShipMarkersCache === 'undefined') return;
+    const source = globalShipMarkersCache.find(m => m.id === markerId);
+    if (!source) { alert("That deployed ship is no longer available -- it may have been destroyed or moved since."); return; }
+    applyStatSnapshotToNewTemplateForm(buildTemplateCopySnapshot(source, true), `deployed "${source.name}"`);
+    document.getElementById('new-secret-template-namehint').style.display = 'none';
 };
 
 window.deployTemplateToInitiative = async function(id) {
@@ -763,6 +924,14 @@ window.renderSecretRepoEditorPanel = function() {
 
     t.ship_weapons = t.ship_weapons || [];
     t.ship_decks = t.ship_decks || [];
+    t.ship_hangar = t.ship_hangar || [];
+    // Cargo/Hangar build: unlike ship_weapons/ship_decks, cargo_inventory has
+    // no natural "empty" state -- window.sanitizeCargo (js/combat.js) treats
+    // null/{} as "never configured" and fills in the same generic starter
+    // loadout every freshly-deployed ship gets today (rations, ammo, marines,
+    // etc.), same convention as the live Cargo Deck. This is DISPLAY ONLY --
+    // it doesn't persist until the DM actually edits something below.
+    t.cargo_inventory = window.sanitizeCargo(t.cargo_inventory || {});
     if (window.ensureDeckIds(t.ship_decks)) {
         db.from('ship_templates').update({ ship_decks: t.ship_decks }).eq('id', t.id);
     }
@@ -785,6 +954,31 @@ window.renderSecretRepoEditorPanel = function() {
         </div>`).join('');
 
     const deckOptions = '<option value="">-- Not deck-gated --</option>' + t.ship_decks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+
+    let hangarHtml = t.ship_hangar.length === 0
+        ? '<span style="font-size:10px; color:#6b826a;">No strike craft squadrons commissioned.</span>'
+        : t.ship_hangar.map((sq, idx) => {
+            const dbStats = (typeof STRIKE_CRAFT_DB !== 'undefined') ? STRIKE_CRAFT_DB[sq.type] : null;
+            const chassisLabel = dbStats ? dbStats.label : (sq.type || 'Unknown Chassis');
+            return `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #c778dd; border-radius:2px; margin-bottom:4px;">
+                <span style="font-size:10px; color:#d4c5a9;"><strong style="color:#c778dd;">${sq.name}</strong> — ${chassisLabel} x${sq.count} (${sq.hp}/${sq.max_hp} HP)</span>
+                <button class="layer-del" onclick="window.removeSecretRepoSquadron(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
+            </div>`;
+        }).join('');
+
+    const strikeCraftTypeOptions = buildStrikeCraftTypeOptionsHtml();
+
+    const cargoCategoryLabels = { perishables: 'Perishables', expendables: 'Expendables', misc: 'Misc' };
+    let cargoHtml = ['perishables', 'expendables', 'misc'].map(cat => {
+        const items = t.cargo_inventory[cat] || [];
+        const itemsHtml = items.length === 0
+            ? '<span style="font-size:9px; color:#6b826a;">Empty.</span>'
+            : items.map((item, idx) => `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:4px 6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:3px;">
+                <span style="font-size:10px; color:#d4c5a9;">${item.name} — ${item.qty} ${item.unit || 'Units'}</span>
+                <button class="layer-del" onclick="window.removeSecretRepoCargoItem('${cat}', ${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
+            </div>`).join('');
+        return `<div style="margin-bottom:8px;"><div style="font-size:9px; color:#00e5a3; margin-bottom:3px;">${cargoCategoryLabels[cat]}</div>${itemsHtml}</div>`;
+    }).join('');
 
     container.innerHTML = `
         <div class="sheet-section" style="border-color:#ff3333;">
@@ -891,6 +1085,43 @@ window.renderSecretRepoEditorPanel = function() {
                     <input type="number" id="repo-deck-hp" placeholder="Max HP" value="50" style="flex:1; border-color:#00e1ff; text-align:center;">
                 </div>
                 <button class="btn-reveal" onclick="window.addSecretRepoDeck()" style="width:100%; margin-top:6px; font-size:10px; border-color:#00e1ff; color:#00e1ff;">+ ADD DECK</button>
+            </div>
+        </div>
+
+        <div class="sheet-section" style="margin-top:16px; border-color:#c778dd;">
+            <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#c778dd;">Hangar / Strike Craft</h4>
+            <div id="secretrepo-hangar-list" style="margin-bottom:10px;">${hangarHtml}</div>
+            <div style="background:#030403; padding:8px; border:1px solid #c778dd; border-radius:2px;">
+                <label for="repo-sq-name" style="font-size:9px; color:#6b826a;">Commission Squadron</label>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="repo-sq-name" placeholder="Callsign" style="flex:2; border-color:#c778dd;">
+                    <select id="repo-sq-type" style="flex:2; border-color:#c778dd;">${strikeCraftTypeOptions}</select>
+                    <input type="number" id="repo-sq-count" placeholder="Count" min="1" value="4" style="flex:1; border-color:#c778dd; text-align:center;">
+                </div>
+                <button class="btn-reveal" onclick="window.addSecretRepoSquadron()" style="width:100%; margin-top:6px; font-size:10px; border-color:#c778dd; color:#c778dd;">+ ADD SQUADRON</button>
+            </div>
+        </div>
+
+        <div class="sheet-section" style="margin-top:16px; border-color:#00e5a3;">
+            <h4 style="margin:0 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#00e5a3;">Cargo Hold</h4>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+                <label for="repo-cargo-synth" style="font-size:9px; color:#00e5a3;">Synth Capacity:</label>
+                <input type="number" id="repo-cargo-synth" value="${t.cargo_inventory.synth_capacity}" min="0" style="width:60px; border-color:#00e5a3; text-align:center;" onchange="window.updateSecretRepoSynthCapacity(this.value)">
+            </div>
+            <div id="secretrepo-cargo-list" style="margin-bottom:10px;">${cargoHtml}</div>
+            <div style="background:#030403; padding:8px; border:1px solid #00e5a3; border-radius:2px;">
+                <label for="repo-cargo-name" style="font-size:9px; color:#6b826a;">Add Cargo Item</label>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="repo-cargo-name" placeholder="Item Name" style="flex:2; border-color:#00e5a3;">
+                    <input type="number" id="repo-cargo-qty" placeholder="Qty" min="0" value="1" style="flex:1; border-color:#00e5a3; text-align:center;">
+                    <input type="text" id="repo-cargo-unit" placeholder="Unit" style="flex:1; border-color:#00e5a3;">
+                </div>
+                <select id="repo-cargo-category" style="margin-top:4px; border-color:#00e5a3;">
+                    <option value="expendables">Expendables</option>
+                    <option value="perishables">Perishables</option>
+                    <option value="misc">Misc</option>
+                </select>
+                <button class="btn-reveal" onclick="window.addSecretRepoCargoItem()" style="width:100%; margin-top:6px; font-size:10px; border-color:#00e5a3; color:#00e5a3;">+ ADD ITEM</button>
             </div>
         </div>
 
@@ -1017,6 +1248,101 @@ window.removeSecretRepoDeck = async function(idx) {
     if (error) { alert("Failed to remove deck: " + error.message); return; }
     t.ship_decks = decks;
     window.renderSecretRepoEditorPanel();
+};
+
+/* --- Secret Repository Hangar / Strike Craft (QOL request, 2026-08-31) ---
+   Templates previously had no hangar of their own at all -- ship_hangar
+   only existed on ship_markers (deployed instances), commissioned via the
+   Vessel Deck's live "commission squadron" tool (window.commissionSquadron,
+   js/squadrons.js), which requires an already-deployed vessel to target.
+   This mirrors that same logic against a ship_templates row instead, so a
+   DM can pre-load an NPC carrier's hangar before it's ever deployed. New
+   `ship_templates.ship_hangar` column added this session (migration
+   add_hangar_cargo_to_ship_templates) -- it did not exist before despite
+   the architecture doc claiming otherwise (verified directly against the
+   live schema before writing any of this; doc corrected separately). */
+function buildStrikeCraftTypeOptionsHtml(selected) {
+    if (typeof STRIKE_CRAFT_DB === 'undefined') return '<option value="">-- No chassis available --</option>';
+    return Object.keys(STRIKE_CRAFT_DB).sort((a, b) => (STRIKE_CRAFT_DB[a].label || a).localeCompare(STRIKE_CRAFT_DB[b].label || b))
+        .map(k => `<option value="${k}" ${k === selected ? 'selected' : ''}>${STRIKE_CRAFT_DB[k].label}</option>`).join('');
+}
+
+window.addSecretRepoSquadron = async function() {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const nameInput = document.getElementById('repo-sq-name');
+    const name = nameInput.value.trim();
+    if (!name) { alert("Enter a callsign for this squadron."); return; }
+    const type = document.getElementById('repo-sq-type').value;
+    const count = Math.max(1, parseInt(document.getElementById('repo-sq-count').value) || 4);
+    const dbStats = (typeof STRIKE_CRAFT_DB !== 'undefined') ? STRIKE_CRAFT_DB[type] : null;
+    if (!dbStats) { alert("No strike craft chassis available -- design one in the Strike Craft Designer first."); return; }
+    const hangar = (t.ship_hangar || []).slice();
+    hangar.push({ id: 'sq_' + Math.random().toString(36).substr(2, 9), name, type, count, hp: dbStats.base_hp * count, max_hp: dbStats.base_hp * count, loiter: 4 });
+    const { error } = await db.from('ship_templates').update({ ship_hangar: hangar }).eq('id', t.id);
+    if (error) { alert("Failed to add squadron: " + error.message); return; }
+    t.ship_hangar = hangar;
+    nameInput.value = '';
+    window.renderSecretRepoEditorPanel();
+};
+
+window.removeSecretRepoSquadron = async function(idx) {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const hangar = (t.ship_hangar || []).slice();
+    hangar.splice(idx, 1);
+    const { error } = await db.from('ship_templates').update({ ship_hangar: hangar }).eq('id', t.id);
+    if (error) { alert("Failed to remove squadron: " + error.message); return; }
+    t.ship_hangar = hangar;
+    window.renderSecretRepoEditorPanel();
+};
+
+/* --- Secret Repository Cargo Hold (QOL request, 2026-08-31) --- same gap
+   as hangar above: cargo_inventory only existed on ship_markers, and every
+   deployed ship silently got the SAME hardcoded starter loadout
+   (window.sanitizeCargo's fallback, js/combat.js) regardless of template --
+   there was no way to give one NPC vessel different starting cargo than
+   another. New `ship_templates.cargo_inventory` column added this session
+   (same migration as ship_hangar above). Uses window.sanitizeCargo's own
+   three-category shape (perishables/expendables/misc) so this editor and
+   the live Cargo Deck stay in sync on structure. */
+window.addSecretRepoCargoItem = async function() {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const nameInput = document.getElementById('repo-cargo-name');
+    const name = nameInput.value.trim();
+    if (!name) { alert("Enter an item name."); return; }
+    const qty = Math.max(0, parseInt(document.getElementById('repo-cargo-qty').value) || 0);
+    const unit = document.getElementById('repo-cargo-unit').value.trim() || 'Units';
+    const category = document.getElementById('repo-cargo-category').value;
+    const cargo = window.sanitizeCargo(t.cargo_inventory || {});
+    cargo[category].push({ name, qty, unit });
+    const { error } = await db.from('ship_templates').update({ cargo_inventory: cargo }).eq('id', t.id);
+    if (error) { alert("Failed to add cargo item: " + error.message); return; }
+    t.cargo_inventory = cargo;
+    nameInput.value = '';
+    window.renderSecretRepoEditorPanel();
+};
+
+window.removeSecretRepoCargoItem = async function(category, idx) {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const cargo = window.sanitizeCargo(t.cargo_inventory || {});
+    (cargo[category] || []).splice(idx, 1);
+    const { error } = await db.from('ship_templates').update({ cargo_inventory: cargo }).eq('id', t.id);
+    if (error) { alert("Failed to remove cargo item: " + error.message); return; }
+    t.cargo_inventory = cargo;
+    window.renderSecretRepoEditorPanel();
+};
+
+window.updateSecretRepoSynthCapacity = async function(val) {
+    const t = findAnyTemplateById(editingRepoTemplateId);
+    if (!t) return;
+    const cargo = window.sanitizeCargo(t.cargo_inventory || {});
+    cargo.synth_capacity = Math.max(0, parseInt(val) || 0);
+    const { error } = await db.from('ship_templates').update({ cargo_inventory: cargo }).eq('id', t.id);
+    if (error) { alert("Failed to update synth capacity: " + error.message); return; }
+    t.cargo_inventory = cargo;
 };
 
 /* --- Secret Repository weapon EDIT modal -- mirrors combat.js's live
