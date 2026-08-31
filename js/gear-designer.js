@@ -80,11 +80,19 @@ window.getGearBonusFor = function(charGearList, targetType, targetName) {
 window.renderGearDesignerPanel = function() {
     const container = document.getElementById('gear-designer-list-container');
     if (!container) return;
-    let html = '';
-    if (gearDefinitionsList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No gear defined yet.</span>';
 
-    const pending = window.applySavedOrder('gear_pending', gearDefinitionsList.filter(g => g.status === 'draft'));
-    const approved = window.applySavedOrder('gear_approved', gearDefinitionsList.filter(g => g.status === 'approved'));
+    // Search bar (QOL request, 2026-08-31): same pattern as perk-designer.js
+    // and augment-designer.js -- filters by name/description, case-
+    // insensitive; the badge below deliberately reads unfiltered totals so
+    // it doesn't fluctuate while someone is mid-search.
+    const searchEl = document.getElementById('gear-designer-search');
+    const searchTerm = searchEl ? searchEl.value.trim().toLowerCase() : '';
+    const sourceList = searchTerm
+        ? gearDefinitionsList.filter(g => (g.name || '').toLowerCase().includes(searchTerm) || (g.description || '').toLowerCase().includes(searchTerm))
+        : gearDefinitionsList;
+
+    const pending = window.applySavedOrder('gear_pending', sourceList.filter(g => g.status === 'draft'));
+    const approved = window.applySavedOrder('gear_approved', sourceList.filter(g => g.status === 'approved'));
 
     const renderCard = (g, listKey, siblingList) => {
         const editable = canManageGear(g);
@@ -123,19 +131,27 @@ window.renderGearDesignerPanel = function() {
             </div>`;
     };
 
-    html = '';
-    if (pending.length > 0) {
-        html += `<h4 style="color:#ffaa00; font-size:11px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h4>`;
-        pending.forEach(g => html += renderCard(g, 'gear_pending', pending));
+    let html = '';
+    if (gearDefinitionsList.length === 0) {
+        html = '<span style="font-size:10px; color:#6b826a;">No gear defined yet.</span>';
+    } else if (searchTerm && pending.length === 0 && approved.length === 0) {
+        html = `<span style="font-size:10px; color:#6b826a;">No gear matches "${searchEl.value.trim()}".</span>`;
+    } else {
+        if (pending.length > 0) {
+            html += `<h4 style="color:#ffaa00; font-size:11px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h4>`;
+            pending.forEach(g => html += renderCard(g, 'gear_pending', pending));
+        }
+        html += `<h4 style="color:#00e5a3; font-size:11px; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-top:14px;">Approved Gear (${approved.length})</h4>`;
+        if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">None approved yet.</span>';
+        approved.forEach(g => html += renderCard(g, 'gear_approved', approved));
     }
-    html += `<h4 style="color:#00e5a3; font-size:11px; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-top:14px;">Approved Gear (${approved.length})</h4>`;
-    if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">None approved yet.</span>';
-    approved.forEach(g => html += renderCard(g, 'gear_approved', approved));
 
     container.innerHTML = html;
 
+    const totalPending = gearDefinitionsList.filter(g => g.status === 'draft').length;
+    const totalApproved = gearDefinitionsList.filter(g => g.status === 'approved').length;
     const badge = document.getElementById('badge-geardesigner');
-    if (badge) badge.innerText = pending.length > 0 ? `${pending.length} pending` : approved.length;
+    if (badge) badge.innerText = totalPending > 0 ? `${totalPending} pending` : totalApproved;
 };
 
 window.moveGearDefinitionOrder = function(id, direction) {
