@@ -1436,8 +1436,34 @@
                     <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Emergency Maintenance.</p>
                     <button class="btn-remove" onclick="window.resetTimeline()">⏳ RESET IN-UNIVERSE TIMELINE</button>
                     <button class="btn-remove" onclick="window.resetUiLayout()" style="margin-top: 6px;">🖥️ RESET LOCAL UI POSITIONS</button>
-                    <button class="btn-reveal" onclick="window.exportCampaignBackup()" style="margin-top: 6px;">💾 BACKUP CAMPAIGN STATE (JSON)</button>
-                    
+                    <button class="btn-reveal" onclick="window.exportCampaignBackup()" style="margin-top: 6px;" title="Only covers custom star systems, deployed ships/stations, territories, hyperlanes, codex entries, and the initiative tracker -- NOT characters, ship designs, perks/gear/augments, colonies, or manufacturing. See FULL CAMPAIGN BACKUP below for everything.">💾 QUICK BACKUP (Galaxy/Map State Only, JSON)</button>
+
+                    <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #ffaa00; padding-bottom: 5px; color: #ffaa00;">Full Campaign Backup / Restore</h4>
+                    <p style="font-size: 9px; color: #6b826a; margin:0 0 6px 0;">Every table the app uses -- characters, ships (both catalogs), perks/augments/gear, colonies, manufacturing, combat, chat, everything. Restore is a full wipe-and-replace: pasting an old backup deletes ALL current campaign data and puts the DB back exactly as it was when that backup was taken. There is no undo for a restore -- if in doubt, take a fresh Full Backup first so you have a way back from the restore itself.</p>
+                    <button class="btn-reveal" onclick="window.exportFullCampaignBackup()" style="border-color:#ffaa00; color:#ffaa00;">🗄️ FULL CAMPAIGN BACKUP (Everything, JSON)</button>
+
+                    <details style="margin-top:10px;">
+                        <summary style="font-size:10px; color:#ff6b6b; cursor:pointer;">▸ Restore From a Full Campaign Backup</summary>
+                        <div style="margin-top:8px; background:#030403; padding:8px; border:1px solid #ff3333; border-radius:2px;">
+                            <label for="full-restore-paste" style="font-size:9px; color:#ffaaaa;">Paste the contents of a FULL CAMPAIGN BACKUP .json file here:</label>
+                            <textarea id="full-restore-paste" rows="4" placeholder="Paste the full backup JSON file's contents here..." style="width:100%; font-size:9px; font-family:monospace; margin:4px 0; border-color:#ff3333;"></textarea>
+                            <button class="layer-edit" onclick="window.previewFullCampaignRestore()" style="border-color:#ffaa00; color:#ffaa00;">PREVIEW BACKUP</button>
+                            <div id="full-restore-preview" style="display:none; margin-top:8px; font-size:10px; color:#d4c5a9; background:#0a0f0a; padding:6px; border:1px solid #ffaa00; border-radius:2px;"></div>
+                            <div id="full-restore-confirm-section" style="display:none; margin-top:10px; border-top:1px solid #ff3333; padding-top:8px;">
+                                <p style="font-size:9px; color:#ff6b6b; margin:0 0 4px 0;">This permanently deletes all current campaign data and cannot be undone. Type <strong>RESTORE FULL CAMPAIGN</strong> to enable the button below:</p>
+                                <label for="full-restore-confirm-phrase" style="display:none;">Confirmation phrase</label>
+                                <input type="text" id="full-restore-confirm-phrase" placeholder="Type RESTORE FULL CAMPAIGN" style="width:100%; font-size:10px; border-color:#ff3333;">
+                                <div style="display:flex; gap:6px; margin-top:6px;">
+                                    <button class="btn-wipe" onclick="window.executeFullCampaignRestore()" style="flex:2;">⚠ RESTORE NOW (IRREVERSIBLE)</button>
+                                    <button class="layer-edit" onclick="window.cancelFullCampaignRestore()" style="flex:1;">CANCEL</button>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <label for="full-campaign-status" style="display:none;">Backup/Restore Status</label>
+                    <pre id="full-campaign-status" style="display:none; margin-top:8px; font-size:9px; color:#00e5a3; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; max-height:140px; overflow-y:auto; white-space:pre-wrap;"></pre>
+
                     <h4 style="margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #3c4e36; padding-bottom: 5px; color: #ff3333;">Critical Emergency Wipe</h4>
                     <button class="btn-wipe" onclick="window.wipeGalaxySlate()">WIPE GALAXY SLATE</button>
                 </div>
@@ -1459,7 +1485,7 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.29"></script>
+    <script src="js/db.js?v=3.30"></script>
     <script src="js/audio.js?v=3.17"></script>
     <script src="js/ui.js?v=3.40"></script>
     <script src="js/combat.js?v=3.51"></script>
