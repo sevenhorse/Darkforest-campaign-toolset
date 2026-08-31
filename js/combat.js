@@ -2019,6 +2019,220 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
     return { integrity_shields: s, integrity_reactive: r, integrity_ablative: a, integrity_hardened: hd, integrity_hull: h, log };
 };
 
+/* --- MANUAL DAMAGE APPLICATION (DM Tools, this session) ---
+   DM request: some players use their own physical dice instead of this
+   app's own roller, and there was no way to get that damage INTO the app's
+   own shield/armor/hull cascade -- the DM could only hand-edit health bars
+   directly, losing the whole DAMAGE_TYPES cascade (shreds/mitigated-by,
+   strike-craft category multipliers, etc.) in the process.
+
+   Confirmed via AskUserQuestion (three real mechanics/UX decisions):
+   1. Stance/category multipliers (attacker Aggressive/Defensive, target
+      Defensive/Evasive/Aggressive, strike-craft/Flak effectiveness) still
+      auto-apply on top of the manually-typed total -- only the dice-ROLLING
+      step is manual, everything downstream is identical to a normal shot.
+   2. Selecting a weapon acts like a REAL shot: consumes ammo, starts its
+      cooldown, respects weapons-disabled/deck-destroyed gates, and still
+      triggers that weapon's own special effects (System Lockdown EMP, the
+      beam-flash animation). Picking "-- Unlisted / no specific weapon --"
+      skips all of that (nothing to consume) and just applies the cascade.
+   3. Lives in the DM Tools panel as its own subtab (new "MANUAL DMG" button
+      next to SPAWN/MAP TOOLS/MAINT), not on every ship's Battle Map card.
+
+   SCOPE, flagged and deliberate: this first pass only supports a regular
+   ship/station (a `ship_markers` row with a real `ship_weapons` array) as
+   the FIRER -- the dropdown deliberately excludes strike craft tokens
+   (`is_strike_craft`), since a squadron's weapons live in STRIKE_CRAFT_DB
+   (js/squadrons.js), not in a per-token `ship_weapons` array, and would
+   need a separate ammo-less/cooldown-on-the-squadron-instance code path
+   (see window.resolveSquadronWeaponFire) mirrored here to support "real
+   shot" semantics correctly. NOT silently dropped -- just not built yet.
+   Any ship OR strike craft token deployed to the active battle can still be
+   the TARGET (window.resolveShipDamage works identically either way, same
+   as a normal shot already does).
+
+   Reuses -- doesn't duplicate -- the exact same gates/effects/multiplier
+   math as window.rollShipWeapon just above, with the dice-rolling step
+   replaced by the DM's typed total. */
+
+window.renderManualDamagePanel = function() {
+    const firerSel = document.getElementById('dm-manualdmg-firer');
+    const targetSel = document.getElementById('dm-manualdmg-target');
+    const dmgTypeSel = document.getElementById('dm-manualdmg-dmgtype');
+    if (!firerSel || !targetSel) return;
+
+    if (dmgTypeSel && dmgTypeSel.options.length === 0) dmgTypeSel.innerHTML = window.buildDamageTypeOptionsHtml('Impact');
+
+    const tokens = (window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || [];
+    const prevFirer = firerSel.value;
+    const prevTarget = targetSel.value;
+
+    const firerCandidates = tokens
+        .map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id))
+        .filter(m => m && !m.is_strike_craft);
+    const targetCandidates = tokens
+        .map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id))
+        .filter(Boolean);
+
+    firerSel.innerHTML = '<option value="">-- Select firing ship --</option>' +
+        firerCandidates.map(m => `<option value="${m.id}">${m.name}${(m.ship_weapons || []).length === 0 ? ' (no weapons installed)' : ''}</option>`).join('');
+    targetSel.innerHTML = '<option value="">-- Select target ship --</option>' +
+        targetCandidates.map(m => `<option value="${m.id}">${m.is_strike_craft ? '🛩 ' : ''}${m.name}</option>`).join('');
+
+    if (prevFirer && firerCandidates.some(m => m.id === prevFirer)) firerSel.value = prevFirer;
+    if (prevTarget && targetCandidates.some(m => m.id === prevTarget)) targetSel.value = prevTarget;
+
+    window.populateManualDamageWeapons();
+};
+
+window.populateManualDamageWeapons = function() {
+    const firerSel = document.getElementById('dm-manualdmg-firer');
+    const wpnSel = document.getElementById('dm-manualdmg-weapon');
+    if (!firerSel || !wpnSel) return;
+    const vessel = globalShipMarkersCache.find(m => m.id === firerSel.value);
+    const weapons = (vessel && vessel.ship_weapons) || [];
+    wpnSel.innerHTML = '<option value="">-- Unlisted / no specific weapon --</option>' +
+        weapons.map((w, idx) => `<option value="${idx}">${w.name} (${w.dice}${w.ammo === 0 ? ' — EMPTY' : ''}${w.cooldown > 0 ? ' — ON COOLDOWN' : ''})</option>`).join('');
+    window.onManualDamageWeaponChange();
+};
+
+// Pre-fills the Damage Type dropdown from the selected weapon (per the DM's
+// own "select the damage type (if necessary)" framing -- set automatically,
+// but always left editable in case of a combo weapon like "Impact/Heat" or
+// a deliberate override).
+window.onManualDamageWeaponChange = function() {
+    const firerSel = document.getElementById('dm-manualdmg-firer');
+    const wpnSel = document.getElementById('dm-manualdmg-weapon');
+    const dmgTypeSel = document.getElementById('dm-manualdmg-dmgtype');
+    if (!wpnSel || !dmgTypeSel) return;
+    const vessel = globalShipMarkersCache.find(m => m.id === firerSel.value);
+    const wpn = (vessel && wpnSel.value !== '') ? (vessel.ship_weapons || [])[parseInt(wpnSel.value)] : null;
+    const dmgType = wpn ? window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name)) : 'Impact';
+    if (dmgTypeSel.querySelector(`option[value="${dmgType}"]`)) dmgTypeSel.value = dmgType;
+};
+
+window.applyManualDamage = async function() {
+    if (currentUserRole !== 'dm') return;
+
+    const firerId = document.getElementById('dm-manualdmg-firer').value;
+    const targetId = document.getElementById('dm-manualdmg-target').value;
+    const wpnIdxRaw = document.getElementById('dm-manualdmg-weapon').value;
+    const dmgType = document.getElementById('dm-manualdmg-dmgtype').value || 'Impact';
+    const totalInput = document.getElementById('dm-manualdmg-total').value;
+
+    if (!firerId || !targetId) { alert("Select both a firing ship and a target."); return; }
+    if (firerId === targetId) { alert("A ship can't fire on itself."); return; }
+
+    let total = parseInt(totalInput);
+    if (isNaN(total) || total < 0) { alert("Enter a valid, non-negative damage total."); return; }
+
+    let vessel = globalShipMarkersCache.find(m => m.id === firerId);
+    let targetShip = globalShipMarkersCache.find(m => m.id === targetId);
+    if (!vessel || !targetShip) { alert("Firing ship or target could not be found -- try re-opening this panel."); return; }
+
+    const wpnIdx = wpnIdxRaw !== '' ? parseInt(wpnIdxRaw) : null;
+    let wpn = (wpnIdx !== null) ? (vessel.ship_weapons || [])[wpnIdx] : null;
+
+    // Same gates as window.rollShipWeapon above, minus the dice-rolling --
+    // "real shot" behavior confirmed with the DM (see header comment).
+    if (vessel.disabled_weapons_until > 0) {
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`[WEAPONS DISABLED] ${vessel.name}'s weapons are offline for ${vessel.disabled_weapons_until} more round(s).`);
+        return;
+    }
+    if (wpn && wpn.assigned_deck_id) {
+        const assignedDeck = (vessel.ship_decks || []).find(d => d.id === wpn.assigned_deck_id);
+        if (assignedDeck && assignedDeck.hp <= 0) {
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`[DECK DESTROYED] ${wpn.name} is mounted on the ${assignedDeck.name} deck, which has been destroyed and can no longer fire.`);
+            return;
+        }
+    }
+    if (wpn) {
+        if (wpn.ammo === 0) {
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`[EMPTY] ${wpn.name} is out of ammunition!`);
+            return;
+        }
+        if (wpn.cooldown > 0) {
+            if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Applying this shot will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
+            wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
+        }
+        if (wpn.ammo > 0) wpn.ammo -= 1;
+        if (wpn.cooldown_period > 0) wpn.cooldown = wpn.cooldown_period;
+        if (wpn.self_damage_on_consecutive_fire) wpn.fired_this_round = true;
+    }
+
+    try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(vessel); } catch (err) { console.error('applyManualDamage: reveal-on-fire failed', err); }
+
+    let combatLog = '';
+
+    // Auto-apply stance/category multipliers on top of the manual total --
+    // confirmed design, see header comment. Identical math to rollShipWeapon.
+    let stance = vessel.ship_stance || 'Balanced';
+    if (stance === 'Aggressive') { total = Math.floor(total * 1.25); }
+    else if (stance === 'Defensive') { total = Math.floor(total * 0.75); }
+
+    let tStance = targetShip.ship_stance || 'Balanced';
+    if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
+    if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
+    if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+
+    let categoryMult = 1;
+    if (dmgType !== 'Healing') {
+        if (targetShip.is_strike_craft) {
+            categoryMult = (dmgType === 'Flak') ? 2 : 0.5;
+            combatLog += `[TARGET: STRIKE CRAFT] ${dmgType} effectiveness x${categoryMult}. `;
+        } else if (dmgType === 'Flak') {
+            categoryMult = 0.4;
+            combatLog += `[TARGET: SHIP] Flak is a poor fit for capital-scale armor (x${categoryMult}). `;
+        }
+    }
+    total = Math.ceil(total * categoryMult);
+
+    const result = window.resolveShipDamage(targetShip, dmgType, total);
+    combatLog += result.log;
+
+    await db.from('ship_markers').update({
+        integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
+        integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
+        integrity_hardened: result.integrity_hardened
+    }).eq('id', targetShip.id);
+    Object.assign(targetShip, {
+        integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
+        integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
+        integrity_hardened: result.integrity_hardened
+    });
+    if (typeof syncSquadronHpToParent === 'function') await syncSquadronHpToParent(targetShip);
+    if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
+    if (wpn && typeof applySystemLockdown === 'function') combatLog += await applySystemLockdown(targetShip, wpn);
+
+    if (typeof window.playWeaponFireEffect === 'function') {
+        const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ff9d4d';
+        window.playWeaponFireEffect(vessel.id, targetShip.id, beamColor, dmgType);
+    }
+
+    if (wpn) await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vessel.id);
+
+    window.renderVesselDeck();
+    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+    window.renderManualDamagePanel();
+    document.getElementById('dm-manualdmg-total').value = '';
+
+    if (window.AudioEngine) window.AudioEngine.playShoot();
+
+    if (typeof window.broadcastRoll === 'function') {
+        const breakdownString = `
+            <div style="margin-top:4px; padding:4px; border-left:2px solid #ff9d4d; background:rgba(255,157,77,0.1);">
+                <strong>Damage Type:</strong> ${dmgType}<br>
+                <strong>Manual Roll Total:</strong> <strong style="color:#ff3333;">${total} Dmg</strong> (adjusted for stance/target-category)<br>
+                <strong>Target Report:</strong> ${combatLog}
+            </div>
+        `;
+        await window.broadcastRoll(`🎲 [MANUAL DICE] ${vessel.name} FIRES ${wpn ? wpn.name : 'an unlisted weapon'} at ${targetShip.name}`, breakdownString, total);
+    }
+};
+
 window.addShipWeapon = async function() {
     const select = document.getElementById('vessel-deck-select');
     const loc = document.getElementById('new-ship-wpn-loc').value.trim() || 'Hull Mount';
