@@ -219,6 +219,62 @@ window.loadGalaxyData = async function() {
     if (starData) globalDbSystemsCache = starData.map(s => ({ ...s, isCustom: true, size: s.size || 5.0, type: s.luminosity === 'Black Hole' ? 'Black Hole' : (s.hazard === 'Nebula' ? 'Nebula' : 'Star'), multiType: s.multiType || 'Single', custom_bodies: s.custom_bodies || [] }));
     const { data: markerData } = await db.from('ship_markers').select('*');
     if (markerData) globalShipMarkersCache = markerData.map(m => ({ ...m, cargo_inventory: window.sanitizeCargo ? window.sanitizeCargo(m.cargo_inventory) : (m.cargo_inventory || {}), ship_weapons: m.ship_weapons || [], ship_decks: m.ship_decks || [] }));
+    // Custom Star Tracker (QOL request, 2026-08-31): every create/edit/delete
+    // of a custom star already round-trips through loadGalaxyData to refresh
+    // globalDbSystemsCache, so hooking the tracker's re-render here (instead
+    // of at every individual save/delete call site) keeps it in sync for
+    // free, including the very first population at login.
+    if (typeof window.renderDmCustomStarsList === 'function') window.renderDmCustomStarsList();
+};
+
+/* --- CUSTOM STAR TRACKER (DM Operations > SPAWN tab) ---
+   DM-only index of every custom star (globalDbSystemsCache entries with
+   isCustom === true -- procedural galaxy stars are deliberately excluded,
+   since those aren't something a DM "made" and can already be found via
+   the galaxy's own spiral-arm layout) with a search box and a LOCATE button
+   per row. LOCATE reuses the exact same selectedTarget/lockCameraOnSelected/
+   renderHUDTelemetry path a normal map click on a star already uses, so the
+   existing "OVERSEER STAR EDITOR" box (rename/reclass/destroy) shows up in
+   Telemetry immediately after -- this list is a finder, not a second editor. */
+window.renderDmCustomStarsList = function() {
+    const container = document.getElementById('dm-custom-stars-list-container');
+    if (!container) return;
+    if (currentUserRole !== 'dm') { container.innerHTML = ''; return; }
+
+    const searchEl = document.getElementById('dm-custom-stars-search');
+    const term = searchEl ? searchEl.value.trim().toLowerCase() : '';
+    const allCustom = (globalDbSystemsCache || []).filter(s => s.isCustom);
+    const filtered = (term ? allCustom.filter(s => (s.name || '').toLowerCase().includes(term)) : allCustom)
+        .slice()
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    if (allCustom.length === 0) {
+        container.innerHTML = '<span style="font-size:9px; color:#6b826a;">No custom stars placed yet -- use SYSTEM ARCHITECT above to create one.</span>';
+        return;
+    }
+    if (filtered.length === 0) {
+        container.innerHTML = `<span style="font-size:9px; color:#6b826a;">No custom stars match "${searchEl.value.trim()}".</span>`;
+        return;
+    }
+
+    container.innerHTML = filtered.map(s => `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:3px 2px; border-bottom:1px solid #1a2419;">
+            <div style="min-width:0;">
+                <strong style="color:#00e5a3; font-size:10px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong>
+                <div style="font-size:8px; color:#6b826a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.luminosity || 'Standard'} · ${s.ownership || 'Unclaimed'}</div>
+            </div>
+            <button class="btn-reveal" onclick="window.locateCustomStar('${s.id}')" style="width:auto; margin:0; padding:3px 6px; font-size:8px; flex-shrink:0;">🎯 LOCATE</button>
+        </div>`).join('');
+};
+
+window.locateCustomStar = function(id) {
+    if (currentUserRole !== 'dm') return;
+    const s = (globalDbSystemsCache || []).find(x => x.id === id && x.isCustom);
+    if (!s) return;
+    window.selectedTarget = { type: 'star', data: s };
+    if (typeof window.lockCameraOnSelected === 'function') window.lockCameraOnSelected();
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    if (window.AudioEngine) window.AudioEngine.playPing();
 };
 
 /* SYSTEM ARCHITECT */
@@ -258,7 +314,16 @@ window.commitArchitectSystem = async function() {
     let color = '#ffe9c4'; if (luminosity === 'Class M (Red Dwarf)') color = '#ffb37b'; if (luminosity === 'Class O (Blue Giant)') color = '#7694ff'; if (luminosity === 'Black Hole') color = '#000000'; if (luminosity === 'Hidden Anomaly') color = '#ff3333';
     let customBodiesClean = architectPlanets.map((p, idx) => ({ ...p, isStar: false, radius: 25 + (idx + 1) * 30, baseAngle: idx * 1.25, speed: 0.0002 / (idx + 1) }));
     const payload = { name, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, size: luminosity === 'Black Hole' ? 7.0 : 5.0, color, luminosity, multiType, hazard, ownership: 'Unclaimed', control: 'Uncontested', industry_tier: 1, custom_bodies: customBodiesClean };
-    await db.from('star_systems').insert(payload); window.closeSystemArchitect(); if(typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
+    // Bug fix (2026-08-31, DM report): this used to fire-and-forget the
+    // insert with no error check at all -- when star_systems was missing
+    // the multiType/hazard/custom_bodies columns this payload has always
+    // sent (see the star_systems_add_missing_hazard_multitype_custom_bodies_columns
+    // migration), the insert 400'd server-side and the DM had no way to
+    // know: the modal just closed as if it had worked, and the star was
+    // simply never created. Now surfaces the failure instead of hiding it.
+    const { error } = await db.from('star_systems').insert(payload);
+    if (error) { alert("Failed to create star system: " + error.message); return; }
+    window.closeSystemArchitect(); if(typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
 };
 
 window.spawnTokenAtCenter = async function() {
