@@ -442,8 +442,8 @@
                                         <option value="direct_fire" selected>Direct Fire (standard)</option>
                                         <option value="ordnance">Ordnance (missile/torpedo — multi-turn, counter-fireable)</option>
                                     </select>
-                                    <label for="new-ship-wpn-range" style="font-size: 9px; color: #ffaaaa;" title="Battle Map targeting range, grid px. Reference tiers (DM-confirmed): LONG=400 (33% of the grid diagonal) &middot; MEDIUM=200 (16.5%) &middot; SHORT=100 (8.25%). Ordnance/missile weapons conventionally use 0 = unlimited launch distance (they travel over multiple turns via the ordnance mechanic instead of hitting instantly) -- 0 is also the default for any weapon left unset.">Range (Battle Map grid px, 0 = unlimited):</label>
-                                    <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" title="Battle Map targeting range, grid px. Reference tiers (DM-confirmed): LONG=400 (33% of the grid diagonal) &middot; MEDIUM=200 (16.5%) &middot; SHORT=100 (8.25%). Ordnance/missile weapons conventionally use 0 = unlimited launch distance (they travel over multiple turns via the ordnance mechanic instead of hitting instantly) -- 0 is also the default for any weapon left unset." style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
+                                    <label for="new-ship-wpn-range" style="font-size: 9px; color: #ffaaaa;" title="Battle Map targeting range, grid px. Reference tiers: LONG=400 (33% of the grid diagonal) &middot; MEDIUM=200 (16.5%) &middot; SHORT=100 (8.25%). Ordnance/missile weapons conventionally use 0 = unlimited launch distance (they travel over multiple turns via the ordnance mechanic instead of hitting instantly) -- 0 is also the default for any weapon left unset.">Range (Battle Map grid px, 0 = unlimited):</label>
+                                    <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" title="Battle Map targeting range, grid px. Reference tiers: LONG=400 (33% of the grid diagonal) &middot; MEDIUM=200 (16.5%) &middot; SHORT=100 (8.25%). Ordnance/missile weapons conventionally use 0 = unlimited launch distance (they travel over multiple turns via the ordnance mechanic instead of hitting instantly) -- 0 is also the default for any weapon left unset." style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
                                     <label for="new-ship-wpn-cooldown" style="font-size: 9px; color: #ffaaaa;" title="Turns this weapon needs to recharge after firing. Auto-applied to Cooldown the moment it's fired. 0 = no cooldown (fires every turn, same as before this field existed).">Cooldown Period (turns, 0 = none):</label>
                                     <input type="number" id="new-ship-wpn-cooldown" min="0" value="0" placeholder="0 = none" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
                                     <label for="new-ship-wpn-reloadcd" style="font-size: 9px; color: #ffaaaa;" title="Only relevant if Standby Reserve above is set. RELOAD (Standby -> Ready) sets this weapon's Cooldown to this many rounds, same field firing uses.">Reload Cooldown (rounds, Tiered Ammo only):</label>
@@ -851,7 +851,7 @@
                                 <label for="new-codex-link" style="font-size: 9px; color: #00e1ff; margin-top: 4px; display: block;">Linked Star System ID (Optional - Hides lore until DRADIS Scan):</label>
                                 <input type="text" id="new-codex-link" placeholder="e.g. proc-spiral-120" style="font-size: 10px; margin: 2px 0; border-color: #00e1ff;">
 
-                                <label for="new-codex-content" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary (Markdown + Charts, this session — <strong>preview-rendered only in the ⛶ FULLSCREEN reader</strong>, still shown as raw text in the card view below):</label>
+                                <label for="new-codex-content" style="font-size: 9px; color: #6b826a; margin-top: 4px; display: block;">Narrative Content / Summary (Markdown + Charts — <strong>preview-rendered only in the ⛶ FULLSCREEN reader</strong>, still shown as raw text in the card view below):</label>
                                 <textarea id="new-codex-content" rows="4" placeholder="Full briefing... supports **bold**, # headers, - lists, | table | rows |, and a fenced &#96;&#96;&#96;chart block (type: bar/pie/line/doughnut, title: ..., then Label: Number per line) for real charts." style="font-size: 10px; margin: 2px 0;"></textarea>
 
                                 <label for="codex-file-input" style="font-size: 9px; color: #6b826a; margin-top: 6px; display: block;">Document File Attachment:</label>
@@ -1451,7 +1451,7 @@
     <script src="js/squadrons.js?v=1.4"></script>
     <script src="js/strike-craft-designer.js?v=1.0"></script>
     <script src="js/colonies.js?v=3.17"></script>
-    <script src="js/ship-designer.js?v=3.26"></script>
+    <script src="js/ship-designer.js?v=3.27"></script>
     <script src="js/perk-designer.js?v=3.16"></script>
     <script src="js/augment-designer.js?v=1.3"></script>
     <script src="js/gear-designer.js?v=1.2"></script>
