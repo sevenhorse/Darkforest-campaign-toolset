@@ -91,11 +91,11 @@
             <div style="border-top:1px solid #3c4e36; margin-top:14px; padding-top:8px;">
                 <label style="font-size:9px; color:#6b826a; display:block; margin-bottom:4px;">Perks</label>
                 <div id="dmse-perks-list" style="margin-bottom:6px;"></div>
-                <div style="display:flex; gap:4px;">
-                    <label for="dmse-award-perk" style="display:none;">Award Perk</label>
-                    <select id="dmse-award-perk" style="flex:1; margin:0; font-size:9px;"></select>
-                    <button class="btn-deploy" id="dmse-award-perk-btn" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">AWARD</button>
-                </div>
+                <!-- Multi-select (QOL request, 2026-08-31): was a single <select> +
+                     AWARD button. Now a scrollable checklist + one batch button --
+                     see renderPerksList/awardPerk below for the populate/insert side. -->
+                <div id="dmse-award-perk-list" style="max-height:100px; overflow-y:auto; border:1px solid #3c4e36; border-radius:2px; padding:4px 6px; background:#030403; margin-bottom:4px;"></div>
+                <button class="btn-deploy" id="dmse-award-perk-btn" style="width:100%; margin:0; padding:4px 8px; font-size:9px;">AWARD SELECTED</button>
             </div>
 
             <div style="border-top:1px solid #3c4e36; margin-top:14px; padding-top:8px;">
@@ -195,9 +195,13 @@
             </div>`;
         }).join('');
 
-        const select = document.getElementById('dmse-award-perk');
+        const listEl = document.getElementById('dmse-award-perk-list');
         const approved = typeof window.getApprovedPerksBySection === 'function' ? window.getApprovedPerksBySection(2) : [];
-        select.innerHTML = approved.map(pk => `<option value="${pk.id}">${pk.name}</option>`).join('') || '<option value="">No approved perks</option>';
+        const heldIds = new Set(perks.map(cp => cp.perk_definition_id));
+        const awardable = approved.filter(pk => !heldIds.has(pk.id));
+        listEl.innerHTML = awardable.length === 0
+            ? '<span style="font-size:9px; color:#6b826a;">No unheld approved perks.</span>'
+            : awardable.map(pk => `<label style="display:flex; align-items:center; gap:4px; font-size:9px; color:#d4c5a9; padding:1px 0; cursor:pointer;"><input type="checkbox" class="dmse-award-perk-check" value="${pk.id}">${pk.name}</label>`).join('');
     }
 
     window.dmRemoveCharacterPerk = async function(rowId, profileId) {
@@ -210,19 +214,22 @@
     };
 
     async function awardPerk() {
-        const select = document.getElementById('dmse-award-perk');
-        const perkDefId = select ? select.value : null;
-        if (!perkDefId) return;
-        const perkDef = window.findPerkDefinition(perkDefId);
+        const checks = Array.from(document.querySelectorAll('#dmse-award-perk-list .dmse-award-perk-check:checked'));
+        if (checks.length === 0) return;
         const prof = targetProf();
-        if (!prof || !prof.character || !prof.character.id || !perkDef) return;
-        const alreadyHas = (prof.perks || []).some(p => p.perk_definition_id === perkDefId);
-        if (alreadyHas) { alert(`${prof.username || 'This commander'} already has ${perkDef.name} — not awarding a duplicate.`); return; }
-        const { data, error } = await db.from('character_perks').insert({ character_id: prof.character.id, perk_definition_id: perkDefId, section: 2 }).select().single();
-        if (error) { alert("Failed to award perk: " + error.message); return; }
+        if (!prof || !prof.character || !prof.character.id) return;
+        // Checklist already excludes currently-held perks (see renderPerksList),
+        // so this is a defensive re-check rather than the primary guard.
+        const alreadyHeldIds = new Set((prof.perks || []).map(p => p.perk_definition_id));
+        const toAward = [...new Set(checks.map(c => c.value))].filter(id => !alreadyHeldIds.has(id));
+        if (toAward.length === 0) return;
+        const payload = toAward.map(id => ({ character_id: prof.character.id, perk_definition_id: id, section: 2 }));
+        const { data, error } = await db.from('character_perks').insert(payload).select();
+        if (error) { alert("Failed to award perk(s): " + error.message); return; }
         prof.perks = prof.perks || [];
-        prof.perks.push(data);
-        db.from('chat_logs').insert({ sender_id: null, content: `🎖️ [OVERSEER] ${prof.username || 'Commander'} was awarded the specialization: ${perkDef.name}.`, message_type: 'system' });
+        prof.perks.push(...(data || []));
+        const names = toAward.map(id => { const d = window.findPerkDefinition(id); return d ? d.name : 'Unknown perk'; });
+        db.from('chat_logs').insert({ sender_id: null, content: `🎖️ [OVERSEER] ${prof.username || 'Commander'} was awarded the specialization${names.length > 1 ? 's' : ''}: ${names.join(', ')}.`, message_type: 'system' });
         renderPerksList();
         if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
     }
