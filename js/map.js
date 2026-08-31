@@ -279,7 +279,29 @@ window.locateCustomStar = function(id) {
 
 /* SYSTEM ARCHITECT */
 let architectPlanets = [];
-window.openSystemArchitect = function() { if (currentUserRole !== 'dm') return; architectPlanets = []; document.getElementById('system-architect-modal').style.display = 'flex'; };
+// Bug fix (tester-found crash, 2026-08-31): this used to reset
+// architectPlanets to [] but never told the visible Orbital Manifest list
+// about it -- any planet rows left over from a PREVIOUS System Architect
+// session (added a planet then Cancelled, or successfully spawned a star)
+// stayed on screen with their onchange handlers still pointing at indices
+// into the now-empty array. Editing Name/Type/Gravity/Atmosphere/Resources
+// on one of those stale rows then threw "Cannot set properties of
+// undefined (setting 'name'/'resources'/etc.)" -- the row still existed in
+// the DOM, but architectPlanets[idx] didn't exist anymore. Re-rendering
+// here keeps the visible list in sync with the reset array. Also resets
+// the core fields (name/class/multiplicity/hazard) to their defaults, same
+// reasoning -- reopening should start a genuinely fresh system, not show
+// whatever was typed for the last one.
+window.openSystemArchitect = function() {
+    if (currentUserRole !== 'dm') return;
+    architectPlanets = [];
+    document.getElementById('arch-name').value = 'Tartarus Prime';
+    document.getElementById('arch-multi').value = 'Single';
+    document.getElementById('arch-lum').value = 'Class G (Yellow)';
+    document.getElementById('arch-hazard').value = 'None';
+    window.renderArchitectPlanets();
+    document.getElementById('system-architect-modal').style.display = 'flex';
+};
 window.closeSystemArchitect = function() { document.getElementById('system-architect-modal').style.display = 'none'; };
 window.architectClassChanged = function(val) { if (val === 'Black Hole') document.getElementById('arch-hazard').value = 'Gravity Well'; };
 window.addArchitectPlanetRow = function() { let count = architectPlanets.length + 1; architectPlanets.push({ name: `Planet ${count}`, type: 'Terrestrial', gravity: '1.0 G', atmosphere: 'Breathable', resources: 'Unknown', radius: 20 + count * 25, size: 1.6, color: '#4287f5' }); window.renderArchitectPlanets(); };
