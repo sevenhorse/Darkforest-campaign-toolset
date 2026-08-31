@@ -681,8 +681,15 @@
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                             <div class="sheet-section" style="border-color:#ff3333; background:rgba(255,51,51,0.04);">
                                 <h4 style="color:#ff6b6b; border-bottom:1px solid #ff3333; padding-bottom:4px;">+ Design New NPC Vessel</h4>
+                                <label for="new-secret-template-copysource" style="font-size:9px; color:#ffaa00;">Copy From Existing:</label>
+                                <div style="display:flex; gap:6px;">
+                                    <select id="new-secret-template-copysource" style="flex:2; font-size:10px; margin:2px 0; border-color:#ffaa00;"></select>
+                                    <button class="layer-edit" onclick="window.applyTemplateCopyToNewForm()" style="flex:1; padding:3px 6px; font-size:9px; border-color:#ffaa00; color:#ffaa00;">COPY</button>
+                                </div>
+                                <div id="new-secret-template-copynote" style="display:none; font-size:8px; color:#ffaa00; margin:2px 0 4px 0;"></div>
                                 <label for="new-secret-template-name" style="font-size:9px; color:#ffaaaa;">Vessel Designation:</label>
-                                <input type="text" id="new-secret-template-name" placeholder="e.g. Void Raider" style="font-size:11px; margin:2px 0; border-color:#ff3333;">
+                                <input type="text" id="new-secret-template-name" placeholder="e.g. Void Raider" style="font-size:11px; margin:2px 0; border-color:#ff3333;" oninput="window.checkDeployedNameMatch()">
+                                <div id="new-secret-template-namehint" style="display:none; font-size:9px; color:#d4c5a9; margin:0 0 4px 0;"></div>
                                 <div style="display:flex; gap:6px; margin-top:4px;">
                                     <input type="text" id="new-secret-template-class" placeholder="Class" style="flex:1; font-size:10px; margin:2px 0; border-color:#ff3333;">
                                     <select id="new-secret-template-drive" style="flex:1.3; font-size:10px; margin:2px 0; border-color:#ff3333;"></select>
@@ -691,6 +698,14 @@
                                     <input type="number" id="new-secret-template-shields" placeholder="Shields" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                                     <input type="number" id="new-secret-template-hull" placeholder="Hull" value="100" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
                                     <input type="number" id="new-secret-template-slots" placeholder="Slots" value="4" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
+                                </div>
+                                <div style="display:flex; gap:6px; margin-top:4px;">
+                                    <label for="new-secret-template-reactive" style="display:none;">Reactive</label>
+                                    <input type="number" id="new-secret-template-reactive" placeholder="Reactive" value="0" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ffaa00;">
+                                    <label for="new-secret-template-ablative" style="display:none;">Ablative</label>
+                                    <input type="number" id="new-secret-template-ablative" placeholder="Ablative" value="0" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ffaa00;">
+                                    <label for="new-secret-template-hardened" style="display:none;">Hardened</label>
+                                    <input type="number" id="new-secret-template-hardened" placeholder="Hardened" value="0" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#c9962f;">
                                 </div>
                                 <div style="display:flex; gap:6px; margin-top:4px; align-items:center;">
                                     <input type="number" id="new-secret-template-speed" placeholder="Tactical Speed" title="Battle Map movement allowance, grid px/round" value="160" min="0" style="flex:1; font-size:10px; margin:2px 0; text-align:center; border-color:#ff3333;">
@@ -1451,7 +1466,7 @@
     <script src="js/squadrons.js?v=1.4"></script>
     <script src="js/strike-craft-designer.js?v=1.0"></script>
     <script src="js/colonies.js?v=3.17"></script>
-    <script src="js/ship-designer.js?v=3.27"></script>
+    <script src="js/ship-designer.js?v=3.28"></script>
     <script src="js/perk-designer.js?v=3.16"></script>
     <script src="js/augment-designer.js?v=1.3"></script>
     <script src="js/gear-designer.js?v=1.2"></script>
