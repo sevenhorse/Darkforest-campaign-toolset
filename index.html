@@ -141,6 +141,7 @@
                 <button class="term-tab-btn-vert" id="term-tab-btn-manufacturing" onclick="window.switchTermTab('manufacturing')" style="border-color:#c9962f; color:#c9962f;"><span class="tab-text">Manufacturing</span> <span class="tab-badge" id="badge-manufacturing">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-shipdesigner" onclick="window.switchTermTab('shipdesigner')"><span class="tab-text">Ship Designer</span> <span class="tab-badge" id="badge-shipdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-secretrepo" onclick="window.switchTermTab('secretrepo')" style="display:none; border-color:#ff3333; color:#ff6b6b;"><span class="tab-text">Secret Repository</span></button>
+                <button class="term-tab-btn-vert" id="term-tab-btn-strikecraft" onclick="window.switchTermTab('strikecraft')" style="display:none; border-color:#00e1ff; color:#00e1ff;"><span class="tab-text">Strike Craft Designer</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-perkdesigner" onclick="window.switchTermTab('perkdesigner')"><span class="tab-text">Perk Designer</span> <span class="tab-badge" id="badge-perkdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-augmentdesigner" onclick="window.switchTermTab('augmentdesigner')"><span class="tab-text">Augment Designer</span> <span class="tab-badge" id="badge-augmentdesigner">0</span></button>
                 <button class="term-tab-btn-vert" id="term-tab-btn-geardesigner" onclick="window.switchTermTab('geardesigner')"><span class="tab-text">Gear Designer</span> <span class="tab-badge" id="badge-geardesigner">0</span></button>
@@ -441,8 +442,8 @@
                                         <option value="direct_fire" selected>Direct Fire (standard)</option>
                                         <option value="ordnance">Ordnance (missile/torpedo — multi-turn, counter-fireable)</option>
                                     </select>
-                                    <label for="new-ship-wpn-range" style="font-size: 9px; color: #ffaaaa;" title="Battle Map targeting range, grid px. 0 = unlimited (no restriction) — the default for every weapon unless set otherwise.">Range (Battle Map grid px, 0 = unlimited):</label>
-                                    <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
+                                    <label for="new-ship-wpn-range" style="font-size: 9px; color: #ffaaaa;" title="Battle Map targeting range, grid px. Reference tiers (DM-confirmed): LONG=400 (33% of the grid diagonal) &middot; MEDIUM=200 (16.5%) &middot; SHORT=100 (8.25%). Ordnance/missile weapons conventionally use 0 = unlimited launch distance (they travel over multiple turns via the ordnance mechanic instead of hitting instantly) -- 0 is also the default for any weapon left unset.">Range (Battle Map grid px, 0 = unlimited):</label>
+                                    <input type="number" id="new-ship-wpn-range" min="0" value="0" placeholder="0 = unlimited" title="Battle Map targeting range, grid px. Reference tiers (DM-confirmed): LONG=400 (33% of the grid diagonal) &middot; MEDIUM=200 (16.5%) &middot; SHORT=100 (8.25%). Ordnance/missile weapons conventionally use 0 = unlimited launch distance (they travel over multiple turns via the ordnance mechanic instead of hitting instantly) -- 0 is also the default for any weapon left unset." style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
                                     <label for="new-ship-wpn-cooldown" style="font-size: 9px; color: #ffaaaa;" title="Turns this weapon needs to recharge after firing. Auto-applied to Cooldown the moment it's fired. 0 = no cooldown (fires every turn, same as before this field existed).">Cooldown Period (turns, 0 = none):</label>
                                     <input type="number" id="new-ship-wpn-cooldown" min="0" value="0" placeholder="0 = none" style="margin:2px 0 6px 0; border-color:#ff3333; text-align:center;">
                                     <label for="new-ship-wpn-reloadcd" style="font-size: 9px; color: #ffaaaa;" title="Only relevant if Standby Reserve above is set. RELOAD (Standby -> Ready) sets this weapon's Cooldown to this many rounds, same field firing uses.">Reload Cooldown (rounds, Tiered Ammo only):</label>
@@ -742,6 +743,34 @@
                     <div id="secretrepo-editor-view" style="display:none;">
                         <button class="layer-edit" onclick="window.closeSecretRepoEditor()" style="margin-bottom:12px; font-size:10px; border-color:#ff6b6b; color:#ff6b6b;">← BACK TO REPOSITORY</button>
                         <div id="secretrepo-editor-container"></div>
+                    </div>
+                </div>
+
+                <!-- STRIKE CRAFT DESIGNER TAB (DM-only; converts STRIKE_CRAFT_DB from a
+                     hardcoded JS catalog into a real DB-backed one, same shift Perk/Gear/
+                     Augment/Ship Designer already made -- 2026-08-31, DM request). Content
+                     built by window.renderStrikeCraftDesignerPanel / window.renderStrikeCraftEditorPanel
+                     (js/strike-craft-designer.js). -->
+                <div id="term-panel-strikecraft" class="term-panel-content">
+                    <div id="strikecraft-list-view">
+                        <p style="font-size: 9px; color: #6b826a; margin-top:0;">Design the strike craft chassis available in Commission Squadron (Vessel Deck). Deleting a custom chassis is permanent; deleting one of the three original chassis (Raven/Hawk/Messenger) reverts it to its built-in defaults instead.</p>
+                        <div class="sheet-section" style="border-color:#00e1ff; background:rgba(0, 225, 255, 0.05);">
+                            <h4 style="border-bottom:1px solid #00e1ff; padding-bottom:4px; color:#00e1ff;">+ Design New Chassis</h4>
+                            <label for="new-strikecraft-name" style="font-size:9px; color:#6b826a;">Chassis Name:</label>
+                            <div style="display:flex; gap:6px;">
+                                <input type="text" id="new-strikecraft-name" placeholder="e.g. Talon Interceptor" style="flex:2; font-size:11px; margin:2px 0;">
+                                <button class="btn-reveal" onclick="window.addStrikeCraftChassis()" style="flex:1; margin:2px 0; font-size:10px; border-color:#00e1ff; color:#00e1ff;">+ CREATE</button>
+                            </div>
+                        </div>
+                        <div class="sheet-section" style="margin-top:12px;">
+                            <h4 style="border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#00e1ff;">Designed Chassis</h4>
+                            <input type="text" id="strikecraft-designer-search" oninput="window.renderStrikeCraftDesignerPanel()" placeholder="🔍 Search by name..." style="width:100%; font-size:11px; margin:0 0 8px;">
+                            <div id="strikecraft-list-container" style="max-height:480px; overflow-y:auto;"></div>
+                        </div>
+                    </div>
+                    <div id="strikecraft-editor-view" style="display:none;">
+                        <button class="layer-edit" onclick="window.closeStrikeCraftEditor()" style="margin-bottom:12px; font-size:10px; border-color:#00e1ff; color:#00e1ff;">← BACK TO CHASSIS LIST</button>
+                        <div id="strikecraft-editor-container"></div>
                     </div>
                 </div>
 
@@ -1222,6 +1251,7 @@
                 <div class="hud-tabs" style="margin-bottom: 10px;">
                     <button class="hud-tab-btn active" id="dm-subtab-btn-spawn" onclick="window.switchDmSubtab('spawn')">⭐ SPAWN</button>
                     <button class="hud-tab-btn" id="dm-subtab-btn-map" onclick="window.switchDmSubtab('map')">🗺️ MAP TOOLS</button>
+                    <button class="hud-tab-btn" id="dm-subtab-btn-manualdmg" onclick="window.switchDmSubtab('manualdmg')">💥 MANUAL DMG</button>
                     <button class="hud-tab-btn" id="dm-subtab-btn-maint" onclick="window.switchDmSubtab('maint')">⚙️ MAINT</button>
                 </div>
 
@@ -1350,6 +1380,43 @@
                     <div id="hazard-zone-list-container" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;"></div>
                 </div>
 
+                <!-- Manual Damage Application (QOL request, 2026-08-31): lets the DM apply
+                     a damage total their players rolled with physical dice, for a table that
+                     mixes real dice with this app. Confirmed via AskUserQuestion: weapon
+                     selection acts like a REAL shot (ammo/cooldown/lockdown gates all apply,
+                     same as the normal FIRE button) and stance/category multipliers still
+                     auto-apply on top of the manually-typed total -- only the dice-ROLLING
+                     step is manual. See window.applyManualDamage (js/combat.js). Scoped to
+                     ships/stations (ship_weapons) only in this first pass -- a strike craft
+                     token as the FIRER isn't wired in yet (squadrons keep their weapons in
+                     STRIKE_CRAFT_DB, not ship_weapons; flagged as deferred, not silently
+                     dropped). Any ship OR strike craft token deployed to the active battle
+                     can still be the TARGET. -->
+                <div id="dm-panel-manualdmg" class="dm-subpanel">
+                    <p style="font-size: 9px; color: #ff9d4d; margin-top:0;">Apply a physical-dice damage roll directly. Requires an active battle with at least one deployed ship. Weapon selection consumes ammo/cooldown exactly like a normal shot.</p>
+                    <label for="dm-manualdmg-firer" style="font-size: 10px; color: #6b826a;">Firing Ship (arsenal source):</label>
+                    <select id="dm-manualdmg-firer" onchange="window.populateManualDamageWeapons()" style="width:100%; font-size:11px; margin:2px 0;"><option value="">-- Select firing ship --</option></select>
+
+                    <label for="dm-manualdmg-weapon" style="font-size: 10px; color: #6b826a; margin-top:6px; display:block;">Weapon (sets damage type):</label>
+                    <select id="dm-manualdmg-weapon" onchange="window.onManualDamageWeaponChange()" style="width:100%; font-size:11px; margin:2px 0;"><option value="">-- Unlisted / no specific weapon --</option></select>
+
+                    <label for="dm-manualdmg-target" style="font-size: 10px; color: #6b826a; margin-top:6px; display:block;">Target Ship:</label>
+                    <select id="dm-manualdmg-target" style="width:100%; font-size:11px; margin:2px 0;"><option value="">-- Select target ship --</option></select>
+
+                    <div style="display:flex; gap:6px; margin-top:6px;">
+                        <div style="flex:1;">
+                            <label for="dm-manualdmg-total" style="font-size: 10px; color: #6b826a;">Player's Total Roll:</label>
+                            <input type="number" id="dm-manualdmg-total" min="0" placeholder="e.g. 27" style="width:100%; font-size:11px; margin:2px 0; text-align:center;">
+                        </div>
+                        <div style="flex:1.4;">
+                            <label for="dm-manualdmg-dmgtype" style="font-size: 10px; color: #6b826a;">Damage Type:</label>
+                            <select id="dm-manualdmg-dmgtype" style="width:100%; font-size:11px; margin:2px 0;"></select>
+                        </div>
+                    </div>
+
+                    <button class="btn-deploy" onclick="window.applyManualDamage()" style="margin-top: 10px; border-color:#ff9d4d; color:#ff9d4d;">💥 APPLY DAMAGE</button>
+                </div>
+
                 <div id="dm-panel-maint" class="dm-subpanel">
                     <p style="font-size: 9px; color: #ff6b6b; margin-top:0;">Emergency Maintenance.</p>
                     <button class="btn-remove" onclick="window.resetTimeline()">⏳ RESET IN-UNIVERSE TIMELINE</button>
@@ -1377,19 +1444,20 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.28"></script>
+    <script src="js/db.js?v=3.29"></script>
     <script src="js/audio.js?v=3.17"></script>
-    <script src="js/ui.js?v=3.39"></script>
-    <script src="js/combat.js?v=3.50"></script>
+    <script src="js/ui.js?v=3.40"></script>
+    <script src="js/combat.js?v=3.51"></script>
     <script src="js/squadrons.js?v=1.4"></script>
+    <script src="js/strike-craft-designer.js?v=1.0"></script>
     <script src="js/colonies.js?v=3.17"></script>
-    <script src="js/ship-designer.js?v=3.25"></script>
+    <script src="js/ship-designer.js?v=3.26"></script>
     <script src="js/perk-designer.js?v=3.16"></script>
     <script src="js/augment-designer.js?v=1.3"></script>
     <script src="js/gear-designer.js?v=1.2"></script>
     <script src="js/dm-sheet-editor.js?v=1.1"></script>
     <script src="js/map.js?v=3.40"></script>
-    <script src="js/battle-map.js?v=1.33"></script>
+    <script src="js/battle-map.js?v=1.34"></script>
     <script src="js/manufacturing.js?v=1.9"></script>
 
 </body>
