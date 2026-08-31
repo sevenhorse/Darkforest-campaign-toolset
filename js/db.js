@@ -758,6 +758,233 @@ window.exportCampaignBackup = function() {
     document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove();
 };
 
+/* ==========================================================================
+   FULL CAMPAIGN BACKUP / RESTORE (QOL request, 2026-08-31)
+   ==========================================================================
+   The QUICK BACKUP above (unchanged, kept as-is) only ever covered the
+   galaxy-map-adjacent tables it happened to have in memory already --
+   star_systems/ship_markers/territories (a superset of what WIPE GALAXY
+   SLATE below it deletes) plus hyperlanes/codex/initiative as a bonus. It
+   was never a real campaign backup: no characters, no ship catalogs
+   (public OR Secret Repository), no perks/augments/gear, no colonies,
+   no manufacturing, no saved fleets, nothing. This section is the real
+   thing -- a full read/write of every live campaign table -- plus, since
+   an export nobody can load back in isn't a backup, an actual paste-to-
+   restore flow.
+
+   DM-confirmed design (AskUserQuestion, all answered this session):
+     - Restore is a TRUE wipe-and-replace, not a merge -- every row
+       currently in every covered table is deleted, then the pasted
+       backup's rows are inserted exactly as captured. This is the
+       disaster-recovery version: it makes the DB look exactly like the
+       moment the backup was taken, which means anything created or
+       changed since is permanently gone. Not for casual undo.
+     - Restore DOES include `profiles` (accounts/usernames/roles/avatars)
+       at the DM's explicit choice -- the safer default would have left
+       player accounts untouched, but was turned down. This only actually
+       matters if profiles.id rows get out of sync with the real Supabase
+       Auth users backing them (e.g. someone's login was deleted and
+       recreated since the backup) -- restoring an old profiles row
+       whose id no longer matches a real auth user would leave an orphaned
+       profile row rather than break anything destructively, since this
+       client has no ability to touch auth.users itself either way.
+     - Requires typing an exact confirmation phrase (RESTORE FULL CAMPAIGN)
+       before it runs, same "can't trigger by accident" bar as WIPE GALAXY
+       SLATE's own confirm modal, but stricter since this is strictly more
+       destructive (33 tables, not 3).
+     - Chat logs and player notes ARE included (the "truly full" option).
+
+   Table list is every entry in the architecture doc's "confirmed live"
+   list except the 4 already-flagged abandoned/unreferenced tables
+   (celestial_bodies, stations, explored_sectors, campaign_codex) and the
+   music-tracks Storage bucket, which isn't a table and isn't covered by
+   this at all -- if that's ever actually lost, the audio files themselves
+   need re-uploading by hand via the Supabase dashboard, same as they were
+   uploaded originally.
+
+   FULL_BACKUP_TABLE_GROUPS is ordered by real FK dependency (verified
+   directly against the live schema's foreign key constraints before
+   writing this, not guessed) -- group N only ever references group N-1
+   or earlier, or `profiles`. INSERT must run in this order (parents
+   before children); DELETE must run in exactly the reverse order
+   (children before parents) or every delete/insert would 400 on a FK
+   violation. ship_markers is self-referential (docked_to/parent_id both
+   point at other ship_markers rows) so it can't just be "one group
+   earlier than itself" -- handled with a 2-phase insert instead (see
+   restoreOneTable below): insert every row with those two columns
+   nulled out, then a second pass patches each row's real values back in,
+   which is FK-safe regardless of insertion order. */
+window.FULL_BACKUP_TABLE_GROUPS = [
+    ['profiles'],
+    ['campaign_objectives', 'perk_definitions', 'augment_definitions', 'gear_definitions', 'hazard_definitions',
+     'hyperlanes', 'star_systems', 'system_ownership_overrides', 'territories', 'planetary_modifiers',
+     'campaign_clock', 'saved_fleets', 'manufacturing_blueprints', 'strike_craft_templates', 'ship_templates',
+     'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes'],
+    ['ship_markers', 'system_hazards'],
+    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker'],
+    ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
+];
+// Primary key column per table -- verified directly against the live schema.
+// Every table not listed here uses the default 'id'. Needed so the wipe
+// step can delete "every row" without hardcoding a uuid-vs-text sentinel
+// per table -- `.not(pkCol, 'is', null)` matches every row regardless of
+// the PK's type, since a primary key column is never actually null.
+window.FULL_BACKUP_PK_COLUMN = {
+    character_skills: 'character_id',
+    planetary_modifiers: 'body_id',
+    system_ownership_overrides: 'system_id'
+};
+// Tables with a column that references another row in the SAME table.
+window.FULL_BACKUP_SELF_REF_TABLES = { ship_markers: ['docked_to', 'parent_id'] };
+
+function fullBackupPkColumn(table) {
+    return window.FULL_BACKUP_PK_COLUMN[table] || 'id';
+}
+
+function fullBackupLog(msg) {
+    const el = document.getElementById('full-campaign-status');
+    if (!el) return;
+    el.style.display = 'block';
+    el.innerText += (el.innerText ? '\n' : '') + msg;
+    el.scrollTop = el.scrollHeight;
+}
+
+window.exportFullCampaignBackup = async function() {
+    if (currentUserRole !== 'dm') return;
+    const el = document.getElementById('full-campaign-status');
+    if (el) { el.style.display = 'block'; el.innerText = 'Exporting full campaign backup...'; }
+    const allTables = window.FULL_BACKUP_TABLE_GROUPS.flat();
+    const backup = { kind: 'full_campaign_backup', schemaVersion: 1, timestamp: new Date().toISOString(), tables: {} };
+    let totalRows = 0;
+    for (const table of allTables) {
+        const { data, error } = await db.from(table).select('*');
+        if (error) {
+            alert(`Full backup failed reading "${table}": ${error.message}\n\nNo file was downloaded -- nothing partial gets saved.`);
+            if (el) el.style.display = 'none';
+            return;
+        }
+        backup.tables[table] = data || [];
+        totalRows += (data || []).length;
+        fullBackupLog(`Read ${table} (${(data || []).length} rows)`);
+    }
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `task_force_black_FULL_backup_${Date.now()}.json`);
+    document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove();
+    fullBackupLog(`✓ Full backup complete -- ${allTables.length} tables, ${totalRows} total rows. File downloaded.`);
+};
+
+/* --- Restore: paste -> preview -> typed confirmation -> execute --- */
+window.previewFullCampaignRestore = function() {
+    const raw = document.getElementById('full-restore-paste').value.trim();
+    const previewEl = document.getElementById('full-restore-preview');
+    const confirmSection = document.getElementById('full-restore-confirm-section');
+    if (!raw) { alert("Paste a Full Campaign Backup JSON file's contents first."); return; }
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (e) { alert("That's not valid JSON: " + e.message); return; }
+    if (!parsed || parsed.kind !== 'full_campaign_backup' || !parsed.tables) {
+        alert('This doesn\'t look like a Full Campaign Backup file (missing the "full_campaign_backup" marker or its table data). The QUICK BACKUP file above is a different, older format and was never meant to be restored -- only a file downloaded from FULL CAMPAIGN BACKUP will work here.');
+        return;
+    }
+    window._pendingRestorePayload = parsed;
+    const allTables = window.FULL_BACKUP_TABLE_GROUPS.flat();
+    const rowLines = allTables.map(t => `${t}: ${(parsed.tables[t] || []).length}`).join(' · ');
+    const missing = allTables.filter(t => !(t in parsed.tables));
+    previewEl.style.display = 'block';
+    previewEl.innerHTML = `<strong style="color:#ffaa00;">Backup captured: ${parsed.timestamp || 'unknown time'}</strong><br><span style="font-size:9px;">${rowLines}</span>`
+        + (missing.length ? `<br><span style="color:#ff6b6b; font-size:9px;">⚠ Not present in this file (will end up EMPTY after restore): ${missing.join(', ')}</span>` : '');
+    confirmSection.style.display = 'block';
+};
+
+window.cancelFullCampaignRestore = function() {
+    window._pendingRestorePayload = null;
+    document.getElementById('full-restore-preview').style.display = 'none';
+    document.getElementById('full-restore-confirm-section').style.display = 'none';
+    document.getElementById('full-restore-confirm-phrase').value = '';
+    document.getElementById('full-restore-paste').value = '';
+};
+
+const FULL_RESTORE_CONFIRM_PHRASE = 'RESTORE FULL CAMPAIGN';
+
+window.executeFullCampaignRestore = async function() {
+    if (currentUserRole !== 'dm') return;
+    const phraseInput = document.getElementById('full-restore-confirm-phrase');
+    if (!phraseInput || phraseInput.value.trim() !== FULL_RESTORE_CONFIRM_PHRASE) {
+        alert(`Type the confirmation phrase exactly: ${FULL_RESTORE_CONFIRM_PHRASE}`);
+        return;
+    }
+    const payload = window._pendingRestorePayload;
+    if (!payload) { alert("Click PREVIEW BACKUP first."); return; }
+    if (!(await window.showConfirmModal("This will PERMANENTLY DELETE all current campaign data (every character, ship, colony, and everything else covered) and replace it with the pasted backup. This cannot be undone. Continue?"))) return;
+
+    const groups = window.FULL_BACKUP_TABLE_GROUPS;
+    const el = document.getElementById('full-campaign-status');
+    if (el) { el.style.display = 'block'; el.innerText = 'Starting restore...'; }
+
+    // --- Delete phase: reverse group order (children before parents) ---
+    for (let i = groups.length - 1; i >= 0; i--) {
+        for (const table of groups[i]) {
+            const pk = fullBackupPkColumn(table);
+            const { error } = await db.from(table).delete().not(pk, 'is', null);
+            if (error) {
+                fullBackupLog(`✕ STOPPED -- failed clearing ${table}: ${error.message}`);
+                alert(`Restore stopped while clearing "${table}": ${error.message}\n\nSome tables are already wiped and some aren't -- the campaign is in a mixed state right now. Don't close this tab; tell your dev/Claude session what table it stopped on so it can be fixed directly against the database.`);
+                return;
+            }
+            fullBackupLog(`Cleared ${table}`);
+        }
+    }
+
+    // --- Insert phase: forward group order (parents before children) ---
+    for (const group of groups) {
+        for (const table of group) {
+            const rows = payload.tables[table] || [];
+            if (rows.length === 0) { fullBackupLog(`${table}: nothing to restore (0 rows in backup)`); continue; }
+            try {
+                await restoreOneTable(table, rows);
+                fullBackupLog(`Restored ${table} (${rows.length} rows)`);
+            } catch (e) {
+                fullBackupLog(`✕ STOPPED -- failed restoring ${table}: ${e.message}`);
+                alert(`Restore stopped while writing "${table}": ${e.message}\n\nEvery table before this one in the list was already cleared AND restored successfully -- everything from here on is still empty (cleared but not yet reloaded). Don't close this tab; tell your dev/Claude session what table it stopped on.`);
+                return;
+            }
+        }
+    }
+
+    fullBackupLog('✓ Restore complete. Reloading app in 3 seconds...');
+    setTimeout(() => location.reload(), 3000);
+};
+
+async function restoreOneTable(table, rows) {
+    const selfRefCols = window.FULL_BACKUP_SELF_REF_TABLES[table];
+    let insertRows = rows;
+    const patches = [];
+    if (selfRefCols) {
+        insertRows = rows.map(r => {
+            const clean = { ...r };
+            const patch = {};
+            let needsPatch = false;
+            selfRefCols.forEach(col => {
+                if (clean[col] !== null && clean[col] !== undefined) { patch[col] = clean[col]; needsPatch = true; }
+                clean[col] = null;
+            });
+            if (needsPatch) patches.push({ id: r.id, patch });
+            return clean;
+        });
+    }
+    const CHUNK = 500;
+    for (let i = 0; i < insertRows.length; i += CHUNK) {
+        const { error } = await db.from(table).insert(insertRows.slice(i, i + CHUNK));
+        if (error) throw new Error(error.message);
+    }
+    for (const p of patches) {
+        const { error } = await db.from(table).update(p.patch).eq('id', p.id);
+        if (error) throw new Error(`self-reference patch -- ${error.message}`);
+    }
+}
+
 window.handleLogout = async function() {
     if (presenceChannel) await presenceChannel.untrack();
     await db.auth.signOut();
