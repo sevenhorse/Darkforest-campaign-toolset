@@ -900,10 +900,16 @@ window.renderPerksPanel = function() {
     const sec1Choices = typeof window.getApprovedPerksBySection === 'function' ? window.getApprovedPerksBySection(1) : [];
     const sec1PickedIds = new Set(section1.map(p => p.perk_definition_id));
     const sec1Available = sec1Choices.filter(p => !sec1PickedIds.has(p.id));
-    let sec1PickerOptions = '<option value="">— Select a Specialization —</option>';
-    sec1Available.forEach(p => {
-        sec1PickerOptions += `<option value="${p.id}">${p.name}</option>`;
-    });
+    // Multi-select (QOL request, 2026-08-31): was a single <select> + "+ ADD"
+    // button, one perk per click. Now a scrollable checklist -- check as many
+    // as you want, one "+ ADD SELECTED" batch-inserts all of them. See
+    // addSection1Perk below for the matching bulk-insert rewrite.
+    const sec1PickerListHtml = sec1Available.length === 0
+        ? '<span style="font-size:9px; color:#6b826a;">No unpicked specializations available.</span>'
+        : sec1Available.map(p => `<label style="display:flex; align-items:flex-start; gap:5px; font-size:10px; color:#d4c5a9; padding:2px 0; cursor:pointer;">
+            <input type="checkbox" class="perk-sec1-check" value="${p.id}" style="margin-top:2px;">
+            <span><strong>${p.name}</strong>${p.description ? ` <span style="color:#6b826a; font-size:9px;">— ${p.description}</span>` : ''}</span>
+        </label>`).join('');
 
     // Bug fix (bug hunt, this session): a deleted perk definition leaves a
     // dangling character_perks row (deletePerkDefinition only removes the
@@ -941,10 +947,9 @@ window.renderPerksPanel = function() {
         <div style="margin-top:10px; border-top:1px solid #3c4e36; padding-top:8px;">
             <label style="font-size:9px; color:#6b826a;">Section 1 Specializations (character creation pick, no cap):</label>
             <div style="margin-top:4px;">${sec1Html}</div>
-            <div style="display:flex; gap:4px; margin-top:6px;">
-                <label for="perk-section1-picker" style="display:none;">Add Specialization</label>
-                <select id="perk-section1-picker" style="flex:1; margin:0; font-size:11px;">${sec1PickerOptions}</select>
-                <button class="btn-deploy" onclick="window.addSection1Perk()" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">+ ADD</button>
+            <div style="margin-top:6px;">
+                <div id="perk-section1-picker-list" style="max-height:130px; overflow-y:auto; border:1px solid #3c4e36; border-radius:2px; padding:4px 6px; background:#030403;">${sec1PickerListHtml}</div>
+                <button class="btn-deploy" onclick="window.addSection1Perk()" style="width:100%; margin-top:4px; padding:4px 8px; font-size:9px;">+ ADD SELECTED</button>
             </div>
         </div>
         <div style="margin-top:10px;">
@@ -955,17 +960,18 @@ window.renderPerksPanel = function() {
 };
 
 window.addSection1Perk = async function() {
-    const select = document.getElementById('perk-section1-picker');
-    const perkDefId = select ? select.value : null;
-    if (!perkDefId) return;
+    const checks = Array.from(document.querySelectorAll('#perk-section1-picker-list .perk-sec1-check:checked'));
+    if (checks.length === 0) return;
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert("Please save your Dossier & Stats once first before selecting a specialization."); return; }
-    const already = (myProf.perks || []).some(p => p.section === 1 && p.perk_definition_id === perkDefId);
-    if (already) return;
-    const { data, error } = await db.from('character_perks').insert({ character_id: myProf.character.id, perk_definition_id: perkDefId, section: 1 }).select().single();
-    if (error) { alert("Failed to save specialization: " + error.message); return; }
+    const already = new Set((myProf.perks || []).filter(p => p.section === 1).map(p => p.perk_definition_id));
+    const idsToAdd = [...new Set(checks.map(c => c.value))].filter(id => !already.has(id));
+    if (idsToAdd.length === 0) return;
+    const payload = idsToAdd.map(id => ({ character_id: myProf.character.id, perk_definition_id: id, section: 1 }));
+    const { data, error } = await db.from('character_perks').insert(payload).select();
+    if (error) { alert("Failed to save specialization(s): " + error.message); return; }
     myProf.perks = myProf.perks || [];
-    myProf.perks.push(data);
+    myProf.perks.push(...(data || []));
     if (typeof window.renderPerksPanel === 'function') window.renderPerksPanel();
 };
 
@@ -1238,10 +1244,17 @@ window.renderCrewRoster = function() {
                             <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Misc. Inventory Override:</label>
                             <textarea id="dm-edit-assets-${p.id}" rows="2" style="font-size:10px; margin:2px 0;">${char.assets || ''}</textarea>
                             <button class="btn-reveal" onclick="window.dmUpdatePlayerStats('${p.id}')" style="width:100%; font-size:9px; margin-top:4px; border-color:#ff6b6b; color:#ff6b6b;">APPLY OVERRIDE</button>
-                            <div style="display:flex; gap:4px; margin-top:8px; border-top:1px solid #3c4e36; padding-top:6px;">
-                                <label for="dm-award-perk-${p.id}" style="display:none;">Award Perk</label>
-                                <select id="dm-award-perk-${p.id}" style="flex:1; margin:0; font-size:9px; padding:3px;">${(typeof window.getApprovedPerksBySection === 'function' ? window.getApprovedPerksBySection(2) : []).map(pk => `<option value="${pk.id}">${pk.name}</option>`).join('')}</select>
-                                <button class="btn-deploy" onclick="window.awardSection2Perk('${p.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">AWARD</button>
+                            <div style="margin-top:8px; border-top:1px solid #3c4e36; padding-top:6px;">
+                                <label style="font-size:9px; color:#6b826a; display:block; margin-bottom:2px;">Award Perk(s):</label>
+                                <div style="max-height:80px; overflow-y:auto; border:1px solid #3c4e36; border-radius:2px; padding:3px 4px; background:#030403;">${(() => {
+                                    const approvedSec2 = typeof window.getApprovedPerksBySection === 'function' ? window.getApprovedPerksBySection(2) : [];
+                                    const heldIds = new Set((p.perks || []).map(cp => cp.perk_definition_id));
+                                    const awardable = approvedSec2.filter(pk => !heldIds.has(pk.id));
+                                    return awardable.length === 0
+                                        ? '<span style="font-size:9px; color:#6b826a;">No unheld approved perks.</span>'
+                                        : awardable.map(pk => `<label style="display:flex; align-items:center; gap:4px; font-size:9px; color:#d4c5a9; padding:1px 0; cursor:pointer;"><input type="checkbox" class="dm-award-perk-check-${p.id}" value="${pk.id}">${pk.name}</label>`).join('');
+                                })()}</div>
+                                <button class="btn-deploy" onclick="window.awardSection2Perk('${p.id}')" style="width:100%; margin-top:4px; padding:4px 8px; font-size:9px;">AWARD SELECTED</button>
                             </div>
                         </div>
                     </div>
@@ -1283,33 +1296,37 @@ window.dmUpdatePlayerStats = async function(profileId) {
 
 window.awardSection2Perk = async function(profileId) {
     if (currentUserRole !== 'dm') return;
-    const select = document.getElementById(`dm-award-perk-${profileId}`);
-    const perkDefId = select ? select.value : null;
-    if (!perkDefId) return;
-    const perkDef = window.findPerkDefinition(perkDefId);
-    if (!perkDef) return;
+    // Multi-select (QOL request, 2026-08-31): was a single <select> + AWARD
+    // button. Now a per-player scrollable checklist (class scoped by
+    // profileId since every roster card's checklist lives in the DOM at
+    // once, unlike a one-at-a-time modal) -- check as many as needed, one
+    // AWARD SELECTED batch-inserts all of them.
+    const checks = Array.from(document.querySelectorAll(`.dm-award-perk-check-${profileId}:checked`));
+    if (checks.length === 0) return;
     const prof = allProfiles.find(p => p.id === profileId);
     if (!prof || !prof.character || !prof.character.id) { alert("This player hasn't saved a character sheet yet — nothing to award the perk to."); return; }
 
-    // Bugfix: this insert used to run with no duplicate check at all, so
-    // clicking Award twice (or awarding a perk the player already has)
-    // silently created a second character_perks row pointing at the same
-    // definition, double-counting its effects. Guard against that here,
-    // regardless of which section the existing link is in.
-    const alreadyHas = (prof.perks || []).some(p => p.perk_definition_id === perkDefId);
-    if (alreadyHas) { alert(`${prof.username || 'This commander'} already has ${perkDef.name} — not awarding a duplicate.`); return; }
+    // Bugfix (kept from the single-select version): guard against awarding a
+    // perk the player already has, regardless of which section the existing
+    // link is in. The checklist already excludes currently-held perks, so
+    // this is now just a defensive re-check rather than the primary guard.
+    const alreadyHeldIds = new Set((prof.perks || []).map(p => p.perk_definition_id));
+    const toAward = [...new Set(checks.map(c => c.value))].filter(id => !alreadyHeldIds.has(id));
+    if (toAward.length === 0) return;
 
-    const { data, error } = await db.from('character_perks').insert({ character_id: prof.character.id, perk_definition_id: perkDefId, section: 2 }).select().single();
-    if (error) { alert("Failed to award perk: " + error.message); return; }
+    const payload = toAward.map(id => ({ character_id: prof.character.id, perk_definition_id: id, section: 2 }));
+    const { data, error } = await db.from('character_perks').insert(payload).select();
+    if (error) { alert("Failed to award perk(s): " + error.message); return; }
     prof.perks = prof.perks || [];
-    prof.perks.push(data);
+    prof.perks.push(...(data || []));
 
+    const names = toAward.map(id => { const d = window.findPerkDefinition(id); return d ? d.name : 'Unknown perk'; });
     await db.from('chat_logs').insert({
         sender_id: null,
-        content: `🎖️ [OVERSEER] ${prof.username || 'Commander'} was awarded the specialization: ${perkDef.name}.`,
+        content: `🎖️ [OVERSEER] ${prof.username || 'Commander'} was awarded the specialization${names.length > 1 ? 's' : ''}: ${names.join(', ')}.`,
         message_type: 'system'
     });
-    if (typeof window.showToast === 'function') window.showToast(`Awarded ${perkDef.name} to ${prof.username || 'Commander'}.`);
+    if (typeof window.showToast === 'function') window.showToast(`Awarded ${names.join(', ')} to ${prof.username || 'Commander'}.`);
     if (typeof window.renderCrewRoster === 'function') window.renderCrewRoster();
 };
 
