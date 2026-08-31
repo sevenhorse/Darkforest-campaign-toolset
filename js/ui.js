@@ -53,6 +53,111 @@
     };
 })();
 
+/* --- EXPANDABLE TEXTAREA POPUP (QOL request, 2026-08-31) ---
+   Most of the app's ~19 textareas (character background/notes, codex
+   entries, perk/gear/augment descriptions, colony/manufacturing notes,
+   etc.) are only 2-4 rows, cramped for writing anything longer than a
+   sentence. Confirmed design (two AskUserQuestion rounds): (1) a large
+   popup editor auto-opens the INSTANT any textarea receives focus,
+   pre-filled with whatever it already holds -- no separate expand button
+   to click first; (2) applied app-wide to every textarea, not a hand-picked
+   subset, including ones added later.
+
+   "App-wide, including later ones" is exactly why this is a single
+   document-level 'focusin' listener (event delegation) rather than code
+   added to each of the ~8 files that render a textarea -- it transparently
+   covers every textarea already in the DOM AND every one a designer/editor
+   modal injects for the first time on some future click, with zero
+   per-field wiring. The popup's own textarea live-syncs every keystroke
+   back to the real field's `.value` AND dispatches a genuine 'input' event
+   on it, so anything already listening for input there (the DM Scratchpad's
+   autosave-on-input being the one real example today) keeps firing exactly
+   as if the user had typed directly into the small box -- this required NO
+   changes anywhere else in the app.
+
+   z-index 10500 is deliberately higher than every other overlay in this
+   codebase (System Architect's modal is the previous highest, at 10000)
+   so this can always pop open on top of a textarea inside another modal
+   (a designer's propose/edit form, DM Sheet Editor, etc.), not just
+   top-level page textareas. */
+(function() {
+    let overlay, popupTextarea, labelEl, sourceEl;
+    let suppressNextFocus = false;
+
+    function ensureModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'expand-textarea-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.88); z-index:10500; align-items:center; justify-content:center; padding:20px;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:min(640px, 94vw); max-width:94vw;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:10px;">
+                <h4 id="expand-textarea-label" style="margin:0; color:#00e5a3; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Edit</h4>
+                <button id="expand-textarea-done-btn" class="btn-deploy" style="width:auto; margin:0; padding:4px 12px; font-size:10px; flex-shrink:0;">✓ DONE</button>
+            </div>
+            <textarea id="expand-textarea-input" style="width:100%; height:min(50vh, 420px); font-size:13px; resize:vertical; box-sizing:border-box;"></textarea>
+        </div>`;
+        document.body.appendChild(overlay);
+        popupTextarea = document.getElementById('expand-textarea-input');
+        labelEl = document.getElementById('expand-textarea-label');
+
+        popupTextarea.addEventListener('input', () => {
+            if (!sourceEl) return;
+            sourceEl.value = popupTextarea.value;
+            sourceEl.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+
+        document.getElementById('expand-textarea-done-btn').addEventListener('click', closePopup);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) closePopup(); });
+        document.addEventListener('keydown', (e) => { if (overlay.style.display !== 'none' && e.key === 'Escape') closePopup(); });
+    }
+
+    // Best-effort human label for the popup header -- an associated
+    // <label for="...">, else the field's placeholder, else a generic
+    // fallback. Purely cosmetic: never blocks the popup from opening.
+    function labelFor(el) {
+        if (el.id) {
+            const lbl = document.querySelector(`label[for="${el.id}"]`);
+            if (lbl && lbl.textContent.trim()) return lbl.textContent.trim().replace(/:\s*$/, '');
+        }
+        if (el.placeholder) return el.placeholder;
+        return 'Edit Text';
+    }
+
+    function openPopup(el) {
+        ensureModal();
+        sourceEl = el;
+        popupTextarea.value = el.value;
+        labelEl.textContent = labelFor(el);
+        overlay.style.display = 'flex';
+        popupTextarea.focus();
+        popupTextarea.setSelectionRange(popupTextarea.value.length, popupTextarea.value.length);
+    }
+
+    function closePopup() {
+        if (!overlay || overlay.style.display === 'none') return;
+        overlay.style.display = 'none';
+        const toRefocus = sourceEl;
+        sourceEl = null;
+        // Return focus to the field that was being edited, same as closing
+        // any other in-app modal returns you to where you were -- guarded
+        // so this refocus doesn't immediately reopen the popup right back up.
+        if (toRefocus && document.body.contains(toRefocus)) {
+            suppressNextFocus = true;
+            toRefocus.focus();
+            setTimeout(() => { suppressNextFocus = false; }, 0);
+        }
+    }
+
+    document.addEventListener('focusin', (e) => {
+        const el = e.target;
+        if (!el || el.tagName !== 'TEXTAREA') return;
+        if (el.id === 'expand-textarea-input') return; // the popup's own box
+        if (el.readOnly || el.disabled) return;
+        if (suppressNextFocus) return;
+        openPopup(el);
+    });
+})();
+
 /* --- REORDERABLE LISTS (personal, per-browser, up/down arrows) ---
    Player-requested: manual reordering across the Command Terminal's lists,
    mobile-friendly (up/down buttons, not drag-and-drop). Confirmed design:
