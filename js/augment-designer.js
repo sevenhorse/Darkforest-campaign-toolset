@@ -72,11 +72,19 @@ window.getAugmentBonusFor = function(charAugmentsList, targetType, targetName) {
 window.renderAugmentDesignerPanel = function() {
     const container = document.getElementById('augment-designer-list-container');
     if (!container) return;
-    let html = '';
-    if (augmentDefinitionsList.length === 0) html = '<span style="font-size:10px; color:#6b826a;">No augments defined yet.</span>';
 
-    const pending = window.applySavedOrder('augments_pending', augmentDefinitionsList.filter(a => a.status === 'draft'));
-    const approved = window.applySavedOrder('augments_approved', augmentDefinitionsList.filter(a => a.status === 'approved'));
+    // Search bar (QOL request, 2026-08-31): same pattern as perk-designer.js
+    // and gear-designer.js -- filters by name/description, case-insensitive;
+    // the badge below deliberately reads unfiltered totals so it doesn't
+    // fluctuate while someone is mid-search.
+    const searchEl = document.getElementById('augment-designer-search');
+    const searchTerm = searchEl ? searchEl.value.trim().toLowerCase() : '';
+    const sourceList = searchTerm
+        ? augmentDefinitionsList.filter(a => (a.name || '').toLowerCase().includes(searchTerm) || (a.description || '').toLowerCase().includes(searchTerm))
+        : augmentDefinitionsList;
+
+    const pending = window.applySavedOrder('augments_pending', sourceList.filter(a => a.status === 'draft'));
+    const approved = window.applySavedOrder('augments_approved', sourceList.filter(a => a.status === 'approved'));
 
     const renderCard = (a, listKey, siblingList) => {
         const editable = canManageAugment(a);
@@ -116,19 +124,27 @@ window.renderAugmentDesignerPanel = function() {
             </div>`;
     };
 
-    html = '';
-    if (pending.length > 0) {
-        html += `<h4 style="color:#ffaa00; font-size:11px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h4>`;
-        pending.forEach(a => html += renderCard(a, 'augments_pending', pending));
+    let html = '';
+    if (augmentDefinitionsList.length === 0) {
+        html = '<span style="font-size:10px; color:#6b826a;">No augments defined yet.</span>';
+    } else if (searchTerm && pending.length === 0 && approved.length === 0) {
+        html = `<span style="font-size:10px; color:#6b826a;">No augments match "${searchEl.value.trim()}".</span>`;
+    } else {
+        if (pending.length > 0) {
+            html += `<h4 style="color:#ffaa00; font-size:11px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h4>`;
+            pending.forEach(a => html += renderCard(a, 'augments_pending', pending));
+        }
+        html += `<h4 style="color:#00e5a3; font-size:11px; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-top:14px;">Approved Augments (${approved.length})</h4>`;
+        if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">None approved yet.</span>';
+        approved.forEach(a => html += renderCard(a, 'augments_approved', approved));
     }
-    html += `<h4 style="color:#00e5a3; font-size:11px; border-bottom:1px solid #3c4e36; padding-bottom:4px; margin-top:14px;">Approved Augments (${approved.length})</h4>`;
-    if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">None approved yet.</span>';
-    approved.forEach(a => html += renderCard(a, 'augments_approved', approved));
 
     container.innerHTML = html;
 
+    const totalPending = augmentDefinitionsList.filter(a => a.status === 'draft').length;
+    const totalApproved = augmentDefinitionsList.filter(a => a.status === 'approved').length;
     const badge = document.getElementById('badge-augmentdesigner');
-    if (badge) badge.innerText = pending.length > 0 ? `${pending.length} pending` : approved.length;
+    if (badge) badge.innerText = totalPending > 0 ? `${totalPending} pending` : totalApproved;
 };
 
 window.moveAugmentDefinitionOrder = function(id, direction) {
