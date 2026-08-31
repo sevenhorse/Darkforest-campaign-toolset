@@ -392,13 +392,43 @@ window.toggleTerritoryTool = function() {
 window.editingTerritoryId = null;
 window.editingTerritoryWasHidden = false;
 
+/* Bug fix (tester report, 2026-08-31): "editing a territory doesn't let me
+   set a new faction/color, and Apply always says no faction set." Root
+   cause traced to the panel's OWN layout, not the save logic (which reads
+   the form fields correctly and was already saving whatever they held) --
+   the territory-control-panel has TWO buttons both effectively labeled
+   "CLOSE" visible at the same time during an active edit: the real save
+   action ("✓ CLOSE & SAVE", btn-finish-territory-draw) and the panel's own
+   dismiss button (plain "CLOSE", btn-close-territory-panel, always present
+   at the bottom of the panel to back out of the tool entirely). Clicking
+   the latter mid-edit calls toggleTerritoryTool() -> cancelDrawingTerritory(),
+   which silently discards the in-progress edit (including any faction/color
+   just picked) with no confirmation and no error -- so a DM who clicked the
+   wrong "CLOSE" would see their faction choice vanish and Apply keep
+   complaining, with nothing on screen explaining why. Fixed by hiding
+   btn-close-territory-panel for the duration of any draw/edit (same
+   show/hide pattern already used for btn-start-territory-draw), forcing an
+   explicit Cancel or Finish/Save instead -- see startDrawingTerritory,
+   startEditTerritory, and cancelDrawingTerritory below. */
+
 function resetTerritoryFormFields() {
     const nameEl = document.getElementById('territory-name-input'); if (nameEl) nameEl.value = '';
     const colorEl = document.getElementById('territory-color-input'); if (colorEl) colorEl.value = '#00e5a3';
     const factionEl = document.getElementById('territory-faction-select'); if (factionEl) factionEl.value = '';
 }
 
-window.startDrawingTerritory = function() { window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; resetTerritoryFormFields(); window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('btn-undo-territory-vertex').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+// Bug fix (tester report, 2026-08-31): this used to call
+// resetTerritoryFormFields() right here, which silently wiped whatever
+// name/faction/color the DM had just typed/picked the INSTANT they clicked
+// "DRAW POLYGON" -- so the natural fill-the-form-then-draw-the-border
+// workflow always lost the faction and color the moment drawing started,
+// and the territory saved with faction_name: '' regardless of what was
+// selected. Fields are already guaranteed blank/default here anyway: the
+// only ways to reach this function are a fresh panel-open (HTML defaults)
+// or after cancelDrawingTerritory()/finishActiveTerritory() (both already
+// reset the form themselves), so dropping the extra reset costs nothing
+// and stops it from clobbering input entered before "DRAW POLYGON".
+window.startDrawingTerritory = function() { window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('btn-undo-territory-vertex').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; const closeBtn1 = document.getElementById('btn-close-territory-panel'); if (closeBtn1) closeBtn1.style.display = 'none'; window.updateToolButtonStyles(); };
 
 // Loads an existing territory's vertices/name/color/faction back into the
 // draw state so the DM can add/remove waypoints and save in place (an
@@ -425,6 +455,7 @@ window.startEditTerritory = function(territoryId) {
     document.getElementById('btn-undo-territory-vertex').style.display = 'block';
     document.getElementById('territory-drawing-status').style.display = 'block';
     document.getElementById('territory-drawing-status').innerText = `Editing "${t.name || 'New Sector'}" — Nodes: ${window.activeTerritoryVertices.length}`;
+    const closeBtn2 = document.getElementById('btn-close-territory-panel'); if (closeBtn2) closeBtn2.style.display = 'none';
     window.updateToolButtonStyles();
 };
 
@@ -450,7 +481,7 @@ window.finishActiveTerritory = async function() {
     if (error) { alert("Failed to save territory: " + error.message); return; }
     window.cancelDrawingTerritory(); if (typeof window.loadTerritories === 'function') window.loadTerritories();
 };
-window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; resetTerritoryFormFields(); document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('btn-undo-territory-vertex').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; window.updateToolButtonStyles(); };
+window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; resetTerritoryFormFields(); document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('btn-undo-territory-vertex').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; const closeBtn3 = document.getElementById('btn-close-territory-panel'); if (closeBtn3) closeBtn3.style.display = ''; window.updateToolButtonStyles(); };
 
 /* --- TERRITORY FACTION OWNERSHIP FLIP ---
    Territories were purely cosmetic before this — drawing one and assigning
