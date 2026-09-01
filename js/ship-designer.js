@@ -1110,6 +1110,11 @@ window.renderSecretRepoEditorPanel = function() {
             </div>
             <div id="secretrepo-cargo-list" style="margin-bottom:10px;">${cargoHtml}</div>
             <div style="background:#030403; padding:8px; border:1px solid #00e5a3; border-radius:2px;">
+                <label for="repo-cargo-catalog-pick" style="font-size:9px; color:#6b826a;">Pick from Catalog</label>
+                <select id="repo-cargo-catalog-pick" style="width:100%; margin-bottom:6px; border-color:#00e5a3;" onchange="window.applyCargoCatalogPick('repo', this.value)">
+                    <option value="">-- Custom / Free-Text Item --</option>
+                    ${(typeof window.renderCargoCatalogOptionsHtml === 'function') ? window.renderCargoCatalogOptionsHtml() : ''}
+                </select>
                 <label for="repo-cargo-name" style="font-size:9px; color:#6b826a;">Add Cargo Item</label>
                 <div style="display:flex; gap:6px;">
                     <input type="text" id="repo-cargo-name" placeholder="Item Name" style="flex:2; border-color:#00e5a3;">
