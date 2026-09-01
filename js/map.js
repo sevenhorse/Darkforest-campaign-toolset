@@ -55,6 +55,30 @@ function applyPlanetaryOverrides(bodies) {
             resources: o.custom_resources ?? b.resources };
     });
 }
+// Bug fix (DM report, 2026-09-01): the render loop has its OWN eligibility
+// checks -- separate from getSystemBodiesRaw above -- that also
+// short-circuited on system.type === 'Nebula' in four places (focus
+// eligibility, the selected-target focus override, the actual orbit-draw
+// call, and the click hit-test). Those checks predate custom stars
+// entirely, written back when 'Nebula' could only mean a procedural gas
+// cloud with zero planets -- so even after the getSystemBodiesRaw fix
+// above started correctly RETURNING a Dense-Nebula-hazard custom star's
+// real custom_bodies, none of these four gates let that reach the
+// screen: the system was excluded from ever winning "focus" and excluded
+// from the orbit-draw call entirely, regardless of its distance from
+// every other star. Confirmed live: Tartarus Prime (hazard: Dense
+// Nebula, real custom planets), moved deliberately far from every other
+// system, still showed no planets zoomed in and centered -- ruling out
+// remaining focus/distance contention and pointing straight at these
+// type-based gates instead. This helper is now the one place that
+// decides "can this system ever show orbiting bodies": true for every
+// non-Nebula system, and true for a Nebula-typed system that still has
+// real custom_bodies (i.e. a custom star whose only 'Nebula'-ness is its
+// DM-picked hazard flavor, not an actual empty procedural gas cloud).
+function systemCanHaveBodies(s) {
+    if (s.type !== 'Nebula') return true;
+    return !!(s.custom_bodies && s.custom_bodies.length > 0);
+}
 window.getSystemBodies = function(system) { return applyPlanetaryOverrides(getSystemBodiesRaw(system)); };
 function getSystemBodiesRaw(system) {
     // Bug fix (DM report: "scanned it and do not see my custom planets
@@ -362,6 +386,50 @@ window.renderArchitectPlanets = function() {
     });
     cont.innerHTML = html;
 };
+
+/* OVERSEER STAR EDITOR — Planet Manifest (DM edit-EXISTING-system flow,
+   2026-09-01, DM report: "can we add in the ability to edit fully a
+   spawned system from the main map"). Separate state from System
+   Architect's own architectPlanets above -- that one is create-only and
+   gets reset to [] every time System Architect opens; this one holds the
+   in-progress edit for whichever custom star is currently selected, and
+   is intentionally NOT reset just because renderHUDTelemetry re-runs (it
+   runs on plain selection/hover churn, not just when the DM actually
+   wants a fresh copy) -- only reset when the selected star's id actually
+   changes, so mid-edit typing survives incidental re-renders. */
+let editingStarBodyId = null; let editingStarBodies = [];
+window.addEditStarPlanetRow = function() { let count = editingStarBodies.length + 1; editingStarBodies.push({ name: `Planet ${count}`, type: 'Terrestrial', gravity: '1.0 G', atmosphere: 'Breathable', resources: 'Unknown', radius: 20 + count * 25, size: 1.6, color: '#4287f5' }); window.renderEditStarPlanets(); };
+window.removeEditStarPlanetRow = function(idx) { editingStarBodies.splice(idx, 1); window.renderEditStarPlanets(); };
+window.buildEditStarPlanetsHtml = function() {
+    if (editingStarBodies.length === 0) { return `<span style="font-size:10px; color:#6b826a;">No custom planets.</span>`; }
+    let html = '';
+    editingStarBodies.forEach((p, idx) => {
+        // Confirmed design choice (DM, 2026-09-01): removing a planet row
+        // here and saving silently discards any Overseer Planet Editor
+        // scan override saved on it (planetary_modifiers, keyed by
+        // body_id) -- retyping/editing a row in place keeps its id and
+        // therefore its override. The warning below is the only signal
+        // before that happens; there's no separate confirmation dialog.
+        const hasOverride = !!(p.id && window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id]);
+        html += `<div style="background:#030403; border:1px solid #3c4e36; padding:6px; border-radius:2px; font-size:10px; margin-top:4px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <input type="text" value="${p.name}" onchange="editingStarBodies[${idx}].name=this.value" style="font-size:10px; padding:2px; width:140px; margin:0;">
+                    <select onchange="editingStarBodies[${idx}].type=this.value; editingStarBodies[${idx}].color=getPlanetColor(this.value, Math.random); window.renderEditStarPlanets();" style="font-size:10px; margin:0; width:110px;">
+                        <option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option>
+                        <option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option>
+                        <option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option>
+                    </select>
+                    <button class="layer-del" onclick="window.removeEditStarPlanetRow(${idx})" style="padding:1px 5px; font-size:9px;">✕</button>
+                </div>
+                <div style="display:flex; gap:6px;">
+                    <input type="text" placeholder="Gravity" value="${p.gravity}" onchange="editingStarBodies[${idx}].gravity=this.value" style="font-size:9px; padding:2px; flex:1; margin:0;">
+                    <input type="text" placeholder="Atmosphere" value="${p.atmosphere}" onchange="editingStarBodies[${idx}].atmosphere=this.value" style="font-size:9px; padding:2px; flex:1; margin:0;">
+                    <input type="text" placeholder="Resource Scans" value="${p.resources}" onchange="editingStarBodies[${idx}].resources=this.value" style="font-size:9px; padding:2px; flex:2; margin:0;">
+                </div>${hasOverride ? `<div style="font-size:8px; color:#ffaa00; margin-top:3px;">⚠ has a saved scan override — removing this row and saving will discard it</div>` : ''}</div>`;
+    });
+    return html;
+};
+window.renderEditStarPlanets = function() { const cont = document.getElementById('edit-star-planets-container'); if (cont) cont.innerHTML = window.buildEditStarPlanetsHtml(); };
 
 window.commitArchitectSystem = async function() {
     if (currentUserRole !== 'dm') return;
@@ -1281,7 +1349,42 @@ window.saveDMStarProperties = async function(id) {
     const name = document.getElementById('edit-star-name').value; const ownership = document.getElementById('edit-star-ownership').value; const control = document.getElementById('edit-star-control') ? document.getElementById('edit-star-control').value : undefined; const luminosity = document.getElementById('edit-star-luminosity').value; const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
     const payload = { name, ownership, luminosity, industry_tier: tier };
     if (control !== undefined) payload.control = control;
-    await db.from('star_systems').update(payload).eq('id', id);
+    // Full System Editor extension (2026-09-01, DM report: "can we add in
+    // the ability to edit fully a spawned system from the main map"):
+    // Hazard, Multiplicity, and the planet manifest itself are now
+    // editable here too, not just at System Architect creation time.
+    // edit-star-hazard only exists on the full custom-system Overseer
+    // Star Editor box (not the smaller procedural-system Ownership/
+    // Control override box that also calls into this same table), so its
+    // presence is what gates all of this extra work.
+    const hazardEl = document.getElementById('edit-star-hazard'); const multiEl = document.getElementById('edit-star-multi');
+    let removedOverrideIds = [];
+    if (hazardEl) {
+        payload.hazard = hazardEl.value;
+        payload.multiType = multiEl ? multiEl.value : 'Single';
+        // Per-planet id stability (confirmed design, DM 2026-09-01): a
+        // body's id is either already stored in custom_bodies, or (for
+        // rows saved before ids existed on this table) synthesized from
+        // array position the same way getSystemBodiesRaw's own fallback
+        // does -- editingStarBodies was populated with that exact same
+        // fallback when this box opened, so "kept" ids line up correctly
+        // here. Any id present in the star's CURRENT saved custom_bodies
+        // but absent from editingStarBodies was deliberately removed in
+        // this editing session, and its planetary_modifiers scan override
+        // (if any) is discarded below, per the confirmed "discard
+        // silently on removal, keep on retype" behavior -- a row that's
+        // just been retyped keeps its id, so its override survives.
+        const keptIds = new Set(editingStarBodies.map(b => b.id).filter(Boolean));
+        const currentStar = (globalDbSystemsCache || []).find(x => x.id === id);
+        removedOverrideIds = ((currentStar && currentStar.custom_bodies) || []).map(b => b.id).filter(bid => bid && !keptIds.has(bid));
+        payload.custom_bodies = editingStarBodies.map((b, idx) => ({ ...b, isStar: false, radius: b.radius || (25 + (idx + 1) * 30), baseAngle: b.baseAngle != null ? b.baseAngle : idx * 1.25, speed: b.speed || (0.0002 / (idx + 1)) }));
+    }
+    const { error } = await db.from('star_systems').update(payload).eq('id', id);
+    if (error) { alert("Failed to save: " + error.message); return; }
+    for (const rid of removedOverrideIds) {
+        await db.from('planetary_modifiers').delete().eq('body_id', rid);
+        if (window.globalPlanetaryModifiersCache) delete window.globalPlanetaryModifiersCache[rid];
+    }
     alert("Parameters updated.");
     if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
     // Bug fix (pre-deploy review): loadGalaxyData rebuilds globalDbSystemsCache
@@ -1295,6 +1398,10 @@ window.saveDMStarProperties = async function(id) {
         if (window.selectedTarget && window.selectedTarget.data && window.selectedTarget.data.id === id) Object.assign(window.selectedTarget.data, refreshed);
         if (window.hoveredTarget && window.hoveredTarget.data && window.hoveredTarget.data.id === id) Object.assign(window.hoveredTarget.data, refreshed);
     }
+    // Force a fresh re-derive of the Planet Manifest editor state from the
+    // just-saved (now-canonical) custom_bodies on next render, rather than
+    // continuing to trust the in-memory editingStarBodies array.
+    editingStarBodyId = null;
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 
@@ -1584,7 +1691,7 @@ window.initGalaxyEngine = function() {
                 // see full body data (resources/atmosphere/gravity) that was
                 // never actually revealed. Gate the hit-test the same way.
                 if (window.getFowTier(s) !== 3 || (window._radarFocusedSystem && s.id !== window._radarFocusedSystem.id)) continue;
-                if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < 250 && s.type !== 'Nebula') {
+                if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < 250 && systemCanHaveBodies(s)) {
                     for (let b of window.getSystemBodies(s)) {
                         let angle = b.baseAngle + (time * b.speed); let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
                         if (Math.hypot(bx - worldPos.x, by - worldPos.y) < (b.isStar ? starHitRadius : planetHitRadius)) { 
@@ -1790,11 +1897,26 @@ window.initGalaxyEngine = function() {
                     <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Ownership:</label><input type="text" id="edit-star-ownership" value="${s.ownership || 'Unclaimed'}" style="font-size:10px; margin:2px 0;">
                     <label style="font-size:9px; color:#6b826a; display:block;">Control:</label><input type="text" id="edit-star-control" value="${s.control || 'None'}" style="font-size:10px; margin:2px 0;">`;
                 if (s.isCustom) {
+                    // Full System Editor extension (2026-09-01, DM report:
+                    // "can we add in the ability to edit fully a spawned
+                    // system from the main map") -- Hazard, Multiplicity,
+                    // and the Planet Manifest (add/remove/edit existing
+                    // custom_bodies) joined the pre-existing Name/Class/
+                    // Tier/Ownership/Control fields below. editingStarBodies
+                    // only re-derives from s.custom_bodies when the
+                    // SELECTED star actually changes, so switching tabs or
+                    // an incidental re-render mid-edit doesn't wipe typing.
+                    if (editingStarBodyId !== s.id) {
+                        editingStarBodyId = s.id;
+                        editingStarBodies = (s.custom_bodies || []).map((b, idx) => ({ ...b, id: b.id || `${s.id}-custom-${idx}` }));
+                    }
                     dmEditorBox = `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;">
                         <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER STAR EDITOR</span>
                         <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Name:</label><input type="text" id="edit-star-name" value="${s.name}" style="font-size:10px; margin:2px 0;">
                         ${ownershipControlFields}
                         <div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Class:</label><select id="edit-star-luminosity" style="font-size:9px; margin:2px 0;"><option value="Class G (Yellow)" ${s.luminosity==='Class G (Yellow)'?'selected':''}>Class G</option><option value="Class M (Red Dwarf)" ${s.luminosity==='Class M (Red Dwarf)'?'selected':''}>Class M</option><option value="Class O (Blue Giant)" ${s.luminosity==='Class O (Blue Giant)'?'selected':''}>Class O</option><option value="Black Hole" ${s.luminosity==='Black Hole'?'selected':''}>Black Hole</option><option value="Hidden Anomaly" ${s.luminosity==='Hidden Anomaly'?'selected':''}>Hidden Anomaly</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Tier:</label><input type="number" id="edit-star-tier" value="${s.industry_tier || 0}" style="font-size:10px; margin:2px 0;"></div></div>
+                        <div style="display:flex; gap:6px; margin-top:4px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Multiplicity:</label><select id="edit-star-multi" style="font-size:9px; margin:2px 0;"><option value="Single" ${(s.multiType||'Single')==='Single'?'selected':''}>Single Star</option><option value="Binary" ${s.multiType==='Binary'?'selected':''}>Binary Stars</option><option value="Trinary" ${s.multiType==='Trinary'?'selected':''}>Trinary Stars</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Hazard:</label><select id="edit-star-hazard" style="font-size:9px; margin:2px 0; background:#0a1410; color:#ffaa00; border-color:#ffaa00;"><option value="None" ${(s.hazard||'None')==='None'?'selected':''}>Clear Sector (No Hazards)</option><option value="Nebula" ${s.hazard==='Nebula'?'selected':''}>Dense Nebula (Shields Offline / EMCON)</option><option value="Pulsar" ${s.hazard==='Pulsar'?'selected':''}>Pulsar Radiation (Double Weapon Overheat)</option><option value="Gravity Well" ${s.hazard==='Gravity Well'?'selected':''}>High Gravity Accretion (2x FTL Fuel Cost)</option></select></div></div>
+                        <div style="margin-top:6px; border-top:1px solid #3c4e36; padding-top:6px;"><div style="display:flex; justify-content:space-between; align-items:center;"><span style="font-size:10px; color:#00e5a3; font-weight:bold;">Planet Manifest</span><button class="btn-reveal" onclick="window.addEditStarPlanetRow()" style="font-size:9px; padding:2px 8px; width:auto; margin:0;">+ ADD PLANET</button></div><div id="edit-star-planets-container">${window.buildEditStarPlanetsHtml()}</div></div>
                         <button class="btn-reveal" onclick="window.saveDMStarProperties('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">SAVE SYSTEM</button>
                         <button class="btn-remove" onclick="window.deleteStarSystem('${s.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DESTROY</button></div>`;
                 } else {
@@ -2013,7 +2135,7 @@ window.initGalaxyEngine = function() {
         if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD) {
             let nearestDist = Infinity;
             for (let s of allSystems) {
-                if (s.type === 'Nebula') continue;
+                if (!systemCanHaveBodies(s)) continue;
                 let d = Math.hypot(s.x - cx, s.y - cy);
                 if (d < nearestDist) { nearestDist = d; focusedSystemId = s.id; focusedSystemObj = s; }
             }
@@ -2033,7 +2155,7 @@ window.initGalaxyEngine = function() {
             // from somewhere else in the galaxy can't permanently hijack
             // focus from whatever's actually in view once you've panned away.
             const sel = window.selectedTarget;
-            if (sel && sel.type === 'star' && sel.data.type !== 'Nebula' && Math.abs(sel.data.x - cx) <= hw + 200 && Math.abs(sel.data.y - cy) <= hh + 200) {
+            if (sel && sel.type === 'star' && systemCanHaveBodies(sel.data) && Math.abs(sel.data.x - cx) <= hw + 200 && Math.abs(sel.data.y - cy) <= hh + 200) {
                 focusedSystemObj = sel.data; focusedSystemId = sel.data.id;
             }
         }
@@ -2061,7 +2183,7 @@ window.initGalaxyEngine = function() {
                 }
             }
 
-            if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD && s.type !== 'Nebula' && fowTier === 3 && s.id === focusedSystemId) {
+            if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD && systemCanHaveBodies(s) && fowTier === 3 && s.id === focusedSystemId) {
                 for (let b of window.getSystemBodies(s)) {
                     let angle = b.baseAngle + (time * b.speed); let bx = s.x + Math.cos(angle) * b.radius; let by = s.y + Math.sin(angle) * b.radius;
                     ctx.beginPath(); ctx.arc(s.x, s.y, b.radius, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(0, 229, 163, 0.12)'; ctx.lineWidth = 1 / window.camera.zoom; ctx.stroke();
