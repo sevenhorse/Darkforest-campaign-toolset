@@ -17,6 +17,102 @@
    window.getPerkBonusFor's new DB-driven implementation. */
 
 
+/* --- CARGO ITEM CATALOG ---
+   DB-backed catalog (cargo_item_catalog table) of named cargo items, built
+   this session from the U.N.S. Intrepid Horizon / Task Force Black supply
+   manifest (51 seeded items). Lets the "Add Cargo Entry" form here and the
+   Secret Repository's cargo editor (js/ship-designer.js) offer a pick-list
+   instead of only free text, while still allowing custom one-off items.
+   Same "catalog/definition" RLS convention as perk_definitions etc. --
+   anyone can read/pick; only the DM sees the add/remove editor (gated in
+   js/db.js's handleLogin, same as every other DM-only element on screen). */
+let cargoItemCatalogList = [];
+
+window.loadCargoItemCatalog = async function() {
+    const { data, error } = await db.from('cargo_item_catalog').select('*').order('manifest_section', { ascending: true }).order('name', { ascending: true });
+    if (error) { console.error('Failed to load cargo item catalog:', error.message); return; }
+    cargoItemCatalogList = data || [];
+    if (typeof window.renderCargoCatalogPickers === 'function') window.renderCargoCatalogPickers();
+    if (typeof window.renderCargoCatalogDmList === 'function') window.renderCargoCatalogDmList();
+};
+
+// Shared <optgroup>-by-manifest-section option list, used both by the main
+// Cargo Deck's static picker (populated on load via renderCargoCatalogPickers)
+// and by the Secret Repository cargo editor's picker (which is rebuilt fresh
+// every render, so it just calls this directly at template-build time).
+window.renderCargoCatalogOptionsHtml = function() {
+    const bySection = {};
+    cargoItemCatalogList.forEach(item => {
+        const sec = item.manifest_section || 'Other';
+        if (!bySection[sec]) bySection[sec] = [];
+        bySection[sec].push(item);
+    });
+    return Object.keys(bySection).sort().map(sec => {
+        const opts = bySection[sec].map(item => `<option value="${item.id}">${item.name}${item.unit ? ' (' + item.unit + ')' : ''}</option>`).join('');
+        return `<optgroup label="${sec}">${opts}</optgroup>`;
+    }).join('');
+};
+
+// Repopulates the static (not re-rendered-per-frame) pickers -- currently
+// just the main Cargo Deck's #new-cargo-catalog-pick. The Secret Repository
+// picker rebuilds itself inline each render instead (see ship-designer.js).
+window.renderCargoCatalogPickers = function() {
+    const sel = document.getElementById('new-cargo-catalog-pick');
+    if (sel) sel.innerHTML = '<option value="">-- Custom / Free-Text Item --</option>' + window.renderCargoCatalogOptionsHtml();
+};
+
+// idPrefix is 'new' (main Cargo Deck form, #new-cargo-*) or 'repo' (Secret
+// Repository cargo form, #repo-cargo-*) -- both forms happen to already use
+// that exact id-suffix convention, so one function serves both.
+window.applyCargoCatalogPick = function(idPrefix, catalogId) {
+    if (!catalogId) return;
+    const item = cargoItemCatalogList.find(c => c.id === catalogId);
+    if (!item) return;
+    const nameEl = document.getElementById(idPrefix + '-cargo-name');
+    const unitEl = document.getElementById(idPrefix + '-cargo-unit');
+    const catEl = document.getElementById(idPrefix + '-cargo-category');
+    if (nameEl) nameEl.value = item.name;
+    if (unitEl) unitEl.value = item.unit || '';
+    if (catEl) catEl.value = item.category;
+    // Quantity is deliberately left for the DM/player to fill in -- the
+    // catalog doesn't have an opinion on how much of something you're adding.
+};
+
+window.addCargoCatalogItem = async function() {
+    if (currentUserRole !== 'dm') return;
+    const nameInput = document.getElementById('catalog-new-name');
+    const name = nameInput.value.trim();
+    if (!name) { alert("Enter an item name."); return; }
+    const code = document.getElementById('catalog-new-code').value.trim() || null;
+    const unit = document.getElementById('catalog-new-unit').value.trim() || null;
+    const category = document.getElementById('catalog-new-category').value;
+    const manifest_section = document.getElementById('catalog-new-section').value.trim() || null;
+    const notes = document.getElementById('catalog-new-notes').value.trim() || null;
+    const { error } = await db.from('cargo_item_catalog').insert({ code, name, unit, category, manifest_section, notes });
+    if (error) { alert("Failed to add catalog item: " + error.message); return; }
+    document.getElementById('catalog-new-code').value = '';
+    nameInput.value = '';
+    document.getElementById('catalog-new-unit').value = '';
+    document.getElementById('catalog-new-section').value = '';
+    document.getElementById('catalog-new-notes').value = '';
+    window.loadCargoItemCatalog();
+};
+
+window.deleteCargoCatalogItem = async function(id) {
+    if (currentUserRole !== 'dm') return;
+    if (!confirm("Remove this item from the catalog? This does not affect cargo already stored on any ship.")) return;
+    const { error } = await db.from('cargo_item_catalog').delete().eq('id', id);
+    if (error) { alert("Failed to remove catalog item: " + error.message); return; }
+    window.loadCargoItemCatalog();
+};
+
+window.renderCargoCatalogDmList = function() {
+    const container = document.getElementById('cargo-catalog-dm-list');
+    if (!container) return;
+    if (!cargoItemCatalogList.length) { container.innerHTML = '<div style="font-size:9px; color:#6b826a;">No catalog items yet.</div>'; return; }
+    container.innerHTML = cargoItemCatalogList.map(c => `<div style="display:flex; justify-content:space-between; align-items:center; font-size:9px; padding:3px 0; border-bottom:1px solid #1c261a;"><span>${c.name} <span style="color:#6b826a;">(${c.category}${c.unit ? ', ' + c.unit : ''})</span></span><button onclick="window.deleteCargoCatalogItem('${c.id}')" style="font-size:8px; padding:1px 5px;">✕</button></div>`).join('');
+};
+
 window.sanitizeCargo = function(inv) {
     if (!inv || typeof inv !== 'object' || Object.keys(inv).length === 0) {
         inv = {
