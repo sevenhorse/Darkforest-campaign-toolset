@@ -57,8 +57,26 @@ function applyPlanetaryOverrides(bodies) {
 }
 window.getSystemBodies = function(system) { return applyPlanetaryOverrides(getSystemBodiesRaw(system)); };
 function getSystemBodiesRaw(system) {
-    if(system.type === 'Nebula') return [];
+    // Bug fix (DM report: "scanned it and do not see my custom planets
+    // around it"): custom_bodies must be checked BEFORE the Nebula
+    // short-circuit below, not after. A custom star tagged with the
+    // "Dense Nebula" environmental hazard gets system.type === 'Nebula'
+    // (see the globalDbSystemsCache mapping in loadGalaxyData: type is
+    // derived from hazard === 'Nebula', not a separate "this field has no
+    // star at all" flag) -- so with the old ordering, ANY custom star that
+    // merely had Dense Nebula picked as its hazard flavor had its real,
+    // DM-placed custom_bodies unconditionally discarded, even though they
+    // were saved correctly in the DB (confirmed directly against the live
+    // schema: Tartarus Prime's row has all 7 planets intact in
+    // custom_bodies, just never reachable through this function). The
+    // Nebula short-circuit only actually needs to apply to a PROCEDURAL
+    // nebula field, which never has custom_bodies set at all (that column
+    // only exists on this table's own custom stars) -- so checking
+    // custom_bodies first changes nothing for a real procedural nebula
+    // (still falls through to the empty-array line below) and only fixes
+    // the custom-star-with-Nebula-hazard case.
     if (system.custom_bodies && Array.isArray(system.custom_bodies) && system.custom_bodies.length > 0) { return system.custom_bodies.map((b, idx) => ({ ...b, id: b.id || `${system.id}-custom-${idx}`, baseAngle: b.baseAngle || (idx * 1.2), speed: b.speed || (0.0002 / (idx + 1)), parentSystem: system })); }
+    if(system.type === 'Nebula') return [];
     if(generatedSystems[system.id]) return generatedSystems[system.id];
     
     let seed = stringToHash(system.id.toString()); let prng = mulberry32(seed); let bodies = []; let r = system.type === 'Black Hole' ? 40 : 15; 
