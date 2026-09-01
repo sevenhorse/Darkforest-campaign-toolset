@@ -157,6 +157,21 @@ window.discoveredHyperlaneNodes = new Set(JSON.parse(localStorage.getItem('odyss
 // (see startEditHyperlane), so this fallback is self-healing over time.
 function hyperlaneNodeKey(route, node, index) { return node.id || (route.id + '-n' + index); }
 function updateHyperlaneDiscovery() {
+    // Bug fix (DM reported "routes do not obey FOW"): isPositionSensorVisible
+    // short-circuits true unconditionally for role 'dm' (by design -- DM sees
+    // everything), but this function used to run for the DM exactly like
+    // everyone else, which meant the FIRST time a DM's browser ever rendered
+    // the map, every node of every route got marked "discovered" -- forever,
+    // via this same browser's localStorage. On a shared screen/browser (this
+    // campaign's own established pattern of testing a "player" account from
+    // the DM's own already-logged-in browser tab, see darkforest-history.md),
+    // that leaves any player account later logged into that SAME physical
+    // browser with full route reveal it never actually earned via sensor
+    // range. The DM's own omniscience is handled entirely on the read side
+    // now (see the render() call site below) -- this function no longer
+    // needs to run for the DM at all, so it no longer writes anything to
+    // this shared, persistent set on a DM's behalf.
+    if (currentUserRole === 'dm') return;
     let changed = false;
     globalHyperlanesCache.forEach(route => {
         (route.nodes || []).forEach((node, idx) => {
@@ -1895,7 +1910,13 @@ window.initGalaxyEngine = function() {
                 // as a hidden hazard zone (no partial hint).
                 for (let k = 0; k < route.nodes.length - 1; k++) {
                     const a = route.nodes[k], b = route.nodes[k + 1];
-                    if (!window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, a, k)) || !window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, b, k + 1))) continue;
+                    // DM is unconditionally omniscient (matches isPositionSensorVisible's
+                    // own DM short-circuit elsewhere) -- draw every segment directly for
+                    // the DM rather than consulting the discovered-node set below, which
+                    // exists ONLY to give a non-DM player a persistent memory of what
+                    // they've actually had real sensor coverage over. See the bug fix
+                    // note on updateHyperlaneDiscovery above for the full writeup.
+                    if (currentUserRole !== 'dm' && (!window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, a, k)) || !window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, b, k + 1)))) continue;
                     ctx.save(); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
                     ctx.strokeStyle = route.color || '#00e1ff'; ctx.lineWidth = 3 / window.camera.zoom; ctx.shadowColor = route.color || '#00e1ff'; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0; ctx.restore();
                 }
