@@ -331,6 +331,10 @@
                         </div>
                         <div class="sheet-section" style="border-color: #00e5a3; background: rgba(0, 229, 163, 0.03);">
                             <h4 style="border-bottom: 1px solid #00e5a3; padding-bottom: 4px; color: #00e5a3;">+ Add Cargo Entry</h4>
+                            <label for="new-cargo-catalog-pick" style="font-size: 10px; color: #6b826a;">Pick from Catalog (optional):</label>
+                            <select id="new-cargo-catalog-pick" style="font-size:10px; margin:2px 0;" onchange="window.applyCargoCatalogPick('new', this.value)">
+                                <option value="">-- Custom / Free-Text Item --</option>
+                            </select>
                             <label for="new-cargo-category" style="font-size: 10px; color: #6b826a;">Target Category:</label>
                             <select id="new-cargo-category" style="font-size:10px; margin:2px 0;">
                                 <option value="perishables">Perishables</option>
@@ -351,6 +355,32 @@
                             </div>
                             <button class="btn-reveal" onclick="window.addNewCargoEntry()" style="margin-top: 12px; font-size:11px;">+ STORE IN HOLD</button>
                         </div>
+                    </div>
+
+                    <!-- DM-only: extend the shared cargo catalog with new item
+                         definitions. Gated the same way every other DM-only
+                         element on this screen is (see js/db.js handleLogin,
+                         data.role === 'dm' block) -- hidden by default here,
+                         revealed via .style.display = 'block' on login. -->
+                    <div id="cargo-catalog-dm-editor" style="display:none; margin-top:20px; background: rgba(255, 51, 51, 0.03); border: 1px solid #ff3333; border-radius: 2px; padding: 12px;">
+                        <h4 style="border-bottom: 1px solid #ff3333; padding-bottom: 4px; color: #ff6b6b; margin-top:0;">⚠ OVERSEER: Cargo Catalog Editor</h4>
+                        <p style="font-size:9px; color:#6b826a; margin:0 0 8px 0;">Items added here become pickable from the catalog dropdown above, and in the Secret Repository cargo editor, for everyone. Removing an item here does not affect cargo already stored on any ship.</p>
+                        <div style="display:grid; grid-template-columns: 1fr 2fr 1fr 1fr; gap:8px;">
+                            <input type="text" id="catalog-new-code" placeholder="Code (optional)" style="font-size:10px;">
+                            <input type="text" id="catalog-new-name" placeholder="Item Name (required)" style="font-size:10px;">
+                            <input type="text" id="catalog-new-unit" placeholder="Unit" style="font-size:10px;">
+                            <select id="catalog-new-category" style="font-size:10px;">
+                                <option value="perishables">Perishables</option>
+                                <option value="expendables">Expendables</option>
+                                <option value="misc">Misc</option>
+                            </select>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:6px;">
+                            <input type="text" id="catalog-new-section" placeholder="Manifest Section (e.g. Ordnance & Kinetic Munitions)" style="flex:1; font-size:10px;">
+                            <input type="text" id="catalog-new-notes" placeholder="Notes (optional)" style="flex:1; font-size:10px;">
+                        </div>
+                        <button class="btn-reveal" onclick="window.addCargoCatalogItem()" style="margin-top: 8px; font-size:10px; border-color:#ff3333; color:#ff6b6b;">+ ADD TO CATALOG</button>
+                        <div id="cargo-catalog-dm-list" style="margin-top:12px; max-height: 22vh; overflow-y:auto;"></div>
                     </div>
                 </div>
 
@@ -1485,14 +1515,14 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.30"></script>
+    <script src="js/db.js?v=3.31"></script>
     <script src="js/audio.js?v=3.17"></script>
     <script src="js/ui.js?v=3.40"></script>
-    <script src="js/combat.js?v=3.51"></script>
+    <script src="js/combat.js?v=3.52"></script>
     <script src="js/squadrons.js?v=1.4"></script>
     <script src="js/strike-craft-designer.js?v=1.0"></script>
     <script src="js/colonies.js?v=3.17"></script>
-    <script src="js/ship-designer.js?v=3.28"></script>
+    <script src="js/ship-designer.js?v=3.29"></script>
     <script src="js/perk-designer.js?v=3.16"></script>
     <script src="js/augment-designer.js?v=1.3"></script>
     <script src="js/gear-designer.js?v=1.2"></script>
