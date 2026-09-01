@@ -2017,6 +2017,25 @@ window.initGalaxyEngine = function() {
                 let d = Math.hypot(s.x - cx, s.y - cy);
                 if (d < nearestDist) { nearestDist = d; focusedSystemId = s.id; focusedSystemObj = s; }
             }
+            // Bug fix (DM report, same investigation as the Nebula-hazard
+            // custom-planet fix above): pure nearest-to-exact-center-pixel
+            // meant that in a dense cluster (the comment above already called
+            // this case out), a star you deliberately selected/centered on
+            // could still lose the single "focused" orbit-render slot to a
+            // procedural neighbor that happened to sit a few world-units
+            // closer to dead-center -- confirmed live: Tartarus Prime,
+            // perfectly centered and zoomed in, still lost focus to "Arm
+            // Alpha-1472" this way. Whatever the player/DM has actually
+            // SELECTED (clicked, scanned, located) now wins outright over
+            // raw distance, but ONLY when it's still on-screen right now --
+            // same viewport-cull bounds (hw+200/hh+200) already used just
+            // below for whether a system draws at all -- so an old selection
+            // from somewhere else in the galaxy can't permanently hijack
+            // focus from whatever's actually in view once you've panned away.
+            const sel = window.selectedTarget;
+            if (sel && sel.type === 'star' && sel.data.type !== 'Nebula' && Math.abs(sel.data.x - cx) <= hw + 200 && Math.abs(sel.data.y - cy) <= hh + 200) {
+                focusedSystemObj = sel.data; focusedSystemId = sel.data.id;
+            }
         }
         window._radarFocusedSystem = focusedSystemObj;
 
