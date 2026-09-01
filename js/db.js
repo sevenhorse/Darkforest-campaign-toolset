@@ -146,6 +146,8 @@ async function fetchUserProfile(user) {
         document.getElementById('dm-scratchpad-toggle-btn').style.display = 'inline-block';
         document.getElementById('territory-tool-toggle-btn').style.display = 'inline-block';
         document.getElementById('codex-dm-creator-panel').style.display = 'block';
+        const cargoCatalogDmEditor = document.getElementById('cargo-catalog-dm-editor');
+        if (cargoCatalogDmEditor) cargoCatalogDmEditor.style.display = 'block';
         document.getElementById('codex-permission-indicator').innerText = '● OVERSEER AUTHORIZATION';
         document.getElementById('codex-permission-indicator').style.color = '#ff6b6b';
         
@@ -191,6 +193,7 @@ async function fetchUserProfile(user) {
     if (typeof loadAugmentDefinitions === 'function') loadAugmentDefinitions();
     if (typeof loadGearDefinitions === 'function') loadGearDefinitions();
     if (typeof window.loadStrikeCraftTemplates === 'function') window.loadStrikeCraftTemplates();
+    if (typeof window.loadCargoItemCatalog === 'function') window.loadCargoItemCatalog();
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
     loadSystemOwnershipOverrides();
