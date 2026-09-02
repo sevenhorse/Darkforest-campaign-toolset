@@ -227,6 +227,69 @@ function updateHyperlaneDiscovery() {
     if (changed) localStorage.setItem('odyssey_discovered_hyperlane_nodes', JSON.stringify([...window.discoveredHyperlaneNodes]));
 }
 
+/* --- FOW RESET SYNC (DM Maintenance panel, 2026-09-02, DM request: "add a
+   way to reset FOW to the players without wiping all data") ---
+   Verified against the actual codebase before building anything: both
+   window.scannedSystems (js/db.js) and window.discoveredHyperlaneNodes
+   above are per-browser localStorage ONLY -- never DB-synced. That means
+   a DM-side button, by itself, has no way to reach into a player's own
+   browser and clear their FOW state; something server-side has to sit in
+   between. fow_reset_state is a new singleton table (id=1, same
+   one-row-plus-realtime-channel pattern as campaign_clock) holding
+   nothing but reset_epoch, a counter the DM bumps. Every client --
+   including the DM's own browser -- compares that epoch against its own
+   last-applied epoch (a third localStorage key) both at login and live
+   via realtime, and wipes ONLY its local FOW state the moment it sees a
+   newer epoch. No other table is touched by any of this.
+   Confirmed design (DM, 2026-09-02): one combined action clears BOTH
+   scanned systems and discovered hyperlanes together, targets every
+   player at once (not a per-player pick), and applies live to anyone
+   online right now, not just on next login. */
+window.applyFowResetIfNewer = function(serverEpoch) {
+    const localEpoch = parseInt(localStorage.getItem('odyssey_fow_reset_epoch') || '0');
+    if (!(serverEpoch > localEpoch)) return;
+    window.scannedSystems = [];
+    window.discoveredHyperlaneNodes = new Set();
+    localStorage.setItem('odyssey_scanned', '[]');
+    localStorage.setItem('odyssey_discovered_hyperlane_nodes', '[]');
+    localStorage.setItem('odyssey_fow_reset_epoch', String(serverEpoch));
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+};
+
+window.initFowResetSync = async function() {
+    try {
+        const { data } = await db.from('fow_reset_state').select('reset_epoch').eq('id', 1).maybeSingle();
+        if (data) window.applyFowResetIfNewer(data.reset_epoch);
+    } catch (e) { /* table unreachable this load -- next login/realtime message catches up */ }
+
+    db.channel('fow_reset_state_stream')
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'fow_reset_state' }, (payload) => {
+            if (!payload.new) return;
+            window.applyFowResetIfNewer(payload.new.reset_epoch);
+        })
+        .subscribe();
+};
+
+window.resetFowForAllPlayers = async function() {
+    if (currentUserRole !== 'dm') return;
+    if (!(await window.showConfirmModal("Reset Fog of War for ALL players? Every DRADIS-scanned system and every discovered hyperlane route reverts to unexplored, for everyone (your own browser included). No other campaign data is touched -- ships, cargo, systems, etc. are unaffected. This cannot be undone."))) return;
+
+    const { data: current, error: readError } = await db.from('fow_reset_state').select('reset_epoch').eq('id', 1).maybeSingle();
+    if (readError) { alert("Failed to reset FOW: " + readError.message); return; }
+    const newEpoch = (current ? current.reset_epoch : 0) + 1;
+
+    const { error } = await db.from('fow_reset_state').update({ reset_epoch: newEpoch, updated_at: new Date().toISOString(), updated_by: currentUserId }).eq('id', 1);
+    if (error) { alert("Failed to reset FOW: " + error.message); return; }
+
+    // Apply immediately to this browser too, rather than waiting on the
+    // realtime message to round-trip back to the same client that just
+    // triggered it.
+    window.applyFowResetIfNewer(newEpoch);
+
+    db.from('chat_logs').insert({ sender_id: currentUserId, content: `🌫️ [FOG OF WAR RESET] Overseer wiped all DRADIS scans and discovered hyperlane routes back to unexplored, for everyone.`, message_type: 'text' });
+    alert("Fog of War reset — every connected player's map just went dark, and anyone logging in later starts fresh too.");
+};
+
 /* --- SYSTEM HAZARD ENGINE ---
    Both hazard sources below now respect Fog of War: a hazard zone or a
    system's implicit hazard flavor only mechanically affects a ship if that
