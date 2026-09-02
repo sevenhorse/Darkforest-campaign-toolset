@@ -69,6 +69,31 @@ window.getAugmentBonusFor = function(charAugmentsList, targetType, targetName) {
     return { total, sources };
 };
 
+// Custom stat-die explode threshold (2026-09-02, Carver Eclipse's torso
+// augment build): a separate lookup from getAugmentBonusFor above because
+// this isn't a flat additive bonus -- it's a replacement threshold for
+// when a stat die explodes (rerolls and adds again), e.g. a d8 Dexterity
+// die exploding on 6+ instead of only on an 8. Effect shape:
+// {target:'stat', name:<StatName>, explode_threshold:<N>}, living in the
+// same augment_definitions.effects array as ordinary bonus effects --
+// getAugmentBonusFor simply ignores entries with no `bonus` key, so the
+// two coexist in one array without conflicting. If a character somehow
+// has more than one augment lowering the same stat's threshold, the
+// LOWEST (most generous) one wins.
+window.getAugmentExplodeThreshold = function(charAugmentsList, statName) {
+    let best = null;
+    (charAugmentsList || []).forEach(ca => {
+        const def = window.findAugmentDefinition(ca.augment_definition_id);
+        if (!def) return;
+        (def.effects || []).forEach(eff => {
+            if (eff.target === 'stat' && eff.name === statName && eff.explode_threshold != null) {
+                if (best === null || eff.explode_threshold < best) best = eff.explode_threshold;
+            }
+        });
+    });
+    return best;
+};
+
 window.renderAugmentDesignerPanel = function() {
     const container = document.getElementById('augment-designer-list-container');
     if (!container) return;
