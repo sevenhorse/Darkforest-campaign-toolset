@@ -2909,13 +2909,22 @@ window.DAMAGE_TYPE_TO_SKILL = {
     'Explosive': 'Explosives', 'Healing': 'Medical'
 };
 
-function rollExplodingDie(faces, canExplode) {
+function rollExplodingDie(faces, canExplode, explodeThreshold) {
+    // Optional 3rd arg (2026-09-02, Carver Eclipse's torso augment build):
+    // every existing call site still passes just (faces, canExplode) and
+    // gets the exact old behavior -- explodeThreshold defaults to faces,
+    // so "roll >= threshold" is identical to the old "roll === faces" when
+    // no override is given. An augment can now lower that threshold (a d8
+    // Dexterity die exploding on 6+ instead of only on an 8) by passing a
+    // smaller explodeThreshold; a threshold above faces (nonsensical) is
+    // clamped back down to faces rather than trusted blindly.
+    const threshold = (explodeThreshold != null && explodeThreshold < faces) ? explodeThreshold : faces;
     let roll, subRolls = [], rollTotal = 0;
     do {
         roll = Math.floor(Math.random() * faces) + 1;
         rollTotal += roll;
         subRolls.push(roll);
-    } while (roll === faces && canExplode);
+    } while (roll >= threshold && canExplode);
     return { rollTotal, subRolls };
 }
 
@@ -3186,15 +3195,28 @@ window.executeDicePoolRoll = async function() {
         // hidden. Scoped to this pool roller only (skills are flat modifiers
         // with no die to re-roll), applying to every selected stat's die
         // when the toggle is on, not just a single-stat roll.
+        // Custom explode threshold (2026-09-02, Carver Eclipse's torso
+        // augment build): normally a stat die only explodes on its own max
+        // face (the rollExplodingDie default below). An augment's effects
+        // can instead carry {target:'stat', name:<StatName>, explode_threshold:N}
+        // to lower that -- looked up fresh on every roll (not cached) since
+        // which augments a character has can change mid-campaign. Scoped
+        // deliberately to just this self-service dice-pool roller, not
+        // every other place a stat die gets rolled in this app (NPC
+        // defender rolls, etc.) -- not asked for there, and a broader
+        // change would need its own pass.
+        const customThreshold = typeof window.getAugmentExplodeThreshold === 'function' ? window.getAugmentExplodeThreshold(myProf.augments, statName) : null;
+        const thresholdNote = (customThreshold != null && customThreshold < faces) ? `, explodes ${customThreshold}+` : '';
+
         let rollTotal, diceBreakdownText;
-        const rollA = rollExplodingDie(faces, canExplode);
+        const rollA = rollExplodingDie(faces, canExplode, customThreshold);
         if (advantageOn) {
-            const rollB = rollExplodingDie(faces, canExplode);
+            const rollB = rollExplodingDie(faces, canExplode, customThreshold);
             rollTotal = Math.max(rollA.rollTotal, rollB.rollTotal);
-            diceBreakdownText = `${statName} (d${faces}, ⭐ADV: [${rollA.subRolls.join('💥')}]=${rollA.rollTotal} vs [${rollB.subRolls.join('💥')}]=${rollB.rollTotal} → kept ${rollTotal})`;
+            diceBreakdownText = `${statName} (d${faces}${thresholdNote}, ⭐ADV: [${rollA.subRolls.join('💥')}]=${rollA.rollTotal} vs [${rollB.subRolls.join('💥')}]=${rollB.rollTotal} → kept ${rollTotal})`;
         } else {
             rollTotal = rollA.rollTotal;
-            diceBreakdownText = `${statName} (d${faces}: ${rollA.subRolls.join('💥')})`;
+            diceBreakdownText = `${statName} (d${faces}${thresholdNote}: ${rollA.subRolls.join('💥')})`;
         }
 
         total += rollTotal;
