@@ -176,6 +176,9 @@ async function fetchUserProfile(user) {
     if (typeof initManufacturingOrdersRealtimeChannel === 'function') initManufacturingOrdersRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
+    // FOW Reset Sync (DM Maintenance panel build, 2026-09-02): picks up any
+    // pending fow_reset_state epoch bump and subscribes for live ones.
+    if (typeof window.initFowResetSync === 'function') window.initFowResetSync();
     // Kick off the ambient music bed now that we have a real authenticated
     // session -- the music files live in a private Supabase Storage bucket
     // (signed URLs only), so this can't succeed before login the way the
