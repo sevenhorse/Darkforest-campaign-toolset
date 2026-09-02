@@ -682,7 +682,22 @@ window.setupMobileNavLayout = function() {
 window.setupMobileNavLayout();
 
 window.resetUiLayout = function() {
-    Object.keys(localStorage).forEach(k => { if (k.startsWith('odyssey_') && !k.includes('universe_time') && !k.includes('scanned')) localStorage.removeItem(k); });
+    // Bug avoided rather than introduced (FOW Reset Sync build, 2026-09-02):
+    // this already excluded 'scanned' so a UI-position reset wouldn't
+    // silently wipe a player's own DRADIS scan progress. It did NOT
+    // exclude odyssey_fow_reset_epoch (the new FOW Reset Sync marker) --
+    // wiping that key alone, without the server's fow_reset_state epoch
+    // also moving, would make this browser think a brand-new DM-triggered
+    // reset just arrived and wipe scanned systems/hyperlanes it shouldn't,
+    // the next time initFowResetSync compares epochs. Excluded here for
+    // the same reason 'scanned' already was.
+    // Separately noticed, NOT fixed here (flagging rather than
+    // scope-creeping into an unrelated button): this does NOT exclude
+    // odyssey_discovered_hyperlane_nodes, so "RESET LOCAL UI POSITIONS"
+    // has apparently always also silently cleared this browser's own
+    // discovered hyperlane routes as a side effect. Say the word if you'd
+    // like that excluded too.
+    Object.keys(localStorage).forEach(k => { if (k.startsWith('odyssey_') && !k.includes('universe_time') && !k.includes('scanned') && !k.includes('fow_reset_epoch')) localStorage.removeItem(k); });
     location.reload();
 };
 
