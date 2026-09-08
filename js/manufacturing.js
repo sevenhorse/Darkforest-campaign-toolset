@@ -373,7 +373,7 @@ window.renderManufacturingPanel = function() {
                 if (colony && colony.owner_id === currentUserId) canCancel = true;
                 sourceLabel = `🏛 ${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}`;
             } else {
-                if (vessel && vessel.owner_id === currentUserId) canCancel = true;
+                if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true;
                 sourceLabel = `🚀 ${vessel ? vessel.name : 'Vessel'}`;
             }
             html += `
@@ -796,7 +796,7 @@ function findCargoItemAcrossBuckets(cargo, name) {
 window.startVesselManufacturingOrder = async function(vesselId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    if (!(currentUserRole === 'dm' || vessel.owner_id === currentUserId)) return;
+    if (!(currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId))) return;
 
     const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
     if (!mfgDeck) { alert('This vessel has no Manufacturing-type deck installed -- building requires one.'); return; }
@@ -973,7 +973,7 @@ window.cancelManufacturingOrder = async function(orderId) {
         if (colony) { ownerOk = colony.owner_id === currentUserId; sourceName = colony.name; }
     } else if (!ownerOk && order.source_type === 'vessel') {
         const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
-        if (vessel) { ownerOk = vessel.owner_id === currentUserId; sourceName = vessel.name; }
+        if (vessel) { ownerOk = window.vesselHasOwner(vessel, currentUserId); sourceName = vessel.name; }
     } else if (order.source_type === 'colony') {
         sourceName = ((typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null)?.name || sourceName;
     } else {
