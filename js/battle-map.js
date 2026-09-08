@@ -136,13 +136,13 @@ window.BATTLE_RANGE_TIERS = { LONG: 400, MEDIUM: 200, SHORT: 100 };
    Deliberately does not care about the Messenger's own ai_stance -- this is
    read as a passive sensor/spotter effect of just being close, not an
    attack action, so a Manual-stance Messenger still projects it. */
-function getUplinkedEnemyIds(forOwnerId) {
+function getUplinkedEnemyIds(forOwnerIds) {
     if (!window.globalBattleEncounterCache) return new Set();
     const tokens = window.globalBattleEncounterCache.tokens || [];
     const messengerPositions = [];
     tokens.forEach(t => {
         const marker = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
-        if (!marker || !marker.is_strike_craft || marker.owner_id !== forOwnerId) return;
+        if (!marker || !marker.is_strike_craft || !window.ownerIdsShareOwner(window.vesselOwnerIds(marker), forOwnerIds)) return;
         const carrier = globalShipMarkersCache.find(c => c.id === marker.parent_id);
         const sq = carrier && (carrier.ship_deployed || []).find(s => s.id === marker.squadron_id);
         if (sq && sq.type === 'messenger') messengerPositions.push({ x: t.x, y: t.y });
@@ -151,7 +151,7 @@ function getUplinkedEnemyIds(forOwnerId) {
     if (messengerPositions.length === 0) return uplinked;
     tokens.forEach(t => {
         const target = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
-        if (!target || target.owner_id === forOwnerId) return; // only enemy ships get uplinked
+        if (!target || window.ownerIdsShareOwner(window.vesselOwnerIds(target), forOwnerIds)) return; // only enemy ships get uplinked
         const isClose = messengerPositions.some(mp => Math.hypot(mp.x - t.x, mp.y - t.y) <= window.BATTLE_RANGE_TIERS.SHORT);
         if (isClose) uplinked.add(target.id);
     });
@@ -192,7 +192,7 @@ function getEffectiveWeaponRange(wpn, firerVessel, targetVessel) {
     const baseRange = (wpn && wpn.range) || 0; // 0 = unlimited, existing convention
 
     if (firerVessel && targetVessel && baseRange >= tiers.MEDIUM) {
-        const uplinked = getUplinkedEnemyIds(firerVessel.owner_id);
+        const uplinked = getUplinkedEnemyIds(window.vesselOwnerIds(firerVessel));
         if (uplinked.has(targetVessel.id)) return 0; // unlimited this round
     }
 
@@ -378,7 +378,7 @@ window.removeBattleToken = async function(tokenId) {
     const tok = tokens.find(t => t.token_id === tokenId);
     if (!tok) return;
     const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
-    const isOwner = vessel && vessel.owner_id === currentUserId;
+    const isOwner = vessel && window.vesselHasOwner(vessel, currentUserId);
     if (currentUserRole !== 'dm' && !isOwner) return;
     if (!(await window.showConfirmModal('Withdraw this vessel from the battle grid? The vessel itself is untouched.'))) return;
 
@@ -455,8 +455,8 @@ window.checkBattleTokenDestroyed = async function(vessel) {
     const playerToken = remaining.find(t => {
         const m = globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id);
         if (!m) return false;
-        const ownerProf = (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === m.owner_id);
-        return ownerProf && ownerProf.role !== 'dm';
+        const ownerProfs = window.vesselOwnerIds(m).map(id => (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === id)).filter(Boolean);
+        return ownerProfs.some(p => p.role !== 'dm');
     });
     if (playerToken) {
         const anchor = globalShipMarkersCache.find(sm => sm.id === playerToken.ship_marker_id);
@@ -584,7 +584,7 @@ window.processBattleRoundAutomations = async function() {
             if (!w.is_point_defense) return;
             if ((w.cooldown || 0) > 0) return; // hard skip — no one to confirm a cooldown override on an automated tick
             if (w.ammo === 0) return;
-            pdPool.push({ vesselId: v.id, weaponIdx: wIdx, position: { x: tok.x, y: tok.y }, ownerId: v.owner_id });
+            pdPool.push({ vesselId: v.id, weaponIdx: wIdx, position: { x: tok.x, y: tok.y }, ownerIds: window.vesselOwnerIds(v) });
         });
     });
 
@@ -608,11 +608,11 @@ window.processBattleRoundAutomations = async function() {
     // flag instead so each caller states which relationship it actually
     // means, rather than smuggling "enemy of" through a param named for
     // "owner of".
-    function findEligiblePD(targetPos, ownerId, opts) {
+    function findEligiblePD(targetPos, ownerIds, opts) {
         const enemyOnly = !!(opts && opts.enemyOnly);
         for (let i = 0; i < pdPool.length; i++) {
             const entry = pdPool[i];
-            const sameOwner = entry.ownerId === ownerId;
+            const sameOwner = window.ownerIdsShareOwner(entry.ownerIds, ownerIds);
             if (enemyOnly ? sameOwner : !sameOwner) continue;
             const v = globalShipMarkersCache.find(m => m.id === entry.vesselId);
             const w = v && v.ship_weapons[entry.weaponIdx];
@@ -623,8 +623,8 @@ window.processBattleRoundAutomations = async function() {
         return -1;
     }
 
-    function fireEligiblePD(targetPos, ownerId, opts) {
-        const idx = findEligiblePD(targetPos, ownerId, opts);
+    function fireEligiblePD(targetPos, ownerIds, opts) {
+        const idx = findEligiblePD(targetPos, ownerIds, opts);
         if (idx < 0) return null;
         const entry = pdPool.splice(idx, 1)[0];
         const pdVessel = globalShipMarkersCache.find(m => m.id === entry.vesselId);
@@ -700,22 +700,22 @@ window.processBattleRoundAutomations = async function() {
             let wpnIdx = dbStats.weapons.findIndex((w, i) => w.role === 'point_defense' && squadronWeaponCooldown(sq, i) === 0);
             if (wpnIdx < 0) wpnIdx = dbStats.weapons.findIndex((w, i) => squadronWeaponCooldown(sq, i) === 0);
             if (wpnIdx < 0) return; // every weapon on cooldown -- no interception offered this round
-            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], wpnIdx, ownerId: sqShip.owner_id, position: pos, sqShipId: sqShip.id });
+            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], wpnIdx, ownerIds: window.vesselOwnerIds(sqShip), position: pos, sqShipId: sqShip.id });
         });
     });
 
-    function findEligibleSquadronIntercept(targetPos, ownerId) {
+    function findEligibleSquadronIntercept(targetPos, ownerIds) {
         for (let i = 0; i < squadronInterceptPool.length; i++) {
             const entry = squadronInterceptPool[i];
-            if (entry.ownerId !== ownerId) continue;
+            if (!window.ownerIdsShareOwner(entry.ownerIds, ownerIds)) continue;
             const dist = Math.hypot(entry.position.x - targetPos.x, entry.position.y - targetPos.y);
             if (!entry.wpn.range || dist <= entry.wpn.range) return i;
         }
         return -1;
     }
 
-    function fireEligibleSquadronIntercept(targetPos, ownerId) {
-        const idx = findEligibleSquadronIntercept(targetPos, ownerId);
+    function fireEligibleSquadronIntercept(targetPos, ownerIds) {
+        const idx = findEligibleSquadronIntercept(targetPos, ownerIds);
         if (idx < 0) return null;
         const entry = squadronInterceptPool.splice(idx, 1)[0];
         const roll = rollDamageDice(entry.wpn.dice, entry.wpn.modifier, entry.wpn.explodes);
@@ -765,7 +765,7 @@ window.processBattleRoundAutomations = async function() {
             continue;
         }
 
-        const engagement = fireEligiblePD(targetPos, targetVessel.owner_id);
+        const engagement = fireEligiblePD(targetPos, window.vesselOwnerIds(targetVessel));
         if (engagement && engagement.roll.total > 0) {
             chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} intercepts a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${engagement.roll.total} dmg) — destroyed!`);
             continue; // payload destroyed, dropped from survivingOrdnance
@@ -778,7 +778,7 @@ window.processBattleRoundAutomations = async function() {
         // squadron gets a shot at the same payload if ship PD didn't
         // already destroy it -- see squadronInterceptPool/
         // fireEligibleSquadronIntercept above.
-        const sqEngagement = fireEligibleSquadronIntercept(targetPos, targetVessel.owner_id);
+        const sqEngagement = fireEligibleSquadronIntercept(targetPos, window.vesselOwnerIds(targetVessel));
         if (sqEngagement && sqEngagement.roll.total > 0) {
             chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} shoots down a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${sqEngagement.roll.total} dmg) — destroyed!`);
             continue; // payload destroyed, dropped from survivingOrdnance
@@ -916,7 +916,7 @@ window.processBattleRoundAutomations = async function() {
             if (!targetPos) return; // squadron has no grid token this round (pre-build legacy launch, or launched outside a battle) — can't be range-checked, skip
             // enemyOnly: true -- this is anti-fighter fire, we want the OPPOSING
             // side's PD shooting at this strike craft, not its own carrier's.
-            const engagement = fireEligiblePD(targetPos, sqShip.owner_id, { enemyOnly: true });
+            const engagement = fireEligiblePD(targetPos, window.vesselOwnerIds(sqShip), { enemyOnly: true });
             if (!engagement) return;
             if (engagement.roll.total <= 0) {
                 chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} fires at ${sq.name} — misses.`);
@@ -1063,7 +1063,7 @@ window.processBattleRoundAutomations = async function() {
             let candidates = tokens
                 .map(tok => globalShipMarkersCache.find(m => m.id === tok.ship_marker_id))
                 .filter(Boolean)
-                .filter(m => m.id !== sqShip.id && m.owner_id !== sqShip.owner_id);
+                .filter(m => m.id !== sqShip.id && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(sqShip)));
 
             if (sq.ai_stance === 'attack_strike_craft') {
                 candidates = candidates.filter(m => m.is_strike_craft);
@@ -1368,7 +1368,7 @@ window.processSalvageConversion = async function(daysPassed) {
 window.saveSalvageProcessingConfig = async function(vesselId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    if (currentUserRole !== 'dm' && vessel.owner_id !== currentUserId) return;
+    if (currentUserRole !== 'dm' && !window.vesselHasOwner(vessel, currentUserId)) return;
     const outputInput = document.getElementById(`salvage-proc-output-${vesselId}`);
     const rateInput = document.getElementById(`salvage-proc-rate-${vesselId}`);
     const output = outputInput ? outputInput.value.trim() : '';
@@ -1682,11 +1682,11 @@ function battleTokenHpColor(vessel) {
    ship (cyan), another player's (green), DM/NPC (red). */
 function battleTokenFactionColor(vessel) {
     if (!vessel) return '#6b826a';
-    const ownerProf = (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === vessel.owner_id);
-    const isPlayerOwned = !!(ownerProf && ownerProf.role !== 'dm');
+    const ownerProfs = window.vesselOwnerIds(vessel).map(id => (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === id)).filter(Boolean);
+    const isPlayerOwned = ownerProfs.some(p => p.role !== 'dm');
     if (!isPlayerOwned) return '#ff3333';           // DM/NPC-owned (or unowned) — hostile/neutral
-    if (vessel.owner_id === currentUserId) return '#00e1ff'; // my own vessel
-    return '#00e5a3';                                // another player's vessel — ally
+    if (window.vesselHasOwner(vessel, currentUserId)) return '#00e1ff'; // I'm one of its owners
+    return '#00e5a3';                                // another player's vessel (I'm not a co-owner) — ally
 }
 
 /* Native drag (mousedown/mousemove/mouseup), constrained to the grid bounds,
@@ -1808,7 +1808,7 @@ window.renderSalvagePanel = function() {
         container.innerHTML = '<span style="font-size:10px; color:#6b826a;">No recoverable wreckage detected.</span>';
         return;
     }
-    const myShips = globalShipMarkersCache.filter(m => !m.is_strike_craft && m.owner_id === currentUserId);
+    const myShips = globalShipMarkersCache.filter(m => !m.is_strike_craft && window.vesselHasOwner(m, currentUserId));
     const shipOptionsHtml = myShips.map(m => `<option value="${m.id}">${m.name}</option>`).join('') || '<option value="">-- No vessels --</option>';
 
     container.innerHTML = records.map(rec => {
@@ -2033,7 +2033,7 @@ window.renderBattleMapPanel = function() {
         // loadGalaxyData does an unfiltered `.select('*')`), so this is a
         // pure display-filter fix, no new query needed. A non-DM player
         // keeps the old own-vessels-only behavior unchanged.
-        const candidates = globalShipMarkersCache.filter(m => !m.is_strike_craft && !placedIds.has(m.id) && (isDm || m.owner_id === currentUserId));
+        const candidates = globalShipMarkersCache.filter(m => !m.is_strike_craft && !placedIds.has(m.id) && (isDm || window.vesselHasOwner(m, currentUserId)));
         if (candidates.length === 0) {
             palette.innerHTML = '<span style="font-size:9px; color:#6b826a;">No available vessels to place.</span>';
         } else {
@@ -2044,8 +2044,9 @@ window.renderBattleMapPanel = function() {
                 // already loaded in this app -- offline owners just show no
                 // suffix rather than a stale/guessed name) so a DM looking
                 // at a mixed NPC+PC list can tell them apart at a glance.
-                const ownerPresence = (isDm && m.owner_id !== currentUserId) ? (onlineUsersMap[m.owner_id] || [])[0] : null;
-                const ownerSuffix = ownerPresence ? ` <span style="color:#6b826a;">— ${ownerPresence.username}</span>` : '';
+                const otherOwnerIds = (isDm && !window.vesselHasOwner(m, currentUserId)) ? window.vesselOwnerIds(m) : [];
+                const otherOwnerNames = otherOwnerIds.map(id => (onlineUsersMap[id] || [])[0]).filter(Boolean).map(p => p.username);
+                const ownerSuffix = otherOwnerNames.length ? ` <span style="color:#6b826a;">— ${otherOwnerNames.join('/')}</span>` : '';
                 return `<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 6px; background:#030403; border:1px solid ${armed ? '#00e5a3' : '#3c4e36'}; border-radius:2px;">
                     <span style="font-size:9px; color:#d4c5a9;">${m.name}${ownerSuffix}</span>
                     ${armed
@@ -2543,14 +2544,14 @@ window.renderBattleShipCards = function(tokens) {
             return `<div class="battle-ship-card" style="border-color:#ff3333;"><span style="font-size:10px; color:#ff3333;">(vessel record missing — token may need to be withdrawn)</span></div>`;
         }
 
-        const ownerProf = profiles.find(p => p.id === vessel.owner_id);
-        const ownedByPlayer = !!(ownerProf && ownerProf.role !== 'dm');
+        const ownerProfs = window.vesselOwnerIds(vessel).map(id => profiles.find(p => p.id === id)).filter(Boolean);
+        const ownedByPlayer = ownerProfs.some(p => p.role !== 'dm');
         const fullDetail = isDm || ownedByPlayer;
-        const canWithdraw = isDm || vessel.owner_id === currentUserId;
+        const canWithdraw = isDm || window.vesselHasOwner(vessel, currentUserId);
         const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : (vessel.tactical_speed ?? 160);
         const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
         const accentColor = fullDetail ? '#00e5a3' : '#ff3333';
-        const ownerTag = ownerProf ? (ownerProf.username || 'Commander') : (isDm ? 'Unowned' : 'Unknown');
+        const ownerTag = ownerProfs.length ? ownerProfs.map(p => p.username || 'Commander').join('/') : (isDm ? 'Unowned' : 'Unknown');
         const expanded = battleMapExpandedCards.has(tok.token_id);
         // Station Designer build: stations are immobile, so the move-
         // remaining readout is dropped entirely rather than showing a
