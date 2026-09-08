@@ -686,8 +686,46 @@ function renderPresenceTicker() {
     listDiv.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active commanders</span>';
 }
 
+/* Multi-owner ship tokens build (this session, DM-confirmed via
+   AskUserQuestion): ship_markers.owner_ids (uuid[]) is now the source of
+   truth for who controls a ship token -- a token can have zero, one, or
+   several owners. The old single-value ship_markers.owner_id column is
+   left in place as deprecated dead schema (backfilled once into owner_ids,
+   matching this app's existing characters.aug_ columns / character_perks.perk_key
+   precedent for a superseded column) -- nothing should read or write it
+   going forward. These three helpers are the single shared way every file
+   checks/reads ownership now, replacing the old `vessel.owner_id === x`
+   pattern used ~35 places across combat.js/map.js/battle-map.js/
+   ship-designer.js/squadrons.js/this file.
+   window.vesselOwnerIds(vessel) -- always an array, even for a legacy/
+   malformed row with no owner_ids at all.
+   window.vesselHasOwner(vessel, userId) -- "is userId one of this vessel's
+   owners" -- the direct replacement for every old `=== currentUserId`
+   permission check (docking, decommission, Vessel Deck access, Salvage/
+   Manufacturing config, etc).
+   window.ownerIdsShareOwner(idsA, idsB) -- "same side" for combat purposes
+   (Point Defense, squadron target-uplink, AI-stance friend/foe filtering):
+   true if the two owner lists share at least one id. DM-confirmed
+   semantics: co-owning ANY one owner in common counts as allied, even if
+   each side also has a different other owner. Two UNOWNED vessels (both
+   empty lists) still count as "same side," matching this app's existing
+   null-owner_id-equals-null-owner_id behavior exactly -- so two ownerless
+   NPCs keep not targeting each other, the one pre-existing edge case this
+   build was careful not to silently flip. */
+window.vesselOwnerIds = function(vessel) {
+    return (vessel && Array.isArray(vessel.owner_ids)) ? vessel.owner_ids : [];
+};
+window.vesselHasOwner = function(vessel, userId) {
+    return !!userId && window.vesselOwnerIds(vessel).includes(userId);
+};
+window.ownerIdsShareOwner = function(idsA, idsB) {
+    idsA = idsA || []; idsB = idsB || [];
+    if (idsA.length === 0 && idsB.length === 0) return true;
+    return idsA.some(id => idsB.includes(id));
+};
+
 window.snapToCommander = function(userId) {
-    let ship = globalShipMarkersCache.find(m => m.owner_id === userId);
+    let ship = globalShipMarkersCache.find(m => window.vesselHasOwner(m, userId));
     if (ship) {
         window.selectedTarget = { type: 'ship', data: ship };
         if (typeof window.lockCameraOnSelected === 'function') window.lockCameraOnSelected();
@@ -715,7 +753,7 @@ window.snapToCommander = function(userId) {
    written or read anywhere — left in the DB as unused dead schema (like
    character_perks.perk_key before it), not worth a migration to drop. */
 window.jumpToActiveShip = async function() {
-    let ship = globalShipMarkersCache.find(m => m.owner_id === currentUserId);
+    let ship = globalShipMarkersCache.find(m => window.vesselHasOwner(m, currentUserId));
     if (!ship) { alert("DRADIS Error: No active vessel found assigned to your callsign."); return; }
 
     window.selectedTarget = { type: 'ship', data: ship };
