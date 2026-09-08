@@ -163,7 +163,7 @@ window.isPositionSensorVisible = function(x, y) {
     if (currentUserRole === 'dm') return true;
     for (let m of globalShipMarkersCache) {
         if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
-        if (m.owner_id === currentUserId || m.iff === 'friendly') {
+        if (window.vesselHasOwner(m, currentUserId) || m.iff === 'friendly') {
             if (Math.hypot(m.x - x, m.y - y) <= 300) return true;
         }
     }
@@ -528,7 +528,7 @@ window.spawnTokenAtCenter = async function() {
     // ship_markers.iff column directly instead of the old cargo_inventory.iff
     // sub-field -- see the architecture doc for the full writeup of why two
     // parallel IFF systems existed and why this one was chosen as canonical.
-    let payload = { owner_id: currentUserId, name: name, drive_type: driveType, iff: iffStatus, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, color: (typeof window.getIffColor === 'function' ? window.getIffColor(iffStatus) : '#00e1ff'), cargo_inventory: newCargo };
+    let payload = { owner_ids: [currentUserId], name: name, drive_type: driveType, iff: iffStatus, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, color: (typeof window.getIffColor === 'function' ? window.getIffColor(iffStatus) : '#00e1ff'), cargo_inventory: newCargo };
 
     if (isJupiter) {
         payload.integrity_shields = 400; payload.max_shields = 400;
@@ -1307,7 +1307,7 @@ window.dockShipToMaster = async function(subShipId, masterShipId) {
     if (!masterShipId) { alert("Select a master vessel to dock to."); return; }
     if (subShipId === masterShipId) return;
     const sub = globalShipMarkersCache.find(m => m.id === subShipId);
-    if (sub && currentUserRole !== 'dm' && sub.owner_id !== currentUserId) { alert("You can only dock vessels you control."); return; }
+    if (sub && currentUserRole !== 'dm' && !window.vesselHasOwner(sub, currentUserId)) { alert("You can only dock vessels you control."); return; }
     const master = globalShipMarkersCache.find(m => m.id === masterShipId);
     if (master && master.docked_to) { alert("That vessel is itself docked to another master — only one level of docking is supported."); return; }
     const { error } = await db.from('ship_markers').update({ docked_to: masterShipId }).eq('id', subShipId);
@@ -1321,7 +1321,7 @@ window.dockShipToMaster = async function(subShipId, masterShipId) {
 window.undockShip = async function(shipId) {
     const ship = globalShipMarkersCache.find(m => m.id === shipId);
     if (!ship) return;
-    if (currentUserRole !== 'dm' && ship.owner_id !== currentUserId) { alert("You can only undock vessels you control."); return; }
+    if (currentUserRole !== 'dm' && !window.vesselHasOwner(ship, currentUserId)) { alert("You can only undock vessels you control."); return; }
     // Detach near wherever its master currently is, not the sub-craft's own
     // stale pre-dock coordinates, so it doesn't reappear somewhere unrelated.
     const master = globalShipMarkersCache.find(m => m.id === ship.docked_to);
@@ -1549,7 +1549,7 @@ window.deleteShipToken = async function(id) {
     // Was DM-only with no ownership carve-out, unlike every other decommission/
     // delete action in this app (weapons, colonies, fleet groups, templates) —
     // a player couldn't remove even their own deployed ship.
-    if (ship && currentUserRole !== 'dm' && ship.owner_id !== currentUserId) return;
+    if (ship && currentUserRole !== 'dm' && !window.vesselHasOwner(ship, currentUserId)) return;
     if (!(await window.showConfirmModal("Decommission token?"))) return;
     // If this is a strike craft token, clean up its squadron record + initiative
     // row too — otherwise decommissioning it directly (instead of using the
@@ -1767,7 +1767,7 @@ window.initGalaxyEngine = function() {
 
         for (let m of globalShipMarkersCache) {
             if (m.docked_to) continue; // docked craft aren't independently selectable — they're part of their master
-            if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < tokenHitRadius && (currentUserRole === 'dm' || m.owner_id === currentUserId)) {
+            if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < tokenHitRadius && (currentUserRole === 'dm' || window.vesselHasOwner(m, currentUserId))) {
                 window.draggedMarker = m; window.selectedTarget = { type: 'ship', data: m }; window.addRecentTarget(window.selectedTarget);
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
             }
@@ -2076,7 +2076,7 @@ window.initGalaxyEngine = function() {
                 </div>`;
             }
 
-            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name}${iffTag}</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${(currentUserRole === 'dm' || m.owner_id === currentUserId) ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
+            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${iffColor}; font-size: 13px;">🚀 ${m.name}${iffTag}</strong><br><span style="color: #6b826a;">Position:</span> X: ${Math.round(m.x)}, Y: ${Math.round(m.y)}<br><div style="margin:4px 0;"><label style="color: #6b826a; font-size:10px;">Engine Drive:</label><select onchange="window.updateShipDriveType('${m.id}', this.value)" style="font-size:10px; padding:2px; background:#0a1410; color:#00e1ff; margin:2px 0;">${driveOptionsHtml}</select></div>${dmIffBox}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${jumpPlotterBox}${dockingBox}${hazardBox}<button class="btn-deploy" onclick="window.openFullVesselTerminal('${m.id}')" style="font-size:9px; padding:4px; margin-top:6px;">⚙️ INSPECT VESSEL DECK</button>${(currentUserRole === 'dm' || window.vesselHasOwner(m, currentUserId)) ? `<button class="btn-remove" onclick="window.deleteShipToken('${m.id}')" style="font-size:9px; padding:4px; margin-top:4px;">DECOMMISSION</button>` : ''}</div>`;
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
             let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button>${(window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id]) ? `<button class="btn-remove" onclick="window.deletePlanetOverride('${p.id}')" style="font-size:9px; padding:4px; margin-top:4px; width:100%;">🗑️ CLEAR OVERRIDE (revert to default)</button>` : ''}</div>` : '';
@@ -2275,9 +2275,10 @@ window.initGalaxyEngine = function() {
             // "another player's" from "Overseer/NPC asset" so the drag-permission
             // boundary already enforced in the click handler above is visible before
             // you try to drag, not just discovered by a failed drag attempt.
-            const isMine = m.owner_id === currentUserId;
-            const ownerProfile = allProfiles.find(p => p.id === m.owner_id);
-            const isNpcAsset = !ownerProfile || ownerProfile.role === 'dm';
+            const isMine = window.vesselHasOwner(m, currentUserId);
+            const ownerIds = window.vesselOwnerIds(m);
+            const ownerProfiles = ownerIds.map(id => allProfiles.find(p => p.id === id)).filter(Boolean);
+            const isNpcAsset = ownerProfiles.length === 0 || ownerProfiles.every(p => p.role === 'dm');
             let ringColor = isMine ? '#00e5a3' : (isNpcAsset ? '#ff6b6b' : '#4a7ab5');
 
             // Dense Nebula EMCON: a non-owned, non-DM-viewed contact sitting inside a
@@ -2311,7 +2312,7 @@ window.initGalaxyEngine = function() {
             ctx.textBaseline = 'middle';
             let labelX = m.x + size + (6 / window.camera.zoom);
             let labelY = m.y;
-            let ownerTag = isMine ? '' : (isNpcAsset ? ' [NPC]' : ` [${ownerProfile.username || 'ALLY'}]`);
+            let ownerTag = isMine ? '' : (isNpcAsset ? ' [NPC]' : ` [${ownerProfiles.map(p => p.username || 'ALLY').join('/')}]`);
             let dockedCount = globalShipMarkersCache.filter(d => d.docked_to === m.id).length;
             let dockTag = dockedCount > 0 ? ` 🔗${dockedCount}` : '';
             let fuelTag = '';
