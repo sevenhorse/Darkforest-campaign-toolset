@@ -220,7 +220,7 @@ window.deployShipTemplate = async function(id) {
     // insurance against any future cross-vessel assumption).
     const newHangar = (t.ship_hangar || []).map(sq => ({ ...JSON.parse(JSON.stringify(sq)), id: 'sq_' + Math.random().toString(36).substr(2, 9) }));
     const payload = {
-        owner_id: currentUserId,
+        owner_ids: [currentUserId],
         name: t.name,
         drive_type: t.drive_type || 'ftl_class1',
         x: -window.camera.x / window.camera.zoom,
