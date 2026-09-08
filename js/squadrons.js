@@ -150,7 +150,7 @@ const SQUADRON_TACTICAL_SPEED = 320;
    + relaunch picks one up. Flagged, not silently glossed over. */
 async function spawnSquadronToken(vessel, sq, hideFromOverworld) {
     const { data: tokenRow, error: tokenError } = await db.from('ship_markers').insert({
-        owner_id: vessel.owner_id, name: sq.name,
+        owner_ids: window.vesselOwnerIds(vessel), name: sq.name,
         x: vessel.x + (Math.random() * 80 - 40), y: vessel.y + (Math.random() * 80 - 40),
         drive_type: 'sublight', color: '#ffaa00', tactical_speed: SQUADRON_TACTICAL_SPEED,
         cargo_inventory: window.sanitizeCargo({}),
@@ -186,7 +186,10 @@ async function spawnSquadronToken(vessel, sq, hideFromOverworld) {
     // defense die -- a real (if narrow) behavior fix, not just a refactor.
     const { error: trackerError } = await db.from('combat_tracker').insert({
         name: sq.name, initiative: 14, hp: `${sq.hp}/${sq.max_hp}`,
-        owner_id: vessel.owner_id, parent_id: vessel.id, squadron_id: sq.id, is_strike_craft: true, is_npc: true
+        // combat_tracker.owner_id stays single-value (out of scope for the
+        // multi-owner ship token build -- the initiative tracker is a
+        // separate table/concept) -- uses the carrier's first/primary owner.
+        owner_id: window.vesselOwnerIds(vessel)[0] || null, parent_id: vessel.id, squadron_id: sq.id, is_strike_craft: true, is_npc: true
     });
     if (trackerError) { console.error('Failed to inject squadron into initiative tracker:', trackerError.message); }
 
