@@ -468,10 +468,10 @@ window.canAccessVesselDeck = function(vessel) {
     if (!vessel) return false;
     if (currentUserRole === 'dm') return true;
     if (typeof window.isVesselVisibleToMe === 'function' && !window.isVesselVisibleToMe(vessel)) return false;
-    if (vessel.owner_id === currentUserId) return true;
+    if (window.vesselHasOwner(vessel, currentUserId)) return true;
     if (vessel.iff === 'friendly') return true;
-    const ownerProf = (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === vessel.owner_id);
-    return !!(ownerProf && ownerProf.role !== 'dm');
+    const ownerProfs = window.vesselOwnerIds(vessel).map(id => (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === id)).filter(Boolean);
+    return ownerProfs.some(p => p.role !== 'dm');
 };
 
 // Fog of War build (this session): the single shared visibility check used
@@ -488,7 +488,7 @@ window.isVesselVisibleToMe = function(vessel) {
     if (!vessel) return true;
     if (!vessel.is_hidden) return true;
     if (currentUserRole === 'dm') return true;
-    return vessel.owner_id === currentUserId;
+    return window.vesselHasOwner(vessel, currentUserId);
 };
 
 // Fog of War build (this session, confirmed design): a hidden vessel
@@ -854,13 +854,32 @@ window.renderVesselDeck = function() {
         const ownershipContainer = document.getElementById('vessel-ownership-container');
         if (ownershipContainer) {
             if (currentUserRole === 'dm') {
+                // Multi-owner ship tokens build (this session, DM-confirmed
+                // via AskUserQuestion): checkboxes add/remove individual
+                // co-owners without touching anyone else's ownership.
+                // Boarding Capture's single-select + TRANSFER stays below,
+                // unchanged in shape, as the deliberate "wipe everyone, set
+                // one new owner" shortcut for an actual capture scenario.
+                const currentOwnerIds = window.vesselOwnerIds(vessel);
+                let ownerCheckboxesHtml = '';
+                allProfiles.forEach(p => {
+                    const checked = currentOwnerIds.includes(p.id) ? 'checked' : '';
+                    ownerCheckboxesHtml += `
+                        <label style="display:flex; align-items:center; gap:5px; font-size:10px; color:#d4c5a9; cursor:pointer; padding:2px 0;">
+                            <input type="checkbox" ${checked} onchange="window.toggleVesselOwner('${vessel.id}', '${p.id}', this.checked)">
+                            ${p.username || 'Commander'}${p.role === 'dm' ? ' [DM]' : ''}
+                        </label>`;
+                });
                 let ownerOptions = '';
                 allProfiles.forEach(p => {
-                    ownerOptions += `<option value="${p.id}" ${p.id === vessel.owner_id ? 'selected' : ''}>${p.username || 'Commander'}${p.id === vessel.owner_id ? ' (current)' : ''}</option>`;
+                    const isCurrent = currentOwnerIds.includes(p.id);
+                    ownerOptions += `<option value="${p.id}" ${isCurrent && currentOwnerIds[0] === p.id ? 'selected' : ''}>${p.username || 'Commander'}${isCurrent ? ' (current owner)' : ''}</option>`;
                 });
                 ownershipContainer.innerHTML = `
                 <div style="background:#030403; padding:8px; border:1px solid #ff6b6b; border-radius:2px; margin-top:10px;">
-                    <label for="vessel-ownership-select-${vessel.id}" style="font-size: 9px; color: #ff6b6b;">⚔ BOARDING CAPTURE — Reassign Vessel Ownership (DM only):</label>
+                    <label style="font-size: 9px; color: #ff6b6b;">⚔ CREW OWNERSHIP (DM only) — check everyone who controls this vessel:</label>
+                    <div style="margin-top:4px;">${ownerCheckboxesHtml}</div>
+                    <label for="vessel-ownership-select-${vessel.id}" style="font-size: 9px; color: #ff6b6b; display:block; margin-top:10px; padding-top:8px; border-top:1px solid #3c4e36;">⚔ BOARDING CAPTURE — Transfer Sole Ownership (replaces ALL current owners with one):</label>
                     <div style="display:flex; gap:6px; margin-top:4px;">
                         <select id="vessel-ownership-select-${vessel.id}" style="flex:1; margin:0; border-color:#ff6b6b;">${ownerOptions}</select>
                         <button class="layer-del" onclick="window.reassignVesselOwnership('${vessel.id}')" style="flex:0 0 auto; font-size:10px; margin:0;">TRANSFER</button>
@@ -878,7 +897,7 @@ window.renderVesselDeck = function() {
         // own owner can set it; everyone else sees nothing here.
         const salvageContainer = document.getElementById('vessel-salvage-container');
         if (salvageContainer) {
-            if (currentUserRole === 'dm' || vessel.owner_id === currentUserId) {
+            if (currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId)) {
                 salvageContainer.innerHTML = `
                 <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:10px;">
                     <label style="font-size: 9px; color: #c9962f;">⚙ Salvage Processing (Manufacturing deck, scales with its HP%):</label>
@@ -904,7 +923,7 @@ window.renderVesselDeck = function() {
         // permission shape as Salvage Processing. See js/manufacturing.js.
         const mfgContainer = document.getElementById('vessel-manufacturing-container');
         if (mfgContainer) {
-            if (currentUserRole === 'dm' || vessel.owner_id === currentUserId) {
+            if (currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId)) {
                 const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
                 if (!mfgDeck) {
                     mfgContainer.innerHTML = `<div style="background:#030403; padding:8px; border:1px solid #3c4e36; border-radius:2px; margin-top:10px;">
@@ -1868,14 +1887,21 @@ window.reassignVesselOwnership = async function(vesselId) {
     const select = document.getElementById(`vessel-ownership-select-${vesselId}`);
     if (!select || !select.value) { alert("Select a new owner first."); return; }
     const newOwnerId = select.value;
-    if (newOwnerId === vessel.owner_id) return;
+    const currentOwnerIds = window.vesselOwnerIds(vessel);
+    if (currentOwnerIds.length === 1 && currentOwnerIds[0] === newOwnerId) return;
 
     const newOwnerName = allProfiles.find(p => p.id === newOwnerId)?.username || 'Commander';
 
-    if (!(await window.showConfirmModal(`Transfer ownership of "${vessel.name}" to ${newOwnerName}? This represents a completed boarding capture.`))) return;
+    // Multi-owner ship tokens build (this session, DM-confirmed): TRANSFER
+    // is deliberately still a full wipe-and-replace -- it sets the owner
+    // list to exactly [newOwnerId], removing every existing co-owner, same
+    // "completed boarding capture" semantics as before this build. Adding
+    // or removing individual owners without wiping the rest is the
+    // checkbox list above instead (window.toggleVesselOwner).
+    if (!(await window.showConfirmModal(`Transfer sole ownership of "${vessel.name}" to ${newOwnerName}? This replaces ALL current owners and represents a completed boarding capture.`))) return;
 
-    await db.from('ship_markers').update({ owner_id: newOwnerId }).eq('id', vesselId);
-    vessel.owner_id = newOwnerId;
+    await db.from('ship_markers').update({ owner_ids: [newOwnerId] }).eq('id', vesselId);
+    vessel.owner_ids = [newOwnerId];
 
     try {
         await db.from('chat_logs').insert({
@@ -1887,6 +1913,25 @@ window.reassignVesselOwnership = async function(vesselId) {
 
     window.renderVesselDeck();
     if (typeof window.showToast === 'function') window.showToast(`Ownership of ${vessel.name} transferred.`);
+};
+
+// Multi-owner ship tokens build (this session): adds/removes ONE co-owner
+// without disturbing anyone else already on the list -- the checkbox-list
+// counterpart to reassignVesselOwnership's full wipe-and-replace above.
+window.toggleVesselOwner = async function(vesselId, profileId, checked) {
+    if (currentUserRole !== 'dm') return;
+    let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+    const current = window.vesselOwnerIds(vessel);
+    const next = checked
+        ? (current.includes(profileId) ? current : [...current, profileId])
+        : current.filter(id => id !== profileId);
+
+    const { error } = await db.from('ship_markers').update({ owner_ids: next }).eq('id', vesselId);
+    if (error) { alert("Failed to update ownership: " + error.message); return; }
+    vessel.owner_ids = next;
+    if (typeof window.showToast === 'function') window.showToast(`${vessel.name}'s ownership updated.`);
+    window.renderVesselDeck();
 };
 
 /* Inject Ammo / Gun Count / Damage Type fields into the "Mount New Weapon System"
