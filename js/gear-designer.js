@@ -68,7 +68,13 @@ window.getGearBonusFor = function(charGearList, targetType, targetName) {
         const def = window.findGearDefinition(cg.gear_definition_id);
         if (!def) return;
         (def.effects || []).forEach(eff => {
-            if (eff.target === targetType && eff.name === targetName) {
+            // Bug fix (2026-09-12, NaN dice-roll report): same fix applied to
+            // getPerkBonusFor/getAugmentBonusFor -- an effect can match on
+            // target+name without carrying a `bonus` field (see the augment
+            // explode_threshold case). Only add it when it's a real number,
+            // so a future gear effect shaped like that can't silently poison
+            // a roll total with NaN either.
+            if (eff.target === targetType && eff.name === targetName && typeof eff.bonus === 'number' && isFinite(eff.bonus)) {
                 total += eff.bonus;
                 sources.push(`${def.name} ${eff.bonus >= 0 ? '+' : ''}${eff.bonus}`);
             }
