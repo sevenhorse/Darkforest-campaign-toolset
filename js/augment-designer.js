@@ -60,7 +60,16 @@ window.getAugmentBonusFor = function(charAugmentsList, targetType, targetName) {
         const def = window.findAugmentDefinition(ca.augment_definition_id);
         if (!def) return;
         (def.effects || []).forEach(eff => {
-            if (eff.target === targetType && eff.name === targetName) {
+            // Bug fix (2026-09-12, NaN dice-roll report): this is the exact
+            // function that broke a live Dexterity+Explosives check. Carver
+            // Eclipse's "Superconducting Neural Dendrites" augment has a
+            // stat/Dexterity effect that ONLY carries `explode_threshold` (no
+            // `bonus` field at all -- see getAugmentExplodeThreshold below),
+            // by design. This lookup used to match on target+name alone and
+            // add `eff.bonus` regardless, so `total += undefined` silently
+            // became NaN and poisoned the whole dice-pool roll the moment
+            // Dexterity was checked on that character. Only add a real number.
+            if (eff.target === targetType && eff.name === targetName && typeof eff.bonus === 'number' && isFinite(eff.bonus)) {
                 total += eff.bonus;
                 sources.push(`${def.name} ${eff.bonus >= 0 ? '+' : ''}${eff.bonus}`);
             }
