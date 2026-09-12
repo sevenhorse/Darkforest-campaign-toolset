@@ -41,7 +41,15 @@ window.getPerkBonusFor = function(charPerksList, targetType, targetName) {
         const def = window.findPerkDefinition(cp.perk_definition_id);
         if (!def) return;
         (def.effects || []).forEach(eff => {
-            if (eff.target === targetType && eff.name === targetName) {
+            // Bug fix (2026-09-12, NaN dice-roll report): an effect object can
+            // legitimately carry a target/name pair with NO `bonus` field at
+            // all -- e.g. an augment's explode_threshold-only effect (see
+            // getAugmentExplodeThreshold below / Carver Eclipse's torso build).
+            // This lookup used to add `eff.bonus` unconditionally once
+            // target+name matched, so `total += undefined` produced a silent
+            // NaN that then poisoned the entire dice-pool roll total. Only add
+            // it when it's actually a real number.
+            if (eff.target === targetType && eff.name === targetName && typeof eff.bonus === 'number' && isFinite(eff.bonus)) {
                 total += eff.bonus;
                 sources.push(`${def.name} ${eff.bonus >= 0 ? '+' : ''}${eff.bonus}`);
             }
