@@ -810,6 +810,16 @@ window.processBattleRoundAutomations = async function() {
             // only on this path.
             const result = window.resolveShipDamage(targetVessel, dmgType, total);
             impactLog += result.log;
+            // DM-AI-for-NPCs build (this session): same "biggest single hit
+            // this round" tracking as every other damage path (see
+            // window.resolveShipWeaponFire, js/combat.js, for the full
+            // explanation) -- an ordnance impact is a legitimate threat
+            // source for the AI ship reprioritization check below, since the
+            // DM explicitly asked for ordnance to be in scope for this build.
+            if (total > (targetVessel.round_biggest_hit_amount || 0)) {
+                targetVessel.round_biggest_hit_amount = total;
+                targetVessel.round_biggest_hit_by = salvo.source_vessel_id || null;
+            }
             Object.assign(targetVessel, {
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
@@ -1185,6 +1195,135 @@ window.processBattleRoundAutomations = async function() {
         }
     }
 
+    /* --- DM-AI-for-NPCs build (this session) ---
+       ai_controlled ship_markers fight on their own during Advance Round:
+       "attack closest in range, move closer if necessary" (confirmed
+       design), with one override -- if this vessel took a bigger single hit
+       THIS round from someone other than whoever it's about to engage, it
+       retargets onto that bigger threat instead ("biggest single hit this
+       round" model, confirmed with the DM over a running per-attacker
+       damage total).
+
+       Runs after the squadron AI-stance block above so an AI ship never
+       fires from a position it didn't survive this round's PD/squadron-
+       intercept fire to hold -- same ordering rationale as squadron AI
+       stances above it.
+
+       Judgment calls made here, NOT separately confirmed with the DM
+       (flagging per this project's convention rather than implying full
+       completeness):
+         - Point-defense-flagged weapons (is_point_defense) are excluded
+           from an AI ship's own direct-fire loop -- they're already
+           committed to the automated defensive PD pool built at the top of
+           this function, and re-firing them here as an offensive weapon
+           didn't seem right for what "point defense" is supposed to mean.
+         - An AI ship fires EVERY eligible (in-range, off-cooldown, has
+           ammo) non-PD weapon at its locked target each round, not just
+           one -- unlike a squadron (one weapon platform), a multi-mount
+           ship emptying everything it has at its target each round is
+           closer to how a human player would actually play the ship.
+         - Target selection is recomputed fresh every round (nearest, or
+           the round's biggest-hit attacker if that's someone else) rather
+           than "sticking" to a previous lock once acquired -- matches the
+           DM's literal wording ("attack closest... but if taking heavy
+           fire... re-prioritize") more directly than a stickier model
+           would. ai_current_target_id is still written every round as an
+           informational "who is it engaging right now" breadcrumb (same
+           convention as squadrons' sq.target_id) -- it isn't itself
+           authoritative for next round's decision.
+         - No is_hidden (Fog of War) exclusion on candidate targets --
+           mirrors the squadron AI-stance block above, which doesn't check
+           it either.
+         - Confirmed with the DM via AskUserQuestion: target scope is ANY
+           enemy vessel on the grid (strike craft included), not just
+           Capital/Escort-class ships -- a literal reading of "attack
+           closest in range".
+       Resolution goes through window.resolveShipWeaponFire (js/combat.js)
+       and window.resolveOrdnanceLaunch (this file) -- the same
+       extracted-core pattern this app already uses for squadrons
+       (window.resolveSquadronWeaponFire), so there's one implementation of
+       "a ship fires its weapon", not two. */
+    for (const tok of tokens.slice()) {
+      try {
+        const v = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+        if (!v || !v.ai_controlled) continue;
+        if ((v.integrity_hull || 0) <= 0) continue; // destroyed earlier this same pass -- don't act
+
+        const selfPos = { x: tok.x, y: tok.y };
+        const moveDist = v.tactical_speed || 160;
+
+        const candidates = tokens
+            .map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id))
+            .filter(Boolean)
+            .filter(m => m.id !== v.id && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(v)));
+
+        if (candidates.length === 0) {
+            chatLines.push(`🤖 [AI CONTROLLED] ${v.name} has no eligible enemy target on the grid this round -- holds position.`);
+            if (v.ai_current_target_id || v.round_biggest_hit_amount || v.round_biggest_hit_by) {
+                await db.from('ship_markers').update({ ai_current_target_id: null, round_biggest_hit_amount: 0, round_biggest_hit_by: null }).eq('id', v.id);
+                Object.assign(v, { ai_current_target_id: null, round_biggest_hit_amount: 0, round_biggest_hit_by: null });
+            }
+            continue;
+        }
+
+        let nearest = null, nearestDist = Infinity, nearestPos = null;
+        candidates.forEach(m => {
+            const pos = window.getBattleTokenPosition(m.id);
+            if (!pos) return;
+            const d = Math.hypot(pos.x - selfPos.x, pos.y - selfPos.y);
+            if (d < nearestDist) { nearestDist = d; nearest = m; nearestPos = pos; }
+        });
+        if (!nearest) continue; // none of the candidates have a resolvable grid position this round
+
+        // --- Threat reprioritization override ---
+        let target = nearest, targetPos = nearestPos;
+        const hitBy = v.round_biggest_hit_by;
+        if (hitBy && hitBy !== nearest.id) {
+            const attacker = candidates.find(m => m.id === hitBy);
+            const attackerPos = attacker ? window.getBattleTokenPosition(attacker.id) : null;
+            if (attacker && attackerPos) {
+                target = attacker;
+                targetPos = attackerPos;
+                chatLines.push(`🤖 [AI CONTROLLED] ${v.name} took a heavy hit (${v.round_biggest_hit_amount}) from ${attacker.name} this round and re-prioritizes onto the greater threat.`);
+            } // attacker no longer a valid/present candidate (destroyed, withdrawn, or same side now) -- falls back to nearest silently
+        }
+
+        // --- Move up to tactical_speed px toward the target's current position ---
+        const movedTokens = moveTokenToward(v.id, targetPos, moveDist);
+        if (movedTokens) await saveBattleTokens(movedTokens);
+        const movedSelfTok = movedTokens ? movedTokens.find(t => t.ship_marker_id === v.id) : null;
+        const newSelfPos = movedSelfTok ? { x: movedSelfTok.x, y: movedSelfTok.y } : selfPos;
+
+        // --- Fire every eligible non-PD weapon (direct-fire AND ordnance) ---
+        let firedAny = false;
+        for (let wIdx = 0; wIdx < (v.ship_weapons || []).length; wIdx++) {
+            const wpn = v.ship_weapons[wIdx];
+            if (!wpn || wpn.is_point_defense) continue;
+            if ((wpn.cooldown || 0) > 0) continue;
+            if (wpn.ammo === 0) continue;
+            const postMoveDist = Math.hypot(targetPos.x - newSelfPos.x, targetPos.y - newSelfPos.y);
+            const effRange = getEffectiveWeaponRange(wpn, v, target);
+            if (effRange && postMoveDist > effRange) continue; // this weapon holds fire this round; other weapons on this same ship are still checked independently
+
+            if (wpn.weapon_class === 'ordnance' && typeof window.resolveOrdnanceLaunch === 'function') {
+                await window.resolveOrdnanceLaunch(v.id, wIdx, target.id, { auto: true });
+            } else if (typeof window.resolveShipWeaponFire === 'function') {
+                await window.resolveShipWeaponFire(v.id, wIdx, target.id, 1, { auto: true });
+            }
+            firedAny = true;
+        }
+        chatLines.push(firedAny
+            ? `🤖 [AI CONTROLLED] ${v.name} engages ${target.name}.`
+            : `🤖 [AI CONTROLLED] ${v.name} closes on ${target.name} but has no weapon in range -- holds fire.`);
+
+        // --- Persist target lock (informational) + reset this round's hit tracking ---
+        await db.from('ship_markers').update({ ai_current_target_id: target.id, round_biggest_hit_amount: 0, round_biggest_hit_by: null }).eq('id', v.id);
+        Object.assign(v, { ai_current_target_id: target.id, round_biggest_hit_amount: 0, round_biggest_hit_by: null });
+      } catch (err) {
+        console.error('processBattleRoundAutomations: AI-controlled ship resolution failed, skipping this ship this round', err);
+      }
+    }
+
     // --- Persist everything touched ---
     for (const v of touchedVessels.values()) {
       try {
@@ -1192,7 +1331,14 @@ window.processBattleRoundAutomations = async function() {
             ship_weapons: v.ship_weapons,
             integrity_shields: v.integrity_shields, integrity_hull: v.integrity_hull,
             integrity_reactive: v.integrity_reactive, integrity_ablative: v.integrity_ablative,
-            integrity_hardened: v.integrity_hardened
+            integrity_hardened: v.integrity_hardened,
+            // DM-AI-for-NPCs build (this session): rides along with every
+            // other mutation this loop already persists for a touched
+            // vessel -- covers the ordnance-impact path above, which (unlike
+            // resolveShipWeaponFire/resolveSquadronWeaponFire) mutates the
+            // cache in-memory here and defers to this shared persist loop
+            // rather than self-persisting per-hit.
+            round_biggest_hit_amount: v.round_biggest_hit_amount || 0, round_biggest_hit_by: v.round_biggest_hit_by || null
         }).eq('id', v.id);
       } catch (err) {
         console.error('processBattleRoundAutomations: failed to persist vessel', v.id, err);
@@ -1471,8 +1617,34 @@ function scaleOrdnanceDice(diceStr, mult) {
 }
 window.scaleOrdnanceDice = scaleOrdnanceDice;
 
+// Thin DOM-reading wrapper — unchanged call signature/behavior for the
+// manual LAUNCH button, delegating to window.resolveOrdnanceLaunch below
+// (same core/wrapper split as window.rollShipWeapon/resolveShipWeaponFire,
+// js/combat.js, and window.rollSquadronWeapon/resolveSquadronWeaponFire,
+// js/squadrons.js).
 window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     idPrefix = idPrefix || '';
+    const selfPos = window.getBattleTokenPosition(vesselId);
+    if (!selfPos) {
+        // Not a battle-map token right now — no grid to track a flight
+        // against, so ordnance just resolves the old instant way.
+        return window.rollShipWeapon(vesselId, idx, idPrefix);
+    }
+    let targetSelect = document.getElementById(`${idPrefix}wpn-target-${vesselId}-${idx}`);
+    let targetId = targetSelect ? targetSelect.value : null;
+    if (!targetId) { alert('Select a target first.'); return; }
+    return window.resolveOrdnanceLaunch(vesselId, idx, targetId, {});
+};
+
+/* DM-AI-for-NPCs build (this session): DOM-independent core extracted from
+   window.launchOrdnance so the new AI ship auto-fire loop
+   (window.processBattleRoundAutomations below) can launch ordnance directly
+   with an explicit targetId instead of reading a hidden DOM select — same
+   split as window.resolveShipWeaponFire (js/combat.js). opts.auto hard-skips
+   every gate that would otherwise alert()/confirm() a human player, same
+   silent-fail convention as everywhere else opts.auto is used in this app. */
+window.resolveOrdnanceLaunch = async function(vesselId, idx, targetId, opts) {
+    opts = opts || {};
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
     let wpn = (vessel.ship_weapons || [])[idx];
@@ -1482,6 +1654,7 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     // js/combat.js's rollShipWeapon (see applySystemLockdown there for the
     // full mechanic).
     if (vessel.disabled_weapons_until > 0) {
+        if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[WEAPONS DISABLED] ${vessel.name}'s weapons are offline for ${vessel.disabled_weapons_until} more round(s).`);
         return;
@@ -1494,6 +1667,7 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     if (wpn.assigned_deck_id) {
         const assignedDeck = (vessel.ship_decks || []).find(d => d.id === wpn.assigned_deck_id);
         if (assignedDeck && assignedDeck.hp <= 0) {
+            if (opts.auto) return;
             if (window.AudioEngine) window.AudioEngine.playError();
             alert(`[DECK DESTROYED] ${wpn.name} is mounted on the ${assignedDeck.name} deck, which has been destroyed and can no longer launch.`);
             return;
@@ -1501,32 +1675,32 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
     }
 
     const selfPos = window.getBattleTokenPosition(vesselId);
-    if (!selfPos) {
-        // Not a battle-map token right now — no grid to track a flight
-        // against, so ordnance just resolves the old instant way.
-        return window.rollShipWeapon(vesselId, idx, idPrefix);
-    }
+    if (!selfPos) return; // AI/core caller is expected to already be a grid token -- manual wrapper above handles the no-token fallback itself
 
-    let targetSelect = document.getElementById(`${idPrefix}wpn-target-${vesselId}-${idx}`);
-    let targetId = targetSelect ? targetSelect.value : null;
-    if (!targetId) { alert('Select a target first.'); return; }
     let targetVessel = globalShipMarkersCache.find(m => m.id === targetId);
     if (!targetVessel) return;
     const targetPos = window.getBattleTokenPosition(targetId);
-    if (!targetPos) { alert('Target is not on the battle grid.'); return; }
+    if (!targetPos) {
+        if (opts.auto) return;
+        alert('Target is not on the battle grid.');
+        return;
+    }
 
     const launchEffRange = getEffectiveWeaponRange(wpn, vessel, targetVessel);
     if (launchEffRange && Math.hypot(targetPos.x - selfPos.x, targetPos.y - selfPos.y) > launchEffRange) {
+        if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${launchEffRange}).`);
         return;
     }
 
     if (wpn.cooldown > 0) {
+        if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick
         if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Launching will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
         wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
     }
     if (wpn.ammo === 0) {
+        if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[EMPTY] ${wpn.name} is out of ammunition!`);
         return;
@@ -1571,7 +1745,8 @@ window.launchOrdnance = async function(vesselId, idx, idPrefix) {
 
     if (window.AudioEngine) window.AudioEngine.playShoot();
     const patternTag = isSinglePattern ? ' [SINGLE WARHEAD]' : '';
-    await db.from('chat_logs').insert({ sender_id: null, content: `☠️ [ORDNANCE]${patternTag} ${vessel.name} launches ${wpn.name} at ${targetVessel.name} — impact in 3 rounds.`, message_type: 'system' });
+    const autoTag = opts.auto ? '🤖 [AI CONTROLLED] ' : '';
+    await db.from('chat_logs').insert({ sender_id: null, content: `${autoTag}☠️ [ORDNANCE]${patternTag} ${vessel.name} launches ${wpn.name} at ${targetVessel.name} — impact in 3 rounds.`, message_type: 'system' });
     window.renderVesselDeck();
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
@@ -1723,6 +1898,10 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     if (stationVessel && stationVessel.is_station) {
         tokenEl.addEventListener('mousedown', (e) => { e.stopPropagation(); });
         tokenEl.addEventListener('click', () => {
+            if (stationVessel.iff === 'hostile' && !window.vesselHasOwner(stationVessel, currentUserId)) {
+                window.autoTargetAllMyWeapons(shipMarkerId);
+                return;
+            }
             if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(shipMarkerId);
         });
         return;
@@ -1769,6 +1948,11 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
                 });
                 saveBattleTokens(tokens).then(() => window.renderBattleMapPanel());
             } else {
+                const clickedVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
+                if (clickedVessel && clickedVessel.iff === 'hostile' && !window.vesselHasOwner(clickedVessel, currentUserId)) {
+                    window.autoTargetAllMyWeapons(shipMarkerId);
+                    return;
+                }
                 if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(shipMarkerId);
             }
         };
@@ -2458,6 +2642,94 @@ window.hideWeaponRangeRing = function() {
     if (ring) ring.style.display = 'none';
 };
 
+/* --- TARGET-SELECT HIGHLIGHT (live-session feature request, 2026-09-13:
+   "when selecting a target highlight the actual token") --- Wired to the
+   onchange of each weapon's target <select> in js/combat.js's
+   renderShipWeaponsHtml (the one function both the Vessel Deck and Battle
+   Map cards share). Same single-reusable-element-over-the-grid pattern as
+   the range ring just above, but this is a brief pulse rather than a
+   persistent overlay -- it's feedback for "you just picked this," not an
+   ongoing selection indicator (nothing here tracks per-weapon-row target
+   state), so it auto-hides itself after ~1.6s. Re-selecting (same or a
+   different target, from the same or a different weapon row) restarts the
+   timer rather than stacking one, so only the most recent pick is ever
+   showing. No-op (silently) if the target isn't currently a token in the
+   active battle -- covers the "-- No Target --" option and any stale
+   selection -- or the grid isn't in the DOM. */
+/* --- CLICK-ENEMY-TO-TARGET-ALL (live-session feature request, 2026-09-13):
+   "clicking an enemy ship auto applies targeting information for all owned
+   ship weapons." Judgment call, not re-confirmed with the DM at the
+   mechanics level (flagged in the architecture doc, easy to revisit):
+   - Only fires for a HOSTILE-tagged token (vessel.iff === 'hostile') that
+     the clicking user doesn't own -- a friendly/neutral/untagged token
+     click keeps the pre-existing "open vessel terminal" behavior unchanged
+     (see the branch in wireTokenDrag below).
+   - Sets every weapon-target <select> on the CLICKING user's own vessels
+     that are currently placed on THIS battle grid (Battle Map ship cards
+     only -- id prefix 'bm-', not the Vessel Deck's separate copies of the
+     same weapon rows) to this target, skipping any weapon whose dropdown
+     doesn't actually list the target as an option (out of range / not
+     visible -- see getBattleScopedTargets) rather than forcing an invalid
+     value in.
+   - Deliberately does NOT also open the vessel terminal for this click --
+     the point is one click to get every gun pointed at the target, and a
+     modal popping up over the same cards the FIRE buttons live on would
+     fight that. Flashes the existing target highlight ring afterward so
+     the lock-on is visually obvious. */
+window.autoTargetAllMyWeapons = function(targetVesselId) {
+    if (!window.globalBattleEncounterCache) return;
+    const myTokens = (window.globalBattleEncounterCache.tokens || []).filter(t => {
+        const v = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
+        return v && v.id !== targetVesselId && window.vesselHasOwner(v, currentUserId);
+    });
+    let appliedAny = false;
+    myTokens.forEach(t => {
+        const vessel = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
+        const weapons = (vessel && vessel.ship_weapons) || [];
+        weapons.forEach((w, idx) => {
+            const sel = document.getElementById(`bm-wpn-target-${vessel.id}-${idx}`);
+            if (!sel) return;
+            const hasOption = Array.from(sel.options).some(o => o.value === targetVesselId);
+            if (!hasOption) return;
+            sel.value = targetVesselId;
+            appliedAny = true;
+        });
+    });
+    if (appliedAny && typeof window.flashBattleTargetHighlight === 'function') window.flashBattleTargetHighlight(targetVesselId);
+};
+
+let battleMapTargetHighlightTimeout = null;
+window.flashBattleTargetHighlight = function(vesselId) {
+    if (!vesselId || !window.globalBattleEncounterCache) return;
+    const grid = document.getElementById('battle-map-grid');
+    if (!grid) return;
+    const pos = window.getBattleTokenPosition ? window.getBattleTokenPosition(vesselId) : null;
+    if (!pos) return;
+
+    let hl = document.getElementById('battle-map-target-highlight');
+    if (!hl) {
+        hl = document.createElement('div');
+        hl.id = 'battle-map-target-highlight';
+        hl.className = 'battle-target-highlight';
+        grid.appendChild(hl);
+    }
+    hl.style.left = pos.x + 'px';
+    hl.style.top = pos.y + 'px';
+    hl.style.width = BATTLE_TOKEN_SIZE + 'px';
+    hl.style.height = BATTLE_TOKEN_SIZE + 'px';
+    hl.style.display = 'block';
+    // Restart the CSS pulse animation on every call, including re-picking
+    // the same target twice in a row -- removing the class, forcing a
+    // reflow, then re-adding it is the standard trick to make a browser
+    // replay an animation it thinks hasn't changed.
+    hl.classList.remove('battle-target-highlight-fade');
+    void hl.offsetWidth;
+    hl.classList.add('battle-target-highlight-fade');
+
+    if (battleMapTargetHighlightTimeout) clearTimeout(battleMapTargetHighlightTimeout);
+    battleMapTargetHighlightTimeout = setTimeout(() => { hl.style.display = 'none'; }, 1600);
+};
+
 /* --- SHIP-STATUS CARDS (full-screen build; collapse/expand added later
    this session per tester feedback) ---
    Confirmed permission rule: the DM sees full weapon+health detail on every
@@ -2486,6 +2758,28 @@ window.hideWeaponRangeRing = function() {
 // was "overwhelming" -- see darkforest-architecture-reference.md's Battle
 // Map layout addendum for the full reasoning.
 let battleMapExpandedCards = new Set();
+
+/* Comms & Dice dock (live-session feature request, 2026-09-13: "dice roller
+   chat integrated into the battle map"). Collapsed by default -- same
+   "don't eat vertical space nobody asked to see yet" reasoning as the ship
+   cards' own collapse-by-default above -- and, once opened, forces a fresh
+   renderChatFeed() so the feed's scrollTop-pin recalculates against the
+   dock's REAL now-visible height (its innerHTML was already kept in sync
+   the whole time via renderChatFeed/renderCommsTabBar's mirrored-render
+   approach in js/ui.js even while display:none, but scrollTop math against
+   a hidden 0-height element wouldn't have pinned it to the bottom). See
+   index.html for the dock markup and js/ui.js for the shared
+   render/send functions this reuses (unmodified in spirit, just now
+   rendering into two targets instead of one). */
+window.toggleBattleMapCommsDock = function() {
+    const body = document.getElementById('bm-comms-dock-body');
+    const caret = document.getElementById('bm-comms-dock-caret');
+    if (!body) return;
+    const opening = body.style.display !== 'block';
+    body.style.display = opening ? 'block' : 'none';
+    if (caret) caret.textContent = opening ? '▾' : '▸';
+    if (opening && typeof window.renderChatFeed === 'function') window.renderChatFeed();
+};
 
 window.toggleBattleShipCardExpanded = function(tokenId) {
     if (battleMapExpandedCards.has(tokenId)) battleMapExpandedCards.delete(tokenId);
@@ -2561,6 +2855,18 @@ window.renderBattleShipCards = function(tokens) {
             ? `<span style="font-size:9px; color:#6b826a;" title="Stationary platform — no Battle Map movement">🛰 STATIONARY</span>`
             : `<span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>`;
 
+        // Mid-battle IFF change (live-session feature request, 2026-09-13): DM
+        // asked to be able to flip a ship's Friendly/Hostile/Neutral tag mid-
+        // fight (e.g. a boarded/captured vessel, a reveal). Reuses the exact
+        // same dropdown markup/behavior as the Galaxy Map HUD's own DM-only
+        // IFF box (js/map.js, selected-target 'ship' panel) for consistency —
+        // same window.IFF_COLORS palette, same "-- Unset --" option, same
+        // window.updateShipIff(shipId, newIff) call — just laid out compactly
+        // for this card's header instead of the HUD's full-width panel.
+        const iffVal = vessel.iff || null;
+        const iffColor = iffVal ? ((window.IFF_COLORS && window.IFF_COLORS[iffVal]) || '#00e1ff') : '#6b826a';
+        const dmIffBox = isDm ? `<select onchange="window.updateShipIff('${vessel.id}', this.value)" onclick="event.stopPropagation();" style="font-size:8px; padding:2px; background:#0a1410; color:${iffColor}; border:1px solid ${iffColor};" title="DM: change this vessel's IFF tag mid-battle"><option value="" ${!iffVal ? 'selected' : ''} style="color:#6b826a;">-- Unset --</option><option value="friendly" ${iffVal === 'friendly' ? 'selected' : ''} style="color:#00e5a3;">✓ Friendly</option><option value="neutral" ${iffVal === 'neutral' ? 'selected' : ''} style="color:#c9962f;">◌ Neutral</option><option value="hostile" ${iffVal === 'hostile' ? 'selected' : ''} style="color:#ff3333;">⚠ Hostile</option></select>` : '';
+
         const header = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
                 <div style="display:flex; align-items:center; gap:6px; cursor:pointer;" onclick="window.toggleBattleShipCardExpanded('${tok.token_id}')" title="${expanded ? 'Click to collapse' : 'Click to expand full detail'}">
@@ -2571,6 +2877,7 @@ window.renderBattleShipCards = function(tokens) {
                 <div style="display:flex; align-items:center; gap:8px;">
                     ${vessel.is_hidden ? `<span style="font-size:9px; color:#c778dd;" title="Hidden from every non-DM viewer except this vessel's own player-owner">🫥 HIDDEN</span>` : ''}
                     ${moveLine}
+                    ${dmIffBox}
                     ${isDm ? `<button class="layer-edit" onclick="window.toggleVesselHidden('${vessel.id}')" style="font-size:8px; padding:2px 6px; border-color:#c778dd; color:#c778dd;" title="Fog of War: toggle whether this vessel is hidden from every non-DM viewer except its own player-owner">${vessel.is_hidden ? '👁 UNHIDE' : '🫥 HIDE'}</button>` : ''}
                     ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
                 </div>
