@@ -862,10 +862,25 @@ function renderSkillInputs() {
     const diceContainer = document.getElementById('dice-roller-skills'); let dHtml = '';
     skillList.forEach(skill => { dHtml += `<label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" class="roll-skill-cb" value="${skill}" style="width:auto; margin:0;"> ${skill}</label>`; });
     if(diceContainer) diceContainer.innerHTML = dHtml;
-    
+
     const statContainer = document.getElementById('dice-roller-stats'); let sHtml = '';
     ['Charisma', 'Dexterity', 'Intelligence', 'Strength', 'Toughness', 'Willpower'].forEach(st => { sHtml += `<label style="font-size: 11px; color: #d4c5a9;"><input type="checkbox" class="roll-stat-cb" value="${st}"> ${st}</label>`; });
     if(statContainer) statContainer.innerHTML = sHtml;
+
+    // Battle Map dock build (live-session feature request, 2026-09-13): the
+    // exact same checkbox markup (same .roll-stat-cb/.roll-skill-cb classes
+    // -- see window.executeDicePoolRoll's idPrefix comment in js/combat.js
+    // for why reusing the classes and scoping by container id is safe here)
+    // also populates the compact roller docked inside the Battle Map, if
+    // that panel exists in the DOM. Populated unconditionally alongside the
+    // Combat Arsenal tab's copy so both stay in sync with zero extra
+    // bookkeeping -- this function already re-runs the character sheet
+    // rarely enough (skill list is static) that duplicating the work here
+    // is a non-issue.
+    const bmDiceContainer = document.getElementById('bm-dice-roller-skills');
+    if (bmDiceContainer) bmDiceContainer.innerHTML = dHtml;
+    const bmStatContainer = document.getElementById('bm-dice-roller-stats');
+    if (bmStatContainer) bmStatContainer.innerHTML = sHtml;
 }
 renderSkillInputs();
 
@@ -1947,7 +1962,16 @@ function persistClosedPmTabs() {
 }
 
 window.renderCommsTabBar = function() {
-    const bar = document.getElementById('comms-tabs-bar'); if (!bar) return;
+    const bar = document.getElementById('comms-tabs-bar');
+    // Battle Map dock build (this session): the docked comms panel inside
+    // the Battle Map shares this exact same tab bar markup/onclick targets
+    // (window.switchCommsTab is global -- clicking either bar flips the one
+    // shared window.activeCommsTab and both bars/feeds re-render in sync).
+    // No separate PM-select dropdown is duplicated there -- starting a new
+    // DM conversation still happens from the floating Comms panel; the dock
+    // is for viewing/replying to tabs that already exist.
+    const bmBar = document.getElementById('bm-comms-tabs-bar');
+    if (!bar && !bmBar) return;
     let html = '';
     html += `<button class="comms-tab-btn ${window.activeCommsTab === 'general' ? 'active' : ''} ${window.commsUnread['general'] ? 'unread' : ''}" onclick="window.switchCommsTab('general')">General</button>`;
     html += `<button class="comms-tab-btn ${window.activeCommsTab === 'dice' ? 'active' : ''} ${window.commsUnread['dice'] ? 'unread' : ''}" onclick="window.switchCommsTab('dice')">🎲 Dice Streamer</button>`;
@@ -1960,7 +1984,8 @@ window.renderCommsTabBar = function() {
         html += `<button class="comms-tab-btn ${window.activeCommsTab === key ? 'active' : ''} ${window.commsUnread[key] ? 'unread' : ''}" onclick="window.switchCommsTab('${key}')">🔒 ${name}<span class="comms-tab-close" title="Close (keeps the conversation, just hides the tab)" onclick="event.stopPropagation(); window.closePmTab('${uid}')">✕</span></button>`;
     });
 
-    bar.innerHTML = html;
+    if (bar) bar.innerHTML = html;
+    if (bmBar) bmBar.innerHTML = html;
 };
 
 window.switchCommsTab = async function(tabKey) {
@@ -1976,12 +2001,16 @@ window.switchCommsTab = async function(tabKey) {
     }
 
     window.renderChatFeed();
-    const input = document.getElementById('comms-message-input');
-    if (input) {
+    // Battle Map dock build (this session): mirror the same disabled/
+    // placeholder state onto the docked input, if present -- one shared
+    // activeCommsTab, so both inputs should agree about whether Dice
+    // Streamer's read-only state applies right now.
+    [document.getElementById('comms-message-input'), document.getElementById('bm-comms-message-input')].forEach(input => {
+        if (!input) return;
         const isDice = tabKey === 'dice';
         input.disabled = isDice;
         input.placeholder = isDice ? 'Dice Streamer is a read-only log...' : 'Transmit message...';
-    }
+    });
 };
 
 window.closePmTab = function(userId) {
@@ -2052,8 +2081,15 @@ window.handleIncomingChatLog = function(newLog) {
     window.appendLocalChatLog(newLog);
 };
 
-window.sendChatMessage = async function() {
-    const input = document.getElementById('comms-message-input'); const content = input.value.trim(); if (!content) return;
+// inputId (added this session, Battle Map dock build): defaults to the
+// floating Comms panel's own input, unchanged for every existing caller.
+// The docked copy inside the Battle Map passes 'bm-comms-message-input'
+// instead -- both write to the same chat_logs/activeCommsTab, so a message
+// sent from either one shows up in both feeds via the normal
+// appendLocalChatLog/renderChatFeed path, no separate state to keep in sync.
+window.sendChatMessage = async function(inputId) {
+    const input = document.getElementById(inputId || 'comms-message-input'); if (!input) return;
+    const content = input.value.trim(); if (!content) return;
     const tab = window.activeCommsTab;
     if (tab === 'dice') return; // read-only stream, not a chat room
 
@@ -2069,7 +2105,13 @@ window.broadcastRoll = async function(title, breakdownText, totalSum) {
 };
 
 window.renderChatFeed = function() {
-    const feed = document.getElementById('comms-chat-feed'); if (!feed) return;
+    const feed = document.getElementById('comms-chat-feed');
+    // Battle Map dock build (this session): same mirrored-render approach as
+    // renderCommsTabBar above -- one shared source of truth
+    // (chatLogsList/diceLogsList/pmLogsCache + activeCommsTab), rendered
+    // into whichever of the two feed elements actually exist right now.
+    const bmFeed = document.getElementById('bm-comms-chat-feed');
+    if (!feed && !bmFeed) return;
     window.renderCommsTabBar();
     const tab = window.activeCommsTab;
     let source = [];
@@ -2089,8 +2131,9 @@ window.renderChatFeed = function() {
         if (log.message_type === 'ping' && log.roll_data) { contentHTML = `${log.content} <button class="layer-edit" onclick="window.jumpToPingLocation(${log.roll_data.x}, ${log.roll_data.y})" style="padding:2px 8px; font-size:9px; margin-left:6px;">JUMP TO LOCATION</button>`; }
         html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.message_type === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;">${contentHTML}</div></div>`;
     });
-    feed.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No messages in this channel yet.</span>';
-    feed.scrollTop = feed.scrollHeight;
+    const finalHtml = html || '<span style="font-size:10px; color:#6b826a;">No messages in this channel yet.</span>';
+    if (feed) { feed.innerHTML = finalHtml; feed.scrollTop = feed.scrollHeight; }
+    if (bmFeed) { bmFeed.innerHTML = finalHtml; bmFeed.scrollTop = bmFeed.scrollHeight; }
 };
 
 window.populateCommsRecipients = function() {
