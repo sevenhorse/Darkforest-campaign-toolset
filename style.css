@@ -24,7 +24,11 @@ body {
 }
 
 #login-wrapper {
-    display: flex; justify-content: center; align-items: center; height: 100vh; text-align: center;
+    /* Defaults hidden now (login-flash fix, 2026-09-13) -- js/db.js's
+       checkExistingSession explicitly sets this back to flex for the actual
+       "you need to log in" case; a valid-session user never sees it painted
+       at all. */
+    display: none; justify-content: center; align-items: center; height: 100vh; text-align: center;
     background: radial-gradient(circle, #09100d 0%, #020302 100%);
 }
 /* max-width safety net (mobile pass, this session) -- fixed 380px alone
