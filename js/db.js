@@ -27,11 +27,26 @@ if (window.supabase) {
 // use for their own boot-time init calls, even though this script's own
 // position (end of body) means the DOM is already parsed either way.
 document.addEventListener('DOMContentLoaded', async function checkExistingSession() {
-    if (!db) return;
+    // Login-flash fix (2026-09-13, live-session bug report): the restore-on-
+    // refresh check above fixed the actual kickout, but #login-wrapper still
+    // defaulted to display:flex in CSS, so it was visible the instant the
+    // page painted and only got hidden ~1s later once this async check
+    // resolved and fetchUserProfile ran -- a valid-session user saw the raw
+    // login form flash before the map appeared. #login-wrapper now defaults
+    // to display:none instead, so every path here that does NOT end in a
+    // successful fetchUserProfile call has to explicitly reveal it again --
+    // nothing else ever will.
+    const showLogin = () => {
+        const el = document.getElementById('login-wrapper');
+        if (el) el.style.display = 'flex';
+    };
+    if (!db) { showLogin(); return; }
     const { data, error } = await db.auth.getSession();
-    if (error) { console.error('Session check failed:', error.message); return; }
+    if (error) { console.error('Session check failed:', error.message); showLogin(); return; }
     if (data && data.session && data.session.user) {
         fetchUserProfile(data.session.user);
+    } else {
+        showLogin();
     }
 });
 
