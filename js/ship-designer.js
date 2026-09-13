@@ -250,6 +250,11 @@ window.deployShipTemplate = async function(id) {
         // editable afterward per-deployment via the Vessel Deck's EDIT BASE
         // STATS modal (js/combat.js), independent of the source template.
         iff: t.iff || null,
+        // DM-AI-for-NPCs build (this session): same carry-from-template
+        // pattern as vessel_class/iff just above -- also still editable
+        // afterward per-deployment via the Vessel Deck's EDIT BASE STATS
+        // modal (js/combat.js), independent of the source template.
+        ai_controlled: !!t.ai_controlled,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
         ship_decks: JSON.parse(JSON.stringify(t.ship_decks || [])),
         ship_hangar: newHangar
@@ -322,6 +327,11 @@ window.deployShipTemplate = async function(id) {
                     <option value="friendly">✓ Friendly</option>
                 </select>
             </div>
+            <div id="tmpl-edit-ai-wrap" style="display:none; margin-top:6px;">
+                <label for="tmpl-edit-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer;" title="DM-AI-for-NPCs: when ON, a deployed copy of this vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round. DM-only field.">
+                    <input type="checkbox" id="tmpl-edit-ai-controlled" style="margin:0;"> 🤖 AI Controlled (DM only)
+                </label>
+            </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="tmpl-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="tmpl-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#00e1ff; color:#00e1ff;">SAVE CHANGES</button>
@@ -345,7 +355,8 @@ window.deployShipTemplate = async function(id) {
                 tactical_speed: isStation ? 0 : (parseInt(document.getElementById('tmpl-edit-speed').value) || 160),
                 is_station: isStation,
                 vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null,
-                iff: document.getElementById('tmpl-edit-iff').value || null
+                iff: document.getElementById('tmpl-edit-iff').value || null,
+                ai_controlled: document.getElementById('tmpl-edit-ai-controlled').checked
             };
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -373,6 +384,9 @@ window.deployShipTemplate = async function(id) {
         document.getElementById('tmpl-edit-iff').value = t.iff || '';
         const iffWrap = document.getElementById('tmpl-edit-iff-wrap');
         if (iffWrap) iffWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
+        const aiWrap = document.getElementById('tmpl-edit-ai-wrap');
+        if (aiWrap) aiWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
+        document.getElementById('tmpl-edit-ai-controlled').checked = !!t.ai_controlled;
         document.getElementById('tmpl-edit-station').checked = !!t.is_station;
         window.toggleStationFields('tmpl-edit');
         overlay.style.display = 'flex';
@@ -590,12 +604,16 @@ window.renderSecretRepositoryPanel = function() {
         // filtering). Purely a visibility badge here.
         const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
         const iffBadge = window.renderIffBadge(t.iff);
+        // DM-AI-for-NPCs build (this session): quick "is this one on?" badge
+        // on the list card so the DM doesn't have to open every template
+        // just to check -- same visual convention as the other badges here.
+        const aiBadge = t.ai_controlled ? `<span style="font-size:8px; color:#ff6b6b; border:1px solid #ff6b6b; border-radius:2px; padding:1px 4px; margin-left:6px;">🤖 AI</span>` : '';
         const hardpointTag = t.is_station ? `${weaponCount} hardpoints (no cap)` : `${weaponCount}/${t.hardpoint_slots || 4} hardpoints`;
         html += `
             <div class="note-card" style="border-color:#ff3333;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}${iffBadge}
+                        <strong style="color:#ff6b6b; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}${iffBadge}${aiBadge}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${t.class || 'Frigate'} · Hull ${t.max_hull || 0} · Shields ${t.max_shields || 0} · ${hardpointTag}</p>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:110px;">
@@ -665,7 +683,15 @@ window.saveNewSecretTemplate = async function() {
         // planting a friendly NPC (e.g. an allied escort) picks Friendly
         // here instead, which is what makes it visible in players' Vessel
         // Deck once deployed -- see window.canViewVesselDeck (js/combat.js).
-        iff: document.getElementById('new-secret-template-iff').value || 'hostile'
+        iff: document.getElementById('new-secret-template-iff').value || 'hostile',
+        // DM-AI-for-NPCs build (this session): the "add new secret template"
+        // form has no dedicated AI-controlled checkbox of its own (unlike
+        // vessel_class/iff, which have selects on this form already) --
+        // defaults off, same as ship_templates.ai_controlled's own column
+        // default. A DM can still turn it on afterward via the ✎ edit
+        // button on this same card, which opens the shared
+        // window.openEditTemplateModal popup (now has the checkbox).
+        ai_controlled: false
     };
     const { error } = await db.from('ship_templates').insert(payload);
     if (error) { alert("Failed to store repository template: " + error.message); return; }
@@ -1014,6 +1040,9 @@ window.renderSecretRepoEditorPanel = function() {
             <label for="repo-edit-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:10px;" title="Locks Tactical Speed to 0 and removes the Hardpoint Slots cap.">
                 <input type="checkbox" id="repo-edit-station" ${t.is_station ? 'checked' : ''} onchange="window.toggleStationFields('repo-edit')" style="margin:0;"> 🛰 This is a Station
             </label>
+            <label for="repo-edit-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="DM-AI-for-NPCs: when ON, a deployed copy of this vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round.">
+                <input type="checkbox" id="repo-edit-ai-controlled" ${t.ai_controlled ? 'checked' : ''} style="margin:0;"> 🤖 AI Controlled
+            </label>
 
             <h4 style="margin:16px 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#ff6b6b;">Base Stats (design max values)</h4>
             <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
@@ -1160,7 +1189,8 @@ window.saveSecretRepoIdentityStats = async function() {
         tactical_speed: isStation ? 0 : (parseInt(document.getElementById('repo-edit-speed').value) || 160),
         is_station: isStation,
         vessel_class: document.getElementById('repo-edit-vesselclass').value || null,
-        iff: document.getElementById('repo-edit-iff').value || null
+        iff: document.getElementById('repo-edit-iff').value || null,
+        ai_controlled: document.getElementById('repo-edit-ai-controlled').checked
     };
     const { error } = await db.from('ship_templates').update(payload).eq('id', editingRepoTemplateId);
     if (error) { alert("Failed to save template: " + error.message); return; }
