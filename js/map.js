@@ -44,17 +44,64 @@ let generatedSystems = {};
 // never mutate the cached objects themselves (new objects are returned).
 function applyPlanetaryOverrides(bodies) {
     const overrides = window.globalPlanetaryModifiersCache || {};
+    // Personal labels (live-session feature request, 2026-09-13): applied
+    // LAST, on top of the DM's own custom_name, per confirmed design ("my
+    // personal label wins for me even over the DM's official name") --
+    // this cache only ever holds the CURRENT viewer's own rows (see
+    // loadPersonalLabels, js/db.js), so this never touches what anyone
+    // else sees, DM included. Falls through to b.name/o.custom_name
+    // unchanged for every body this viewer hasn't personally relabeled.
+    const personalLabels = window.globalPersonalLabelsCache || {};
     return bodies.map(b => {
         const o = overrides[b.id];
-        if (!o) return b;
+        const personalName = personalLabels[`body:${b.id}`];
+        if (!o && !personalName) return b;
         return { ...b,
-            name: o.custom_name ?? b.name,
-            type: o.custom_type ?? b.type,
-            gravity: o.custom_gravity ?? b.gravity,
-            atmosphere: o.custom_atmosphere ?? b.atmosphere,
-            resources: o.custom_resources ?? b.resources };
+            name: personalName ?? (o ? (o.custom_name ?? b.name) : b.name),
+            type: o ? (o.custom_type ?? b.type) : b.type,
+            gravity: o ? (o.custom_gravity ?? b.gravity) : b.gravity,
+            atmosphere: o ? (o.custom_atmosphere ?? b.atmosphere) : b.atmosphere,
+            resources: o ? (o.custom_resources ?? b.resources) : b.resources };
     });
 }
+
+// Personal system renaming (live-session feature request, 2026-09-13):
+// star_systems has no override-merge choke point the way bodies do (a DM's
+// rename writes straight into star_systems.name, read directly everywhere)
+// -- this small wrapper is the equivalent single injection point for
+// systems. Applied at the two highest-value display sites (the galaxy map's
+// own star label and the selected-target HUD panel's heading) rather than
+// every last read of `.name` across the codebase (search results, the jump
+// plotter's snap-target label, etc. still show the canonical name) --
+// flagged as a deliberate scope trim, not an oversight; easy to extend to
+// more sites later if it turns out to matter at the table.
+window.getDisplaySystemName = function(system) {
+    if (!system) return '';
+    const personalLabels = window.globalPersonalLabelsCache || {};
+    return personalLabels[`system:${system.id}`] ?? system.name;
+};
+
+// Shared save/clear for BOTH personal-label editors below (system + body).
+// Upsert-by-conflict on (user_id, target_type, target_id) -- same
+// "only ever this viewer's own row" scoping the load query and RLS-adjacent
+// honor-system convention rely on elsewhere in this feature (see the
+// personal_labels migration / loadPersonalLabels in js/db.js).
+window.savePersonalLabel = async function(targetType, targetId, newName) {
+    const trimmed = (newName || '').trim();
+    const cacheKey = `${targetType}:${targetId}`;
+    if (!trimmed) {
+        // Empty input clears the personal label back to the canonical name,
+        // rather than saving a blank string as if it were a real label.
+        await db.from('personal_labels').delete().eq('user_id', currentUserId).eq('target_type', targetType).eq('target_id', targetId);
+        delete window.globalPersonalLabelsCache[cacheKey];
+    } else {
+        const { error } = await db.from('personal_labels')
+            .upsert({ user_id: currentUserId, target_type: targetType, target_id: targetId, custom_name: trimmed }, { onConflict: 'user_id,target_type,target_id' });
+        if (error) { alert('Failed to save personal label: ' + error.message); return; }
+        window.globalPersonalLabelsCache[cacheKey] = trimmed;
+    }
+    if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+};
 // Bug fix (DM report, 2026-09-01): the render loop has its OWN eligibility
 // checks -- separate from getSystemBodiesRaw above -- that also
 // short-circuited on system.type === 'Nebula' in four places (focus
@@ -1940,6 +1987,20 @@ window.initGalaxyEngine = function() {
         if (dynamicTarget.type === 'star') {
             const s = dynamicTarget.data; let fowTier = window.getFowTier(s);
             let dmEditorBox = '';
+            // Personal system renaming (live-session feature request,
+            // 2026-09-13): visible to EVERY user (not DM-gated, unlike
+            // dmEditorBox above) -- only affects this viewer's own client,
+            // see window.savePersonalLabel/getDisplaySystemName above. Not
+            // offered at fowTier 1 (Unknown Contact) -- nothing to rename
+            // yet if you don't even know what it is.
+            const myPersonalSystemLabel = (window.globalPersonalLabelsCache || {})[`system:${s.id}`] || '';
+            const personalLabelBox = `<div style="background:#040605; border:1px solid #3c4e36; padding:6px; margin-top:8px; border-radius:2px;">
+                <span style="font-size:9px; color:#6b826a;">📝 Personal Label (only you see this):</span>
+                <div style="display:flex; gap:4px; margin-top:4px;">
+                    <input type="text" id="personal-label-system-${s.id}" value="${myPersonalSystemLabel}" placeholder="${s.name}" style="flex:1; font-size:10px; margin:0;">
+                    <button class="btn-reveal" onclick="window.savePersonalLabel('system', '${s.id}', document.getElementById('personal-label-system-${s.id}').value)" style="width:auto; padding:4px 8px; font-size:9px; margin:0;" title="Leave blank and click SET to clear your personal label">SET</button>
+                </div>
+            </div>`;
             // Control follow-on (this session): Ownership/Control fields now
             // show for the DM on EVERY system, not just DM-authored custom
             // ones. Custom systems keep the full "OVERSEER STAR EDITOR" box
@@ -1994,10 +2055,10 @@ window.initGalaxyEngine = function() {
                 content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #6b826a; font-size: 13px;">[UNKNOWN CONTACT]</strong><br><span style="color: #6b826a;">Coordinates:</span> X: ${Math.round(s.x)}, Y: ${Math.round(s.y)}<br><span style="color: #ff3333; font-size:9px; margin-top:6px; display:block;">⚠ OUT OF SENSOR RANGE</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}</div>`;
             } else if (fowTier === 2) {
                 let bodies = window.getSystemBodies(s).length; let dradisBtn = `<button class="btn-deploy" onclick="window.executeDradisScan('${s.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">📡 EXECUTE DRADIS SCAN (EST: ${2 + bodies} HRS)</button>`;
-                content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #ffaa00; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br><span style="color: #6b826a;">Orbital Bodies Detected:</span> ${bodies}<br><span style="color: #ffaa00; font-size:9px; margin-top:6px; display:block;">⚠ AWAITING DEEP SCAN FOR SURFACE TELEMETRY</span>${dradisBtn}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}</div>`;
+                content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #ffaa00; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${window.getDisplaySystemName(s)}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br><span style="color: #6b826a;">Orbital Bodies Detected:</span> ${bodies}<br><span style="color: #ffaa00; font-size:9px; margin-top:6px; display:block;">⚠ AWAITING DEEP SCAN FOR SURFACE TELEMETRY</span>${dradisBtn}<div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}${personalLabelBox}</div>`;
             } else {
                 let hazardBadge = s.hazard && s.hazard !== 'None' ? `<span style="color:#ff3333; font-weight:bold; display:block; margin:2px 0;">⚠️ HAZARD: ${s.hazard.toUpperCase()}</span>` : '';
-                content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${s.name}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br>${hazardBadge}<span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br><span style="color: #6b826a;">Control:</span> ${s.control || 'None'}<br><span style="color: #00e5a3; font-size:9px; margin-top:6px; display:block;">✓ DRADIS TELEMETRY COMPLETE</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}</div>`;
+                content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${window.getDisplaySystemName(s)}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br>${hazardBadge}<span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br><span style="color: #6b826a;">Control:</span> ${s.control || 'None'}<br><span style="color: #00e5a3; font-size:9px; margin-top:6px; display:block;">✓ DRADIS TELEMETRY COMPLETE</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}${personalLabelBox}</div>`;
             }
         } else if (dynamicTarget.type === 'ship') {
             // IFF unification (this session): now reads/writes the real ship_markers.iff
@@ -2080,7 +2141,24 @@ window.initGalaxyEngine = function() {
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
             let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button>${(window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id]) ? `<button class="btn-remove" onclick="window.deletePlanetOverride('${p.id}')" style="font-size:9px; padding:4px; margin-top:4px; width:100%;">🗑️ CLEAR OVERRIDE (revert to default)</button>` : ''}</div>` : '';
-            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${p.color}; font-size: 13px;">🪐 ${p.name}</strong><br><span style="color: #6b826a;">System:</span> ${p.parentSystem.name}<br><span style="color: #6b826a;">Class:</span> ${p.type} | <span style="color: #6b826a;">Grav:</span> ${p.gravity}<br><span style="color: #00e5a3; font-weight:bold; margin-top:4px; display:block;">Scans:</span> <span style="color: #d4c5a9;">${p.resources}</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmBodyEditorBox}</div>`;
+            // Personal planet renaming (live-session feature request,
+            // 2026-09-13): visible to every user. p.name here already
+            // reflects THIS viewer's own personal label if set (see the
+            // personalLabels merge in applyPlanetaryOverrides above, which
+            // getSystemBodies runs through before p ever reaches here) --
+            // this box is just the editor for setting/clearing it. Value
+            // pulled straight from the cache (not p.name) so the input
+            // shows the raw label you typed, not whatever it resolved to.
+            const myPersonalBodyLabel = (window.globalPersonalLabelsCache || {})[`body:${p.id}`] || '';
+            const canonicalBodyName = (window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id] && window.globalPlanetaryModifiersCache[p.id].custom_name) || p.name;
+            const personalBodyLabelBox = `<div style="background:#040605; border:1px solid #3c4e36; padding:6px; margin-top:8px; border-radius:2px;">
+                <span style="font-size:9px; color:#6b826a;">📝 Personal Label (only you see this):</span>
+                <div style="display:flex; gap:4px; margin-top:4px;">
+                    <input type="text" id="personal-label-body-${p.id}" value="${myPersonalBodyLabel}" placeholder="${canonicalBodyName}" style="flex:1; font-size:10px; margin:0;">
+                    <button class="btn-reveal" onclick="window.savePersonalLabel('body', '${p.id}', document.getElementById('personal-label-body-${p.id}').value)" style="width:auto; padding:4px 8px; font-size:9px; margin:0;" title="Leave blank and click SET to clear your personal label">SET</button>
+                </div>
+            </div>`;
+            content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: ${p.color}; font-size: 13px;">🪐 ${p.name}</strong><br><span style="color: #6b826a;">System:</span> ${window.getDisplaySystemName(p.parentSystem)}<br><span style="color: #6b826a;">Class:</span> ${p.type} | <span style="color: #6b826a;">Grav:</span> ${p.gravity}<br><span style="color: #00e5a3; font-weight:bold; margin-top:4px; display:block;">Scans:</span> <span style="color: #d4c5a9;">${p.resources}</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmBodyEditorBox}${personalBodyLabelBox}</div>`;
         }
     };
 
@@ -2242,7 +2320,7 @@ window.initGalaxyEngine = function() {
                     ctx.beginPath(); ctx.arc(s.x, s.y, s.size / (s.isCustom ? window.camera.zoom : 1), 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
                 }
                 if (window.camera.zoom > 0.15 && window.camera.zoom <= SYSTEM_ZOOM_THRESHOLD && s.type !== 'Nebula') {
-                    ctx.fillStyle = s.isCustom ? `rgba(0, 229, 163, 0.8)` : `rgba(107, 130, 106, 0.8)`; ctx.font = `${Math.max(10, 12 / window.camera.zoom)}px Courier New`; ctx.fillText(s.name, s.x + 10, s.y + 4);
+                    ctx.fillStyle = s.isCustom ? `rgba(0, 229, 163, 0.8)` : `rgba(107, 130, 106, 0.8)`; ctx.font = `${Math.max(10, 12 / window.camera.zoom)}px Courier New`; ctx.fillText(window.getDisplaySystemName(s), s.x + 10, s.y + 4);
                 }
             }
 
