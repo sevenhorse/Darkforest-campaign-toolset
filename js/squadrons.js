@@ -287,6 +287,24 @@ window.launchSquadron = async function(vesselId, idx, hideFromOverworld) {
     let sq = hangar.splice(idx, 1)[0];
     if (sq) {
         sq.loiter = 4;
+        // Bug/feature report (live session, 2026-09-13): squadrons launched
+        // with no ai_stance at all, staying fully manual until someone
+        // opened the Vessel Deck or Battle Map dropdown and picked one --
+        // easy to forget mid-combat. Give it a sensible default by chassis
+        // type instead, but only if nothing was already chosen (re-launching
+        // a squadron that had its stance set before recall keeps it, same
+        // "don't clobber an explicit choice" precedent as elsewhere in this
+        // file). Raven = fighter wing -> defaults to dogfighting other
+        // strike craft; Hawk = bomb group -> defaults to going after
+        // capitals; Messenger's value is the passive Target Uplink (see
+        // window.getUplinkedEnemyIds in js/battle-map.js), not a combat
+        // role, so it's deliberately left manual/blank. This is a judgment
+        // call, not a DM-confirmed mapping -- easy to change if it doesn't
+        // match what's wanted at the table.
+        if (!sq.ai_stance) {
+            if (sq.type === 'raven') sq.ai_stance = 'attack_strike_craft';
+            else if (sq.type === 'hawk') sq.ai_stance = 'attack_capitals';
+        }
         deployed.push(sq);
         await db.from('ship_markers').update({ ship_hangar: hangar, ship_deployed: deployed }).eq('id', vessel.id);
         vessel.ship_hangar = hangar;
