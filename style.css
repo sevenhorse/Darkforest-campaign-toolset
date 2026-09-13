@@ -203,11 +203,22 @@ canvas { display: block; width: 100%; height: 100%; }
    wide screens instead of pinned left with dead space on the right. Same
    tester-feedback pass, see darkforest-architecture-reference.md. */
 .battle-map-layout { display: flex; gap: 16px; height: calc(100vh - 80px); justify-content: center; }
+/* Left gutter build (live-session feature request, 2026-09-13): puts the
+   dead space the centered layout used to leave on both sides to use --
+   see the HTML comment above #battle-map-active-container for what moved
+   in here (Comms & Dice Roller, Available Vessels reserve pool, DM Deploy
+   Template/Saved Fleet). Same scroll/overflow treatment as the other two
+   columns since it can get tall with all three sections expanded. */
+.battle-map-dice-col {
+    flex: 0 0 300px; display: flex; flex-direction: column; gap: 10px;
+    overflow-y: auto; overflow-x: hidden; padding-right: 6px;
+}
 .battle-map-left-col {
     flex: 0 0 740px; display: flex; flex-direction: column; gap: 10px;
     overflow-y: auto; overflow-x: hidden; padding-right: 6px;
 }
 .battle-map-right-col { flex: 0 1 420px; min-width: 260px; max-width: 480px; overflow-y: auto; padding-right: 6px; }
+#battle-map-vessel-tabs .hud-tab-btn { flex: 1 1 30%; font-size: 8px; padding: 4px 2px; }
 .battle-ship-card { background: #030403; border: 1px solid #3c4e36; border-radius: 2px; padding: 10px; }
 #salvage-panel { top: 100px; right: 20px; width: 320px; display: none; z-index: 20; max-height: 70vh; overflow-y: auto; }
 
@@ -1007,7 +1018,7 @@ div[style*="grid-template-columns"] > div,
         flex-direction: column !important; height: auto !important;
         max-height: calc(100vh - 70px) !important; overflow-y: auto !important;
     }
-    .battle-map-left-col, .battle-map-right-col {
+    .battle-map-dice-col, .battle-map-left-col, .battle-map-right-col {
         flex: 1 1 auto !important; width: 100% !important; max-width: 100% !important; min-width: 0 !important;
     }
     #battle-map-grid-wrap { width: 100% !important; max-width: 100% !important; height: 50vh !important; }
