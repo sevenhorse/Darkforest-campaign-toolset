@@ -679,6 +679,7 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
                         onmouseenter="window.showWeaponRangeRing && window.showWeaponRangeRing('${vessel.id}', ${w.range || 0})"
                         onblur="window.hideWeaponRangeRing && window.hideWeaponRangeRing()"
                         onmouseleave="window.hideWeaponRangeRing && window.hideWeaponRangeRing()"
+                        onchange="window.flashBattleTargetHighlight && window.flashBattleTargetHighlight(this.value)"
                         style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
                     <label for="${idPrefix}wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
                     <input type="number" id="${idPrefix}wpn-volley-${vessel.id}-${idx}" value="1" min="1" max="${w.gun_count || 1}" title="Volley Count (max ${w.gun_count || 1} guns)" style="width:35px; height:20px; font-size:10px; margin:0; padding:0; text-align:center; border:1px solid #ff6b6b; background:#0a1410; color:#ff6b6b; border-radius:2px;">
@@ -1408,6 +1409,9 @@ window.resetShipStats = async function(vesselId) {
                 <label for="maxstats-hidden" style="font-size:10px; color:#c778dd; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="Fog of War: removes this vessel entirely from every non-DM surface (Battle Map grid/cards, weapon target dropdowns, Vessel Deck selector) for everyone except the DM and this vessel's own player-owner. Auto-reveals the instant it fires a weapon.">
                     <input type="checkbox" id="maxstats-hidden" style="margin:0;"> 🫥 Hidden (Fog of War) — DM only
                 </label>
+                <label for="maxstats-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="DM-AI-for-NPCs: when ON, this deployed vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round. DM-only field.">
+                    <input type="checkbox" id="maxstats-ai-controlled" style="margin:0;"> 🤖 AI Controlled — DM only
+                </label>
             </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="maxstats-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
@@ -1434,7 +1438,8 @@ window.resetShipStats = async function(vesselId) {
                 // form just writes those same values back unchanged rather
                 // than silently resetting them.
                 iff: document.getElementById('maxstats-iff').value || null,
-                is_hidden: document.getElementById('maxstats-hidden').checked
+                is_hidden: document.getElementById('maxstats-hidden').checked,
+                ai_controlled: document.getElementById('maxstats-ai-controlled').checked
             };
             const clamped = {
                 integrity_shields: Math.min(vessel.integrity_shields !== undefined ? vessel.integrity_shields : newMax.max_shields, newMax.max_shields),
@@ -1463,6 +1468,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-vesselclass').value = vessel.vessel_class || '';
         document.getElementById('maxstats-iff').value = vessel.iff || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
+        document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
         const dmWrap = document.getElementById('maxstats-dm-wrap');
         if (dmWrap) dmWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         overlay.style.display = 'flex';
@@ -1535,8 +1541,32 @@ async function applySystemLockdown(targetShip, wpn) {
     return log;
 }
 
+// Thin DOM-reading wrapper — unchanged call signature/behavior for the
+// manual FIRE button, delegating to window.resolveShipWeaponFire below (same
+// core/wrapper split this app already uses for squadrons — see
+// window.rollSquadronWeapon/resolveSquadronWeaponFire, js/squadrons.js).
 window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     idPrefix = idPrefix || '';
+    let volleyInput = document.getElementById(`${idPrefix}wpn-volley-${vesselId}-${idx}`);
+    let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
+    let targetSelect = document.getElementById(`${idPrefix}wpn-target-${vesselId}-${idx}`);
+    let targetId = targetSelect ? targetSelect.value : null;
+    return window.resolveShipWeaponFire(vesselId, idx, targetId, volleys, {});
+};
+
+/* DM-AI-for-NPCs build (this session): DOM-independent core extracted from
+   window.rollShipWeapon so the new AI ship auto-fire loop
+   (window.processBattleRoundAutomations, js/battle-map.js) can call it
+   directly with an explicit targetId/volleys instead of reading hidden DOM
+   inputs — exact same split as window.resolveSquadronWeaponFire
+   (js/squadrons.js), "one implementation, not two". opts.auto (set by the
+   AI loop) hard-skips every gate that would otherwise alert()/confirm() a
+   human player — same silent-fail convention resolveSquadronWeaponFire's
+   own opts.auto already uses — rather than guessing at what an AI should do
+   when e.g. its weapon is on cooldown (it just doesn't fire that weapon
+   this round, exactly like a squadron with every weapon on cooldown). */
+window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, opts) {
+    opts = opts || {};
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
@@ -1547,6 +1577,7 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     // style/placement as the deck-destroyed check right below. Checked on
     // the FIRER, not the target -- a disabled vessel can't shoot, full stop.
     if (vessel.disabled_weapons_until > 0) {
+        if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[WEAPONS DISABLED] ${vessel.name}'s weapons are offline for ${vessel.disabled_weapons_until} more round(s).`);
         return;
@@ -1561,40 +1592,45 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     if (wpn.assigned_deck_id) {
         const assignedDeck = (vessel.ship_decks || []).find(d => d.id === wpn.assigned_deck_id);
         if (assignedDeck && assignedDeck.hp <= 0) {
+            if (opts.auto) return;
             if (window.AudioEngine) window.AudioEngine.playError();
             alert(`[DECK DESTROYED] ${wpn.name} is mounted on the ${assignedDeck.name} deck, which has been destroyed and can no longer fire.`);
             return;
         }
     }
 
-    let volleyInput = document.getElementById(`${idPrefix}wpn-volley-${vesselId}-${idx}`);
-    let volleys = volleyInput ? (parseInt(volleyInput.value) || 1) : 1;
-    let targetSelect = document.getElementById(`${idPrefix}wpn-target-${vesselId}-${idx}`);
-    let targetId = targetSelect ? targetSelect.value : null;
-
+    volleys = volleys || 1;
     let gunCount = wpn.gun_count || 1;
     if (volleys > gunCount) {
-        if (window.AudioEngine) window.AudioEngine.playError();
-        alert(`[MOUNT LIMIT] ${wpn.name} has ${gunCount} gun(s) installed — cannot fire a volley of ${volleys}.`);
-        return;
+        if (opts.auto) { volleys = gunCount; } // AI always requests 1 anyway; clamp rather than refuse if ever called otherwise
+        else {
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`[MOUNT LIMIT] ${wpn.name} has ${gunCount} gun(s) installed — cannot fire a volley of ${volleys}.`);
+            return;
+        }
     }
 
     if (wpn.cooldown > 0) {
+        if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick, same rule squadron AI-stance fire already follows
         if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
         wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
-    } 
-    
+    }
+
     if (wpn.ammo === 0) {
+        if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
-        alert(`[EMPTY] ${wpn.name} is out of ammunition!`); 
+        alert(`[EMPTY] ${wpn.name} is out of ammunition!`);
         return;
     }
 
     if (wpn.ammo > 0) {
         if (wpn.ammo < volleys) {
-            if (window.AudioEngine) window.AudioEngine.playError();
-            alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
-            return;
+            if (opts.auto) { volleys = wpn.ammo; }
+            else {
+                if (window.AudioEngine) window.AudioEngine.playError();
+                alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
+                return;
+            }
         }
         wpn.ammo -= volleys;
     }
@@ -1688,15 +1724,32 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
             const result = window.resolveShipDamage(targetShip, dmgType, total);
             combatLog += result.log;
 
+            // DM-AI-for-NPCs build (this session): "biggest single hit this
+            // round" threat tracking (confirmed design: NOT a cumulative
+            // per-attacker total, just the hardest single hit and who dealt
+            // it). Every damage-dealing path in this app writes into this
+            // same pair of fields on the TARGET's own row -- see also
+            // resolveSquadronWeaponFire (js/squadrons.js) and the ordnance
+            // impact / touchedVessels persist loop in
+            // window.processBattleRoundAutomations (js/battle-map.js) -- so
+            // the AI ship resolution loop can read it back at the top of the
+            // next Advance Round regardless of which client's browser fired
+            // the shot that set it.
+            const newRoundBiggestHit = total > (targetShip.round_biggest_hit_amount || 0);
+            const roundBiggestHitAmount = newRoundBiggestHit ? total : (targetShip.round_biggest_hit_amount || 0);
+            const roundBiggestHitBy = newRoundBiggestHit ? vesselId : (targetShip.round_biggest_hit_by || null);
+
             await db.from('ship_markers').update({
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened
+                integrity_hardened: result.integrity_hardened,
+                round_biggest_hit_amount: roundBiggestHitAmount, round_biggest_hit_by: roundBiggestHitBy
             }).eq('id', targetShip.id);
             Object.assign(targetShip, {
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened
+                integrity_hardened: result.integrity_hardened,
+                round_biggest_hit_amount: roundBiggestHitAmount, round_biggest_hit_by: roundBiggestHitBy
             });
             await syncSquadronHpToParent(targetShip);
 
@@ -1743,7 +1796,8 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     if (window.AudioEngine) window.AudioEngine.playShoot();
 
     if(typeof window.broadcastRoll === 'function') {
-        await window.broadcastRoll(`[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
+        const autoTag = opts.auto ? '🤖 [AI CONTROLLED] ' : '';
+        await window.broadcastRoll(`${autoTag}[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
     }
 };
 
@@ -3207,16 +3261,33 @@ window.resolveArsenalAttack = async function(weaponId) {
     }
 };
 
-window.executeDicePoolRoll = async function() {
+// idPrefix (added this session, live-session feature request: "dice roller
+// integrated into the battle map"): the Combat Arsenal tab's "Multi-Stat &
+// Skill Pool Roller" is now duplicated into a compact docked panel inside
+// the Battle Map (js/battle-map.js's Comms & Dice dock, index.html) so
+// players don't have to leave the map to make an ad-hoc roll. Rather than
+// give the second copy different class names, both copies reuse the exact
+// same .roll-stat-cb/.roll-skill-cb classes and are instead disambiguated
+// by SCOPING every query to the relevant idPrefix + 'dice-roller-stats'/
+// 'dice-roller-skills' container -- querying document-wide (the original
+// behavior, still exactly what happens when idPrefix is '') would otherwise
+// double-count checkboxes from whichever copy isn't the one just used.
+// #roll-extra-mod/#roll-advantage-cb get real idPrefix'd ids instead (two
+// elements can't safely share one id). Always rolls the CALLING user's own
+// character (myProf = current logged-in user) regardless of prefix -- there
+// was never a way to roll for anyone else's sheet from here to begin with.
+window.executeDicePoolRoll = async function(idPrefix) {
+    idPrefix = idPrefix || '';
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
     const char = myProf.character || {};
     const skills = myProf.skills || {};
 
-    let statCheckboxes = document.querySelectorAll('.roll-stat-cb:checked');
-    let skillCheckboxes = document.querySelectorAll('.roll-skill-cb:checked');
-    let extraMod = parseInt(document.getElementById('roll-extra-mod').value) || 0;
-    const advCb = document.getElementById('roll-advantage-cb');
+    let statCheckboxes = document.querySelectorAll(`#${idPrefix}dice-roller-stats .roll-stat-cb:checked`);
+    let skillCheckboxes = document.querySelectorAll(`#${idPrefix}dice-roller-skills .roll-skill-cb:checked`);
+    const extraModEl = document.getElementById(`${idPrefix}roll-extra-mod`);
+    let extraMod = parseInt(extraModEl && extraModEl.value) || 0;
+    const advCb = document.getElementById(`${idPrefix}roll-advantage-cb`);
     const advantageOn = !!(advCb && advCb.checked);
 
     if (statCheckboxes.length === 0 && skillCheckboxes.length === 0 && extraMod === 0) {
@@ -3325,9 +3396,9 @@ window.executeDicePoolRoll = async function() {
         </div>
     `;
     
-    document.querySelectorAll('.roll-stat-cb').forEach(cb => cb.checked = false);
-    document.querySelectorAll('.roll-skill-cb').forEach(cb => cb.checked = false);
-    document.getElementById('roll-extra-mod').value = 0;
+    document.querySelectorAll(`#${idPrefix}dice-roller-stats .roll-stat-cb`).forEach(cb => cb.checked = false);
+    document.querySelectorAll(`#${idPrefix}dice-roller-skills .roll-skill-cb`).forEach(cb => cb.checked = false);
+    if (extraModEl) extraModEl.value = 0;
     if (advCb) advCb.checked = false;
 
     if (window.AudioEngine) window.AudioEngine.playShoot();
