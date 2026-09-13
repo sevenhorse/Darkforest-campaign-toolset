@@ -13,6 +13,28 @@ if (window.supabase) {
     console.error("CRITICAL ERROR: Supabase CDN failed to load. Check internet connection or AdBlockers.");
 }
 
+// Session-restore-on-refresh fix (2026-09-13, live-session bug report): the
+// app never checked whether a Supabase session already existed on page load
+// -- fetchUserProfile() (below) was only ever called from inside
+// handleLogin's own submit handler. The Supabase JS client persists the
+// session token to localStorage and keeps it valid across refreshes by
+// default, but this app ignored that entirely and always showed the raw
+// login form again, forcing everyone to re-enter credentials after every
+// refresh even though they were still technically authenticated. This
+// checks once at boot for an existing session and, if one is found, skips
+// straight into fetchUserProfile the same way a fresh login does. Wrapped
+// in DOMContentLoaded to match the same safety margin audio.js/ui.js already
+// use for their own boot-time init calls, even though this script's own
+// position (end of body) means the DOM is already parsed either way.
+document.addEventListener('DOMContentLoaded', async function checkExistingSession() {
+    if (!db) return;
+    const { data, error } = await db.auth.getSession();
+    if (error) { console.error('Session check failed:', error.message); return; }
+    if (data && data.session && data.session.user) {
+        fetchUserProfile(data.session.user);
+    }
+});
+
 let currentUserRole = 'player';
 let currentUserId = null;
 let currentUserEmail = '';
@@ -167,6 +189,7 @@ async function fetchUserProfile(user) {
     if (typeof initGearDefinitionsRealtimeChannel === 'function') initGearDefinitionsRealtimeChannel();
     initHazardDefinitionsRealtimeChannel();
     initPlanetaryModifiersRealtimeChannel();
+    initPersonalLabelsRealtimeChannel();
     initHyperlanesRealtimeChannel();
     initSystemOwnershipRealtimeChannel();
     if (typeof initBattleEncountersRealtimeChannel === 'function') initBattleEncountersRealtimeChannel();
@@ -199,6 +222,7 @@ async function fetchUserProfile(user) {
     if (typeof window.loadCargoItemCatalog === 'function') window.loadCargoItemCatalog();
     if (typeof loadHazardDefinitions === 'function') loadHazardDefinitions();
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
+    if (typeof loadPersonalLabels === 'function') loadPersonalLabels();
     loadSystemOwnershipOverrides();
     if (typeof loadBattleEncounters === 'function') loadBattleEncounters();
     if (typeof loadBattlefieldSalvage === 'function') loadBattlefieldSalvage();
@@ -353,6 +377,35 @@ async function loadPlanetaryModifiers() {
         // Re-render if a body is currently on screen so a DM edit (this
         // client's own, or synced in from another) shows immediately.
         if (window.selectedTarget && window.selectedTarget.type === 'body' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    }
+}
+
+// Personal system/planet renaming (live-session feature request,
+// 2026-09-13): "the ability for players to rename system/planets per
+// person (only applies to that user)". Deliberately NOT the same mechanism
+// as planetary_modifiers above -- that's a DM-set override visible to
+// EVERYONE; this is a purely personal label, only ever loaded/applied for
+// the CURRENT viewer. Confirmed design: a personal label takes precedence
+// over even a DM's custom_name/star name IN THAT VIEWER'S OWN CLIENT ONLY
+// -- nothing here ever touches star_systems.name or planetary_modifiers,
+// so nobody else's view changes. Keyed by `${target_type}:${target_id}` in
+// the cache (target_id is TEXT in the table so both real uuids and
+// procedural string ids like 'proc-spiral-14' work identically -- same id
+// space planetary_modifiers already keys off). The load query filters to
+// this user's own rows even though the table's RLS is the same blanket
+// "Allow Auth Users" convention as the rest of this app (see the
+// personal_labels migration) -- real isolation is enforced here, and by
+// every render site only ever reading its OWN cache, not by RLS.
+window.globalPersonalLabelsCache = {};
+async function loadPersonalLabels() {
+    if (!currentUserId) return;
+    const { data } = await db.from('personal_labels').select('*').eq('user_id', currentUserId);
+    if (data) {
+        window.globalPersonalLabelsCache = {};
+        data.forEach(row => { window.globalPersonalLabelsCache[`${row.target_type}:${row.target_id}`] = row.custom_name; });
+        // Re-render whatever's currently on screen so a label set on
+        // another of this same player's own devices/tabs shows up here too.
+        if (window.selectedTarget && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
     }
 }
 
@@ -645,6 +698,22 @@ function initPlanetaryModifiersRealtimeChannel() {
         .subscribe();
 }
 
+/* --- PERSONAL LABELS: REAL-TIME SYNC ---
+   Same whole-table-subscribe-then-reload pattern as planetary_modifiers
+   above (this codebase has no precedent for a server-side realtime FILTER
+   on any channel -- every one just reloads and re-filters client-side,
+   even for per-user data), so this fires on every player's label changes,
+   not just this user's own -- loadPersonalLabels' own .eq('user_id', ...)
+   still means only this user's rows ever land in the cache either way. */
+let personalLabelsRealtimeChannel = null;
+function initPersonalLabelsRealtimeChannel() {
+    personalLabelsRealtimeChannel = db.channel('personal_labels_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'personal_labels' }, () => {
+            if (typeof loadPersonalLabels === 'function') loadPersonalLabels();
+        })
+        .subscribe();
+}
+
 let systemOwnershipRealtimeChannel = null;
 function initSystemOwnershipRealtimeChannel() {
     systemOwnershipRealtimeChannel = db.channel('system_ownership_overrides_stream')
@@ -861,7 +930,7 @@ window.exportCampaignBackup = function() {
 window.FULL_BACKUP_TABLE_GROUPS = [
     ['profiles'],
     ['campaign_objectives', 'perk_definitions', 'augment_definitions', 'gear_definitions', 'hazard_definitions',
-     'hyperlanes', 'star_systems', 'system_ownership_overrides', 'territories', 'planetary_modifiers',
+     'hyperlanes', 'star_systems', 'system_ownership_overrides', 'territories', 'planetary_modifiers', 'personal_labels',
      'campaign_clock', 'saved_fleets', 'manufacturing_blueprints', 'strike_craft_templates', 'ship_templates',
      'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes'],
     ['ship_markers', 'system_hazards'],
