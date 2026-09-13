@@ -2804,22 +2804,84 @@ function renderCompactHealthLine(vessel) {
     </div>`;
 }
 
+// Vessel roster tabs build (live-session feature request, 2026-09-13): see
+// the HTML comment above #battle-map-vessel-tabs in index.html for why this
+// exists and why strike craft need a separate, simpler card type. Tracks
+// which of the 5 tabs is currently showing; persists only for the session
+// (not saved anywhere), same lifetime as battleMapExpandedCards below.
+window.battleMapVesselTab = window.battleMapVesselTab || 'friendly';
+
+// Buckets a CAPITAL ship into Friendly/Neutral/Hostile. The DM's explicit
+// iff tag (the dropdown built into this card's header, further down) always
+// wins when set -- that control exists specifically so a boarded/captured/
+// revealed vessel can be reclassified mid-fight, and this tab would silently
+// fight that if it used its own separate rule. When iff is unset (the
+// common case -- a player's own ship never needed one before this build),
+// falls back to ownership: player-owned defaults to Friendly, anything else
+// (DM/NPC, still unset) defaults to Neutral rather than assuming Hostile
+// with no DM confirmation. Strike craft use a simpler ownership-only rule
+// (see the sc_friendly/sc_hostile bucketing below) since squadron tokens
+// don't carry an iff value at all.
+window.getVesselTabBucket = function(vessel, ownedByPlayer) {
+    if (vessel.iff === 'friendly' || vessel.iff === 'neutral' || vessel.iff === 'hostile') return vessel.iff;
+    return ownedByPlayer ? 'friendly' : 'neutral';
+};
+
+window.switchBattleMapVesselTab = function(tab) {
+    window.battleMapVesselTab = tab;
+    ['friendly', 'neutral', 'hostile', 'sc_friendly', 'sc_hostile'].forEach(t => {
+        const btn = document.getElementById('bm-vessel-tab-btn-' + t);
+        if (btn) btn.classList.toggle('active', t === tab);
+    });
+    window.renderBattleShipCards((window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || []);
+};
+
+// New lightweight card for the sc_friendly/sc_hostile tabs (live-session
+// feature request, 2026-09-13). Strike craft were deliberately excluded
+// from the capital-ship card below (see that function's own header comment)
+// because their weapons/stats live entirely in the Hangar Bay panel on
+// their carrier's card, not on a ship_weapons row -- this card is read-only
+// status (name/owner/HP/move/withdraw) for exactly that reason, it doesn't
+// try to grow a weapons section to match.
+function renderStrikeCraftCard(tok, isDm, profiles) {
+    const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+    if (!vessel) {
+        return `<div class="battle-ship-card" style="border-color:#ff3333;"><span style="font-size:10px; color:#ff3333;">(vessel record missing — token may need to be withdrawn)</span></div>`;
+    }
+    const ownerProfs = window.vesselOwnerIds(vessel).map(id => profiles.find(p => p.id === id)).filter(Boolean);
+    const ownedByPlayer = ownerProfs.some(p => p.role !== 'dm');
+    const accentColor = ownedByPlayer ? '#00e5a3' : '#ff3333';
+    const canWithdraw = isDm || window.vesselHasOwner(vessel, currentUserId);
+    const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : (vessel.tactical_speed ?? 160);
+    const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
+    const ownerTag = ownerProfs.length ? ownerProfs.map(p => p.username || 'Commander').join('/') : (isDm ? 'Unowned' : 'Unknown');
+    return `<div class="battle-ship-card" style="border-color:${accentColor};">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
+            <div style="display:flex; align-items:center; gap:6px;">
+                <strong style="color:${accentColor}; font-size:13px;">🛩️ ${vessel.name}</strong>
+                <span style="font-size:9px; color:#6b826a;">${ownerTag}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                ${vessel.is_hidden ? `<span style="font-size:9px; color:#c778dd;" title="Hidden from every non-DM viewer except this vessel's own player-owner">🫥 HIDDEN</span>` : ''}
+                <span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>
+                ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
+            </div>
+        </div>
+        ${renderCompactHealthLine(vessel)}
+        <div style="font-size:8px; color:#6b826a; margin-top:4px;">Fire from the Hangar Bay panel on the carrier's card, not from here.</div>
+    </div>`;
+}
+
 window.renderBattleShipCards = function(tokens) {
     const container = document.getElementById('battle-map-ship-cards');
     if (!container) return;
     const isDm = currentUserRole === 'dm';
     const profiles = (typeof allProfiles !== 'undefined' ? allProfiles : []);
+    const activeTab = window.battleMapVesselTab || 'friendly';
+    const isScTab = activeTab === 'sc_friendly' || activeTab === 'sc_hostile';
 
-    // Strike Craft Grid Position build (this session, confirmed design):
-    // squadron tokens are grid-markers-only, not a ship-status card here —
-    // renderShipWeaponsHtml/renderShipStanceHtml assume ship_weapons-style
-    // data a squadron token doesn't have (it uses STRIKE_CRAFT_DB +
-    // rollSquadronWeapon instead, fired from the Hangar Bay panel), so
-    // including them here would render an empty/broken-looking weapons
-    // section. Filtered out regardless of caller.
     tokens = (tokens || []).filter(tok => {
         const v = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
-        if (v && v.is_strike_craft) return false;
         // Fog of War build (this session): same visibility rule as the grid
         // token rendering above -- a hidden vessel gets no status card
         // either, except for the DM and its own player-owner.
@@ -2827,12 +2889,41 @@ window.renderBattleShipCards = function(tokens) {
         return true;
     });
 
-    if (!tokens || tokens.length === 0) {
-        container.innerHTML = '<span style="font-size:10px; color:#6b826a;">No vessels placed on the grid yet.</span>';
+    // Vessel roster tabs build: bucket every visible token into all 5 tabs
+    // up front (not just the active one) so the tab button counts are
+    // always right, then only render the active bucket's cards below.
+    const buckets = { friendly: [], neutral: [], hostile: [], sc_friendly: [], sc_hostile: [] };
+    tokens.forEach(tok => {
+        const v = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+        if (!v) { buckets.neutral.push(tok); return; } // missing record -- surfaced under Neutral rather than silently dropped, see the "(vessel record missing...)" card below
+        if (v.is_strike_craft) {
+            const ownedByPlayer = window.vesselOwnerIds(v).map(id => profiles.find(p => p.id === id)).filter(Boolean).some(p => p.role !== 'dm');
+            buckets[ownedByPlayer ? 'sc_friendly' : 'sc_hostile'].push(tok);
+        } else {
+            const ownerProfs = window.vesselOwnerIds(v).map(id => profiles.find(p => p.id === id)).filter(Boolean);
+            buckets[window.getVesselTabBucket(v, ownerProfs.some(p => p.role !== 'dm'))].push(tok);
+        }
+    });
+
+    const tabLabels = { friendly: 'Friendly', neutral: 'Neutral', hostile: 'Hostile', sc_friendly: '🛩️ Friendly', sc_hostile: '🛩️ Hostile' };
+    Object.keys(tabLabels).forEach(t => {
+        const btn = document.getElementById('bm-vessel-tab-btn-' + t);
+        if (btn) btn.textContent = `${tabLabels[t]} (${buckets[t].length})`;
+    });
+
+    const activeTokens = buckets[activeTab] || [];
+
+    if (activeTokens.length === 0) {
+        container.innerHTML = '<span style="font-size:10px; color:#6b826a;">No vessels here.</span>';
         return;
     }
 
-    container.innerHTML = tokens.map(tok => {
+    if (isScTab) {
+        container.innerHTML = activeTokens.map(tok => renderStrikeCraftCard(tok, isDm, profiles)).join('');
+        return;
+    }
+
+    container.innerHTML = activeTokens.map(tok => {
         const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
         if (!vessel) {
             return `<div class="battle-ship-card" style="border-color:#ff3333;"><span style="font-size:10px; color:#ff3333;">(vessel record missing — token may need to be withdrawn)</span></div>`;
