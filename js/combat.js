@@ -1000,7 +1000,15 @@ window.renderVesselDeck = function() {
                         <div style="font-size:9px; color:#6b826a;">${dbStats.label} | Units: ${sq.count} | Max HP: ${dbStats.base_hp * sq.count}</div>
                     </div>
                     <div style="display:flex; gap:6px;">
-                        <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx}, false)" style="padding:4px 10px; font-size:9px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH WING</button>
+                        <!-- Overworld-visibility fix (live-session feature request,
+                             2026-09-13): this button used to launch with
+                             hideFromOverworld=false while the Battle Map's own
+                             compact hangar launch (js/squadrons.js) already passed
+                             true -- the inconsistency, not a missing feature, was
+                             why strike craft launched from here still showed up on
+                             the galaxy map. Now matches that button unconditionally
+                             (DM-confirmed: always hide, not just during a battle). -->
+                        <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx}, true)" style="padding:4px 10px; font-size:9px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH WING</button>
                         <button class="layer-del" onclick="window.deleteSquadron('${vessel.id}', ${idx}, false)" style="padding:4px 8px; font-size:9px;">✕</button>
                     </div>
                 </div>`;
