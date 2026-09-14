@@ -935,8 +935,13 @@ window.renderVesselDeck = function() {
                     const discountPct = (myProf && typeof window.getManufacturingDiscountPct === 'function') ? window.getManufacturingDiscountPct(myProf.perks) : 0;
                     // Approved-only -- a still-pending proposal (see the
                     // manufacturing_blueprints approval workflow in
-                    // js/manufacturing.js) isn't buildable yet.
-                    const blueprints = (typeof manufacturingBlueprintsList !== 'undefined') ? manufacturingBlueprintsList.filter(b => b.status !== 'draft') : [];
+                    // js/manufacturing.js) isn't buildable yet. Also excludes
+                    // colony_infrastructure output blueprints (Infrastructure,
+                    // 2026-09-14) -- a vessel has no Infrastructure Level
+                    // concept, so those are colony-build-only (see
+                    // window.startVesselManufacturingOrder's own belt-and-
+                    // suspenders rejection of the same case).
+                    const blueprints = (typeof manufacturingBlueprintsList !== 'undefined') ? manufacturingBlueprintsList.filter(b => b.status !== 'draft' && b.output_type !== 'colony_infrastructure') : [];
                     const bpOptions = blueprints.length
                         ? blueprints.map(bp => `<option value="${bp.id}">${bp.name}</option>`).join('')
                         : '<option value="">No approved blueprints yet</option>';
