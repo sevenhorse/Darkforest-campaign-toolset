@@ -87,6 +87,33 @@
 let manufacturingBlueprintsList = [];
 window.globalManufacturingOrdersCache = [];
 
+/* Manufacturing Tabs + Search (added 2026-09-14, per the DM's own request
+   -- "add tabs to the manufacturing screen where different blueprints are
+   grouped into various tabs as well as adding in a search function").
+   Groups the Blueprint Catalog by each blueprint's existing output_type
+   field rather than a new category/tag field (confirmed design -- no such
+   field exists, and output_type is the only thing that meaningfully
+   buckets a blueprint today: Cargo Items / Arsenal Weapons / Colony
+   Infrastructure, plus an "All" tab). Search matches name OR description,
+   case-insensitively. Both are local UI-only state -- not persisted, not
+   synced across clients -- same scope as e.g. js/colonies.js's own
+   colonies/fleets subtab selection. Reuses the existing .cargo-subtabs /
+   .cargo-subtab-btn CSS pattern (style.css) already shared by the cargo
+   bucket tabs, vessel deck tabs, and colonies/fleets tabs, for visual
+   consistency. */
+let activeManufacturingTab = 'all';
+let manufacturingSearchQuery = '';
+
+window.switchManufacturingTab = function(tab) {
+    activeManufacturingTab = tab;
+    window.renderManufacturingPanel();
+};
+
+window.filterManufacturingSearch = function(value) {
+    manufacturingSearchQuery = (value || '').trim().toLowerCase();
+    window.renderManufacturingPanel();
+};
+
 async function loadManufacturingBlueprints() {
     const { data } = await db.from('manufacturing_blueprints').select('*').order('created_at', { ascending: true });
     if (data) {
@@ -308,16 +335,47 @@ function describeBlueprintCost(bp) {
 window.renderManufacturingPanel = function() {
     const bpContainer = document.getElementById('manufacturing-blueprints-container');
     const ordContainer = document.getElementById('manufacturing-orders-container');
+    const tabsContainer = document.getElementById('manufacturing-tabs-container');
     // The "+ PROPOSE BLUEPRINT" button is always visible now -- anyone can
     // propose, same as "+ PROPOSE PERK" has no visibility gate.
 
-    let pendingCount = 0;
+    // Tab bar -- counts always come from the FULL catalog (drafts
+    // included), never the search-filtered view, so a tab's own count
+    // means the same thing regardless of what's currently typed in the
+    // search box.
+    const MANUFACTURING_TABS = [
+        { key: 'all', label: 'All' },
+        { key: 'cargo_item', label: '📦 Cargo Items' },
+        { key: 'arsenal_weapon', label: '⚔ Arsenal Weapons' },
+        { key: 'colony_infrastructure', label: '🏗 Infrastructure' }
+    ];
+    if (tabsContainer) {
+        tabsContainer.innerHTML = MANUFACTURING_TABS.map(t => {
+            const count = t.key === 'all' ? manufacturingBlueprintsList.length : manufacturingBlueprintsList.filter(bp => bp.output_type === t.key).length;
+            return `<button class="cargo-subtab-btn${activeManufacturingTab === t.key ? ' active' : ''}" onclick="window.switchManufacturingTab('${t.key}')">${t.label} (${count})</button>`;
+        }).join('');
+    }
+
+    // Badge below (further down this function) always reflects the TRUE
+    // total pending count across the whole catalog, never the tab/search-
+    // filtered view -- a DM shouldn't lose track of a proposal awaiting
+    // review just because a different tab happens to be active.
+    let pendingCount = manufacturingBlueprintsList.filter(bp => bp.status === 'draft').length;
     if (bpContainer) {
+        const byTab = activeManufacturingTab === 'all'
+            ? manufacturingBlueprintsList
+            : manufacturingBlueprintsList.filter(bp => bp.output_type === activeManufacturingTab);
+        const q = manufacturingSearchQuery;
+        const visible = q
+            ? byTab.filter(bp => (bp.name || '').toLowerCase().includes(q) || (bp.description || '').toLowerCase().includes(q))
+            : byTab;
+
         // Pending Review / Approved Blueprints split -- direct mirror of
-        // js/perk-designer.js's own renderPerkDesignerPanel.
-        const pending = manufacturingBlueprintsList.filter(bp => bp.status === 'draft');
-        const approved = manufacturingBlueprintsList.filter(bp => bp.status !== 'draft');
-        pendingCount = pending.length;
+        // js/perk-designer.js's own renderPerkDesignerPanel. Now split from
+        // the tab/search-filtered `visible` list rather than the full
+        // catalog, so a tab or search query narrows both sections at once.
+        const pending = visible.filter(bp => bp.status === 'draft');
+        const approved = visible.filter(bp => bp.status !== 'draft');
 
         const renderCard = (bp) => {
             const editable = canManageBlueprint(bp);
@@ -356,13 +414,20 @@ window.renderManufacturingPanel = function() {
         };
 
         let html = '';
-        if (pending.length > 0) {
-            html += `<h5 style="color:#ffaa00; font-size:10px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h5>`;
-            pending.forEach(bp => html += renderCard(bp));
+        if (manufacturingBlueprintsList.length === 0) {
+            html = '<span style="font-size:10px; color:#6b826a;">No blueprints exist yet.</span>';
+        } else if (visible.length === 0) {
+            const qSafe = q.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            html = `<span style="font-size:10px; color:#6b826a;">No blueprints match${q ? ` "${qSafe}"` : ' this tab'}.</span>`;
+        } else {
+            if (pending.length > 0) {
+                html += `<h5 style="color:#ffaa00; font-size:10px; border-bottom:1px solid #ffaa00; padding-bottom:4px; margin-top:0;">Pending Review (${pending.length})</h5>`;
+                pending.forEach(bp => html += renderCard(bp));
+            }
+            html += `<h5 style="color:#6b826a; font-size:10px; margin:${pending.length > 0 ? '10px' : '0'} 0 4px 0;">Approved Blueprints (${approved.length})</h5>`;
+            if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">No approved blueprints in this view.</span>';
+            approved.forEach(bp => html += renderCard(bp));
         }
-        html += `<h5 style="color:#6b826a; font-size:10px; margin:${pending.length > 0 ? '10px' : '0'} 0 4px 0;">Approved Blueprints (${approved.length})</h5>`;
-        if (approved.length === 0) html += '<span style="font-size:10px; color:#6b826a;">No approved blueprints yet.</span>';
-        approved.forEach(bp => html += renderCard(bp));
         bpContainer.innerHTML = html;
     }
 
@@ -431,9 +496,6 @@ window.renderManufacturingPanel = function() {
 window.renderColonyManufacturingBox = function(colony) {
     // Approved-only -- a still-pending proposal isn't buildable yet.
     const blueprints = (manufacturingBlueprintsList || []).filter(b => b.status !== 'draft');
-    const bpOptions = blueprints.length
-        ? blueprints.map(bp => `<option value="${bp.id}">${bp.name}</option>`).join('')
-        : '<option value="">No approved blueprints yet</option>';
     const inProgress = (window.globalManufacturingOrdersCache || []).filter(o => o.source_type === 'colony' && o.source_colony_id === colony.id);
     let progressHtml = '';
     inProgress.forEach(o => {
@@ -448,15 +510,20 @@ window.renderColonyManufacturingBox = function(colony) {
     const facilityNote = colony.has_manufacturing_facility
         ? '🏭 Manufacturing Facility installed — draws materials from colony storage when available, falls back to time-only otherwise:'
         : '🏭 Manufacturing (time cost only — no Facility installed, see colony edit to add one):';
+    // Build Popup (Tabs/Search/Build-Popup pass, 2026-09-14): same
+    // replacement as the vessel Manufacturing Bay box (js/combat.js) -- the
+    // old inline <select> + BUILD button is now a single button opening a
+    // modal with full details and a live afford-check per blueprint. See
+    // openColonyBuildModal / computeManufacturingPreview below.
     return `
     <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:6px;">
         <label style="font-size: 9px; color: #c9962f;">${facilityNote}</label>
-        <div style="display:flex; gap:6px; margin-top:4px;">
-            <label for="mfg-colony-blueprint-${colony.id}" style="display:none;">Blueprint</label>
-            <select id="mfg-colony-blueprint-${colony.id}" style="flex:1; margin:0; font-size:9px; padding:3px; border-color:#c9962f;">${bpOptions}</select>
-            <button class="btn-deploy" onclick="window.startColonyManufacturingOrder('${colony.id}')" style="flex:0 0 auto; font-size:9px; padding:4px 8px; margin:0;">BUILD</button>
+        <div style="margin-top:4px;">
+            ${blueprints.length
+                ? `<button class="btn-deploy" onclick="window.openColonyBuildModal('${colony.id}')" style="width:100%; font-size:9px; padding:5px 8px; margin:0;">🔍 SELECT BLUEPRINT TO BUILD</button>`
+                : `<p style="margin:0; font-size:9px; color:#6b826a;">No approved blueprints yet.</p>`}
         </div>
-        <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">Finished build delivers to whichever vessel is selected in the Storage pickup dropdown above.</p>
+        <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">Finished build (except Infrastructure) delivers to whichever vessel is selected in the Storage pickup dropdown above.</p>
         ${progressHtml}
     </div>`;
 };
@@ -831,7 +898,7 @@ function findCargoItemAcrossBuckets(cargo, name) {
     return null;
 }
 
-window.startVesselManufacturingOrder = async function(vesselId) {
+window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
     if (!(currentUserRole === 'dm' || vessel.owner_id === currentUserId)) return;
@@ -839,8 +906,10 @@ window.startVesselManufacturingOrder = async function(vesselId) {
     const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
     if (!mfgDeck) { alert('This vessel has no Manufacturing-type deck installed -- building requires one.'); return; }
 
-    const select = document.getElementById(`mfg-vessel-blueprint-${vesselId}`);
-    const blueprintId = select ? select.value : null;
+    // Blueprint id now comes from the Build modal (Tabs/Search/Build-Popup
+    // pass, 2026-09-14 -- js/manufacturing.js's openVesselBuildModal) rather
+    // than an inline <select> that used to live in the Manufacturing Bay
+    // box (js/combat.js). No other caller of this function exists.
     if (!blueprintId) { alert('Select a blueprint to build first.'); return; }
     const bp = manufacturingBlueprintsList.find(b => b.id === blueprintId);
     if (!bp) return;
@@ -970,13 +1039,16 @@ window.startVesselManufacturingOrder = async function(vesselId) {
    infrastructure blueprint whose own resource chain is Tier 3, which would
    require already being at Level 3 -- a contradiction). --- */
 
-window.startColonyManufacturingOrder = async function(colonyId) {
+window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
     const colony = coloniesList.find(c => c.id === colonyId);
     if (!colony) return;
     if (!(currentUserRole === 'dm' || colony.owner_id === currentUserId)) return;
 
-    const bpSelect = document.getElementById(`mfg-colony-blueprint-${colonyId}`);
-    const blueprintId = bpSelect ? bpSelect.value : null;
+    // Blueprint id now comes from the Build modal (Tabs/Search/Build-Popup
+    // pass, 2026-09-14 -- js/manufacturing.js's openColonyBuildModal) rather
+    // than an inline <select> that used to live in this box. The delivery
+    // vessel picker below is untouched -- it's a separate element on the
+    // colony card itself (shared with the Storage pickup dropdown).
     if (!blueprintId) { alert('Select a blueprint to build first.'); return; }
     const bp = manufacturingBlueprintsList.find(b => b.id === blueprintId);
     if (!bp) return;
@@ -1062,6 +1134,239 @@ window.startColonyManufacturingOrder = async function(colonyId) {
     });
     loadManufacturingOrders();
 };
+
+/* ==========================================================================
+   BUILD PREVIEW (shared core) + BUILD POPUP MODAL -- added 2026-09-14 per
+   the DM's request for "a pop up function similar to how notes pop up...
+   so it is more clear what a user's options are", replacing the old blind
+   <select>+BUILD button at both the vessel Manufacturing Bay box
+   (js/combat.js) and the colony Manufacturing box (renderColonyManufacturingBox
+   above).
+
+   computeManufacturingPreview(bp, opts) is a DOM-independent "core"
+   function (opts = {vessel} or {colony}) -- the same core/wrapper shape
+   used elsewhere in this codebase (e.g. resolveShipWeaponFire), so it can
+   be called equally from this popup's render loop or, in principle, from
+   anywhere else that needs a live afford-check without touching the DOM.
+
+   Judgment call / known limitation (flagging per project convention rather
+   than implying full parity): this function MIRRORS the requirement/
+   sufficiency logic inside startVesselManufacturingOrder and
+   startColonyManufacturingOrder rather than sharing a single code path
+   with them -- extracting a true shared core would mean touching the two
+   already-working, already-tested order-start functions themselves, which
+   felt like more risk than this pass warranted. If either start function's
+   gating/discount/deck-scale logic changes later, this preview needs the
+   same change made here or it will silently drift out of sync and show a
+   "can build" preview that the actual BUILD click then contradicts. */
+function computeManufacturingPreview(bp, opts) {
+    const myProf = (typeof allProfiles !== 'undefined' && typeof currentUserId !== 'undefined') ? allProfiles.find(p => p.id === currentUserId) : null;
+    const discountPct = (myProf && typeof window.getManufacturingDiscountPct === 'function') ? window.getManufacturingDiscountPct(myProf.perks) : 0;
+    const tier = computeBlueprintTier(bp);
+    const isInfrastructure = bp.output_type === 'colony_infrastructure';
+    const result = { tier, discountPct, isInfrastructure, blocking: [], notes: [], costRows: [], timeHours: null, needsVessel: false, canBuild: true };
+
+    // Same aggregate-by-name-then-discount sequence the two start functions
+    // use, for the same reason -- a blueprint can list the same input
+    // across more than one cost row.
+    const rawTotalsByName = new Map();
+    (bp.resource_cost || []).forEach(c => {
+        const key = c.name.toLowerCase();
+        const existing = rawTotalsByName.get(key);
+        if (existing) existing.qty += c.qty;
+        else rawTotalsByName.set(key, { name: c.name, unit: c.unit || 'Units', qty: c.qty });
+    });
+    const requirements = Array.from(rawTotalsByName.values()).map(req => ({
+        ...req,
+        qty: discountPct ? Math.max(1, Math.round(req.qty * (1 - discountPct / 100))) : req.qty
+    }));
+
+    if (opts && opts.vessel) {
+        const vessel = opts.vessel;
+        if (isInfrastructure) result.blocking.push('Infrastructure blueprints can only be built at a colony.');
+        const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
+        if (!mfgDeck) result.blocking.push('No Manufacturing-type deck installed on this vessel.');
+        const deckScale = mfgDeck && mfgDeck.max_hp > 0 ? Math.max(0.1, mfgDeck.hp / mfgDeck.max_hp) : 1;
+        if (mfgDeck && deckScale < 1) result.notes.push(`Manufacturing deck at ${Math.round(deckScale * 100)}% HP — build will take ${(1 / deckScale).toFixed(1)}x longer.`);
+        result.timeHours = Math.max(0.1, (bp.time_cost_hours * (1 - discountPct / 100)) / deckScale);
+
+        const cargo = window.sanitizeCargo(vessel.cargo_inventory);
+        result.costRows = requirements.map(req => {
+            const found = findCargoItemAcrossBuckets(cargo, req.name);
+            const have = found ? found.item.qty : 0;
+            const sufficient = have >= req.qty;
+            if (!sufficient) result.blocking.push(`Insufficient ${req.name}: need ${req.qty}, have ${have}.`);
+            return { name: req.name, unit: req.unit, qty: req.qty, have, sufficient };
+        });
+    } else if (opts && opts.colony) {
+        const colony = opts.colony;
+        if (!isInfrastructure) {
+            const currentLevel = colony.infrastructure_level || 1;
+            if (tier !== Infinity && tier > currentLevel) {
+                result.blocking.push(`${colony.name}'s Infrastructure Level (${currentLevel}) is too low — needs Level ${tier}.`);
+            }
+            result.needsVessel = true;
+        }
+        result.timeHours = Math.max(0.1, bp.time_cost_hours * (1 - discountPct / 100));
+
+        if (requirements.length > 0) {
+            if (colony.has_manufacturing_facility) {
+                const cargo = window.sanitizeColonyCargo(colony.cargo_inventory);
+                let allAvailable = true;
+                result.costRows = requirements.map(req => {
+                    const found = findCargoItemAcrossBuckets(cargo, req.name);
+                    const have = found ? found.item.qty : 0;
+                    const sufficient = have >= req.qty;
+                    if (!sufficient) allAvailable = false;
+                    return { name: req.name, unit: req.unit, qty: req.qty, have, sufficient };
+                });
+                result.notes.push(allAvailable
+                    ? 'Sufficient materials in colony storage — will draw from storage.'
+                    : 'Insufficient stored materials right now — will fall back to a time-only build (not blocked).');
+            } else {
+                result.costRows = requirements.map(req => ({ name: req.name, unit: req.unit, qty: req.qty, have: null, sufficient: null }));
+                result.notes.push('No Manufacturing Facility installed — this build will be time-only regardless of the listed materials.');
+            }
+        }
+    }
+
+    result.canBuild = result.blocking.length === 0;
+    return result;
+}
+window.computeManufacturingPreview = computeManufacturingPreview;
+
+/* Self-contained IIFE-wrapped popup modal -- same convention as the
+   Blueprint editor modal above (overlay div injected into the body once,
+   toggled via display:flex/none, closes on backdrop click). One shared
+   overlay reused for both the vessel and colony contexts (buildModalContext
+   tracks which). */
+(function() {
+    let overlay, buildModalContext = null; // { type: 'vessel'|'colony', id }
+
+    function ensureBuildModal() {
+        if (overlay) return;
+        overlay = document.createElement('div');
+        overlay.id = 'manufacturing-build-overlay';
+        overlay.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,4,6,0.85); z-index:5000; align-items:center; justify-content:center;';
+        overlay.innerHTML = `<div class="panel" style="position:relative; width:520px; max-width:94vw; max-height:88vh; overflow-y:auto; border-color:#c9962f;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h4 style="color:#c9962f; margin:0;" id="mfg-build-modal-title">Select a Blueprint</h4>
+                <button id="mfg-build-modal-close" style="width:auto; margin:0; padding:3px 10px; font-size:10px;">✕ CLOSE</button>
+            </div>
+            <p id="mfg-build-modal-subtitle" style="font-size:9px; color:#6b826a; margin:4px 0 10px 0;"></p>
+            <div id="mfg-build-modal-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('mfg-build-modal-close').addEventListener('click', () => { overlay.style.display = 'none'; });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+    }
+
+    function renderBuildModalList() {
+        if (!buildModalContext) return;
+        const listEl = document.getElementById('mfg-build-modal-list');
+        const subtitleEl = document.getElementById('mfg-build-modal-subtitle');
+        if (!listEl) return;
+
+        let opts, blueprints;
+        if (buildModalContext.type === 'vessel') {
+            const vessel = globalShipMarkersCache.find(m => m.id === buildModalContext.id);
+            if (!vessel) { overlay.style.display = 'none'; return; }
+            opts = { vessel };
+            // Same exclusion as the Manufacturing Bay box's own filter --
+            // colony_infrastructure is colony-build-only.
+            blueprints = manufacturingBlueprintsList.filter(b => b.status !== 'draft' && b.output_type !== 'colony_infrastructure');
+            document.getElementById('mfg-build-modal-title').innerText = `Build at ${vessel.name}`;
+            subtitleEl.innerText = 'Drawn from this vessel\'s own cargo. A greyed-out entry cannot be built right now -- the reason is listed under it.';
+        } else {
+            const colony = coloniesList.find(c => c.id === buildModalContext.id);
+            if (!colony) { overlay.style.display = 'none'; return; }
+            opts = { colony };
+            blueprints = manufacturingBlueprintsList.filter(b => b.status !== 'draft');
+            document.getElementById('mfg-build-modal-title').innerText = `Build at ${colony.name}`;
+            const vesselSelect = document.getElementById(`colony-deliver-vessel-${colony.id}`);
+            const deliveryVessel = vesselSelect ? globalShipMarkersCache.find(m => m.id === vesselSelect.value) : null;
+            subtitleEl.innerHTML = deliveryVessel
+                ? `Non-Infrastructure builds deliver to <strong style="color:#d4c5a9;">${deliveryVessel.name}</strong> (the vessel currently selected above). Materials are drawn from colony storage when a Facility is installed and stock allows -- otherwise time-only, never blocked.`
+                : `⚠ No delivery vessel is selected in the Storage/Delivery dropdown above -- pick one first for any non-Infrastructure build. Materials are drawn from colony storage when a Facility is installed and stock allows -- otherwise time-only, never blocked.`;
+        }
+
+        if (blueprints.length === 0) {
+            listEl.innerHTML = '<span style="font-size:10px; color:#6b826a;">No approved blueprints are buildable here.</span>';
+            return;
+        }
+
+        // Whether a delivery vessel is picked is DOM state (the shared
+        // colony-deliver-vessel-<id> select), not something the DOM-
+        // independent computeManufacturingPreview core can see -- checked
+        // here instead and folded into this row's own blocking list so the
+        // reason shows up next to the button, not just in the subtitle.
+        const missingDeliveryVessel = buildModalContext.type === 'colony' && !document.getElementById(`colony-deliver-vessel-${buildModalContext.id}`)?.value;
+
+        listEl.innerHTML = blueprints.map(bp => {
+            const preview = computeManufacturingPreview(bp, opts);
+            const costText = preview.costRows.length === 0
+                ? 'No listed resource cost (time only).'
+                : preview.costRows.map(r => {
+                    if (r.sufficient === null) return `${r.qty}x ${r.name}`; // no facility -- have/sufficient not meaningful
+                    return `<span style="color:${r.sufficient ? '#6b826a' : '#ff6b6b'};">${r.qty}x ${r.name} (have ${r.have})</span>`;
+                }).join(', ');
+            const tierLine = preview.isInfrastructure
+                ? `Reaches Infrastructure Level ${(bp.output_payload || {}).infrastructure_level || 1}`
+                : `${formatBlueprintTier(preview.tier)}${preview.tier !== Infinity && preview.tier > 1 ? ` (needs Colony Infrastructure Lvl ${preview.tier} if built at a colony)` : ''}`;
+            const rowBlocking = preview.blocking.slice();
+            if (preview.needsVessel && missingDeliveryVessel) rowBlocking.push('No delivery vessel selected (pick one in the Storage/Delivery dropdown above).');
+            const blockedHtml = rowBlocking.length
+                ? `<p style="margin:4px 0 0 0; font-size:9px; color:#ff6b6b;">✕ ${rowBlocking.join(' &nbsp;·&nbsp; ')}</p>` : '';
+            const notesHtml = preview.notes.length
+                ? `<p style="margin:4px 0 0 0; font-size:9px; color:#6b826a;">${preview.notes.join(' &nbsp;·&nbsp; ')}</p>` : '';
+            const buildableNow = preview.canBuild && !(preview.needsVessel && missingDeliveryVessel);
+            return `
+            <div class="note-card" style="border-left: 3px solid ${buildableNow ? '#3c4e36' : '#5a3a3a'}; opacity:${buildableNow ? '1' : '0.75'};">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+                    <div style="flex:1;">
+                        <strong style="color:#c9962f; font-size:12px;">${bp.name}</strong>
+                        <span style="font-size:8px; color:#6b826a; margin-left:6px;">${tierLine}</span>
+                        <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${bp.description || ''}</p>
+                        <p style="margin:4px 0 0 0; font-size:9px; color:#6b826a;">Cost: ${costText} &nbsp;·&nbsp; Time: ~${preview.timeHours.toFixed(1)}h${preview.discountPct ? ` (${preview.discountPct}% perk discount applied)` : ''}</p>
+                        ${blockedHtml}
+                        ${notesHtml}
+                    </div>
+                    <button class="btn-deploy" ${buildableNow ? '' : 'disabled'} onclick="window.executeManufacturingBuildFromModal('${bp.id}')" style="flex:0 0 auto; font-size:9px; padding:4px 8px; margin:0;${buildableNow ? '' : ' opacity:0.5; cursor:not-allowed;'}">BUILD</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    window.openVesselBuildModal = function(vesselId) {
+        ensureBuildModal();
+        buildModalContext = { type: 'vessel', id: vesselId };
+        renderBuildModalList();
+        overlay.style.display = 'flex';
+    };
+
+    window.openColonyBuildModal = function(colonyId) {
+        ensureBuildModal();
+        buildModalContext = { type: 'colony', id: colonyId };
+        renderBuildModalList();
+        overlay.style.display = 'flex';
+    };
+
+    // Fired by a BUILD button inside the modal. Deliberately does NOT close
+    // the modal -- it re-renders in place instead, so the user immediately
+    // sees the effect of the build (materials drawn, in-progress row
+    // appended elsewhere, another blueprint's afford-check possibly now
+    // failing) without losing their place. Backdrop-click or the CLOSE
+    // button dismiss it, same as the Blueprint editor modal above.
+    window.executeManufacturingBuildFromModal = async function(blueprintId) {
+        if (!buildModalContext) return;
+        if (buildModalContext.type === 'vessel') {
+            await window.startVesselManufacturingOrder(buildModalContext.id, blueprintId);
+        } else {
+            await window.startColonyManufacturingOrder(buildModalContext.id, blueprintId);
+        }
+        renderBuildModalList();
+    };
+})();
 
 /* ==========================================================================
    CANCELLING AN IN-PROGRESS ORDER -- refunds the exact resources deducted
