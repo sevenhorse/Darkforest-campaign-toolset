@@ -344,6 +344,307 @@ function moveTokenToward(shipMarkerId, targetPos, maxDist) {
 // deliberately NOT moved -- they share closure state with this file's
 // non-squadron PD pool logic. See js/squadrons.js's header comment.
 
+/* ==========================================================================
+   INITIATIVE + ACTION ECONOMY (new this session)
+   ==========================================================================
+   Confirmed design (see darkforest-architecture-reference.md): individual
+   d20 initiative per token, rolled once when the DM starts it and reused
+   for the rest of THIS battle (rerolled only by starting a new battle, not
+   every round); a fixed Action Point pool per token, refilled at the start
+   of that token's own turn, spent 1-per-action, no carryover once the turn
+   ends. Scope, confirmed: Battle Map only (ships/squadrons), not ground
+   combat. Movement is deliberately NOT folded into AP -- move_remaining
+   keeps working exactly as it already did (soft-enforced px budget,
+   refilled once per full ROUND rather than per individual turn, since
+   nothing here asked to change that).
+
+   AI-stance squadrons and ai_controlled ships are DELIBERATELY EXCLUDED
+   from the initiative order and never get an individual turn slot --
+   confirmed design tradeoff (see the AI-turn-risk decision) to avoid
+   restructuring window.processBattleRoundAutomations's shared
+   persist/chat-flush machinery, or duplicating its fire/move logic, in the
+   same pass as building this engine. They keep firing together in one
+   batch the instant the turn order wraps back to the top (same trigger as
+   today's ADVANCE ROUND) -- a real, deliberate scope limit, not an
+   oversight. PD/intercept was never turn-gated to begin with and stays
+   fully reactive, untouched by any of this.
+
+   Deliberately NOT AP-gated this pass (flagged, not silently skipped):
+   launching/recalling a squadron from the Hangar Bay (doesn't cleanly map
+   to "spend AP of token X" -- the squadron doesn't have a grid token yet
+   at launch time), and changing a squadron's AI stance (stance-driven
+   squadrons don't have a turn slot to spend from in the first place, per
+   the exclusion above). Say the word if either should be wired in too. */
+
+/* Resolves the live squadron record (`sq`, the entry on its CARRIER's own
+   ship_deployed array) for a strike-craft battle token -- the reverse of
+   the far more common sqShip-from-sq lookup used throughout this file.
+   Needed here because a strike-craft token's own ship_markers row carries
+   no weapon list of its own (STRIKE_CRAFT_DB is the catalog, keyed off
+   sq.type, not the token). Returns null if the carrier or the squadron
+   record can't be found (e.g. a stale/orphaned token) -- fails open, same
+   convention as every other "can't resolve a squadron's own data" case in
+   this file. */
+function getSquadronRecordForToken(vessel) {
+    if (!vessel || !vessel.is_strike_craft || !vessel.parent_id) return null;
+    const carrier = globalShipMarkersCache.find(m => m.id === vessel.parent_id);
+    if (!carrier) return null;
+    const sq = (carrier.ship_deployed || []).find(s => s.id === vessel.squadron_id);
+    if (!sq) return null;
+    return { sq, carrier };
+}
+
+/* Action Point pool for one token's turn: 1 + floor(weaponCount / 2),
+   confirmed formula -- a lone 1-2 weapon squadron gets 2 AP, a 12-weapon
+   Jupiter-class cruiser gets 7. Floor of 1 even for a 0-weapon token (e.g.
+   an unarmed station) so it can always do at least one non-fire action
+   (Withdraw, etc.) on its turn. */
+window.getTokenApMax = function(vessel) {
+    if (!vessel) return 1;
+    let weaponCount;
+    if (vessel.is_strike_craft) {
+        const rec = getSquadronRecordForToken(vessel);
+        const dbStats = rec && typeof STRIKE_CRAFT_DB !== 'undefined' ? STRIKE_CRAFT_DB[rec.sq.type] : null;
+        weaponCount = dbStats ? (dbStats.weapons || []).length : 1;
+    } else {
+        weaponCount = (vessel.ship_weapons || []).length;
+    }
+    return 1 + Math.floor(weaponCount / 2);
+};
+
+/* A token gets its own individual initiative slot only if nothing already
+   controls it automatically -- confirmed scope (see file-header note
+   above). A squadron counts as "manually controlled" whenever its
+   ai_stance is unset/blank/'manual'; anything else (attack_strike_craft/
+   attack_capitals/attack_escorts/intercept_munitions) excludes it. */
+function tokenIsInitiativeEligible(vessel) {
+    if (!vessel) return false;
+    if (vessel.is_strike_craft) {
+        const rec = getSquadronRecordForToken(vessel);
+        if (!rec) return false;
+        const stance = rec.sq.ai_stance;
+        return !stance || stance === 'manual';
+    }
+    return !vessel.ai_controlled;
+}
+
+/* DM-only: rolls a flat d20 per initiative-eligible token currently on the
+   active battle's grid and builds the turn order (descending). Ties are
+   resolved by re-rolling just the tied tokens against each other (a few
+   passes, capped so a pathological all-ties case can't loop forever --
+   falls back to token_id string order if still tied after the cap, which
+   never actually triggers with a d20 pool this small in practice). Ineligible
+   tokens (AI-stance squadrons, ai_controlled ships) get no initiative value
+   at all and never appear in turn_order -- they act at the round boundary
+   exactly as they already did before this build. */
+window.rollBattleInitiative = async function() {
+    if (currentUserRole !== 'dm') return;
+    const encounter = window.globalBattleEncounterCache;
+    if (!encounter) return;
+    const tokens = (encounter.tokens || []).slice();
+    if (tokens.length === 0) { alert('No tokens on the grid to roll initiative for.'); return; }
+
+    const eligibleIds = [];
+    tokens.forEach(tok => {
+        const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+        if (tokenIsInitiativeEligible(vessel)) eligibleIds.push(tok.token_id);
+    });
+    if (eligibleIds.length === 0) { alert('No manually-controlled tokens on the grid -- nothing to roll initiative for (AI-stance squadrons and AI-controlled ships keep acting at the round boundary, not on an individual turn).'); return; }
+
+    let rolls = {};
+    eligibleIds.forEach(id => { rolls[id] = 1 + Math.floor(Math.random() * 20); });
+    for (let pass = 0; pass < 5; pass++) {
+        const byValue = {};
+        Object.keys(rolls).forEach(id => { (byValue[rolls[id]] = byValue[rolls[id]] || []).push(id); });
+        const tiedGroups = Object.values(byValue).filter(g => g.length > 1);
+        if (tiedGroups.length === 0) break;
+        tiedGroups.forEach(group => group.forEach(id => { rolls[id] = 1 + Math.floor(Math.random() * 20); }));
+    }
+
+    const turnOrder = eligibleIds.slice().sort((a, b) => (rolls[b] - rolls[a]) || a.localeCompare(b));
+    const newTokens = tokens.map(tok => ({ ...tok, initiative: rolls[tok.token_id] !== undefined ? rolls[tok.token_id] : null, ap_current: 0 }));
+    const firstTok = newTokens.find(t => t.token_id === turnOrder[0]);
+    const firstVessel = firstTok ? globalShipMarkersCache.find(m => m.id === firstTok.ship_marker_id) : null;
+    if (firstTok) firstTok.ap_current = window.getTokenApMax(firstVessel);
+
+    const updatePayload = { tokens: newTokens, turn_order: turnOrder, current_turn_index: 0, round_number: 1, initiative_rolled: true };
+    await db.from('battle_encounters').update(updatePayload).eq('id', encounter.id);
+    Object.assign(encounter, updatePayload);
+
+    const orderSummary = turnOrder.map(id => {
+        const tok = newTokens.find(t => t.token_id === id);
+        const v = tok ? globalShipMarkersCache.find(m => m.id === tok.ship_marker_id) : null;
+        return `${v ? v.name : '(unknown)'} (${rolls[id]})`;
+    }).join(' → ');
+    await db.from('chat_logs').insert({ sender_id: null, content: `🎲 [INITIATIVE] Order rolled: ${orderSummary}`, message_type: 'system' });
+
+    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+};
+
+/* Rolls initiative for any token that's been added to the grid AFTER
+   window.rollBattleInitiative already ran this battle (a mid-fight deploy,
+   a freshly-launched squadron) -- called as a cheap, idempotent tail check
+   from window.renderBattleMapPanel, same "safe to call unconditionally
+   every render" convention this codebase already uses for other per-render
+   refreshes. Inserts each newly-rolled token into turn_order at its sorted
+   position; whether it actually gets to act THIS round or has to wait for
+   the next one falls out naturally from where that position lands relative
+   to current_turn_index. A simple in-flight guard avoids overlapping
+   concurrent persists if a render fires again before the previous one's
+   write lands. */
+let battleMapInitiativeSyncInFlight = false;
+window.ensureNewTokensInTurnOrder = async function() {
+    const encounter = window.globalBattleEncounterCache;
+    if (!encounter || !encounter.initiative_rolled || battleMapInitiativeSyncInFlight) return;
+    const tokens = encounter.tokens || [];
+    const turnOrder = encounter.turn_order || [];
+    const newcomers = tokens.filter(tok => {
+        if (turnOrder.includes(tok.token_id)) return false;
+        const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
+        return tokenIsInitiativeEligible(vessel);
+    });
+    if (newcomers.length === 0) return;
+
+    battleMapInitiativeSyncInFlight = true;
+    try {
+        // Remember whose turn it currently is BEFORE inserting anything --
+        // splicing a newcomer in ahead of current_turn_index would otherwise
+        // silently shift which token that numeric index actually points to.
+        const currentTokenId = turnOrder[encounter.current_turn_index];
+
+        let rolls = {};
+        newcomers.forEach(tok => { rolls[tok.token_id] = 1 + Math.floor(Math.random() * 20); });
+        let newOrder = turnOrder.slice();
+        newcomers.forEach(tok => {
+            const val = rolls[tok.token_id];
+            let insertAt = newOrder.findIndex(id => {
+                const otherTok = tokens.find(t => t.token_id === id);
+                return otherTok && (otherTok.initiative || 0) < val;
+            });
+            if (insertAt < 0) insertAt = newOrder.length;
+            newOrder.splice(insertAt, 0, tok.token_id);
+        });
+        const newTokens = tokens.map(tok => rolls[tok.token_id] !== undefined ? { ...tok, initiative: rolls[tok.token_id], ap_current: 0 } : tok);
+        // Re-derive the index from the remembered token id rather than
+        // trusting the old numeric index, which the splice(s) above may
+        // have invalidated.
+        const newCurrentIndex = currentTokenId ? newOrder.indexOf(currentTokenId) : encounter.current_turn_index;
+        await db.from('battle_encounters').update({ tokens: newTokens, turn_order: newOrder, current_turn_index: newCurrentIndex < 0 ? encounter.current_turn_index : newCurrentIndex }).eq('id', encounter.id);
+        Object.assign(encounter, { tokens: newTokens, turn_order: newOrder, current_turn_index: newCurrentIndex < 0 ? encounter.current_turn_index : newCurrentIndex });
+        if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+    } catch (err) {
+        console.error('ensureNewTokensInTurnOrder: failed to roll in a newly-added token', err);
+    } finally {
+        battleMapInitiativeSyncInFlight = false;
+    }
+};
+
+/* Spends `amount` AP from shipMarkerId's OWN turn slot, IF it's currently
+   that token's turn and it has enough left. Fails open (returns true, no
+   alert) whenever the turn-order system isn't active at all -- no
+   initiative rolled for this battle, or the token isn't on this battle's
+   grid -- so every call site stays a harmless no-op until a DM actually
+   starts using ROLL INITIATIVE. Persists optimistically (fire-and-forget,
+   matching this file's existing convention for a cheap incidental token
+   field write) and re-renders so the turn bar's AP readout updates
+   immediately. */
+window.spendTokenAp = function(shipMarkerId, amount) {
+    amount = amount || 1;
+    const encounter = window.globalBattleEncounterCache;
+    if (!encounter || !encounter.initiative_rolled) return true;
+    const tokens = encounter.tokens || [];
+    const tok = tokens.find(t => t.ship_marker_id === shipMarkerId);
+    if (!tok) return true;
+    const turnOrder = encounter.turn_order || [];
+    const curTokId = turnOrder[encounter.current_turn_index];
+    if (!turnOrder.includes(tok.token_id)) return true; // this token was never given an individual slot (AI-stance/ai_controlled) -- unrestricted, matches its always-acts-at-round-boundary behavior
+    if (tok.token_id !== curTokId) {
+        alert("It's not this unit's turn yet.");
+        return false;
+    }
+    const apCur = tok.ap_current || 0;
+    if (apCur < amount) {
+        alert(`Not enough Action Points (${apCur} left, this costs ${amount}).`);
+        return false;
+    }
+    const newTokens = tokens.map(t => t.token_id === tok.token_id ? { ...t, ap_current: apCur - amount } : t);
+    encounter.tokens = newTokens;
+    db.from('battle_encounters').update({ tokens: newTokens }).eq('id', encounter.id).catch(err => console.error('spendTokenAp: failed to persist AP spend', err));
+    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+    return true;
+};
+
+/* Ends the current token's turn and hands it to the next eligible one in
+   turn_order, skipping any that have been withdrawn (no longer a token) or
+   destroyed (integrity_hull <= 0) since the order was rolled -- up to a
+   full lap, so an all-dead/all-gone order doesn't loop forever. Wrapping
+   past the end of turn_order is a full round boundary: fires the exact
+   same global tick window.advanceCombatRound's manual button does (via
+   window.resolveRoundTick, no confirm dialog / no DM-only gate -- see that
+   function's own header comment), which is where AI-stance squadrons and
+   ai_controlled ships actually get to act, then starts the new round at
+   the top of the order. Callable by the DM or by whoever owns the vessel
+   whose turn it currently is -- matches how a player already fires their
+   own weapons without DM involvement elsewhere in this app. */
+window.endCurrentTurn = async function() {
+    const encounter = window.globalBattleEncounterCache;
+    if (!encounter || !encounter.initiative_rolled) return;
+    const turnOrder = encounter.turn_order || [];
+    if (turnOrder.length === 0) return;
+
+    const isDm = currentUserRole === 'dm';
+    const curTok = (encounter.tokens || []).find(t => t.token_id === turnOrder[encounter.current_turn_index]);
+    const curVessel = curTok ? globalShipMarkersCache.find(m => m.id === curTok.ship_marker_id) : null;
+    if (!isDm && !(curVessel && window.vesselHasOwner(curVessel, currentUserId))) return;
+
+    let idx = encounter.current_turn_index;
+    let wrapped = false;
+    let nextTok = null, nextVessel = null;
+    let safety = 0;
+    do {
+        idx += 1;
+        if (idx >= turnOrder.length) { idx = 0; wrapped = true; }
+        safety++;
+        const tid = turnOrder[idx];
+        nextTok = (encounter.tokens || []).find(t => t.token_id === tid);
+        nextVessel = nextTok ? globalShipMarkersCache.find(m => m.id === nextTok.ship_marker_id) : null;
+    } while ((!nextTok || !nextVessel || (nextVessel.integrity_hull || 0) <= 0) && safety <= turnOrder.length);
+
+    if (safety > turnOrder.length) {
+        await db.from('chat_logs').insert({ sender_id: null, content: `⏭️ [INITIATIVE] No units remain in the turn order.`, message_type: 'system' });
+        return;
+    }
+
+    if (wrapped && typeof window.resolveRoundTick === 'function') {
+        await window.resolveRoundTick();
+        // resolveRoundTick can destroy/change tokens (PD, AI fire) -- re-read
+        // the freshly-picked next token's vessel fresh rather than trust a
+        // now-possibly-stale reference. A token destroyed by the round tick
+        // right as it becomes its own turn is a known, accepted edge case
+        // this pass doesn't fully solve -- the DM/owner just clicks END TURN
+        // again to skip it.
+        nextVessel = globalShipMarkersCache.find(m => m.id === nextTok.ship_marker_id);
+        if (!nextVessel || (nextVessel.integrity_hull || 0) <= 0) {
+            if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+            return;
+        }
+    }
+
+    const apMax = window.getTokenApMax(nextVessel);
+    const freshEncounter = window.globalBattleEncounterCache; // resolveRoundTick may have reloaded/updated this
+    const newTokens = (freshEncounter.tokens || []).map(t => t.token_id === nextTok.token_id ? { ...t, ap_current: apMax } : t);
+
+    const updatePayload = { tokens: newTokens, current_turn_index: idx };
+    if (wrapped) updatePayload.round_number = (freshEncounter.round_number || 1) + 1;
+
+    await db.from('battle_encounters').update(updatePayload).eq('id', freshEncounter.id);
+    Object.assign(freshEncounter, updatePayload);
+
+    await db.from('chat_logs').insert({ sender_id: null, content: `⏭️ [INITIATIVE] ${nextVessel.name}'s turn (${apMax} AP)${wrapped ? `, round ${updatePayload.round_number}` : ''}.`, message_type: 'system' });
+
+    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+};
+
 
 window.armTokenForPlacement = function(shipMarkerId) {
     window.battleMapArmedToken = { ship_marker_id: shipMarkerId };
@@ -381,6 +682,12 @@ window.removeBattleToken = async function(tokenId) {
     const isOwner = vessel && window.vesselHasOwner(vessel, currentUserId);
     if (currentUserRole !== 'dm' && !isOwner) return;
     if (!(await window.showConfirmModal('Withdraw this vessel from the battle grid? The vessel itself is untouched.'))) return;
+
+    // Initiative + Action Economy build (this session): Withdraw spends 1 AP
+    // from this token's own turn slot -- checked AFTER the confirm dialog
+    // (not before) so declining the confirm never spends AP that wasn't
+    // actually used.
+    if (typeof window.spendTokenAp === 'function' && !window.spendTokenAp(tok.ship_marker_id, 1)) return;
 
     // Pending-list follow-up (this session): a withdrawn carrier's still-
     // deployed squadrons used to be left behind as orphaned tokens with no
@@ -1650,6 +1957,11 @@ window.resolveOrdnanceLaunch = async function(vesselId, idx, targetId, opts) {
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
 
+    // Initiative + Action Economy build (this session): same 1-AP spend as
+    // window.resolveShipWeaponFire (js/combat.js) -- a manual ordnance
+    // launch is still a discrete action from this ship's own turn slot.
+    if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(vesselId, 1)) return;
+
     // System Lockdown build (this session): same Weapons-disabled gate as
     // js/combat.js's rollShipWeapon (see applySystemLockdown there for the
     // full mechanic).
@@ -2048,17 +2360,55 @@ window.renderBattleMapPanel = function() {
     document.getElementById('battle-map-encounter-name').innerText = encounter.name;
     const endBtn = document.getElementById('battle-map-end-btn');
     if (endBtn) endBtn.style.display = isDm ? 'inline-block' : 'none';
+    // Initiative + Action Economy build (this session): ADVANCE ROUND is now
+    // only the pre-initiative free-for-all's round tick -- once a battle has
+    // real initiative rolled, ending the last turn in the order fires the
+    // exact same tick automatically (window.endCurrentTurn), so a DM
+    // manually clicking ADVANCE ROUND mid-turn-order would desync the two.
+    // ROLL INITIATIVE is the mirror image: only useful before that's
+    // happened for this battle.
+    const advanceBtn = document.getElementById('battle-map-advance-btn');
     // ADVANCE ROUND was already functionally DM-only (advanceCombatRound
     // itself returns immediately for a non-DM caller) but the button had no
     // visibility check of its own, so a player saw a clickable button that
     // silently did nothing -- tester feedback asked for it hidden outright.
     // Same toggle pattern as endBtn above.
-    const advanceBtn = document.getElementById('battle-map-advance-btn');
-    if (advanceBtn) advanceBtn.style.display = isDm ? 'inline-block' : 'none';
+    if (advanceBtn) advanceBtn.style.display = (isDm && !encounter.initiative_rolled) ? 'inline-block' : 'none';
+    const rollInitBtn = document.getElementById('battle-map-roll-initiative-btn');
+    if (rollInitBtn) rollInitBtn.style.display = (isDm && !encounter.initiative_rolled) ? 'inline-block' : 'none';
     const dmDeploy = document.getElementById('battle-map-dm-deploy');
     if (dmDeploy) dmDeploy.style.display = isDm ? 'block' : 'none';
 
     const tokens = encounter.tokens || [];
+
+    // --- Turn bar (Initiative + Action Economy build, this session) ---
+    const turnBar = document.getElementById('battle-map-turn-bar');
+    if (turnBar) {
+        if (encounter.initiative_rolled && (encounter.turn_order || []).length > 0) {
+            turnBar.style.display = 'flex';
+            const turnOrder = encounter.turn_order || [];
+            const curTokId = turnOrder[encounter.current_turn_index];
+            const curTok = tokens.find(t => t.token_id === curTokId);
+            const curVessel = curTok ? globalShipMarkersCache.find(m => m.id === curTok.ship_marker_id) : null;
+            const turnInfo = document.getElementById('battle-map-turn-info');
+            if (turnInfo) {
+                turnInfo.innerText = curVessel
+                    ? `Round ${encounter.round_number || 1} — ${curVessel.name}'s turn (AP ${curTok.ap_current || 0}/${window.getTokenApMax(curVessel)})`
+                    : `Round ${encounter.round_number || 1} — (current unit not found)`;
+            }
+            const endTurnBtn = document.getElementById('battle-map-endturn-btn');
+            if (endTurnBtn) {
+                const canEndTurn = isDm || (curVessel && window.vesselHasOwner(curVessel, currentUserId));
+                endTurnBtn.style.display = canEndTurn ? 'inline-block' : 'none';
+            }
+            // Cheap, idempotent tail check (own in-flight guard) -- picks up
+            // any token placed/launched onto the grid after initiative was
+            // first rolled for this battle.
+            if (typeof window.ensureNewTokensInTurnOrder === 'function') window.ensureNewTokensInTurnOrder();
+        } else {
+            turnBar.style.display = 'none';
+        }
+    }
 
     // --- Grid / placed tokens ---
     // Animation Engine build (this session): diff against existing DOM
@@ -2086,6 +2436,12 @@ window.renderBattleMapPanel = function() {
         }
 
         const seenTokenIds = new Set();
+        // Initiative + Action Economy build (this session): whose turn it is,
+        // for the glow highlight below -- undefined/harmless when initiative
+        // hasn't been rolled for this battle.
+        const currentTurnTokenId = (encounter.initiative_rolled && (encounter.turn_order || []).length > 0)
+            ? encounter.turn_order[encounter.current_turn_index]
+            : null;
         tokens.forEach(tok => {
             const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
             // Fog of War build (this session): a hidden token is simply
@@ -2137,6 +2493,13 @@ window.renderBattleMapPanel = function() {
             // don't get their own ship-status card, see the checkpoint notes
             // for why the data model doesn't fit renderBattleShipCards).
             tokenEl.style.border = `2px ${isStrikeCraftTok ? 'dashed' : 'solid'} ${battleTokenHpColor(vessel)}`;
+            // Initiative + Action Economy build (this session): a bright
+            // glow on whichever token currently has the turn -- purely
+            // additive to the existing HP-color border above, cleared for
+            // every other token by re-setting boxShadow unconditionally
+            // every render (same "re-apply every render" pattern the rest
+            // of this loop already uses).
+            tokenEl.style.boxShadow = (currentTurnTokenId && tok.token_id === currentTurnTokenId) ? '0 0 8px 3px #ffd700' : 'none';
             tokenEl.style.display = 'flex';
             tokenEl.style.alignItems = 'center';
             tokenEl.style.justifyContent = 'center';
