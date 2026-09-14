@@ -9,6 +9,37 @@ let coloniesList = [];
 let fleetGroupsList = [];
 let activeColoniesSubtab = 'colonies';
 
+/* Colony Storage (2026-09-14): colonies previously had no inventory of
+   their own at all -- production was a manual, non-accumulating per-click
+   push straight into a picked vessel's cargo (the old deliverColonyResources,
+   removed this pass). Colonies now accumulate real stock in their own
+   cargo_inventory (same 3-bucket shape as ship_markers, see js/combat.js's
+   window.sanitizeCargo) until manually picked up -- see
+   window.pickupColonyStorageItem / window.pickupAllColonyStorage below, and
+   window.processColonyProduction for the automatic daily accrual.
+
+   Deliberately its OWN sanitize function rather than reusing
+   window.sanitizeCargo directly: that function's "empty object" branch
+   fills in the generic ship starter kit (rations, security marines, ammo)
+   which makes no sense seeded onto a colony. This only ever guarantees the
+   three arrays exist -- no starter loadout, no synth_capacity (that field
+   is a ship/vessel synthesizer mechanic, not applicable to a colony). */
+// Infrastructure (2026-09-14, confirmed design): flat % production boost
+// per Infrastructure Level above 1 (Level 1 is baseline -- just enough to
+// build Tier 1 items, no bonus yet). Single source of truth for both the
+// display line in renderColoniesPanel and the actual tick math in
+// window.processColonyProduction below -- change this one constant to
+// retune the rate everywhere at once.
+window.COLONY_INFRA_PRODUCTION_BONUS_PER_LEVEL = 0.25;
+
+window.sanitizeColonyCargo = function(inv) {
+    if (!inv || typeof inv !== 'object') inv = {};
+    if (!Array.isArray(inv.expendables)) inv.expendables = [];
+    if (!Array.isArray(inv.perishables)) inv.perishables = [];
+    if (!Array.isArray(inv.misc)) inv.misc = [];
+    return inv;
+};
+
 async function loadColonies() {
     const { data } = await db.from('colonies').select('*').order('created_at', { ascending: true });
     if (data) { coloniesList = data; if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel(); }
@@ -42,13 +73,25 @@ window.renderColoniesPanel = function() {
         ordered.forEach(c => {
             const editable = canManage(c);
             const moraleColor = c.morale === 'Thriving' ? '#00e5a3' : c.morale === 'Unrest' ? '#ffaa00' : c.morale === 'Crisis' ? '#ff3333' : '#c9962f';
+            const mfgBadge = c.has_manufacturing_facility ? '<span style="font-size:8px; color:#00e5a3; border:1px solid #00e5a3; border-radius:2px; padding:1px 4px; margin-left:6px;">🏭 FACILITY</span>' : '';
+            const infraLevel = c.infrastructure_level || 1;
+            const infraBadge = `<span style="font-size:8px; color:#00e1ff; border:1px solid #00e1ff; border-radius:2px; padding:1px 4px; margin-left:6px;">🏗️ INFRA LVL ${infraLevel}</span>`;
+            // Infrastructure production boost (2026-09-14, confirmed design:
+            // flat % per level) -- Level 1 is baseline (no bonus yet, just
+            // enough to build Tier 1 items); the bonus starts accruing from
+            // Level 2 onward. See window.processColonyProduction for the
+            // same formula actually applied at tick time -- keep both in
+            // sync if this constant ever changes.
+            const infraMultiplier = 1 + (infraLevel - 1) * window.COLONY_INFRA_PRODUCTION_BONUS_PER_LEVEL;
+            const effectiveOutput = Math.round((c.resource_output || 0) * infraMultiplier);
+            const infraNote = infraMultiplier > 1 ? ` &nbsp;·&nbsp; Effective: ${effectiveOutput}/day (Infrastructure Lvl ${infraLevel})` : '';
             html += `
                 <div class="note-card">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
-                            <strong style="color:#ffaa00; font-size:12px;">${c.name}</strong>
+                            <strong style="color:#ffaa00; font-size:12px;">${c.name}</strong>${mfgBadge}${infraBadge}
                             <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">POP: ${Number(c.population || 0).toLocaleString()} &nbsp;·&nbsp; MORALE: <span style="color:${moraleColor};">${c.morale}</span></p>
-                            <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Producing: ${c.resource_output || 0}x ${c.resource_type || 'Unspecified'} / cycle</p>
+                            <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Producing: ${c.resource_output || 0}x ${c.resource_type || 'Unspecified'} / day (auto, accumulates in storage)${infraNote}</p>
                         </div>
                         <div style="display:flex; gap:4px;">
                             ${window.renderReorderArrows('colonies', ordered, c.id, 'moveColonyOrder')}
@@ -56,19 +99,22 @@ window.renderColoniesPanel = function() {
                             <button class="layer-del" onclick="window.deleteColony('${c.id}')" style="padding:3px 7px; font-size:9px;">✕</button>` : ''}
                         </div>
                     </div>
+                    <div style="margin-top:8px; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px;">
+                        <label style="font-size:9px; color:#6b826a;">📦 Colony Storage (no limit -- sits here until picked up):</label>
+                        <div style="margin-top:4px;">${window.renderColonyStorageList(c.id, window.sanitizeColonyCargo(c.cargo_inventory))}</div>
+                    </div>
                     <div style="display:flex; gap:6px; margin-top:8px; align-items:center;">
-                        <label for="colony-deliver-vessel-${c.id}" style="display:none;">Deliver To</label>
+                        <label for="colony-deliver-vessel-${c.id}" style="display:none;">Pick Up To</label>
                         <select id="colony-deliver-vessel-${c.id}" style="flex:1; margin:0; font-size:9px; padding:3px;"></select>
-                        <button class="btn-deploy" onclick="window.deliverColonyResources('${c.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">DELIVER TO EXPENDABLES</button>
+                        <button class="btn-deploy" onclick="window.pickupAllColonyStorage('${c.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">PICK UP ALL</button>
                     </div>
                     ${editable && typeof window.renderColonyManufacturingBox === 'function' ? window.renderColonyManufacturingBox(c) : ''}
                 </div>`;
         });
         container.innerHTML = html;
-        // Populate each colony's delivery-target vessel dropdown -- also
+        // Populate each colony's pickup-target vessel dropdown -- also
         // doubles as the Manufacturing order's delivery target (see
-        // window.startColonyManufacturingOrder in js/manufacturing.js),
-        // same select, same reasoning: a colony has no cargo of its own.
+        // window.startColonyManufacturingOrder in js/manufacturing.js).
         coloniesList.forEach(c => {
             const sel = document.getElementById(`colony-deliver-vessel-${c.id}`);
             if (!sel) return;
@@ -78,6 +124,25 @@ window.renderColoniesPanel = function() {
     const badge = document.getElementById('badge-colonies');
     if (badge) badge.innerText = coloniesList.length + fleetGroupsList.length;
 };
+// Renders one colony's stored items across all three buckets with a
+// per-item pick-up button, or an empty-storage placeholder. Escapes the
+// item name into the onclick attribute (names are free-text, DM-entered
+// via resource_type or a blueprint's output name -- an apostrophe in
+// either would otherwise break out of the inline handler's string).
+window.renderColonyStorageList = function(colonyId, cargo) {
+    const rows = [];
+    ['expendables', 'perishables', 'misc'].forEach(bucket => {
+        (cargo[bucket] || []).forEach(item => {
+            const safeName = (item.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            rows.push(`<div style="display:flex; justify-content:space-between; align-items:center; font-size:9px; padding:2px 0;">
+                <span style="color:#d4c5a9;">${item.qty}x ${item.name} <span style="color:#6b826a;">(${item.unit || 'Units'})</span></span>
+                <button class="layer-edit" onclick="window.pickupColonyStorageItem('${colonyId}', '${bucket}', '${safeName}')" style="padding:1px 5px; font-size:8px;" title="Pick up this stack to the selected vessel">↑ PICK UP</button>
+            </div>`);
+        });
+    });
+    return rows.length ? rows.join('') : '<span style="font-size:9px; color:#6b826a;">Storage empty.</span>';
+};
+
 window.moveColonyOrder = function(id, direction) {
     window.moveListItem('colonies', window.applySavedOrder('colonies', coloniesList), id, direction);
     window.renderColoniesPanel();
@@ -90,14 +155,20 @@ window.addColony = async function() {
     const morale = document.getElementById('new-colony-morale').value;
     const resource_type = document.getElementById('new-colony-restype').value.trim() || 'Raw Materials';
     const resource_output = parseInt(document.getElementById('new-colony-resqty').value) || 0;
+    const mfgCheckbox = document.getElementById('new-colony-mfg');
+    const has_manufacturing_facility = mfgCheckbox ? mfgCheckbox.checked : false;
+    const infraInput = document.getElementById('new-colony-infra');
+    const infrastructure_level = Math.max(1, parseInt(infraInput ? infraInput.value : 1) || 1);
 
-    const { error } = await db.from('colonies').insert({ owner_id: currentUserId, name, population, morale, resource_type, resource_output });
+    const { error } = await db.from('colonies').insert({ owner_id: currentUserId, name, population, morale, resource_type, resource_output, has_manufacturing_facility, infrastructure_level });
     if (error) { alert("Failed to establish colony: " + error.message); return; }
 
     document.getElementById('new-colony-name').value = '';
     document.getElementById('new-colony-pop').value = '0';
     document.getElementById('new-colony-restype').value = '';
     document.getElementById('new-colony-resqty').value = '10';
+    if (mfgCheckbox) mfgCheckbox.checked = false;
+    if (infraInput) infraInput.value = '1';
     if (typeof loadColonies === 'function') loadColonies();
 };
 
@@ -109,39 +180,87 @@ window.deleteColony = async function(id) {
     if (typeof loadColonies === 'function') loadColonies();
 };
 
-window.deliverColonyResources = async function(id) {
-    const colony = coloniesList.find(c => c.id === id);
+/* Pick-up flow replaces the old deliverColonyResources (removed this pass):
+   that button computed a per-click shipment straight from resource_output
+   and pushed it directly into a vessel -- nothing ever sat at the colony.
+   Now production accrues into the colony's own cargo_inventory automatically
+   (see window.processColonyProduction below) and these two actions are the
+   only way it ever leaves -- pick up one stack, or everything at once. Both
+   require the same vessel-select dropdown the Manufacturing delivery box
+   already reuses. */
+window.pickupColonyStorageItem = async function(colonyId, bucket, itemName) {
+    const colony = coloniesList.find(c => c.id === colonyId);
     if (!colony) return;
-    const select = document.getElementById(`colony-deliver-vessel-${id}`);
+    if (!(currentUserRole === 'dm' || colony.owner_id === currentUserId)) return;
+    const select = document.getElementById(`colony-deliver-vessel-${colonyId}`);
     const vesselId = select ? select.value : null;
     if (!vesselId) { alert("Select a vessel to receive the shipment first."); return; }
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
-    // Bug fix (bug hunt, this session): the search key fell back to '' when
-    // resource_type was falsy, but the pushed item's name fell back to
-    // 'Raw Materials' -- for a colony with no resource_type set (an
-    // anticipated real state; the display code elsewhere falls back to
-    // 'Unspecified'), the first delivery pushed a 'Raw Materials' row, but
-    // every SUBSEQUENT delivery still searched for an item named '', never
-    // matched that existing row, and pushed a brand new duplicate 'Raw
-    // Materials' row instead of incrementing it. Use the same resolved name
-    // in both the search and the push.
-    let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-    let resType = colony.resource_type || 'Raw Materials';
-    let existing = cargo.expendables.find(item => item.name.toLowerCase() === resType.toLowerCase());
-    if (existing) { existing.qty += (colony.resource_output || 0); }
-    else { cargo.expendables.push({ name: resType, qty: colony.resource_output || 0, unit: 'Units' }); }
+    let colonyCargo = window.sanitizeColonyCargo(colony.cargo_inventory);
+    const idx = (colonyCargo[bucket] || []).findIndex(i => i.name.toLowerCase() === itemName.toLowerCase());
+    if (idx < 0) { alert("That item is no longer in storage -- someone may have already picked it up."); return; }
+    const item = colonyCargo[bucket][idx];
+    colonyCargo[bucket].splice(idx, 1);
 
-    await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
-    vessel.cargo_inventory = cargo;
-    if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+    let vesselCargo = window.sanitizeCargo(vessel.cargo_inventory);
+    const vBucket = vesselCargo[bucket] || (vesselCargo[bucket] = []);
+    const existing = vBucket.find(i => i.name.toLowerCase() === item.name.toLowerCase());
+    if (existing) existing.qty += item.qty;
+    else vBucket.push({ name: item.name, qty: item.qty, unit: item.unit || 'Units' });
+
+    await db.from('colonies').update({ cargo_inventory: colonyCargo }).eq('id', colonyId);
+    await db.from('ship_markers').update({ cargo_inventory: vesselCargo }).eq('id', vesselId);
+    colony.cargo_inventory = colonyCargo;
+    vessel.cargo_inventory = vesselCargo;
 
     await db.from('chat_logs').insert({
-        sender_id: null,
-        content: `📦 [SUPPLY RUN] ${colony.resource_output || 0}x ${colony.resource_type || 'Raw Materials'} delivered from ${colony.name} to ${vessel.name}'s expendables hold.`,
-        message_type: 'system'
+        sender_id: null, message_type: 'system',
+        content: `📦 [PICKUP] ${item.qty}x ${item.name} picked up from ${colony.name}'s storage by ${vessel.name}.`
     });
+
+    if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+    if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
+};
+
+window.pickupAllColonyStorage = async function(colonyId) {
+    const colony = coloniesList.find(c => c.id === colonyId);
+    if (!colony) return;
+    if (!(currentUserRole === 'dm' || colony.owner_id === currentUserId)) return;
+    const select = document.getElementById(`colony-deliver-vessel-${colonyId}`);
+    const vesselId = select ? select.value : null;
+    if (!vesselId) { alert("Select a vessel to receive the shipment first."); return; }
+    const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+    if (!vessel) return;
+
+    let colonyCargo = window.sanitizeColonyCargo(colony.cargo_inventory);
+    let vesselCargo = window.sanitizeCargo(vessel.cargo_inventory);
+    const movedLines = [];
+    ['expendables', 'perishables', 'misc'].forEach(bucket => {
+        (colonyCargo[bucket] || []).forEach(item => {
+            const vBucket = vesselCargo[bucket] || (vesselCargo[bucket] = []);
+            const existing = vBucket.find(i => i.name.toLowerCase() === item.name.toLowerCase());
+            if (existing) existing.qty += item.qty;
+            else vBucket.push({ name: item.name, qty: item.qty, unit: item.unit || 'Units' });
+            movedLines.push(`${item.qty}x ${item.name}`);
+        });
+        colonyCargo[bucket] = [];
+    });
+    if (movedLines.length === 0) { alert("No stored items to pick up."); return; }
+
+    await db.from('colonies').update({ cargo_inventory: colonyCargo }).eq('id', colonyId);
+    await db.from('ship_markers').update({ cargo_inventory: vesselCargo }).eq('id', vesselId);
+    colony.cargo_inventory = colonyCargo;
+    vessel.cargo_inventory = vesselCargo;
+
+    await db.from('chat_logs').insert({
+        sender_id: null, message_type: 'system',
+        content: `📦 [PICKUP] ${vessel.name} collected all stored goods from ${colony.name}: ${movedLines.join(', ')}.`
+    });
+
+    if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+    if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
 };
 
 /* --- COLONY EDIT MODAL --- */
@@ -172,6 +291,11 @@ window.deliverColonyResources = async function(id) {
                 <div style="flex:1.5;"><label for="colony-edit-restype" style="font-size:9px; color:#6b826a;">Resource Type</label><input type="text" id="colony-edit-restype" style="border-color:#ffaa00;"></div>
                 <div style="flex:1;"><label for="colony-edit-resqty" style="font-size:9px; color:#6b826a;">Qty / Cycle</label><input type="number" id="colony-edit-resqty" min="0" style="border-color:#ffaa00; text-align:center;"></div>
             </div>
+            <label for="colony-edit-infra" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">🏗️ Infrastructure Level (gates Tier N+ builds 1:1, boosts daily production -- see Manufacturing box below)</label>
+            <input type="number" id="colony-edit-infra" min="1" style="border-color:#00e1ff; text-align:center;">
+            <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:6px; margin-top:8px; cursor:pointer;">
+                <input type="checkbox" id="colony-edit-mfg" style="margin:0;"> 🏭 Manufacturing Facility installed (enables resource-consuming builds)
+            </label>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="colony-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="colony-edit-save-btn" class="btn-reveal" style="flex:1; margin-top:0; border-color:#ffaa00; color:#ffaa00;">SAVE CHANGES</button>
@@ -186,7 +310,9 @@ window.deliverColonyResources = async function(id) {
                 population: parseInt(document.getElementById('colony-edit-pop').value) || 0,
                 morale: document.getElementById('colony-edit-morale').value,
                 resource_type: document.getElementById('colony-edit-restype').value.trim() || 'Raw Materials',
-                resource_output: parseInt(document.getElementById('colony-edit-resqty').value) || 0
+                resource_output: parseInt(document.getElementById('colony-edit-resqty').value) || 0,
+                infrastructure_level: Math.max(1, parseInt(document.getElementById('colony-edit-infra').value) || 1),
+                has_manufacturing_facility: document.getElementById('colony-edit-mfg').checked
             };
             const { error } = await db.from('colonies').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save colony changes: " + error.message); return; }
@@ -204,6 +330,8 @@ window.deliverColonyResources = async function(id) {
         document.getElementById('colony-edit-morale').value = colony.morale || 'Stable';
         document.getElementById('colony-edit-restype').value = colony.resource_type || '';
         document.getElementById('colony-edit-resqty').value = colony.resource_output || 0;
+        document.getElementById('colony-edit-infra').value = colony.infrastructure_level || 1;
+        document.getElementById('colony-edit-mfg').checked = !!colony.has_manufacturing_facility;
         overlay.style.display = 'flex';
     };
 })();
@@ -475,4 +603,51 @@ window.processFleetGroupProduction = async function(daysPassed) {
     }
     if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
     if (typeof window.renderFleetGroupsPanel === 'function') window.renderFleetGroupsPanel();
+};
+
+/* --- COLONY STORAGE / PRODUCTION TICK ---
+   Direct sibling of processFleetGroupProduction above -- same once-daily
+   cadence, same "isolate each entity in its own try/catch" reasoning, same
+   merge-by-name-into-expendables convention. The one real difference:
+   output lands in the COLONY's own cargo_inventory (new this pass) instead
+   of a linked vessel's, since colonies now keep stored items until manually
+   picked up rather than auto-delivering anywhere. No Manufacturing-deck
+   scaling here -- colonies have no deck/HP concept to scale against, unlike
+   a vessel; resource_output is scaled by Infrastructure Level instead (new
+   this pass, see window.COLONY_INFRA_PRODUCTION_BONUS_PER_LEVEL). Called
+   from window.processTimeAdvancement in js/ui.js whenever daysPassed > 0. */
+window.processColonyProduction = async function(daysPassed) {
+    if (!daysPassed || daysPassed <= 0) return;
+    const producedLines = [];
+    for (const c of coloniesList) {
+        try {
+            if (!c.resource_type || !(c.resource_output > 0)) continue;
+            const infraLevel = c.infrastructure_level || 1;
+            const infraMultiplier = 1 + (infraLevel - 1) * window.COLONY_INFRA_PRODUCTION_BONUS_PER_LEVEL;
+            const output = Math.round(c.resource_output * infraMultiplier * daysPassed);
+            if (output <= 0) continue;
+
+            let cargo = window.sanitizeColonyCargo(c.cargo_inventory);
+            let existing = cargo.expendables.find(item => item.name.toLowerCase() === c.resource_type.toLowerCase());
+            if (existing) { existing.qty += output; }
+            else { cargo.expendables.push({ name: c.resource_type, qty: output, unit: 'Units' }); }
+
+            await db.from('colonies').update({ cargo_inventory: cargo }).eq('id', c.id);
+            c.cargo_inventory = cargo;
+            producedLines.push(`${c.name}: +${output}x ${c.resource_type}`);
+        } catch (err) {
+            console.error(`processColonyProduction: failed for colony "${c.name}" (${c.id})`, err);
+        }
+    }
+    // One combined log line rather than one-per-colony (Fleet Group
+    // Production logs individually, but a campaign can plausibly run many
+    // more colonies than fleet groups, and a multi-day time jump would
+    // otherwise flood chat with a line per colony per tick).
+    if (producedLines.length > 0) {
+        await db.from('chat_logs').insert({
+            sender_id: null, message_type: 'system',
+            content: `🏗 [COLONY PRODUCTION] ${producedLines.join(' · ')} — accumulated in colony storage, awaiting pickup.`
+        });
+    }
+    if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
 };
