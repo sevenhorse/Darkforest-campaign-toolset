@@ -556,6 +556,16 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     // computed once here and reused (was previously duplicated inline).
     const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
 
+    // Initiative + Action Economy build (this session): a manual shot spends
+    // 1 AP from the SQUADRON's own turn slot (its own battle token, not the
+    // carrier's -- squadrons get their own independent initiative slot per
+    // the confirmed design), same opts.auto exemption/fail-open behavior as
+    // window.resolveShipWeaponFire. Fails open (no gate at all) if the
+    // squadron has no token on this battle's grid -- nothing to spend AP
+    // against, same "can't check what doesn't exist" convention this
+    // function already uses for the Weapons-disabled gate right below.
+    if (!opts.auto && sqShipSelf && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(sqShipSelf.id, 1)) return;
+
     // System Lockdown build (this session): Weapons-disabled gate, checked
     // on the squadron's own companion token (that's what would have been
     // targeted and hit by an EMP shot, not the carrier). Fails open if the
@@ -783,6 +793,14 @@ window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId
     if (!wpn) return;
 
     const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+
+    // Initiative + Action Economy build (this session): same 1-AP spend as
+    // window.resolveSquadronWeaponFire above, same opts.auto exemption and
+    // same fail-open when the squadron has no grid token to spend AP
+    // against (the no-selfPos fallback right below already handles that
+    // case for the rest of this function).
+    if (!opts.auto && sqShipSelf && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(sqShipSelf.id, 1)) return;
+
     const selfPos = sqShipSelf ? window.getBattleTokenPosition(sqShipSelf.id) : null;
     if (!selfPos) {
         // Not a battle-map token right now (pre-build legacy launch, or
