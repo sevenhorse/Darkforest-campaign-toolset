@@ -651,6 +651,9 @@
                             <div id="manufacturing-add-blueprint-wrap" style="margin:8px 0;">
                                 <button class="btn-reveal" onclick="window.openNewBlueprintModal()" style="width:100%; font-size:10px; margin:0; border-color:#c9962f; color:#c9962f;">+ PROPOSE BLUEPRINT</button>
                             </div>
+                            <label for="manufacturing-bp-search" style="display:none;">Search blueprints</label>
+                            <input type="text" id="manufacturing-bp-search" placeholder="Search by name or description..." oninput="window.filterManufacturingSearch(this.value)" style="width:100%; box-sizing:border-box; font-size:10px; padding:5px 6px; margin:0 0 8px 0; background:#030403; color:#d4c5a9; border:1px solid #3c4e36;">
+                            <div class="cargo-subtabs" id="manufacturing-tabs-container" style="margin-bottom:8px;"></div>
                             <div id="manufacturing-blueprints-container" style="max-height:60vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-top:8px;"></div>
                         </div>
                         <div class="sheet-section" style="border-color:#c9962f; background:rgba(201,150,47,0.04);">
@@ -1599,7 +1602,7 @@
     <script src="js/db.js?v=3.37"></script>
     <script src="js/audio.js?v=3.17"></script>
     <script src="js/ui.js?v=3.43"></script>
-    <script src="js/combat.js?v=3.60"></script>
+    <script src="js/combat.js?v=3.61"></script>
     <script src="js/squadrons.js?v=1.7"></script>
     <script src="js/strike-craft-designer.js?v=1.0"></script>
     <script src="js/colonies.js?v=3.19"></script>
@@ -1610,7 +1613,7 @@
     <script src="js/dm-sheet-editor.js?v=1.1"></script>
     <script src="js/map.js?v=3.48"></script>
     <script src="js/battle-map.js?v=1.40"></script>
-    <script src="js/manufacturing.js?v=1.12"></script>
+    <script src="js/manufacturing.js?v=1.13"></script>
 
 </body>
 </html>
