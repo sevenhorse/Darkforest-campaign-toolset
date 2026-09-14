@@ -942,9 +942,6 @@ window.renderVesselDeck = function() {
                     // window.startVesselManufacturingOrder's own belt-and-
                     // suspenders rejection of the same case).
                     const blueprints = (typeof manufacturingBlueprintsList !== 'undefined') ? manufacturingBlueprintsList.filter(b => b.status !== 'draft' && b.output_type !== 'colony_infrastructure') : [];
-                    const bpOptions = blueprints.length
-                        ? blueprints.map(bp => `<option value="${bp.id}">${bp.name}</option>`).join('')
-                        : '<option value="">No approved blueprints yet</option>';
                     const inProgress = (window.globalManufacturingOrdersCache || []).filter(o => o.source_type === 'vessel' && o.vessel_id === vessel.id);
                     let progressHtml = '';
                     inProgress.forEach(o => {
@@ -963,13 +960,21 @@ window.renderVesselDeck = function() {
                     // scaling window.startVesselManufacturingOrder applies.
                     const deckScale = mfgDeck.max_hp > 0 ? Math.max(0.1, mfgDeck.hp / mfgDeck.max_hp) : 1;
                     const deckNote = deckScale < 1 ? ` — <span style="color:#ff9b6b;">Manufacturing deck at ${Math.round(deckScale * 100)}% (builds take ${(1 / deckScale).toFixed(1)}x longer)</span>` : '';
+                    // Build Popup (Tabs/Search/Build-Popup pass, 2026-09-14):
+                    // the old inline <select> + BUILD button here (pick blind,
+                    // then hope) is replaced by a single button that opens a
+                    // modal listing every buildable blueprint with its full
+                    // cost/time/tier breakdown AND a live "can this actually
+                    // succeed right now" check against this vessel's own
+                    // cargo and deck state -- see js/manufacturing.js's
+                    // openVesselBuildModal / computeManufacturingPreview.
                     mfgContainer.innerHTML = `
                     <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:10px;">
                         <label style="font-size: 9px; color: #c9962f;">🏭 Manufacturing Bay (Manufacturing deck installed)${discountPct ? ` — ${discountPct}% perk discount applies` : ''}${deckNote}:</label>
-                        <div style="display:flex; gap:6px; margin-top:4px;">
-                            <label for="mfg-vessel-blueprint-${vessel.id}" style="display:none;">Blueprint</label>
-                            <select id="mfg-vessel-blueprint-${vessel.id}" style="flex:1; margin:0; font-size:9px; padding:3px; border-color:#c9962f;">${bpOptions}</select>
-                            <button class="btn-deploy" onclick="window.startVesselManufacturingOrder('${vessel.id}')" style="flex:0 0 auto; font-size:9px; padding:4px 8px; margin:0;">BUILD</button>
+                        <div style="margin-top:4px;">
+                            ${blueprints.length
+                                ? `<button class="btn-deploy" onclick="window.openVesselBuildModal('${vessel.id}')" style="width:100%; font-size:9px; padding:5px 8px; margin:0;">🔍 SELECT BLUEPRINT TO BUILD</button>`
+                                : `<p style="margin:0; font-size:9px; color:#6b826a;">No approved blueprints buildable from a vessel yet.</p>`}
                         </div>
                         ${progressHtml}
                     </div>`;
