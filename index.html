@@ -580,6 +580,11 @@
                                         <input type="number" id="new-colony-resqty" value="10" min="0" style="font-size:11px; margin:2px 0; text-align:center;">
                                     </div>
                                 </div>
+                                <label for="new-colony-infra" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">🏗️ Infrastructure Level (starts at 1):</label>
+                                <input type="number" id="new-colony-infra" value="1" min="1" style="font-size:11px; margin:2px 0; text-align:center;">
+                                <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:6px; margin-top:8px; cursor:pointer;">
+                                    <input type="checkbox" id="new-colony-mfg" style="margin:0;"> 🏭 Manufacturing Facility installed
+                                </label>
                                 <button class="btn-reveal" onclick="window.addColony()" style="margin-top:10px; border-color:#ffaa00; color:#ffaa00;">+ ESTABLISH COLONY</button>
                             </div>
                             <div class="sheet-section">
@@ -1593,11 +1598,11 @@
     <!-- MAIN JAVASCRIPT LINKS -->
     <script src="js/db.js?v=3.37"></script>
     <script src="js/audio.js?v=3.17"></script>
-    <script src="js/ui.js?v=3.42"></script>
-    <script src="js/combat.js?v=3.59"></script>
+    <script src="js/ui.js?v=3.43"></script>
+    <script src="js/combat.js?v=3.60"></script>
     <script src="js/squadrons.js?v=1.7"></script>
     <script src="js/strike-craft-designer.js?v=1.0"></script>
-    <script src="js/colonies.js?v=3.17"></script>
+    <script src="js/colonies.js?v=3.19"></script>
     <script src="js/ship-designer.js?v=3.31"></script>
     <script src="js/perk-designer.js?v=3.17"></script>
     <script src="js/augment-designer.js?v=1.5"></script>
@@ -1605,7 +1610,7 @@
     <script src="js/dm-sheet-editor.js?v=1.1"></script>
     <script src="js/map.js?v=3.48"></script>
     <script src="js/battle-map.js?v=1.40"></script>
-    <script src="js/manufacturing.js?v=1.10"></script>
+    <script src="js/manufacturing.js?v=1.12"></script>
 
 </body>
 </html>
