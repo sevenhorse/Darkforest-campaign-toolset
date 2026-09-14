@@ -350,6 +350,15 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
             await window.processFleetGroupProduction(daysPassed);
         }
 
+        // Colony Storage: automatic daily accrual (2026-09-14) — a colony's
+        // configured resource_type/resource_output now accumulates into its
+        // own cargo_inventory every daily cycle instead of only being
+        // available via a manual per-click delivery. Same cadence as Fleet
+        // Group Production just above.
+        if (typeof window.processColonyProduction === 'function') {
+            await window.processColonyProduction(daysPassed);
+        }
+
         // Battlefield Salvage — Manufacturing-deck post-processing: same
         // once-daily cadence as fleet group production, converting raw
         // wreckage sitting in any ship's cargo into a DM-configured output.
