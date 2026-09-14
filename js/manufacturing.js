@@ -292,6 +292,9 @@ function describeBlueprintOutput(bp) {
     if (bp.output_type === 'arsenal_weapon') {
         return `🔫 ${p.name || 'Unnamed Weapon'} (${p.dice || '1d6'}${p.modifier || '+0'}${p.damage_type ? ', ' + p.damage_type : ''}) → crafting character's Arsenal`;
     }
+    if (bp.output_type === 'colony_infrastructure') {
+        return `🏗️ Reaches Infrastructure Level ${p.infrastructure_level || 1} → the building colony itself (colony builds only)`;
+    }
     const bucket = (p.cargo_bucket && p.cargo_bucket !== 'expendables') ? ` (${p.cargo_bucket})` : '';
     return `📦 ${p.qty || 0}x ${p.name || 'Unnamed Item'} (${p.unit || 'Units'}) → target vessel's cargo${bucket}`;
 }
@@ -321,13 +324,22 @@ window.renderManufacturingPanel = function() {
             const tier = computeBlueprintTier(bp);
             const tierWarn = (tier !== Infinity && tier > MANUFACTURING_TIER_CAP) ? ' <span style="color:#ff9b6b;">(exceeds 5-layer guideline)</span>' : '';
             const tierColor = tier === Infinity ? '#ff6b6b' : '#6b826a';
+            // Infrastructure (2026-09-14): a colony must already be at
+            // Infrastructure Level >= this blueprint's own derived tier to
+            // build it there (1:1, confirmed design) -- EXCEPT a
+            // colony_infrastructure blueprint itself, which is exempt (it's
+            // how a colony reaches that level in the first place). Shown
+            // here so the requirement is visible without opening the colony
+            // card and trying a build.
+            const infraNote = (bp.output_type !== 'colony_infrastructure' && tier !== Infinity && tier > 1)
+                ? ` <span style="color:#6b826a;">(needs Colony Infrastructure Lvl ${tier} to build at a colony)</span>` : '';
             const proposer = (bp.status === 'draft' && typeof allProfiles !== 'undefined') ? allProfiles.find(a => a.id === bp.created_by) : null;
             return `
             <div class="note-card" style="border-left: 3px solid ${bp.status === 'draft' ? '#ffaa00' : '#3c4e36'};">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
                         <strong style="color:${bp.status === 'draft' ? '#ffaa00' : '#c9962f'}; font-size:12px;">${bp.name}</strong>
-                        <span style="font-size:8px; color:${tierColor}; margin-left:6px;">${formatBlueprintTier(tier)}${tierWarn}</span>
+                        <span style="font-size:8px; color:${tierColor}; margin-left:6px;">${formatBlueprintTier(tier)}${tierWarn}${infraNote}</span>
                         ${bp.status === 'draft' ? '<span style="font-size:8px; color:#ffaa00;"> · PENDING REVIEW</span>' : ''}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${bp.description || ''}</p>
                         <p style="margin:4px 0 0 0; font-size:9px; color:#6b826a;">Cost: ${describeBlueprintCost(bp)} &nbsp;·&nbsp; Time: ${bp.time_cost_hours}h</p>
@@ -373,7 +385,7 @@ window.renderManufacturingPanel = function() {
                 if (colony && colony.owner_id === currentUserId) canCancel = true;
                 sourceLabel = `🏛 ${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}`;
             } else {
-                if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true;
+                if (vessel && vessel.owner_id === currentUserId) canCancel = true;
                 sourceLabel = `🚀 ${vessel ? vessel.name : 'Vessel'}`;
             }
             html += `
@@ -401,10 +413,21 @@ window.renderManufacturingPanel = function() {
 };
 
 /* Rendered by js/colonies.js's renderColoniesPanel, inside each editable
-   colony's card -- colonies have no deck concept (unlike vessels, no hard
-   gate here) and no cargo of their own, so this reuses that same card's
-   existing colony-deliver-vessel-<id> select as the Manufacturing order's
-   delivery target instead of drawing a second picker. */
+   colony's card -- reuses that same card's colony-deliver-vessel-<id>
+   select as the Manufacturing order's delivery target for the FINISHED
+   product (a build still always ships out to a vessel, that part hasn't
+   changed), same reasoning as before: the crafted output isn't "stored
+   items" in the new colony-storage sense, it's a one-shot delivery like a
+   vessel build's output always was.
+
+   Colony Manufacturing Facility (2026-09-14): a colony with
+   has_manufacturing_facility now CAN draw real materials out of its own
+   cargo_inventory (see the header comment on window.startColonyManufacturingOrder
+   below) instead of every colony build being unconditionally time-only.
+   Whether this particular build actually used materials or fell back to
+   time-only is reported in the chat log after BUILD is clicked -- no live
+   pre-build cost/sufficiency preview here (deferred; a judgment call to
+   keep this pass's scope to the storage + gating mechanic itself). */
 window.renderColonyManufacturingBox = function(colony) {
     // Approved-only -- a still-pending proposal isn't buildable yet.
     const blueprints = (manufacturingBlueprintsList || []).filter(b => b.status !== 'draft');
@@ -417,20 +440,23 @@ window.renderColonyManufacturingBox = function(colony) {
         const remaining = Math.max(0, (o.started_at_hours || 0) + (o.duration_hours || 0) - (window.universeTimeHours || 0));
         // This box only renders for an editable (DM/owner) colony already
         // (see js/colonies.js's renderColoniesPanel), so anyone seeing it
-        // can also cancel from here -- colony builds have no resource cost
-        // to refund (time only), window.cancelManufacturingOrder handles
-        // that case as a plain cancel.
+        // can also cancel from here -- window.cancelManufacturingOrder now
+        // refunds a colony order's snapshot back into colony storage when
+        // one exists, same as a vessel order refunds into vessel cargo.
         progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build">✕</button></div>`;
     });
+    const facilityNote = colony.has_manufacturing_facility
+        ? '🏭 Manufacturing Facility installed — draws materials from colony storage when available, falls back to time-only otherwise:'
+        : '🏭 Manufacturing (time cost only — no Facility installed, see colony edit to add one):';
     return `
     <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:6px;">
-        <label style="font-size: 9px; color: #c9962f;">🏭 Manufacturing (time cost only — colonies have no cargo to draw materials from):</label>
+        <label style="font-size: 9px; color: #c9962f;">${facilityNote}</label>
         <div style="display:flex; gap:6px; margin-top:4px;">
             <label for="mfg-colony-blueprint-${colony.id}" style="display:none;">Blueprint</label>
             <select id="mfg-colony-blueprint-${colony.id}" style="flex:1; margin:0; font-size:9px; padding:3px; border-color:#c9962f;">${bpOptions}</select>
             <button class="btn-deploy" onclick="window.startColonyManufacturingOrder('${colony.id}')" style="flex:0 0 auto; font-size:9px; padding:4px 8px; margin:0;">BUILD</button>
         </div>
-        <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">Delivers to whichever vessel is selected in the dropdown above.</p>
+        <p style="font-size:8px; color:#6b826a; margin:4px 0 0 0;">Finished build delivers to whichever vessel is selected in the Storage pickup dropdown above.</p>
         ${progressHtml}
     </div>`;
 };
@@ -572,6 +598,7 @@ window.approveBlueprint = async function(id) {
         const type = document.getElementById('bp-output-type').value;
         document.getElementById('bp-output-cargo-fields').style.display = type === 'cargo_item' ? 'block' : 'none';
         document.getElementById('bp-output-weapon-fields').style.display = type === 'arsenal_weapon' ? 'block' : 'none';
+        document.getElementById('bp-output-infra-fields').style.display = type === 'colony_infrastructure' ? 'block' : 'none';
     }
 
     function ensureModal() {
@@ -605,6 +632,7 @@ window.approveBlueprint = async function(id) {
             <select id="bp-output-type" onchange="window.syncBlueprintOutputFieldsPublic()" style="border-color:#c9962f;">
                 <option value="cargo_item">A named cargo item (delivered to a vessel's hold)</option>
                 <option value="arsenal_weapon">An Arsenal weapon (delivered to the crafting character)</option>
+                <option value="colony_infrastructure">Colony Infrastructure (raises a colony's Infrastructure Level -- colony builds only)</option>
             </select>
 
             <div id="bp-output-cargo-fields" style="margin-top:6px;">
@@ -631,6 +659,10 @@ window.approveBlueprint = async function(id) {
                     <input type="number" id="bp-out-wpn-ammo" placeholder="Ammo (blank=infinite)" style="flex:1; margin:0; font-size:9px; border-color:#c9962f;">
                     <label style="font-size:9px; color:#d4c5a9; display:flex; align-items:center; gap:3px; white-space:nowrap;"><input type="checkbox" id="bp-out-wpn-explodes" checked style="margin:0;"> Explodes</label>
                 </div>
+            </div>
+            <div id="bp-output-infra-fields" style="margin-top:6px; display:none;">
+                <label for="bp-out-infra-level" style="font-size:8px; color:#6b826a; display:block;">Target Infrastructure Level -- completing this build raises the colony to this level (never lowers it if already higher). Colony-build-only; per the confirmed design a colony must already be at Infrastructure Level N to build a Tier N item, so this blueprint's OWN resource-cost tier is exempt from that gate (it's how a colony reaches the level in the first place).</label>
+                <input type="number" id="bp-out-infra-level" min="1" value="2" style="border-color:#c9962f; text-align:center;">
             </div>
 
             <div style="display:flex; gap:10px; margin-top:14px;">
@@ -665,6 +697,10 @@ window.approveBlueprint = async function(id) {
                     explodes: document.getElementById('bp-out-wpn-explodes').checked,
                     damage_type: document.getElementById('bp-out-wpn-dmgtype').value || null,
                     ammo: ammoVal, max_ammo: ammoVal
+                };
+            } else if (outputType === 'colony_infrastructure') {
+                outputPayload = {
+                    infrastructure_level: Math.max(1, parseInt(document.getElementById('bp-out-infra-level').value) || 1)
                 };
             } else {
                 const itemName = document.getElementById('bp-out-cargo-name').value.trim();
@@ -729,6 +765,7 @@ window.approveBlueprint = async function(id) {
         document.getElementById('bp-out-wpn-mod').value = '+0';
         document.getElementById('bp-out-wpn-ammo').value = '';
         document.getElementById('bp-out-wpn-explodes').checked = true;
+        document.getElementById('bp-out-infra-level').value = 2;
         syncOutputFields();
         populateCostInputDropdown();
         renderCostList();
@@ -762,6 +799,7 @@ window.approveBlueprint = async function(id) {
         document.getElementById('bp-out-wpn-ammo').value = (bp.output_type === 'arsenal_weapon' && p.ammo !== null && p.ammo !== undefined) ? p.ammo : '';
         document.getElementById('bp-out-wpn-explodes').checked = bp.output_type === 'arsenal_weapon' ? (p.explodes !== false) : true;
         if (bp.output_type === 'arsenal_weapon' && p.damage_type) document.getElementById('bp-out-wpn-dmgtype').value = p.damage_type;
+        document.getElementById('bp-out-infra-level').value = bp.output_type === 'colony_infrastructure' ? (p.infrastructure_level || 2) : 2;
         syncOutputFields();
         populateCostInputDropdown();
         renderCostList();
@@ -796,7 +834,7 @@ function findCargoItemAcrossBuckets(cargo, name) {
 window.startVesselManufacturingOrder = async function(vesselId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    if (!(currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId))) return;
+    if (!(currentUserRole === 'dm' || vessel.owner_id === currentUserId)) return;
 
     const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
     if (!mfgDeck) { alert('This vessel has no Manufacturing-type deck installed -- building requires one.'); return; }
@@ -806,6 +844,11 @@ window.startVesselManufacturingOrder = async function(vesselId) {
     if (!blueprintId) { alert('Select a blueprint to build first.'); return; }
     const bp = manufacturingBlueprintsList.find(b => b.id === blueprintId);
     if (!bp) return;
+    // Infrastructure (2026-09-14): colony_infrastructure output raises a
+    // COLONY's Infrastructure Level -- vessels have no such concept, so this
+    // is rejected here as defense in depth even though the vessel Manufacturing
+    // Bay's own blueprint dropdown already filters these out (js/combat.js).
+    if (bp.output_type === 'colony_infrastructure') { alert('Infrastructure blueprints can only be built at a colony.'); return; }
 
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert('Please save your Dossier & Stats once first before starting a build.'); return; }
@@ -898,11 +941,34 @@ window.startVesselManufacturingOrder = async function(vesselId) {
     loadManufacturingOrders();
 };
 
-/* --- STARTING AN ORDER -- colony path (no deck check, no resource
-   deduction -- colonies have no cargo of their own; time cost only,
-   discount still applies to time). Delivers to a picked vessel, reusing
-   the same vessel-select the existing colony resource-delivery button
-   already uses. --- */
+/* --- STARTING AN ORDER -- colony path.
+
+   Manufacturing Facility (2026-09-14): a colony with has_manufacturing_facility
+   now attempts the SAME aggregate-then-check-then-deduct sequence
+   window.startVesselManufacturingOrder uses, drawing from the colony's own
+   cargo_inventory (see js/colonies.js's window.sanitizeColonyCargo) instead
+   of a vessel's. Per the confirmed design, this is a SOFT attempt, not a
+   hard gate the way a vessel build is: no facility, no resource_cost on the
+   blueprint, or insufficient stock all fall back to today's original
+   time-only behavior rather than blocking the build outright -- colonies
+   never refuse a build the way a vessel does. Which path actually happened
+   is reported in the completion chat log below.
+
+   Finished output delivers to a picked vessel, reusing the same
+   vessel-select the colony's Storage pickup box uses -- EXCEPT a
+   colony_infrastructure build (Infrastructure, 2026-09-14), which has
+   nothing to deliver anywhere (its "output" is the colony's own
+   infrastructure_level going up) and so needs no vessel selected at all.
+
+   Infrastructure GATE (2026-09-14, confirmed design: Level N unlocks Tier
+   N, 1:1): unlike the soft materials fallback above, this one IS a hard
+   block -- a colony below the blueprint's own derived tier cannot attempt
+   the build at all, full stop, no time-only fallback. The one deliberate
+   exception is a colony_infrastructure blueprint itself: its own tier is
+   exempt from this check, since otherwise a colony could never reach a
+   higher level in the first place (reaching Level 3 would require an
+   infrastructure blueprint whose own resource chain is Tier 3, which would
+   require already being at Level 3 -- a contradiction). --- */
 
 window.startColonyManufacturingOrder = async function(colonyId) {
     const colony = coloniesList.find(c => c.id === colonyId);
@@ -915,27 +981,84 @@ window.startColonyManufacturingOrder = async function(colonyId) {
     const bp = manufacturingBlueprintsList.find(b => b.id === blueprintId);
     if (!bp) return;
 
-    const vesselSelect = document.getElementById(`colony-deliver-vessel-${colonyId}`);
-    const vesselId = vesselSelect ? vesselSelect.value : null;
-    if (!vesselId) { alert('Select a vessel to receive the finished build first (same dropdown used for resource deliveries).'); return; }
-    const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
-    if (!vessel) return;
+    const isInfrastructure = bp.output_type === 'colony_infrastructure';
+    if (!isInfrastructure) {
+        const requiredLevel = computeBlueprintTier(bp);
+        const currentLevel = colony.infrastructure_level || 1;
+        if (requiredLevel !== Infinity && requiredLevel > currentLevel) {
+            alert(`${colony.name}'s Infrastructure Level (${currentLevel}) is too low to build "${bp.name}" (Tier ${requiredLevel}). Raise Infrastructure to Level ${requiredLevel} first.`);
+            return;
+        }
+    }
+
+    let vesselId = null, vessel = null;
+    if (!isInfrastructure) {
+        const vesselSelect = document.getElementById(`colony-deliver-vessel-${colonyId}`);
+        vesselId = vesselSelect ? vesselSelect.value : null;
+        if (!vesselId) { alert('Select a vessel to receive the finished build first (same dropdown used for storage pickups).'); return; }
+        vessel = globalShipMarkersCache.find(m => m.id === vesselId);
+        if (!vessel) return;
+    }
 
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert('Please save your Dossier & Stats once first before starting a build.'); return; }
     const discountPct = window.getManufacturingDiscountPct(myProf.perks);
     const durationHours = Math.max(0.1, bp.time_cost_hours * (1 - discountPct / 100));
 
+    let deductedSnapshot = null;
+    let usedMaterials = false;
+    if (colony.has_manufacturing_facility && (bp.resource_cost || []).length > 0) {
+        let cargo = window.sanitizeColonyCargo(colony.cargo_inventory);
+        // Same aggregate-by-name-then-discount sequence as the vessel path,
+        // and for the same reason -- a blueprint can list the same input
+        // across more than one cost row.
+        const rawTotalsByName = new Map();
+        bp.resource_cost.forEach(c => {
+            const key = c.name.toLowerCase();
+            const existing = rawTotalsByName.get(key);
+            if (existing) existing.qty += c.qty;
+            else rawTotalsByName.set(key, { name: c.name, unit: c.unit || 'Units', qty: c.qty });
+        });
+        const requirements = Array.from(rawTotalsByName.values()).map(req => ({
+            ...req,
+            qty: discountPct ? Math.max(1, Math.round(req.qty * (1 - discountPct / 100))) : req.qty
+        }));
+        const allAvailable = requirements.every(req => {
+            const found = findCargoItemAcrossBuckets(cargo, req.name);
+            return found && found.item.qty >= req.qty;
+        });
+        if (allAvailable) {
+            deductedSnapshot = requirements.map(req => {
+                const found = findCargoItemAcrossBuckets(cargo, req.name);
+                found.item.qty -= req.qty;
+                return { name: req.name, unit: req.unit, qty: req.qty, bucket: found.bucket };
+            });
+            await db.from('colonies').update({ cargo_inventory: cargo }).eq('id', colonyId);
+            colony.cargo_inventory = cargo;
+            usedMaterials = true;
+            if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
+        }
+        // else: not enough in storage -- fall through to time-only below,
+        // deductedSnapshot stays null, nothing is deducted.
+    }
+
     const { error } = await db.from('manufacturing_orders').insert({
         blueprint_id: bp.id, blueprint_name: bp.name, output_type: bp.output_type, output_payload: bp.output_payload,
         source_type: 'colony', vessel_id: vesselId, source_colony_id: colonyId, character_id: myProf.character.id, initiated_by: currentUserId,
-        started_at_hours: window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct
+        started_at_hours: window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct,
+        resource_cost_snapshot: deductedSnapshot
     });
     if (error) { alert('Failed to start build: ' + error.message); return; }
 
+    const materialsNote = usedMaterials
+        ? ` Materials drawn from colony storage: ${deductedSnapshot.map(r => `${r.qty}x ${r.name}`).join(', ')}.`
+        : (colony.has_manufacturing_facility && (bp.resource_cost || []).length > 0
+            ? ' Insufficient stored materials — built as time-only instead.'
+            : ' Colony builds without stored materials cost time only.');
+    const destinationNote = isInfrastructure ? '' : ` for delivery to ${vessel.name}`;
     await db.from('chat_logs').insert({
         sender_id: null, message_type: 'system',
-        content: `🏭 [MANUFACTURING] ${colony.name} began building "${bp.name}" for delivery to ${vessel.name}${discountPct ? ` (${discountPct}% discount applied)` : ''} — ready in ${durationHours.toFixed(1)}h. (Colony builds cost time only -- no material deduction.)`
+        content: `🏭 [MANUFACTURING] ${colony.name} began building "${bp.name}"${destinationNote}${discountPct ? ` (${discountPct}% discount applied)` : ''} — ready in ${durationHours.toFixed(1)}h.${materialsNote}`
     });
     loadManufacturingOrders();
 };
@@ -973,7 +1096,7 @@ window.cancelManufacturingOrder = async function(orderId) {
         if (colony) { ownerOk = colony.owner_id === currentUserId; sourceName = colony.name; }
     } else if (!ownerOk && order.source_type === 'vessel') {
         const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
-        if (vessel) { ownerOk = window.vesselHasOwner(vessel, currentUserId); sourceName = vessel.name; }
+        if (vessel) { ownerOk = vessel.owner_id === currentUserId; sourceName = vessel.name; }
     } else if (order.source_type === 'colony') {
         sourceName = ((typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null)?.name || sourceName;
     } else {
@@ -991,7 +1114,14 @@ window.cancelManufacturingOrder = async function(orderId) {
     // tracking existed" message even when nothing is actually wrong. Check
     // "does a snapshot record exist at all" separately from "does it have
     // anything to refund."
-    const hasSnapshotRecord = order.source_type === 'vessel' && Array.isArray(order.resource_cost_snapshot);
+    //
+    // Manufacturing Facility (2026-09-14): a colony order can now ALSO carry
+    // a real resource_cost_snapshot (when it drew materials from colony
+    // storage -- see window.startColonyManufacturingOrder), so the snapshot
+    // check is no longer vessel-only; a colony order with no snapshot (the
+    // time-only fallback path, still the common case) reads exactly like
+    // before.
+    const hasSnapshotRecord = Array.isArray(order.resource_cost_snapshot);
     const hasRefund = hasSnapshotRecord && order.resource_cost_snapshot.length > 0;
     const refundLine = hasRefund
         ? `Refunds: ${order.resource_cost_snapshot.map(r => `${r.qty}x ${r.name}`).join(', ')}.`
@@ -999,18 +1129,34 @@ window.cancelManufacturingOrder = async function(orderId) {
     if (!(await window.showConfirmModal(`Cancel "${order.blueprint_name}" (${sourceName})? ${refundLine}`))) return;
 
     if (hasRefund) {
-        const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
-        if (vessel) {
-            let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-            order.resource_cost_snapshot.forEach(r => {
-                const bucket = MANUFACTURING_CARGO_BUCKETS.includes(r.bucket) ? r.bucket : 'expendables';
-                const existing = (cargo[bucket] || []).find(i => i.name.toLowerCase() === r.name.toLowerCase());
-                if (existing) existing.qty += r.qty;
-                else cargo[bucket].push({ name: r.name, qty: r.qty, unit: r.unit || 'Units' });
-            });
-            await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
-            vessel.cargo_inventory = cargo;
-            if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+        if (order.source_type === 'colony') {
+            const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
+            if (colony) {
+                let cargo = window.sanitizeColonyCargo(colony.cargo_inventory);
+                order.resource_cost_snapshot.forEach(r => {
+                    const bucket = MANUFACTURING_CARGO_BUCKETS.includes(r.bucket) ? r.bucket : 'expendables';
+                    const existing = (cargo[bucket] || []).find(i => i.name.toLowerCase() === r.name.toLowerCase());
+                    if (existing) existing.qty += r.qty;
+                    else cargo[bucket].push({ name: r.name, qty: r.qty, unit: r.unit || 'Units' });
+                });
+                await db.from('colonies').update({ cargo_inventory: cargo }).eq('id', colony.id);
+                colony.cargo_inventory = cargo;
+                if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
+            }
+        } else {
+            const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
+            if (vessel) {
+                let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+                order.resource_cost_snapshot.forEach(r => {
+                    const bucket = MANUFACTURING_CARGO_BUCKETS.includes(r.bucket) ? r.bucket : 'expendables';
+                    const existing = (cargo[bucket] || []).find(i => i.name.toLowerCase() === r.name.toLowerCase());
+                    if (existing) existing.qty += r.qty;
+                    else cargo[bucket].push({ name: r.name, qty: r.qty, unit: r.unit || 'Units' });
+                });
+                await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+                vessel.cargo_inventory = cargo;
+                if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+            }
         }
     }
 
@@ -1060,6 +1206,22 @@ window.processManufacturingOrders = async function(newHours) {
                     ammo: p.ammo, max_ammo: p.max_ammo
                 });
                 await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.name} added to ${charRow.name || 'the crafting character'}'s Arsenal.` });
+            } else if (order.output_type === 'colony_infrastructure') {
+                // Infrastructure (2026-09-14): "delivers" to the colony that
+                // built it, not a vessel -- vessel_id is null on these
+                // orders (see window.startColonyManufacturingOrder). Never
+                // lowers the level -- if the colony already reached a higher
+                // level some other way by the time this completes, this is
+                // a no-op on the level itself (still consumes the order).
+                const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
+                if (!colony) { await db.from('manufacturing_orders').delete().eq('id', order.id); continue; } // colony no longer exists -- fizzle rather than error
+                const p = order.output_payload || {};
+                const targetLevel = Math.max(1, parseInt(p.infrastructure_level) || 1);
+                const newLevel = Math.max(colony.infrastructure_level || 1, targetLevel);
+                await db.from('colonies').update({ infrastructure_level: newLevel }).eq('id', colony.id);
+                colony.infrastructure_level = newLevel;
+                await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${colony.name}'s Infrastructure reached Level ${newLevel}.` });
+                if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
             } else {
                 const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
                 if (!vessel) { await db.from('manufacturing_orders').delete().eq('id', order.id); continue; } // target vessel no longer exists -- fizzle rather than error
