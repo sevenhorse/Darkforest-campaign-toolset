@@ -1581,6 +1581,17 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
 
+    // Initiative + Action Economy build (this session): a manual shot spends
+    // 1 AP from the firer's OWN turn slot, same "opts.auto skips every
+    // human-only gate" convention every other check in this function already
+    // uses -- an AI-controlled ship's automated fire (opts.auto) is exempt,
+    // since AI-controlled ships never get an individual turn slot at all
+    // (they still fire together in one batch at the round boundary).
+    // window.spendTokenAp itself fails open (returns true) whenever no
+    // initiative has been rolled for the active battle, so this is a no-op
+    // until a DM actually starts using the turn-order system.
+    if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(vesselId, 1)) return;
+
     // System Lockdown build (this session): Weapons-disabled gate, same
     // style/placement as the deck-destroyed check right below. Checked on
     // the FIRER, not the target -- a disabled vessel can't shoot, full stop.
@@ -2332,6 +2343,13 @@ window.applyManualDamage = async function() {
     let vessel = globalShipMarkersCache.find(m => m.id === firerId);
     let targetShip = globalShipMarkersCache.find(m => m.id === targetId);
     if (!vessel || !targetShip) { alert("Firing ship or target could not be found -- try re-opening this panel."); return; }
+
+    // Initiative + Action Economy build (this session): Manual Damage is
+    // explicitly documented as acting like a REAL shot from the firer (see
+    // this feature's own header comment) -- spends 1 AP from the firer's
+    // turn slot exactly like a normal FIRE, same fail-open-if-no-initiative
+    // behavior as every other spendTokenAp call site.
+    if (typeof window.spendTokenAp === 'function' && !window.spendTokenAp(firerId, 1)) return;
 
     const wpnIdx = wpnIdxRaw !== '' ? parseInt(wpnIdxRaw) : null;
     let wpn = (wpnIdx !== null) ? (vessel.ship_weapons || [])[wpnIdx] : null;
@@ -3532,10 +3550,17 @@ window.removeCombatant = async function(id) {
     if(typeof loadCombatTracker === 'function') loadCombatTracker(); 
 };
 
-window.advanceCombatRound = async function() {
-    if (currentUserRole !== 'dm') return;
-    if (!(await window.showConfirmModal("Advance combat round? This will process cooldowns, overheat, and force-recall any strike craft that run out of fuel."))) return;
-
+/* Initiative + Action Economy build (this session): extracted the whole
+   body of window.advanceCombatRound below into this DOM/confirm-independent
+   core so the new per-turn engine (js/battle-map.js's window.endCurrentTurn)
+   can trigger the exact same global tick the instant the initiative order
+   wraps back to the top, with no human confirm dialog in the way and no
+   DM-only gate blocking a player who legitimately ends the last turn of a
+   round. Same "core has no human gates, wrapper adds them" convention this
+   codebase already uses everywhere else (resolveShipWeaponFire vs
+   rollShipWeapon, etc.) — logic itself is completely unchanged by this
+   extraction, byte-for-byte the same tick as before. */
+window.resolveRoundTick = async function() {
     let anyChanged = false;
     let klaxonTriggered = false;
 
@@ -3687,9 +3712,26 @@ window.advanceCombatRound = async function() {
         window.AudioEngine.playKlaxon();
     }
 
+    // Initiative + Action Economy build (this session): switched from
+    // sender_id:currentUserId/message_type:'text' to a system line, since
+    // this tick can now fire automatically (a player ending the last turn
+    // of a round via window.endCurrentTurn) and not just from the DM's own
+    // manual ADVANCE ROUND click — matches the convention every other
+    // automated tick in this app already announces itself with.
     await db.from('chat_logs').insert({
-        sender_id: currentUserId,
+        sender_id: null,
         content: `⏭️ [TACTICAL] Combat round advanced. Cooldowns reduced. Heat dissipated. Strike craft loiter time degraded.`,
-        message_type: 'text'
+        message_type: 'system'
     });
+};
+
+/* Thin human-facing wrapper around window.resolveRoundTick above — adds
+   back the DM-only gate and confirm dialog a manual button click needs.
+   The new per-turn engine (js/battle-map.js) calls resolveRoundTick()
+   directly instead, bypassing both, same as every other opts.auto path in
+   this codebase skips its own human-only gates. */
+window.advanceCombatRound = async function() {
+    if (currentUserRole !== 'dm') return;
+    if (!(await window.showConfirmModal("Advance combat round? This will process cooldowns, overheat, and force-recall any strike craft that run out of fuel."))) return;
+    await window.resolveRoundTick();
 };
