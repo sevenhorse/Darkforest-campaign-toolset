@@ -1085,11 +1085,61 @@ div[style*="grid-template-columns"] > div,
        stack as plain blocks inside the drawer's own scroll container. */
     #mobile-nav-drawer-body #top-bar,
     #mobile-nav-drawer-body #bottom-toggle-bar,
-    #mobile-nav-drawer-body #hud-overlay {
+    #mobile-nav-drawer-body #hud-overlay,
+    #mobile-nav-drawer-body #bottom-right-presence {
         position: static !important;
         width: 100% !important; max-width: 100% !important; max-height: none !important;
         left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
         margin: 0 !important;
+        /* Mobile layout fix (2026-09-24): #bottom-toggle-bar's desktop rule
+           centers it with transform: translateX(-50%), and position:static
+           does NOT cancel a transform -- so inside the drawer it was shoved
+           half its own width off the left edge (CODEX button unreachable). */
+        transform: none !important;
+        box-sizing: border-box;
+    }
+    /* Mobile layout fix (2026-09-24): #top-bar and #bottom-toggle-bar are
+       single no-wrap rows on desktop (#top-bar's content is ~1650px wide).
+       Relocated into a ~300px drawer they became thin sideways-scroll
+       strips with nearly every button off-screen. Inside the drawer, let
+       both (and #top-bar's two inner flex groups) wrap into a grid of
+       buttons instead. Desktop is untouched -- these only match inside
+       #mobile-nav-drawer-body, which only exists at this breakpoint. */
+    #mobile-nav-drawer-body #top-bar {
+        height: auto !important; min-height: 0 !important;
+        flex-direction: column; align-items: stretch;
+        padding: 10px !important; gap: 10px;
+        overflow: visible !important; white-space: normal !important;
+        border: 1px solid #3c4e36;
+    }
+    #mobile-nav-drawer-body #top-bar > div,
+    #mobile-nav-drawer-body #bottom-toggle-bar {
+        display: flex !important;
+        flex-wrap: wrap !important; white-space: normal !important;
+        overflow: visible !important;
+        gap: 6px !important;
+    }
+    #mobile-nav-drawer-body #bottom-toggle-bar { padding: 8px !important; }
+    #mobile-nav-drawer-body #top-bar button,
+    #mobile-nav-drawer-body #bottom-toggle-bar button {
+        flex: 1 1 auto; margin: 0 !important;
+    }
+    #mobile-nav-drawer-body #top-bar input { max-width: 100%; }
+
+    /* Mobile layout fix (2026-09-24): the hamburger is z-index 1100, above
+       the drawer (1095), so while the drawer was open it sat directly on
+       top of the drawer's own "✕ CLOSE" button. The drawer has its own
+       close button (and the backdrop closes it too), so hide the hamburger
+       while it's open. body.mobile-nav-open is set by window.toggleMobileNav. */
+    body.mobile-nav-open #mobile-nav-toggle-btn { display: none !important; }
+
+    /* Mobile layout fix (2026-09-24): the fixed top-right hamburger also
+       overlapped the RETURN TO MAP / CLOSE buttons in the two full-screen
+       overlays' headers. Reserve room for it on the right of each header. */
+    #character-terminal > div:first-child,
+    #battle-map-header {
+        padding-right: 48px !important;
+        flex-wrap: wrap; gap: 8px;
     }
 }
 
