@@ -6,6 +6,81 @@ console.log('%c [SYSTEM] DB.JS LOADED SUCCESSFULLY', 'color: #00e5a3; font-weigh
 const SUPABASE_URL = 'https://uodeeyfaizbjplvvslry.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_7Kj1D_Frh3v0MLNuAyyROQ_rcaTx2F8';
 
+/* --- SHARED BACKEND HELPERS (2026-09-24 bug-hunt pass) ---
+   Small, dependency-free utilities used across the app. Defined here because
+   db.js is the first app script index.html loads, so every other file can
+   rely on them existing. Nothing here touches the database or the UI style.
+   - safeJsonParse / safeLocalGet: localStorage reads that can't throw. A
+     single corrupted localStorage value used to throw during THIS file's
+     top-level setup, which killed the whole app (login never appeared).
+   - escapeHtml: for putting user-typed text into innerHTML safely.
+   - coalesceAsync: wraps an async loader so overlapping calls share one
+     in-flight run plus at most one trailing re-run, instead of N parallel
+     fetches racing to overwrite each other with stale results.
+   - serializeAsync: wraps an async function so calls run one-at-a-time in
+     arrival order (used for the time-advancement tick).
+   - preserveFormState: re-render a container via innerHTML without wiping
+     the user's in-progress dropdown/input choices that match a selector. */
+window.safeJsonParse = function(raw, fallback) {
+    if (raw === null || raw === undefined || raw === '') return fallback;
+    try { const v = JSON.parse(raw); return (v === null || v === undefined) ? fallback : v; } catch (e) { return fallback; }
+};
+window.safeLocalGet = function(key, fallback) {
+    try { const raw = localStorage.getItem(key); return raw === null ? fallback : raw; } catch (e) { return fallback; }
+};
+window.escapeHtml = function(str) {
+    return String(str === null || str === undefined ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+};
+window.coalesceAsync = function(fn) {
+    let running = null, trailing = null;
+    const wrapped = function(...args) {
+        if (!running) {
+            running = Promise.resolve().then(() => fn.apply(this, args)).finally(() => { running = null; });
+            return running;
+        }
+        if (!trailing) {
+            trailing = running.catch(() => {}).then(() => { trailing = null; return wrapped.apply(this, args); });
+        }
+        return trailing;
+    };
+    return wrapped;
+};
+window.serializeAsync = function(fn, label) {
+    let chain = Promise.resolve();
+    return function(...args) {
+        const run = chain.then(() => fn.apply(this, args));
+        chain = run.catch(err => console.error(`${label || 'serializeAsync'}: run failed`, err));
+        return run;
+    };
+};
+window.preserveFormState = function(container, render, selector) {
+    if (!container) { render(); return; }
+    const saved = [];
+    container.querySelectorAll(selector || 'select[id], input[id]').forEach(el => {
+        if (!el.id) return;
+        saved.push({ id: el.id, isCheck: el.type === 'checkbox' || el.type === 'radio', value: el.value, checked: el.checked, isSelect: el.tagName === 'SELECT' });
+    });
+    render();
+    // Two passes: selects whose own onchange rebuilds sibling controls
+    // (squadron weapon pickers) are restored first and their change
+    // handler re-fired, so the dependent controls exist before pass two.
+    const apply = (s) => {
+        const el = document.getElementById(s.id);
+        if (!el || !container.contains(el)) return false;
+        if (s.isCheck) { el.checked = s.checked; return false; }
+        if (s.isSelect) {
+            if (el.value === s.value || !Array.from(el.options).some(o => o.value === s.value)) return false;
+            el.value = s.value; return true;
+        }
+        if (el.value !== s.value) el.value = s.value;
+        return false;
+    };
+    saved.filter(s => s.id.startsWith('sq-wpn-select-')).forEach(s => { if (apply(s)) document.getElementById(s.id).dispatchEvent(new Event('change')); });
+    saved.filter(s => !s.id.startsWith('sq-wpn-select-')).forEach(apply);
+};
+
 let db = null;
 if (window.supabase) {
     db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -70,13 +145,17 @@ window.pmLogsCache = {};
 window.pmPartnerIds = new Set();
 let editingNoteId = null;
 
-let bookmarkedTargets = JSON.parse(localStorage.getItem('odyssey_bookmarks') || '[]');
-let recentTargets = JSON.parse(localStorage.getItem('odyssey_recents') || '[]');
+let bookmarkedTargets = window.safeJsonParse(window.safeLocalGet('odyssey_bookmarks', '[]'), []);
+let recentTargets = window.safeJsonParse(window.safeLocalGet('odyssey_recents', '[]'), []);
 
 // MODULE C: Fog of War DRADIS Scan State
-window.scannedSystems = JSON.parse(localStorage.getItem('odyssey_scanned') || '[]');
+window.scannedSystems = window.safeJsonParse(window.safeLocalGet('odyssey_scanned', '[]'), []);
 
-let activeHudTab = 'telemetry';
+// Bug-hunt pass (2026-09-24): these used to be `let` declarations, but every
+// reader/writer in the app uses window.X -- and a top-level `let` in a classic
+// script does NOT create a window property, so the intended defaults never
+// applied (window.activeCodexCategory started undefined, etc.).
+window.activeHudTab = 'telemetry';
 let globalProceduralSystemsCache = [];
 let globalShipMarkersCache = [];
 let globalDbSystemsCache = [];
@@ -85,20 +164,19 @@ let globalCodexEntriesCache = [];
 let globalHyperlanesCache = [];
 window.globalSystemHazardsCache = [];
 
-let editingCodexId = null;
-let activeCargoSubtab = 'perishables';
-let activeCodexCategory = 'factions';
-let codexSearchFilter = '';
-let hyperlanesVisible = true;
+window.editingCodexId = null;
+let activeCargoSubtab = 'perishables'; // genuinely used bare (js/combat.js), keep as let
+window.activeCodexCategory = 'factions';
+window.codexSearchFilter = '';
 
 window.hoveredTarget = null;
 window.selectedTarget = null;
 
-let measuringTapeActive = false; let measureStartPoint = null; let measureEndPoint = null;
-// NOTE: ping state lives on window (window.pingModeActive / window.activePings), set in map.js
-let jumpPlottingActive = false; let activeJumpShip = null; let jumpTargetPoint = null; let selectedDriveSpeed = 250;
-let territoryToolActive = false; let territoryDrawActive = false; let activeTerritoryVertices = [];
-let hyperlaneDrawActive = false; let activeHyperlaneNodes = [];
+// Map tool state (measuring tape, ping, jump plotter, territory/hyperlane
+// drawing, hyperlanesVisible) lives on window and is initialized at the top
+// of js/map.js. Bug-hunt pass (2026-09-24): removed the unused `let`
+// duplicates that used to sit here -- nothing read them, and they made it
+// look like there were two copies of that state.
 
 const driveSpeeds = {
     sublight: { name: "Sublight Thrusters (0.1c)", speed: 10, label: "0.1c Sublight" },
@@ -947,7 +1025,11 @@ window.FULL_BACKUP_TABLE_GROUPS = [
     ['campaign_objectives', 'perk_definitions', 'augment_definitions', 'gear_definitions', 'hazard_definitions',
      'hyperlanes', 'star_systems', 'system_ownership_overrides', 'territories', 'planetary_modifiers', 'personal_labels',
      'campaign_clock', 'saved_fleets', 'manufacturing_blueprints', 'strike_craft_templates', 'ship_templates',
-     'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes'],
+     'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes',
+     // Bug-hunt pass (2026-09-24): cargo_item_catalog (the DM's cargo item
+     // catalog) was missing from the backup entirely. No other table
+     // references it, so it sits safely in this parent group.
+     'cargo_item_catalog'],
     ['ship_markers', 'system_hazards'],
     ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker'],
     ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
@@ -1020,9 +1102,10 @@ window.previewFullCampaignRestore = function() {
     const allTables = window.FULL_BACKUP_TABLE_GROUPS.flat();
     const rowLines = allTables.map(t => `${t}: ${(parsed.tables[t] || []).length}`).join(' · ');
     const missing = allTables.filter(t => !(t in parsed.tables));
+    const skippedNote = 'will be LEFT AS-IS (not cleared, not restored)';
     previewEl.style.display = 'block';
     previewEl.innerHTML = `<strong style="color:#ffaa00;">Backup captured: ${parsed.timestamp || 'unknown time'}</strong><br><span style="font-size:9px;">${rowLines}</span>`
-        + (missing.length ? `<br><span style="color:#ff6b6b; font-size:9px;">⚠ Not present in this file (will end up EMPTY after restore): ${missing.join(', ')}</span>` : '');
+        + (missing.length ? `<br><span style="color:#ff6b6b; font-size:9px;">⚠ Not present in this file (${skippedNote}): ${missing.join(', ')}</span>` : '');
     confirmSection.style.display = 'block';
 };
 
@@ -1054,6 +1137,12 @@ window.executeFullCampaignRestore = async function() {
     // --- Delete phase: reverse group order (children before parents) ---
     for (let i = groups.length - 1; i >= 0; i--) {
         for (const table of groups[i]) {
+            // Bug-hunt pass (2026-09-24): a table that isn't in the backup
+            // file at all (e.g. one added to the backup list after the
+            // file was made) is now left untouched instead of wiped and
+            // left empty. A table that IS in the file with 0 rows is still
+            // cleared, exactly as before.
+            if (!(table in payload.tables)) { fullBackupLog(`${table}: not in this backup file -- left as-is`); continue; }
             const pk = fullBackupPkColumn(table);
             const { error } = await db.from(table).delete().not(pk, 'is', null);
             if (error) {
@@ -1068,6 +1157,7 @@ window.executeFullCampaignRestore = async function() {
     // --- Insert phase: forward group order (parents before children) ---
     for (const group of groups) {
         for (const table of group) {
+            if (!(table in payload.tables)) continue; // left as-is, see delete phase
             const rows = payload.tables[table] || [];
             if (rows.length === 0) { fullBackupLog(`${table}: nothing to restore (0 rows in backup)`); continue; }
             try {
