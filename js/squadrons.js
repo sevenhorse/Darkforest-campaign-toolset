@@ -125,6 +125,18 @@ const STRIKE_CRAFT_DB = {
 // stored tactical_speed values were deliberately NOT bulk-updated.
 const SQUADRON_TACTICAL_SPEED = 320;
 
+// Bug-hunt pass (2026-09-24): safe lookup into STRIKE_CRAFT_DB. A squadron
+// whose chassis type isn't in the catalog (a DM-designed chassis that was
+// later deleted, or the brief window at login before loadStrikeCraftTemplates
+// finishes) used to crash every screen that listed it -- including the whole
+// Vessel Deck and the Battle Map panel. This returns a harmless placeholder
+// instead (no weapons, so it can't fire), and never mutates the catalog.
+window.getStrikeCraftStats = function(type) {
+    const stats = (typeof STRIKE_CRAFT_DB !== 'undefined') ? STRIKE_CRAFT_DB[type] : null;
+    if (stats) return stats;
+    return { label: `${type || 'Unknown'} (chassis not in catalog)`, base_hp: 0, weapons: [], _missing: true };
+};
+
 // --- Squadron commission / launch / recall / deploy (moved from js/combat.js) ---
 
 /* --- STRIKE CRAFT MAP/INITIATIVE PRESENCE ---
@@ -257,6 +269,7 @@ window.commissionSquadron = async function() {
 
     let hangar = vessel.ship_hangar || [];
     let dbStats = STRIKE_CRAFT_DB[type];
+    if (!dbStats) { alert("Pick a valid chassis type first."); return; } // bug-hunt pass: used to throw on an empty/unknown type
     
     let sqId = 'sq_' + Math.random().toString(36).substr(2, 9);
     hangar.push({
@@ -533,7 +546,7 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     let sq = (vessel.ship_deployed || [])[sqIdx];
     if (!sq) return;
 
-    let dbStats = STRIKE_CRAFT_DB[sq.type];
+    let dbStats = window.getStrikeCraftStats(sq.type);
     let wpn = dbStats.weapons[wpnIdx];
     if (!wpn) return;
 
@@ -564,7 +577,9 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     // squadron has no token on this battle's grid -- nothing to spend AP
     // against, same "can't check what doesn't exist" convention this
     // function already uses for the Weapons-disabled gate right below.
-    if (!opts.auto && sqShipSelf && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(sqShipSelf.id, 1)) return;
+    // (Bug-hunt pass 2026-09-24: the AP spend itself moved further down, to
+    // just after the range check -- it used to happen here, BEFORE the
+    // disabled/range refusals, so a refused shot still cost an AP.)
 
     // System Lockdown build (this session): Weapons-disabled gate, checked
     // on the squadron's own companion token (that's what would have been
@@ -610,6 +625,11 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
         }
     }
 
+    // Initiative + Action Economy: 1 AP from the squadron's own turn slot.
+    // Every refusal gate above has passed, so the shot is actually going to
+    // happen -- only now is the AP spent (see note above).
+    if (!opts.auto && sqShipSelf && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(sqShipSelf.id, 1)) return;
+
     let volleys = sq.count;
     if (volleys <= 0) return;
 
@@ -629,7 +649,7 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     try { if (typeof window.revealVesselIfHidden === 'function' && sqShipSelf) await window.revealVesselIfHidden(sqShipSelf); } catch (err) { console.error('resolveSquadronWeaponFire: reveal-on-fire failed', err); }
 
     const diceRegex = /^(\d*)d(\d+)$/i;
-    const match = wpn.dice.trim().match(diceRegex);
+    const match = (wpn.dice || '').trim().match(diceRegex);
     if (!match) return;
 
     let baseNumDice = parseInt(match[1]) || 1;
@@ -788,8 +808,8 @@ window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId
     let sq = (vessel.ship_deployed || [])[sqIdx];
     if (!sq) return;
 
-    let dbStats = STRIKE_CRAFT_DB[sq.type];
-    let wpn = dbStats && dbStats.weapons[wpnIdx];
+    let dbStats = window.getStrikeCraftStats(sq.type);
+    let wpn = dbStats.weapons[wpnIdx];
     if (!wpn) return;
 
     const sqShipSelf = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
@@ -799,7 +819,9 @@ window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId
     // same fail-open when the squadron has no grid token to spend AP
     // against (the no-selfPos fallback right below already handles that
     // case for the rest of this function).
-    if (!opts.auto && sqShipSelf && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(sqShipSelf.id, 1)) return;
+    // (Bug-hunt pass 2026-09-24: AP spend moved below the refusal gates --
+    // see resolveSquadronWeaponFire. The no-grid fallback just below hands
+    // off to resolveSquadronWeaponFire, which spends its own AP.)
 
     const selfPos = sqShipSelf ? window.getBattleTokenPosition(sqShipSelf.id) : null;
     if (!selfPos) {
@@ -848,6 +870,8 @@ window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId
         alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${launchEffRange}).`);
         return;
     }
+
+    if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(sqShipSelf.id, 1)) return;
 
     let volleys = sq.count;
     if (volleys <= 0) return;
