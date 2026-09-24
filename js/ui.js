@@ -638,6 +638,10 @@ window.toggleMobileNav = function(forceState) {
     const open = (typeof forceState === 'boolean') ? forceState : !drawer.classList.contains('open');
     drawer.classList.toggle('open', open);
     backdrop.classList.toggle('open', open);
+    // Mobile layout fix (2026-09-24): lets style.css hide the hamburger
+    // while the drawer is open (it was sitting on top of the drawer's own
+    // CLOSE button).
+    document.body.classList.toggle('mobile-nav-open', open);
     if (open) {
         // Opening the drawer (by any means -- hamburger tap or otherwise)
         // clears the "new stuff in here" indicator set by flagMobileNavUpdate,
@@ -668,6 +672,12 @@ window.setupMobileNavLayout = function() {
         { el: document.getElementById('top-bar'), anchor: document.getElementById('top-bar-anchor') },
         { el: document.getElementById('bottom-toggle-bar'), anchor: document.getElementById('bottom-toggle-bar-anchor') },
         { el: document.getElementById('hud-overlay'), anchor: document.getElementById('hud-overlay-anchor') },
+        // Mobile layout fix (2026-09-24): the always-visible "Active
+        // Commanders" presence box floated over the bottom of the map AND
+        // over the bottom of every full-screen mobile panel (it covered DM
+        // Tools' deploy button). Same treatment as hud-overlay: live in
+        // the drawer on phones, back in place on desktop.
+        { el: document.getElementById('bottom-right-presence'), anchor: document.getElementById('bottom-right-presence-anchor') },
     ];
     if (!drawerBody || moves.some(m => !m.el || !m.anchor)) return; // markup not present yet/at all -- fail closed, no-op rather than throw
     function apply(isMobile) {
