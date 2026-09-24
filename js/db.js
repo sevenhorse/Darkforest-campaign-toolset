@@ -322,6 +322,9 @@ async function fetchUserProfile(user) {
     if (typeof loadSavedFleets === 'function') loadSavedFleets();
     if (typeof loadManufacturingBlueprints === 'function') loadManufacturingBlueprints();
     if (typeof loadManufacturingOrders === 'function') loadManufacturingOrders();
+    // Player tutorial (2026-09-24): auto-runs once per device for non-DM
+    // players on first login -- see js/tutorial.js.
+    if (typeof window.maybeAutoStartTutorial === 'function') window.maybeAutoStartTutorial();
 }
 
 async function loadAllProfiles() {
