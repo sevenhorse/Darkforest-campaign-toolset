@@ -569,7 +569,13 @@ window.spendTokenAp = function(shipMarkerId, amount) {
     }
     const newTokens = tokens.map(t => t.token_id === tok.token_id ? { ...t, ap_current: apCur - amount } : t);
     encounter.tokens = newTokens;
-    db.from('battle_encounters').update({ tokens: newTokens }).eq('id', encounter.id).catch(err => console.error('spendTokenAp: failed to persist AP spend', err));
+    // Bug-hunt pass (2026-09-24): this used to end in `.catch(...)` -- but a
+    // Supabase query builder has no .catch() (only .then), so it threw a
+    // TypeError right here: the AP spend was never saved and every manual
+    // shot/launch/withdraw aborted the moment initiative had been rolled.
+    // `.then(({ error }) => ...)` is the correct fire-and-forget form.
+    db.from('battle_encounters').update({ tokens: newTokens }).eq('id', encounter.id)
+        .then(({ error }) => { if (error) console.error('spendTokenAp: failed to persist AP spend', error); });
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     return true;
 };
@@ -1755,14 +1761,29 @@ window.processSalvageGatherCompletion = async function(newHours) {
         const ship = globalShipMarkersCache.find(m => m.id === rec.gathering_ship_id);
         if (!ship) continue; // gathering vessel no longer exists — leave the record rather than silently discarding it
 
+        // Bug-hunt pass (2026-09-24): claim the record FIRST by deleting it
+        // and checking we were the one who deleted it. Two clients (or two
+        // overlapping time ticks) processing the same completed gather used
+        // to BOTH deliver the salvage before either deleted the record --
+        // double cargo. Now only the client whose delete actually removed
+        // the row delivers; if delivery then fails, the record is put back
+        // so the next tick retries it instead of the salvage vanishing.
+        const { data: claimed, error: claimErr } = await db.from('battlefield_salvage').delete().eq('id', rec.id).select();
+        if (claimErr || !claimed || claimed.length === 0) continue; // already claimed/delivered elsewhere
+
         let cargo = (typeof window.sanitizeCargo === 'function') ? window.sanitizeCargo(ship.cargo_inventory || {}) : (ship.cargo_inventory || {});
-        let existing = cargo.misc.find(i => i.name.toLowerCase() === rec.resource_name.toLowerCase());
+        let existing = cargo.misc.find(i => (i.name || '').toLowerCase() === (rec.resource_name || '').toLowerCase());
         if (existing) existing.qty += rec.qty;
         else cargo.misc.push({ name: rec.resource_name, qty: rec.qty, unit: rec.unit || 'Tons' });
 
-        await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', ship.id);
+        const { error: deliverErr } = await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', ship.id);
+        if (deliverErr) {
+            console.error('processSalvageGatherCompletion: delivery failed, restoring salvage record for retry', deliverErr);
+            await db.from('battlefield_salvage').insert(rec);
+            if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); // resync the cargo cache we just touched
+            continue;
+        }
         ship.cargo_inventory = cargo;
-        await db.from('battlefield_salvage').delete().eq('id', rec.id);
         await db.from('chat_logs').insert({ sender_id: null, content: `📦 [SALVAGE] ${ship.name} recovered ${rec.qty}x ${rec.resource_name}.`, message_type: 'system' });
         any = true;
     }
@@ -1960,7 +1981,8 @@ window.resolveOrdnanceLaunch = async function(vesselId, idx, targetId, opts) {
     // Initiative + Action Economy build (this session): same 1-AP spend as
     // window.resolveShipWeaponFire (js/combat.js) -- a manual ordnance
     // launch is still a discrete action from this ship's own turn slot.
-    if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(vesselId, 1)) return;
+    // (Bug-hunt pass 2026-09-24: the 1-AP spend moved below every refusal
+    // gate and the cooldown confirm -- a refused launch no longer costs AP.)
 
     // System Lockdown build (this session): same Weapons-disabled gate as
     // js/combat.js's rollShipWeapon (see applySystemLockdown there for the
@@ -2006,17 +2028,20 @@ window.resolveOrdnanceLaunch = async function(vesselId, idx, targetId, opts) {
         return;
     }
 
-    if (wpn.cooldown > 0) {
-        if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick
-        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Launching will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
-        wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
-    }
     if (wpn.ammo === 0) {
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[EMPTY] ${wpn.name} is out of ammunition!`);
         return;
     }
+    let overridingCooldown = false;
+    if (wpn.cooldown > 0) {
+        if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick
+        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Launching will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
+        overridingCooldown = true;
+    }
+    if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(vesselId, 1)) return;
+    if (overridingCooldown) wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
     if (wpn.ammo > 0) wpn.ammo -= 1;
 
     // Weapon Cooldowns build (this session): the launch is now committed --
@@ -2218,57 +2243,96 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         });
         return;
     }
+    // Mobile pass (2026-09-24): token dragging was mouse-only, so on a phone
+    // you could tap a token (the browser fakes a click) but never MOVE your
+    // ship on the Battle Map. The drag logic is now three plain functions
+    // (begin/move/end, taking screen coordinates) driven by BOTH mouse and
+    // touch listeners -- same math, same save, same tap-vs-drag rule (more
+    // than 5 grid units = a drag, otherwise it's a tap that opens the vessel
+    // or auto-targets a hostile). Desktop mouse behavior is unchanged.
     let isDragging = false, moved = false, startX, startY, initialLeft, initialTop;
-    tokenEl.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
+    let lastTouchX = 0, lastTouchY = 0, lastTouchEndAt = 0;
+    function beginDrag(clientX, clientY) {
         isDragging = true; moved = false;
-        startX = e.clientX; startY = e.clientY;
+        startX = clientX; startY = clientY;
         const liveToken = ((window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || []).find(t => t.token_id === tokenId);
         initialLeft = liveToken ? liveToken.x : (parseFloat(tokenEl.style.left) || 0);
         initialTop = liveToken ? liveToken.y : (parseFloat(tokenEl.style.top) || 0);
         // Suspend the CSS position transition (see .battle-token-el in
-        // style.css) for the duration of this drag -- otherwise every
-        // mousemove's style.left/top write would animate TOWARD the new
-        // value instead of tracking the cursor directly, producing a
-        // laggy trailing effect. Restored on drop so a later externally-
-        // driven position change (remote sync, round reset) animates again.
+        // style.css) for the duration of this drag -- otherwise every move
+        // write would animate TOWARD the new value instead of tracking the
+        // pointer directly. Restored on drop.
         tokenEl.style.transition = 'none';
-        // moveEvt.clientX/Y deltas are raw screen pixels; the token div lives
-        // inside #battle-map-grid's CSS transform:scale(), so a screen-pixel
-        // delta corresponds to BATTLE_GRID_SCALE fewer logical grid units --
-        // divide before adding to the token's logical (unscaled) position.
-        const onMove = (moveEvt) => {
-            if (!isDragging) return;
-            const dx = (moveEvt.clientX - startX) / BATTLE_GRID_SCALE, dy = (moveEvt.clientY - startY) / BATTLE_GRID_SCALE;
-            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true;
+    }
+    // Screen-pixel deltas are divided by BATTLE_GRID_SCALE because the token
+    // lives inside #battle-map-grid's CSS transform:scale().
+    function moveDrag(clientX, clientY) {
+        if (!isDragging) return;
+        const dx = (clientX - startX) / BATTLE_GRID_SCALE, dy = (clientY - startY) / BATTLE_GRID_SCALE;
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true;
+        const pos = clampToGrid(initialLeft + dx, initialTop + dy);
+        tokenEl.style.left = pos.x + 'px'; tokenEl.style.top = pos.y + 'px';
+    }
+    function endDrag(clientX, clientY) {
+        if (!isDragging) return;
+        isDragging = false;
+        tokenEl.style.transition = '';
+        if (moved) {
+            const dx = (clientX - startX) / BATTLE_GRID_SCALE, dy = (clientY - startY) / BATTLE_GRID_SCALE;
             const pos = clampToGrid(initialLeft + dx, initialTop + dy);
-            tokenEl.style.left = pos.x + 'px'; tokenEl.style.top = pos.y + 'px';
-        };
-        const onUp = (upEvt) => {
-            isDragging = false;
-            window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp);
-            tokenEl.style.transition = '';
-            if (moved) {
-                const dx = (upEvt.clientX - startX) / BATTLE_GRID_SCALE, dy = (upEvt.clientY - startY) / BATTLE_GRID_SCALE;
-                const pos = clampToGrid(initialLeft + dx, initialTop + dy);
-                const distMoved = Math.hypot(pos.x - initialLeft, pos.y - initialTop);
-                const dragVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
-                const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
-                    if (t.token_id !== tokenId) return t;
-                    const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : (dragVessel?.tactical_speed ?? 160);
-                    return { ...t, x: pos.x, y: pos.y, move_remaining: Math.round((prevRemaining - distMoved) * 10) / 10 };
-                });
-                saveBattleTokens(tokens).then(() => window.renderBattleMapPanel());
-            } else {
-                const clickedVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
-                if (clickedVessel && clickedVessel.iff === 'hostile' && !window.vesselHasOwner(clickedVessel, currentUserId)) {
-                    window.autoTargetAllMyWeapons(shipMarkerId);
-                    return;
-                }
-                if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(shipMarkerId);
+            const distMoved = Math.hypot(pos.x - initialLeft, pos.y - initialTop);
+            const dragVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
+            const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
+                if (t.token_id !== tokenId) return t;
+                const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : (dragVessel?.tactical_speed ?? 160);
+                return { ...t, x: pos.x, y: pos.y, move_remaining: Math.round((prevRemaining - distMoved) * 10) / 10 };
+            });
+            saveBattleTokens(tokens).then(() => window.renderBattleMapPanel());
+        } else {
+            const clickedVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
+            if (clickedVessel && clickedVessel.iff === 'hostile' && !window.vesselHasOwner(clickedVessel, currentUserId)) {
+                window.autoTargetAllMyWeapons(shipMarkerId);
+                return;
             }
+            if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(shipMarkerId);
+        }
+    }
+    tokenEl.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (Date.now() - lastTouchEndAt < 800) return; // browser's synthetic mouse event after a touch -- already handled
+        beginDrag(e.clientX, e.clientY);
+        const onMove = (moveEvt) => moveDrag(moveEvt.clientX, moveEvt.clientY);
+        const onUp = (upEvt) => {
+            window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp);
+            endDrag(upEvt.clientX, upEvt.clientY);
         };
         window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+    });
+    tokenEl.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        e.stopPropagation();
+        const t = e.touches[0];
+        lastTouchX = t.clientX; lastTouchY = t.clientY;
+        beginDrag(t.clientX, t.clientY);
+    }, { passive: true });
+    tokenEl.addEventListener('touchmove', (e) => {
+        if (!isDragging || e.touches.length !== 1) return;
+        e.preventDefault(); // keep the page from scrolling while a token is being dragged
+        const t = e.touches[0];
+        lastTouchX = t.clientX; lastTouchY = t.clientY;
+        moveDrag(t.clientX, t.clientY);
+    }, { passive: false });
+    tokenEl.addEventListener('touchend', (e) => {
+        if (!isDragging) return;
+        lastTouchEndAt = Date.now();
+        e.preventDefault(); // suppress the browser's follow-up synthetic mouse/click events
+        endDrag(lastTouchX, lastTouchY);
+    }, { passive: false });
+    tokenEl.addEventListener('touchcancel', () => {
+        if (!isDragging) return;
+        isDragging = false; moved = false;
+        tokenEl.style.transition = '';
+        tokenEl.style.left = initialLeft + 'px'; tokenEl.style.top = initialTop + 'px'; // snap back, nothing saved
     });
 }
 
@@ -3286,7 +3350,11 @@ window.renderBattleShipCards = function(tokens) {
         return;
     }
 
-    container.innerHTML = activeTokens.map(tok => {
+    // Bug-hunt pass (2026-09-24): wrapped in preserveFormState (js/db.js) --
+    // this re-renders on every realtime ship/battle update during combat,
+    // which used to reset the weapon target dropdowns and volley counts a
+    // player was in the middle of setting.
+    window.preserveFormState(container, () => { container.innerHTML = activeTokens.map(tok => {
         const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
         if (!vessel) {
             return `<div class="battle-ship-card" style="border-color:#ff3333;"><span style="font-size:10px; color:#ff3333;">(vessel record missing — token may need to be withdrawn)</span></div>`;
@@ -3354,5 +3422,5 @@ window.renderBattleShipCards = function(tokens) {
             </div>
             ${typeof window.renderCompactHangarHtml === 'function' ? window.renderCompactHangarHtml(vessel) : ''}
         </div>`;
-    }).join('');
+    }).join(''); }, 'select[id^="bm-wpn-target-"], input[id^="bm-wpn-volley-"]');
 };
