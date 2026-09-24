@@ -450,7 +450,7 @@ window.renderManufacturingPanel = function() {
                 if (colony && colony.owner_id === currentUserId) canCancel = true;
                 sourceLabel = `🏛 ${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}`;
             } else {
-                if (vessel && vessel.owner_id === currentUserId) canCancel = true;
+                if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true; // Bug-hunt pass (2026-09-24): ships moved to multi-owner `owner_ids` long ago; this still read the legacy single `owner_id` column (stale on 2 of 8 ships, blank on the rest), so non-DM owners were silently refused.
                 sourceLabel = `🚀 ${vessel ? vessel.name : 'Vessel'}`;
             }
             html += `
@@ -901,7 +901,8 @@ function findCargoItemAcrossBuckets(cargo, name) {
 window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    if (!(currentUserRole === 'dm' || vessel.owner_id === currentUserId)) return;
+    // Bug-hunt pass (2026-09-24): ships moved to multi-owner `owner_ids` long ago; this still read the legacy single `owner_id` column (stale on 2 of 8 ships, blank on the rest), so non-DM owners were silently refused.
+    if (!(currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId))) { alert("Only this vessel's owners (or the DM) can start a build here."); return; }
 
     const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
     if (!mfgDeck) { alert('This vessel has no Manufacturing-type deck installed -- building requires one.'); return; }
@@ -1401,7 +1402,7 @@ window.cancelManufacturingOrder = async function(orderId) {
         if (colony) { ownerOk = colony.owner_id === currentUserId; sourceName = colony.name; }
     } else if (!ownerOk && order.source_type === 'vessel') {
         const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
-        if (vessel) { ownerOk = vessel.owner_id === currentUserId; sourceName = vessel.name; }
+        if (vessel) { ownerOk = window.vesselHasOwner(vessel, currentUserId); sourceName = vessel.name; } // Bug-hunt pass (2026-09-24): ships moved to multi-owner `owner_ids` long ago; this still read the legacy single `owner_id` column (stale on 2 of 8 ships, blank on the rest), so non-DM owners were silently refused.
     } else if (order.source_type === 'colony') {
         sourceName = ((typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null)?.name || sourceName;
     } else {
@@ -1500,16 +1501,27 @@ window.processManufacturingOrders = async function(newHours) {
             if (order.started_at_hours === null || order.duration_hours === null) continue;
             if (newHours < order.started_at_hours + order.duration_hours) continue;
 
+            // Bug-hunt pass (2026-09-24): claim the order FIRST (delete it and
+            // confirm we were the one who removed it), then deliver. Two
+            // overlapping time ticks -- or two clients -- used to both see
+            // the same finished order and BOTH deliver it before either
+            // deleted it. If delivery then throws, the order row is put back
+            // (catch block below) so it's retried next tick rather than lost.
+            const { data: claimed, error: claimErr } = await db.from('manufacturing_orders').delete().eq('id', order.id).select();
+            if (claimErr || !claimed || claimed.length === 0) continue; // already completed/cancelled elsewhere
+            order._claimed = true;
+
             if (order.output_type === 'arsenal_weapon') {
                 const { data: charRow } = await db.from('characters').select('id, profile_id, name').eq('id', order.character_id).maybeSingle();
-                if (!charRow) { await db.from('manufacturing_orders').delete().eq('id', order.id); continue; } // crafting character no longer exists -- fizzle rather than error
+                if (!charRow) continue; // crafting character no longer exists -- fizzle (order was already removed by the claim above)
                 const p = order.output_payload || {};
-                await db.from('character_arsenal').insert({
+                const { error: arsenalErr } = await db.from('character_arsenal').insert({
                     profile_id: charRow.profile_id, character_id: charRow.id,
                     name: p.name, dice: p.dice || '1d6', modifier: p.modifier || '+0',
                     explodes: p.explodes !== false, damage_type: p.damage_type || null,
                     ammo: p.ammo, max_ammo: p.max_ammo
                 });
+                if (arsenalErr) throw new Error('arsenal delivery failed: ' + arsenalErr.message);
                 await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.name} added to ${charRow.name || 'the crafting character'}'s Arsenal.` });
             } else if (order.output_type === 'colony_infrastructure') {
                 // Infrastructure (2026-09-14): "delivers" to the colony that
@@ -1519,17 +1531,18 @@ window.processManufacturingOrders = async function(newHours) {
                 // level some other way by the time this completes, this is
                 // a no-op on the level itself (still consumes the order).
                 const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
-                if (!colony) { await db.from('manufacturing_orders').delete().eq('id', order.id); continue; } // colony no longer exists -- fizzle rather than error
+                if (!colony) continue; // colony no longer exists -- fizzle (order was already removed by the claim above)
                 const p = order.output_payload || {};
                 const targetLevel = Math.max(1, parseInt(p.infrastructure_level) || 1);
                 const newLevel = Math.max(colony.infrastructure_level || 1, targetLevel);
-                await db.from('colonies').update({ infrastructure_level: newLevel }).eq('id', colony.id);
+                const { error: infraErr } = await db.from('colonies').update({ infrastructure_level: newLevel }).eq('id', colony.id);
+                if (infraErr) throw new Error('infrastructure delivery failed: ' + infraErr.message);
                 colony.infrastructure_level = newLevel;
                 await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${colony.name}'s Infrastructure reached Level ${newLevel}.` });
                 if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
             } else {
                 const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
-                if (!vessel) { await db.from('manufacturing_orders').delete().eq('id', order.id); continue; } // target vessel no longer exists -- fizzle rather than error
+                if (!vessel) continue; // target vessel no longer exists -- fizzle (order was already removed by the claim above)
                 const p = order.output_payload || {};
                 let cargo = window.sanitizeCargo(vessel.cargo_inventory);
                 // Deliver into whichever bucket the blueprint's output picked
@@ -1538,10 +1551,11 @@ window.processManufacturingOrders = async function(newHours) {
                 // at all, so falls back to expendables, its historical
                 // behavior.
                 const bucket = MANUFACTURING_CARGO_BUCKETS.includes(p.cargo_bucket) ? p.cargo_bucket : 'expendables';
-                let existing = (cargo[bucket] || []).find(i => i.name.toLowerCase() === (p.name || '').toLowerCase());
+                let existing = (cargo[bucket] || []).find(i => (i.name || '').toLowerCase() === (p.name || '').toLowerCase());
                 if (existing) existing.qty += (p.qty || 0);
                 else cargo[bucket].push({ name: p.name, qty: p.qty || 0, unit: p.unit || 'Units' });
-                await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+                const { error: cargoErr } = await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+                if (cargoErr) throw new Error('cargo delivery failed: ' + cargoErr.message);
                 vessel.cargo_inventory = cargo;
                 const bucketLabel = bucket === 'perishables' ? 'perishables' : (bucket === 'misc' ? 'misc cargo' : 'expendables');
                 await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.qty || 0}x ${p.name} delivered to ${vessel.name}'s ${bucketLabel} hold.` });
@@ -1549,11 +1563,16 @@ window.processManufacturingOrders = async function(newHours) {
 
             // Completed orders are deleted, not kept -- same convention as
             // battlefield_salvage (the chat log above is the audit trail,
-            // avoiding unbounded table growth).
-            await db.from('manufacturing_orders').delete().eq('id', order.id);
+            // avoiding unbounded table growth). The delete itself now happens
+            // up front as the "claim" (see top of this loop).
             any = true;
         } catch (err) {
             console.error(`processManufacturingOrders: failed for order ${order.id} ("${order.blueprint_name}")`, err);
+            if (order._claimed) {
+                const { _claimed, ...originalRow } = order;
+                const { error: restoreErr } = await db.from('manufacturing_orders').insert(originalRow);
+                if (restoreErr) console.error('processManufacturingOrders: could not restore the order row after a failed delivery', restoreErr, originalRow);
+            }
         }
     }
     if (any) {
