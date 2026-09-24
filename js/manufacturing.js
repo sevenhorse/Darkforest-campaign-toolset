@@ -1071,6 +1071,7 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
         if (!vesselId) { alert('Select a vessel to receive the finished build first (same dropdown used for storage pickups).'); return; }
         vessel = globalShipMarkersCache.find(m => m.id === vesselId);
         if (!vessel) return;
+        if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) { alert("🔒 You don't have access to that delivery vessel."); return; } // 2026-09-24: same rule as Vessel/Cargo Deck
     }
 
     const myProf = allProfiles.find(p => p.id === currentUserId);
