@@ -118,7 +118,13 @@ window.renderColoniesPanel = function() {
         coloniesList.forEach(c => {
             const sel = document.getElementById(`colony-deliver-vessel-${c.id}`);
             if (!sel) return;
-            sel.innerHTML = globalShipMarkersCache.map(m => `<option value="${m.id}">${m.name}</option>`).join('') || '<option value="">No vessels</option>';
+            // Access control (2026-09-24, DM-confirmed): same rule as the
+            // Vessel Deck and Cargo Deck -- window.canAccessVesselDeck. Keeps
+            // the current pick when the list is rebuilt.
+            const prev = sel.value;
+            const allowed = globalShipMarkersCache.filter(m => typeof window.canAccessVesselDeck !== 'function' || window.canAccessVesselDeck(m));
+            sel.innerHTML = allowed.map(m => `<option value="${m.id}">${m.name}</option>`).join('') || '<option value="">No accessible vessels</option>';
+            if (prev && allowed.some(m => m.id === prev)) sel.value = prev;
         });
     }
     const badge = document.getElementById('badge-colonies');
@@ -197,6 +203,7 @@ window.pickupColonyStorageItem = async function(colonyId, bucket, itemName) {
     if (!vesselId) { alert("Select a vessel to receive the shipment first."); return; }
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) { alert("🔒 You don't have access to that vessel."); return; } // same rule as the Vessel/Cargo Deck
 
     let colonyCargo = window.sanitizeColonyCargo(colony.cargo_inventory);
     const idx = (colonyCargo[bucket] || []).findIndex(i => i.name.toLowerCase() === itemName.toLowerCase());
@@ -233,6 +240,7 @@ window.pickupAllColonyStorage = async function(colonyId) {
     if (!vesselId) { alert("Select a vessel to receive the shipment first."); return; }
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) { alert("🔒 You don't have access to that vessel."); return; } // same rule as the Vessel/Cargo Deck
 
     let colonyCargo = window.sanitizeColonyCargo(colony.cargo_inventory);
     let vesselCargo = window.sanitizeCargo(vessel.cargo_inventory);
