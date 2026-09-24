@@ -100,16 +100,46 @@ const TUTORIAL_STEPS = [
         body: 'Your ship\'s full status. <b>Shields, armor and hull</b> are shown in the order they take damage. <b>Tactical stance</b> trades damage for defense. Weapons have a <b>FIRE</b> button with a target and volley size. Decks can be damaged and knock out their weapons. The <b>Hangar Bay</b> tab launches and recalls strike-craft squadrons.'
     },
     {
-        title: 'Colonies and Manufacturing',
+        title: 'Colonies and Fleets',
         target: '#term-tab-btn-colonies',
         before: () => tutorialOpenTerminalTab('colonies'),
-        body: 'Colonies produce resources every day into their own storage. Use <b>PICK UP</b> to load them onto one of your ships. The <b>Manufacturing</b> tab builds items from blueprints. Builds take time on the campaign clock and the result is delivered to the ship you chose.'
+        body: 'Colonies produce resources every day into their own storage. Use <b>PICK UP</b> to load them onto one of your ships. A colony can also run builds from its own Manufacturing box. <b>Fleet task groups</b> (second sub-tab) can be linked to a ship to produce resources for it every day.'
+    },
+    {
+        title: 'Manufacturing',
+        target: '#term-tab-btn-manufacturing',
+        before: () => tutorialOpenTerminalTab('manufacturing'),
+        body: 'The blueprint catalog: what can be built, what it costs and how long it takes. Anyone can <b>+ PROPOSE BLUEPRINT</b>, and the Overseer approves proposals before they can be built. Builds are <i>started</i> elsewhere: from the Manufacturing Bay on the Vessel Deck (the ship needs a Manufacturing-type deck) or from a colony. This tab also lists every build in progress. Some perks shorten builds and reduce their cost.'
+    },
+    {
+        title: 'Ship Designer',
+        target: '#term-tab-btn-shipdesigner',
+        before: () => tutorialOpenTerminalTab('shipdesigner'),
+        body: 'Design reusable vessel profiles here: shields, armor, hull, hardpoint slots and speed. <b>✎ STATS</b> and <b>⚔ LOADOUT</b> edit a profile you created (weapons and internal decks). <b>🚀 DEPLOY</b> places a new ship built from that profile on the map, at the point your camera is centered on.'
+    },
+    {
+        title: 'Perk, Augment and Gear Designers',
+        target: '#term-tab-btn-perkdesigner',
+        before: () => tutorialOpenTerminalTab('perkdesigner'),
+        body: 'These three tabs work the same way. Anyone can <b>propose</b> a new perk, body augmentation or gear item, with the bonuses it grants. It stays a draft until the Overseer approves it. Once approved, you add it to your own character from the <b>Dossier & Stats</b> tab, and its bonuses are counted in your rolls automatically.'
     },
     {
         title: 'Codex and Intel',
         target: '#term-tab-btn-codex',
         before: () => tutorialOpenTerminalTab('codex'),
-        body: 'The <b>Cloud Codex</b> holds lore on factions, places and history. Some entries unlock only after you scan the right system. <b>Intel & Ops</b> is your notebook, and each note can be private or shared with the crew. <b>RETURN TO MAP</b> closes this terminal.'
+        body: 'The <b>Cloud Codex</b> holds lore on factions, places and history. Some entries unlock only after you scan the right system. <b>⛶ FULLSCREEN</b> opens an entry for easier reading.'
+    },
+    {
+        title: 'Intel & Ops',
+        target: '#term-tab-btn-notes',
+        before: () => tutorialOpenTerminalTab('notes'),
+        body: '<b>Campaign Objectives</b> is the crew\'s shared to-do list, which anyone can add to or mark complete. <b>Intel Notes</b> is your notebook: each note is either <b>Private Only</b> or <b>Shared with All Players</b>.'
+    },
+    {
+        title: 'Crew Roster',
+        target: '#term-tab-btn-roster',
+        before: () => tutorialOpenTerminalTab('roster'),
+        body: 'Everyone in the task force at a glance: injuries, stress and shields. <b>RETURN TO MAP</b> at the top closes this terminal whenever you\'re done.'
     },
     {
         title: 'Comms',
@@ -272,6 +302,14 @@ function tutorialGo(i) {
         window.toggleMobileNav(inDrawer);
         if (inDrawer) { tutorialState.opened.add('drawer'); try { el.scrollIntoView({ block: 'center' }); } catch (e) {} }
     }
+
+    // Bring the target into view if it's scrolled out of sight (e.g. the
+    // terminal's tab row scrolls sideways on phones). The galaxy canvas is
+    // skipped -- it's full-screen and must never be scrolled.
+    try {
+        const t = typeof step.target === 'function' ? step.target() : (step.target ? document.querySelector(step.target) : null);
+        if (t && t.id !== 'canvas-container') t.scrollIntoView({ block: 'nearest', inline: 'center' });
+    } catch (e) {}
 
     const { card } = tutorialEnsureEls();
     card.querySelector('#tutorial-card-count').textContent = `STEP ${i + 1} / ${TUTORIAL_STEPS.length}`;
