@@ -1162,3 +1162,42 @@ div[style*="grid-template-columns"] > div,
         max-height: 40vh !important; 
     }
 }
+
+/* --- PLAYER TUTORIAL (2026-09-24, js/tutorial.js) ---
+   Spotlight tour. #tutorial-blocker swallows clicks for the whole tour;
+   #tutorial-spotlight outlines the real element and darkens everything else
+   with a huge box-shadow; #tutorial-card reuses the .panel look. z-index
+   12000 sits above every other layer in the app (drawer 1095, modals 5000,
+   expand-textarea 10500). */
+#tutorial-blocker {
+    display: none; position: fixed; inset: 0; z-index: 11990;
+    background: transparent;
+}
+#tutorial-blocker.tutorial-dim { background: rgba(3, 4, 3, 0.78); }
+#tutorial-spotlight {
+    display: none; position: fixed; z-index: 11995; pointer-events: none;
+    border: 2px solid #00e5a3; border-radius: 3px;
+    box-shadow: 0 0 0 9999px rgba(3, 4, 3, 0.78), 0 0 14px rgba(0, 229, 163, 0.6);
+    transition: left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+#tutorial-card {
+    display: none; position: fixed !important; z-index: 12000;
+    width: 340px; max-width: calc(100vw - 20px); max-height: calc(100vh - 20px); overflow-y: auto;
+    border-color: #00e5a3 !important; box-shadow: 0 0 18px rgba(0, 229, 163, 0.25);
+}
+#tutorial-card.tutorial-card-center {
+    left: 50% !important; top: 50% !important; right: auto !important; bottom: auto !important;
+    transform: translate(-50%, -50%);
+}
+#tutorial-card-count { font-size: 9px; color: #6b826a; letter-spacing: 1px; margin-bottom: 4px; }
+#tutorial-card-title { margin: 0 0 8px 0; color: #00e5a3; font-size: 13px; }
+#tutorial-card-body { font-size: 11px; color: #d4c5a9; line-height: 1.55; }
+#tutorial-card-body b { color: #00e5a3; }
+#tutorial-card-actions { display: flex; gap: 6px; margin-top: 12px; }
+#tutorial-card-actions button { margin: 0; padding: 6px 8px; font-size: 10px; flex: 1; }
+#tutorial-skip-btn { color: #6b826a; border-color: #3c4e36; }
+#tutorial-back-btn:disabled { opacity: 0.4; cursor: default; }
+@media screen and (max-width: 768px) {
+    #tutorial-card { width: auto; max-height: 55vh; }
+    #tutorial-card.tutorial-card-center { width: calc(100vw - 20px); }
+}
