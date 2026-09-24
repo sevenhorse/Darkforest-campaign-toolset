@@ -860,6 +860,15 @@ div[style*="grid-template-columns"] > div,
         margin-bottom: 0 !important;
         white-space: nowrap !important;
     }
+    /* Bug fix (2026-09-24, caught by the tutorial's phone screenshots): the
+       !important above also un-hid the DM-only terminal tabs (Secret
+       Repository, Strike Craft designer), which ship with an inline
+       display:none that js/db.js flips to display:flex for the DM only.
+       Keep any tab whose inline style still says display:none hidden. */
+    .term-tab-btn-vert[style*="display:none"],
+    .term-tab-btn-vert[style*="display: none"] {
+        display: none !important;
+    }
 
     .term-sidebar button[onclick="window.toggleSidebar()"] {
         display: none !important;
