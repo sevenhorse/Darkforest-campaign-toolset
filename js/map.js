@@ -1875,7 +1875,14 @@ window.initGalaxyEngine = function() {
         };
     }
 
-    container.addEventListener('mousedown', (e) => { handlePointerDown(e.clientX, e.clientY, e.target, e.shiftKey); });
+    // Mobile pan fix (2026-09-24): browsers fire synthetic "compatibility"
+    // mouse events ~300ms after a touch ends. The touch handlers below now
+    // run the select/tap logic themselves on touchend, so a trailing
+    // synthetic mousedown would run handlePointerDown a SECOND time
+    // (double-placing a measuring-tape point, double ping, etc.). Ignore any
+    // mousedown that lands shortly after a real touch.
+    window._lastTouchTime = 0;
+    container.addEventListener('mousedown', (e) => { if (Date.now() - window._lastTouchTime < 800) return; handlePointerDown(e.clientX, e.clientY, e.target, e.shiftKey); });
     window.addEventListener('mousemove', (e) => { handlePointerMove(e.clientX, e.clientY); });
     window.addEventListener('mouseup', () => { handlePointerUp(); });
 
@@ -1887,18 +1894,52 @@ window.initGalaxyEngine = function() {
         applyZoomAtPoint(mouseX, mouseY, zoomFactor);
     }, { passive: false });
 
-    // --- Touch: single finger = pan/select/drag (mirrors mouse exactly via
-    // the shared handlers above); two fingers = pinch-zoom (no mouse
-    // equivalent, zooms around the midpoint between the two fingers). ---
+    // --- Touch input -- REVISED (2026-09-24, mobile tester report: "the
+    // moment you touch a star you are basically forced to bunny hop around
+    // by clicking the next furthest star"). Root cause: touchstart called
+    // handlePointerDown immediately, and handlePointerDown RETURNS as soon
+    // as it hits a star/ship/body (select) BEFORE it ever sets
+    // camera.isDragging -- so any finger landing within a star's hit radius
+    // (almost everywhere, in a dense galaxy, with a finger-sized touch)
+    // could never pan. Touching your own ship was worse: it grabbed the
+    // ship and dragged it instead of the camera.
+    // New model (touch only; mouse is untouched):
+    //   * one finger down  -> always starts a camera pan
+    //   * lifted without moving > TOUCH_TAP_SLOP px -> a TAP: runs the exact
+    //     same handlePointerDown select/tool logic a mouse click would, at
+    //     the original touch point (so measure/ping/territory/hyperlane/jump
+    //     modes all still work, now as taps)
+    //   * held still for TOUCH_LONG_PRESS_MS -> LONG PRESS: runs
+    //     handlePointerDown then too, which is how you pick up a draggable
+    //     token (your own ship / a DM custom star) and then drag it; a
+    //     short vibration confirms the pickup where supported
+    //   * two fingers -> pinch-zoom (unchanged), and cancels any tap
+    const TOUCH_TAP_SLOP = 10; const TOUCH_LONG_PRESS_MS = 450;
+    let touchGesture = null; // { x, y, target, moved, longPressed, timer }
+    function clearTouchGesture() { if (touchGesture && touchGesture.timer) clearTimeout(touchGesture.timer); touchGesture = null; }
+
     container.addEventListener('touchstart', (e) => {
         if (e.target && e.target.closest && e.target.closest('.panel')) return;
+        window._lastTouchTime = Date.now();
         if (e.touches.length === 1) {
             const t = e.touches[0];
-            handlePointerDown(t.clientX, t.clientY, t.target, false);
+            clearTouchGesture();
+            window.draggedMarker = null; window.draggedStar = null;
+            window.camera.isDragging = true; window.camera.startX = t.clientX; window.camera.startY = t.clientY;
+            const g = { x: t.clientX, y: t.clientY, target: t.target, moved: false, longPressed: false, timer: null };
+            g.timer = setTimeout(() => {
+                if (touchGesture !== g || g.moved) return;
+                g.longPressed = true;
+                window.camera.isDragging = false;
+                handlePointerDown(g.x, g.y, g.target, false);
+                if ((window.draggedMarker || window.draggedStar) && navigator.vibrate) { try { navigator.vibrate(30); } catch (_) {} }
+            }, TOUCH_LONG_PRESS_MS);
+            touchGesture = g;
         } else if (e.touches.length >= 2) {
             // A second finger landing mid-drag cancels any single-finger
-            // drag/select in favor of starting a pinch, so a ship/star
-            // isn't left "stuck" to the cursor after the gesture changes.
+            // pan/tap/drag in favor of starting a pinch, so a ship/star
+            // isn't left "stuck" to the finger after the gesture changes.
+            if (touchGesture) { touchGesture.moved = true; if (touchGesture.timer) clearTimeout(touchGesture.timer); }
             window.camera.isDragging = false; window.draggedMarker = null; window.draggedStar = null;
             window._pinchStartDist = touchDist(e.touches);
             window._pinchStartZoom = window.camera.zoom;
@@ -1910,8 +1951,16 @@ window.initGalaxyEngine = function() {
             // dropped from two fingers to one -- don't resume a pan using a
             // stale startX/startY from before the pinch.
             window._pinchStartDist = null;
+            window.camera.isDragging = true;
             window.camera.startX = e.touches[0].clientX; window.camera.startY = e.touches[0].clientY;
             return;
+        }
+        if (e.touches.length === 1 && touchGesture && !touchGesture.moved) {
+            const t = e.touches[0];
+            if (Math.hypot(t.clientX - touchGesture.x, t.clientY - touchGesture.y) > TOUCH_TAP_SLOP) {
+                touchGesture.moved = true;
+                if (touchGesture.timer) clearTimeout(touchGesture.timer);
+            }
         }
         if (e.touches.length === 1 && (window.camera.isDragging || window.draggedMarker || window.draggedStar)) {
             e.preventDefault();
@@ -1928,10 +1977,29 @@ window.initGalaxyEngine = function() {
     }, { passive: false });
 
     container.addEventListener('touchend', (e) => {
-        if (e.touches.length === 0) { handlePointerUp(); window._pinchStartDist = null; }
-        else if (e.touches.length === 1) { window._pinchStartDist = null; window.camera.startX = e.touches[0].clientX; window.camera.startY = e.touches[0].clientY; }
+        window._lastTouchTime = Date.now();
+        if (e.touches.length === 0) {
+            const g = touchGesture; clearTouchGesture();
+            window._pinchStartDist = null;
+            if (g && !g.moved && !g.longPressed) {
+                // TAP: same select/tool logic as a mouse click, at the
+                // original touch point. handlePointerDown may arm a drag
+                // (own ship / DM custom star) or a camera pan on empty
+                // space -- a tap never moved, so disarm both without the
+                // pointless DB position write handlePointerUp would do.
+                window.camera.isDragging = false;
+                handlePointerDown(g.x, g.y, g.target, false);
+                window.draggedMarker = null; window.draggedStar = null; window.camera.isDragging = false;
+            } else {
+                handlePointerUp();
+            }
+        } else if (e.touches.length === 1) {
+            window._pinchStartDist = null;
+            window.camera.isDragging = true;
+            window.camera.startX = e.touches[0].clientX; window.camera.startY = e.touches[0].clientY;
+        }
     });
-    container.addEventListener('touchcancel', () => { handlePointerUp(); window._pinchStartDist = null; });
+    container.addEventListener('touchcancel', () => { clearTouchGesture(); handlePointerUp(); window._pinchStartDist = null; });
 
     // HUD TELEMETRY RENDERER
     window.renderHUDTelemetry = function() {
