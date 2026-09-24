@@ -144,14 +144,35 @@ window.sanitizeCargo = function(inv) {
     return inv;
 };
 
+// Cargo Deck Access Control (2026-09-24, DM-confirmed: "Cargo Deck should
+// follow the same rules as the vessel deck"). The list used to include EVERY
+// ship_markers row, so any player could view and edit any vessel's cargo --
+// NPCs, hidden vessels, other factions. It now uses the exact Vessel Deck
+// rule, window.canAccessVesselDeck (DM sees everything; a player sees their
+// own ships, IFF-friendly ships and other players' ships, never hidden ones).
+// Every cargo mutation below re-checks it too (canEditCargo), since a stale
+// dropdown or a hand-typed onclick could otherwise bypass the list filter.
+// Also now keeps the currently selected vessel when the list is rebuilt
+// (it used to snap back to the first vessel every time).
+function canEditCargo(vessel) {
+    if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) {
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert("🔒 You don't have access to this vessel's cargo.");
+        return false;
+    }
+    return true;
+}
 window.populateCargoVesselSelect = function() {
     const select = document.getElementById('cargo-vessel-select');
     if (!select) return;
+    const prev = select.value;
     let html = '';
     globalShipMarkersCache.forEach(m => {
+        if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(m)) return;
         html += `<option value="${m.id}">${m.name} (X: ${Math.round(m.x)}, Y: ${Math.round(m.y)})</option>`;
     });
-    select.innerHTML = html || '<option value="">No active vessels found</option>';
+    select.innerHTML = html || '<option value="">No accessible vessels found</option>';
+    if (prev && Array.from(select.options).some(o => o.value === prev)) select.value = prev;
 };
 
 window.switchCargoSubtab = function(subtab) {
@@ -172,6 +193,10 @@ window.renderTerminalCargoDeck = function() {
 
     if (!vessel) {
         container.innerHTML = '<span style="font-size:11px; color:#6b826a;">Select a valid vessel token above.</span>';
+        return;
+    }
+    if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) {
+        container.innerHTML = '<span style="font-size:10px; color:#ff3333;">🔒 DM ONLY — this vessel\'s cargo is not accessible to you.</span>';
         return;
     }
 
@@ -250,6 +275,7 @@ window.renderTerminalCargoDeck = function() {
 window.executeSynthesis = async function(vesselId) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
     
     let cat = document.getElementById(`synth-cat-${vesselId}`).value;
     let name = document.getElementById(`synth-name-${vesselId}`).value.trim();
@@ -298,6 +324,7 @@ window.executeSynthesis = async function(vesselId) {
 window.modifySynthCapacity = async function(vesselId, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     cargo.synth_capacity = Math.max(0, Math.min(10, cargo.synth_capacity + delta));
     await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vesselId);
@@ -308,6 +335,7 @@ window.modifySynthCapacity = async function(vesselId, delta) {
 window.modifyCargoQty = async function(vesselId, itemIndex, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     if (cargo[activeCargoSubtab] && cargo[activeCargoSubtab][itemIndex]) {
         cargo[activeCargoSubtab][itemIndex].qty = Math.max(0, cargo[activeCargoSubtab][itemIndex].qty + delta);
@@ -320,6 +348,7 @@ window.modifyCargoQty = async function(vesselId, itemIndex, delta) {
 window.updateCargoQtyDirect = async function(vesselId, itemIndex, newQty) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     let val = Math.max(0, parseInt(newQty) || 0);
     if (cargo[activeCargoSubtab] && cargo[activeCargoSubtab][itemIndex]) {
@@ -333,6 +362,7 @@ window.updateCargoQtyDirect = async function(vesselId, itemIndex, newQty) {
 window.removeCargoItem = async function(vesselId, itemIndex) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
     if (!(await window.showConfirmModal("Decommission this cargo item from vessel hold?"))) return;
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     if (cargo[activeCargoSubtab]) {
@@ -349,6 +379,7 @@ window.removeCargoItem = async function(vesselId, itemIndex) {
 window.moveCargoItem = async function(vesselId, index, direction) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     const arr = cargo[activeCargoSubtab];
     if (!arr) return;
@@ -372,6 +403,7 @@ window.addNewCargoEntry = async function() {
 
     let vessel = globalShipMarkersCache.find(m => m.id === select.value);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
 
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
     if (!cargo[category]) cargo[category] = [];
@@ -395,6 +427,7 @@ window.broadcastTerminalCargoManifest = async function() {
     if (!select || !select.value) return;
     let vessel = globalShipMarkersCache.find(m => m.id === select.value);
     if (!vessel) return;
+    if (!canEditCargo(vessel)) return;
 
     await db.from('chat_logs').insert({
         sender_id: currentUserId,
@@ -990,7 +1023,13 @@ window.renderVesselDeck = function() {
         // window.renderShipWeaponsHtml above renderVesselDeck. Vessel Deck
         // keeps its plain (unprefixed) element ids and the manage buttons,
         // unchanged from before this session.
-        weaponsContainer.innerHTML = window.renderShipWeaponsHtml(vessel, { idPrefix: '', showManageButtons: true });
+        // Bug-hunt pass (2026-09-24): this re-renders on every realtime
+        // ship update (any player firing, moving, etc.), which used to reset
+        // the target dropdown and volley count you were in the middle of
+        // choosing. preserveFormState (js/db.js) restores those picks.
+        window.preserveFormState(weaponsContainer, () => {
+            weaponsContainer.innerHTML = window.renderShipWeaponsHtml(vessel, { idPrefix: '', showManageButtons: true });
+        }, 'select[id^="wpn-target-"], input[id^="wpn-volley-"]');
     }
 
     const embarkedContainer = document.getElementById('vessel-embarked-container');
@@ -1002,7 +1041,7 @@ window.renderVesselDeck = function() {
         if (hangar.length === 0) eHtml = '<span style="font-size:10px; color:#6b826a;">No squadrons currently embarked.</span>';
         else {
             hangar.forEach((sq, idx) => {
-                let dbStats = STRIKE_CRAFT_DB[sq.type];
+                let dbStats = window.getStrikeCraftStats(sq.type); // bug-hunt pass: was a raw STRIKE_CRAFT_DB lookup -- a deleted chassis crashed the whole Vessel Deck
                 eHtml += `
                 <div class="note-card" style="padding:6px; margin-bottom:4px; background:#030403; border-color:#00e1ff; display:flex; justify-content:space-between; align-items:center;">
                     <div>
@@ -1033,7 +1072,7 @@ window.renderVesselDeck = function() {
         if (deployed.length === 0) dHtml = '<span style="font-size:10px; color:#6b826a;">No active flights in sector.</span>';
         else {
             deployed.forEach((sq, idx) => {
-                let dbStats = STRIKE_CRAFT_DB[sq.type];
+                let dbStats = window.getStrikeCraftStats(sq.type); // bug-hunt pass: see hangar loop above
                 let wpnOptions = '';
                 dbStats.weapons.forEach((w, wIdx) => { wpnOptions += `<option value="${wIdx}">${w.weapon_class === 'ordnance' ? '☠ ' : ''}${w.name} (${w.dice})${w.range ? ` [📏${w.range}]` : ''}${w.cooldown_period ? ` [⏱${w.cooldown_period}]` : ''}</option>`; });
 
@@ -1143,7 +1182,7 @@ window.renderVesselDeck = function() {
                 </div>`;
             });
         }
-        deployedContainer.innerHTML = dHtml;
+        window.preserveFormState(deployedContainer, () => { deployedContainer.innerHTML = dHtml; }, 'select[id^="sq-wpn-select-"], select[id^="sq-target-"]'); // bug-hunt pass: keep squadron weapon/target picks across realtime re-renders
     }
 
     // Keep the Battle Map's full-screen ship-status cards in sync with
@@ -1182,7 +1221,7 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
         if (actualDelta > 0) {
             let cargo = vessel.cargo_inventory || window.sanitizeCargo({});
             let expendables = cargo.expendables || [];
-            let platesIdx = expendables.findIndex(i => i.name.toLowerCase().includes('hull plate'));
+            let platesIdx = expendables.findIndex(i => (i.name || '').toLowerCase().includes('hull plate'));
             let cost = Math.ceil(actualDelta / 10);
 
             if (platesIdx >= 0 && expendables[platesIdx].qty >= cost) {
@@ -1600,7 +1639,17 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     // window.spendTokenAp itself fails open (returns true) whenever no
     // initiative has been rolled for the active battle, so this is a no-op
     // until a DM actually starts using the turn-order system.
-    if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(vesselId, 1)) return;
+    // Bug-hunt pass (2026-09-24): the AP spend used to happen right here,
+    // BEFORE every refusal gate below -- so a shot refused for being
+    // disabled/empty/over the mount limit, or cancelled at the cooldown
+    // confirm, still cost the AP. It now happens after all of them (see
+    // "AP spend" below). Dice format is also validated up front now: a bad
+    // dice string (e.g. "-") used to burn ammo and set cooldown in memory
+    // before failing, and popped a blocking alert() mid-Advance-Round when
+    // an AI-controlled ship tried to fire it.
+    const diceRegex = /^(\d*)d(\d+)$/i;
+    const match = (wpn.dice || '').trim().match(diceRegex);
+    if (!match) { if (!opts.auto) alert(`Invalid dice format on ${wpn.name} ("${wpn.dice || ''}") -- edit the weapon to fix it.`); return; }
 
     // System Lockdown build (this session): Weapons-disabled gate, same
     // style/placement as the deck-destroyed check right below. Checked on
@@ -1639,30 +1688,34 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
         }
     }
 
-    if (wpn.cooldown > 0) {
-        if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick, same rule squadron AI-stance fire already follows
-        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
-        wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
-    }
-
     if (wpn.ammo === 0) {
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[EMPTY] ${wpn.name} is out of ammunition!`);
         return;
     }
-
-    if (wpn.ammo > 0) {
-        if (wpn.ammo < volleys) {
-            if (opts.auto) { volleys = wpn.ammo; }
-            else {
-                if (window.AudioEngine) window.AudioEngine.playError();
-                alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
-                return;
-            }
+    if (wpn.ammo > 0 && wpn.ammo < volleys) {
+        if (opts.auto) { volleys = wpn.ammo; }
+        else {
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`[INSUFFICIENT AMMO] ${wpn.name} only has ${wpn.ammo} uses left!`);
+            return;
         }
-        wpn.ammo -= volleys;
     }
+
+    let overridingCooldown = false;
+    if (wpn.cooldown > 0) {
+        if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick, same rule squadron AI-stance fire already follows
+        if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
+        overridingCooldown = true;
+    }
+
+    // AP spend (Initiative + Action Economy): every refusal gate has passed
+    // and the player has confirmed any override, so the shot is happening.
+    if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(vesselId, 1)) return;
+
+    if (overridingCooldown) wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
+    if (wpn.ammo > 0) wpn.ammo -= volleys;
 
     // Weapon Cooldowns build (this session): the shot is now committed
     // (every refusal gate above this point has already passed), so start
@@ -1688,10 +1741,6 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     // right place to reveal. Best-effort: a failure here should never lose
     // an already-committed shot.
     try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(vessel); } catch (err) { console.error('rollShipWeapon: reveal-on-fire failed', err); }
-
-    const diceRegex = /^(\d*)d(\d+)$/i;
-    const match = wpn.dice.trim().match(diceRegex);
-    if (!match) { alert("Invalid dice format."); return; }
 
     let baseNumDice = parseInt(match[1]) || 1;
     let numDice = baseNumDice * volleys;
@@ -2359,8 +2408,8 @@ window.applyManualDamage = async function() {
     // this feature's own header comment) -- spends 1 AP from the firer's
     // turn slot exactly like a normal FIRE, same fail-open-if-no-initiative
     // behavior as every other spendTokenAp call site.
-    if (typeof window.spendTokenAp === 'function' && !window.spendTokenAp(firerId, 1)) return;
-
+    // (Bug-hunt pass 2026-09-24: the 1-AP spend moved below the refusal
+    // gates and cooldown confirm, same fix as resolveShipWeaponFire.)
     const wpnIdx = wpnIdxRaw !== '' ? parseInt(wpnIdxRaw) : null;
     let wpn = (wpnIdx !== null) ? (vessel.ship_weapons || [])[wpnIdx] : null;
 
@@ -2385,13 +2434,18 @@ window.applyManualDamage = async function() {
             alert(`[EMPTY] ${wpn.name} is out of ammunition!`);
             return;
         }
+        let overridingCooldown = false;
         if (wpn.cooldown > 0) {
             if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Applying this shot will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
-            wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
+            overridingCooldown = true;
         }
+        if (typeof window.spendTokenAp === 'function' && !window.spendTokenAp(firerId, 1)) return;
+        if (overridingCooldown) wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
         if (wpn.ammo > 0) wpn.ammo -= 1;
         if (wpn.cooldown_period > 0) wpn.cooldown = wpn.cooldown_period;
         if (wpn.self_damage_on_consecutive_fire) wpn.fired_this_round = true;
+    } else if (typeof window.spendTokenAp === 'function' && !window.spendTokenAp(firerId, 1)) {
+        return; // unlisted weapon: no weapon gates, spend the AP here
     }
 
     try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(vessel); } catch (err) { console.error('applyManualDamage: reveal-on-fire failed', err); }
@@ -3053,7 +3107,13 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
     // Dexterity die exploding on 6+ instead of only on an 8) by passing a
     // smaller explodeThreshold; a threshold above faces (nonsensical) is
     // clamped back down to faces rather than trusted blindly.
-    const threshold = (explodeThreshold != null && explodeThreshold < faces) ? explodeThreshold : faces;
+    let threshold = (explodeThreshold != null && explodeThreshold < faces) ? explodeThreshold : faces;
+    // Bug-hunt pass (2026-09-24): an augment explode_threshold of 1 or less
+    // (or a non-number) meant EVERY roll exploded forever -- an infinite
+    // loop that froze the browser tab. Clamp to 2+ (the lowest value that
+    // still ends). No current augment in the database uses <= 1.
+    threshold = Number(threshold);
+    if (!(threshold >= 2)) threshold = Math.max(2, faces);
     let roll, subRolls = [], rollTotal = 0;
     do {
         roll = Math.floor(Math.random() * faces) + 1;
