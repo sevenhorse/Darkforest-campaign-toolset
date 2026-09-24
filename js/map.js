@@ -233,7 +233,7 @@ window.getFowTier = function(system) {
    it permanently discovered for this browser. Same localStorage-per-
    browser pattern as window.scannedSystems — not DB-synced, so each player
    (and the DM) tracks their own discovered nodes independently. */
-window.discoveredHyperlaneNodes = new Set(JSON.parse(localStorage.getItem('odyssey_discovered_hyperlane_nodes') || '[]'));
+window.discoveredHyperlaneNodes = new Set(window.safeJsonParse(window.safeLocalGet('odyssey_discovered_hyperlane_nodes', '[]'), []));
 // Every node created from this session onward carries its own stable id
 // (see genHyperlaneNodeId / the hyperlane click handler further down), so
 // node.id is normally all this needs. Older routes drawn before this
@@ -350,23 +350,25 @@ window.checkShipHazards = function(shipMarker) {
     if (!shipMarker) return [];
     let hits = [];
 
+    // Bug-hunt pass (2026-09-24, performance): the cheap distance test now
+    // runs BEFORE the sensor-visibility test (which loops every ship). Same
+    // result, far less work -- this runs per ship per frame on the map,
+    // which mattered most on phones.
     (window.globalSystemHazardsCache || []).forEach(hz => {
-        if (!window.isPositionSensorVisible(hz.x, hz.y)) return;
         const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
         let dist = Math.hypot(shipMarker.x - hz.x, shipMarker.y - hz.y);
-        if (dist <= r) {
-            hits.push({ type: hz.hazard_type, intensity: hz.intensity || 1, radius: r, source: 'zone', distance: dist });
-        }
+        if (dist > r) return;
+        if (!window.isPositionSensorVisible(hz.x, hz.y)) return;
+        hits.push({ type: hz.hazard_type, intensity: hz.intensity || 1, radius: r, source: 'zone', distance: dist });
     });
 
     const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
     allSystems.forEach(s => {
         if (!s.hazard || s.hazard === 'None') return;
-        if (!window.isPositionSensorVisible(s.x, s.y)) return;
         let dist = Math.hypot(shipMarker.x - s.x, shipMarker.y - s.y);
-        if (dist <= window.HAZARD_IMPLICIT_RADIUS) {
-            hits.push({ type: s.hazard.toLowerCase().replace(/\s+/g, '_'), intensity: 1, radius: window.HAZARD_IMPLICIT_RADIUS, source: 'system', systemName: s.name, distance: dist });
-        }
+        if (dist > window.HAZARD_IMPLICIT_RADIUS) return;
+        if (!window.isPositionSensorVisible(s.x, s.y)) return;
+        hits.push({ type: s.hazard.toLowerCase().replace(/\s+/g, '_'), intensity: 1, radius: window.HAZARD_IMPLICIT_RADIUS, source: 'system', systemName: s.name, distance: dist });
     });
 
     return hits;
@@ -381,7 +383,13 @@ window.wipeGalaxySlate = async function() {
     window.selectedTarget = null; if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 
-window.loadGalaxyData = async function() {
+// Bug-hunt pass (2026-09-24): loadGalaxyData is called from many places at
+// once (every ship_markers realtime event, every save), and overlapping runs
+// could finish out of order -- an older fetch landing last would overwrite
+// newer data. It's now coalesced (see window.coalesceAsync, js/db.js): at
+// most one fetch in flight plus one trailing refresh. Callers that `await`
+// it still get data at least as fresh as their own change.
+window.loadGalaxyData = window.coalesceAsync(async function() {
     const { data: starData } = await db.from('star_systems').select('*');
     if (starData) globalDbSystemsCache = starData.map(s => ({ ...s, isCustom: true, size: s.size || 5.0, type: s.luminosity === 'Black Hole' ? 'Black Hole' : (s.hazard === 'Nebula' ? 'Nebula' : 'Star'), multiType: s.multiType || 'Single', custom_bodies: s.custom_bodies || [] }));
     const { data: markerData } = await db.from('ship_markers').select('*');
@@ -392,7 +400,23 @@ window.loadGalaxyData = async function() {
     // of at every individual save/delete call site) keeps it in sync for
     // free, including the very first population at login.
     if (typeof window.renderDmCustomStarsList === 'function') window.renderDmCustomStarsList();
-};
+    // Bug-hunt pass (2026-09-24): the caches above are rebuilt as brand-new
+    // objects, so a selected ship/custom star (and an active jump plot)
+    // kept pointing at the OLD object -- the HUD showed stale position/
+    // stats until you re-clicked it. Re-point them at the fresh copies.
+    const freshOf = (t) => {
+        if (!t || !t.data || t.data.id === undefined) return null;
+        if (t.type === 'ship') return globalShipMarkersCache.find(m => m.id === t.data.id) || null;
+        if (t.type === 'star' && t.data.isCustom) return globalDbSystemsCache.find(x => x.id === t.data.id) || null;
+        return null;
+    };
+    const freshSel = freshOf(window.selectedTarget);
+    if (freshSel && !window.draggedMarker && !window.draggedStar) window.selectedTarget = { type: window.selectedTarget.type, data: freshSel };
+    if (window.activeJumpShip) {
+        const freshJump = globalShipMarkersCache.find(m => m.id === window.activeJumpShip.id);
+        if (freshJump) window.activeJumpShip = freshJump;
+    }
+});
 
 /* --- CUSTOM STAR TRACKER (DM Operations > SPAWN tab) ---
    DM-only index of every custom star (globalDbSystemsCache entries with
@@ -1137,9 +1161,9 @@ function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
    FOW input. Radius is always clamped to window.SYSTEM_HAZARD_MAX_RADIUS. */
 function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
     (window.globalSystemHazardsCache || []).forEach(hz => {
-        if (!window.isPositionSensorVisible(hz.x, hz.y)) return;
         const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
-        if (Math.abs(hz.x - cx) > hw + r || Math.abs(hz.y - cy) > hh + r) return;
+        if (Math.abs(hz.x - cx) > hw + r || Math.abs(hz.y - cy) > hh + r) return; // off-screen cull first (cheap)
+        if (!window.isPositionSensorVisible(hz.x, hz.y)) return;
         drawSingleHazard(ctx, hz.x, hz.y, r, hz.hazard_type, zoom, time);
     });
 
@@ -1147,8 +1171,8 @@ function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
     const implicitR = window.HAZARD_IMPLICIT_RADIUS;
     allSystems.forEach(s => {
         if (!s.hazard || s.hazard === 'None') return;
+        if (Math.abs(s.x - cx) > hw + implicitR || Math.abs(s.y - cy) > hh + implicitR) return; // off-screen cull first (cheap)
         if (!window.isPositionSensorVisible(s.x, s.y)) return;
-        if (Math.abs(s.x - cx) > hw + implicitR || Math.abs(s.y - cy) > hh + implicitR) return;
         drawSingleHazard(ctx, s.x, s.y, implicitR, s.hazard.toLowerCase().replace(/\s+/g, '_'), zoom, time);
     });
 }
@@ -1335,13 +1359,13 @@ window.startJumpPlottingMode = function() {
     if (!window.selectedTarget || window.selectedTarget.type !== 'ship') return;
     window.jumpPlottingActive = true; window.measuringTapeActive = false; window.pingModeActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
     window.activeJumpShip = window.selectedTarget.data; window.jumpTargetPoint = null;
-    window.selectedDriveTypeKey = window.activeJumpShip.drive_type || 'ftl_class1';
+    window.selectedDriveTypeKey = driveSpeeds[window.activeJumpShip.drive_type] ? window.activeJumpShip.drive_type : 'ftl_class1'; // bug-hunt pass: unknown drive types used to crash here
     window.selectedDriveSpeed = driveSpeeds[window.selectedDriveTypeKey].speed;
     window.updateToolButtonStyles(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 window.cancelJumpPlotting = function() { window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 window.setDriveSpeedKey = function(key) { if (driveSpeeds[key]) { window.selectedDriveTypeKey = key; window.selectedDriveSpeed = driveSpeeds[key].speed; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); } };
-window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId) { window.selectedDriveTypeKey = newDriveType; window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.updateShipDriveType = async function(shipId, newDriveType) { await db.from('ship_markers').update({ drive_type: newDriveType }).eq('id', shipId); let ship = globalShipMarkersCache.find(s => s.id === shipId); if (ship) ship.drive_type = newDriveType; if (window.activeJumpShip && window.activeJumpShip.id === shipId && driveSpeeds[newDriveType]) { window.selectedDriveTypeKey = newDriveType; window.selectedDriveSpeed = driveSpeeds[newDriveType].speed; } if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; const iffValue = newIff || null; await db.from('ship_markers').update({ iff: iffValue }).eq('id', shipId); ship.iff = iffValue; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 
 /* --- MASTER-TO-SUB-TOKEN DOCKING ---
@@ -1388,7 +1412,7 @@ window.executePlottedJump = async function() {
     let fuelCost = Math.max(1, Math.round(dist / 100)); if (window.selectedDriveSpeed < 50) fuelCost = 0;
 
     let cargo = ship.cargo_inventory || {}; let expendables = cargo.expendables || [];
-    let fuelIdx = expendables.findIndex(i => i.name.toLowerCase().includes('energy core') || i.name.toLowerCase().includes('fuel'));
+    let fuelIdx = expendables.findIndex(i => (i.name || '').toLowerCase().includes('energy core') || (i.name || '').toLowerCase().includes('fuel'));
 
     if (fuelCost > 0) {
         if (fuelIdx >= 0 && expendables[fuelIdx].qty >= fuelCost) { expendables[fuelIdx].qty -= fuelCost; cargo.expendables = expendables; }
@@ -1815,14 +1839,14 @@ window.initGalaxyEngine = function() {
         for (let m of globalShipMarkersCache) {
             if (m.docked_to) continue; // docked craft aren't independently selectable — they're part of their master
             if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < tokenHitRadius && (currentUserRole === 'dm' || window.vesselHasOwner(m, currentUserId))) {
-                window.draggedMarker = m; window.selectedTarget = { type: 'ship', data: m }; window.addRecentTarget(window.selectedTarget);
+                window.draggedMarker = m; window._dragOrigin = { x: m.x, y: m.y }; window.selectedTarget = { type: 'ship', data: m }; window.addRecentTarget(window.selectedTarget);
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
             }
         }
         for (let s of allSystems) {
             if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < starHitRadius) {
                 window.selectedTarget = { type: 'star', data: s }; window.addRecentTarget(window.selectedTarget);
-                if(currentUserRole === 'dm' && s.isCustom) window.draggedStar = s; 
+                if(currentUserRole === 'dm' && s.isCustom) { window.draggedStar = s; window._dragOrigin = { x: s.x, y: s.y }; }
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
             }
         }
@@ -1843,12 +1867,23 @@ window.initGalaxyEngine = function() {
         }
     }
 
+    // Bug-hunt pass (2026-09-24): a plain click on your own ship (no drag)
+    // used to write the ship's CACHED x/y back to the database. If another
+    // player had just moved/jumped that ship and your cache hadn't caught up
+    // yet, the click silently teleported it back. Now only an actual drag
+    // (position changed since pointer-down) writes anything.
     async function handlePointerUp() {
+        const origin = window._dragOrigin; window._dragOrigin = null;
+        const movedFromOrigin = (obj) => !origin || obj.x !== origin.x || obj.y !== origin.y;
         if (window.draggedMarker) {
-            await db.from('ship_markers').update({ x: window.draggedMarker.x, y: window.draggedMarker.y }).eq('id', window.draggedMarker.id);
-            window.draggedMarker = null; if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+            const m = window.draggedMarker; window.draggedMarker = null;
+            if (movedFromOrigin(m)) await db.from('ship_markers').update({ x: m.x, y: m.y }).eq('id', m.id);
+            if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
         }
-        if (window.draggedStar) { await db.from('star_systems').update({ x: window.draggedStar.x, y: window.draggedStar.y }).eq('id', window.draggedStar.id); window.draggedStar = null; }
+        if (window.draggedStar) {
+            const st = window.draggedStar; window.draggedStar = null;
+            if (movedFromOrigin(st)) await db.from('star_systems').update({ x: st.x, y: st.y }).eq('id', st.id);
+        }
         window.camera.isDragging = false;
     }
 
@@ -1989,7 +2024,7 @@ window.initGalaxyEngine = function() {
                 // pointless DB position write handlePointerUp would do.
                 window.camera.isDragging = false;
                 handlePointerDown(g.x, g.y, g.target, false);
-                window.draggedMarker = null; window.draggedStar = null; window.camera.isDragging = false;
+                window.draggedMarker = null; window.draggedStar = null; window.camera.isDragging = false; window._dragOrigin = null;
             } else {
                 handlePointerUp();
             }
@@ -2303,7 +2338,7 @@ window.initGalaxyEngine = function() {
                 let displayFaction = t.faction_name ? t.faction_name.replace('[HIDDEN] ', '').replace('[HIDDEN]', '') : '';
                 
                 ctx.fillStyle = t.color; ctx.font = `bold ${Math.max(10, 14 / window.camera.zoom)}px Courier New`; ctx.textAlign = 'center'; 
-                ctx.fillText(`⬡ ${t.name.toUpperCase()}${isHidden ? ' (HIDDEN)' : ''}`, avgX, avgY);
+                ctx.fillText(`⬡ ${(t.name || 'Sector').toUpperCase()}${isHidden ? ' (HIDDEN)' : ''}`, avgX, avgY);
                 if (displayFaction) { ctx.font = `${Math.max(8, 10 / window.camera.zoom)}px Courier New`; ctx.fillText(`[${displayFaction}]`, avgX, avgY + (14 / window.camera.zoom)); }
                 ctx.textAlign = 'left';
             }
@@ -2509,7 +2544,23 @@ window.initGalaxyEngine = function() {
         ctx.restore();
         updateCicTelemetry(cx, cy, window.camera.zoom, _gridSpacing);
         updateRadarSweepPosition(cssWidth, cssHeight);
-        requestAnimationFrame(render);
     }
-    render();
+    // Bug-hunt pass (2026-09-24): requestAnimationFrame used to be scheduled
+    // at the very END of render(), so any exception mid-frame (one malformed
+    // row in the data) stopped the galaxy map permanently until a reload.
+    // Now the next frame is always scheduled; a failing frame is logged once
+    // and the canvas state is reset (resize() reassigns the canvas size,
+    // which clears any unbalanced ctx.save() stack left by the throw).
+    let lastRenderErrorAt = 0;
+    function renderLoop() {
+        try {
+            render();
+        } catch (err) {
+            if (Date.now() - lastRenderErrorAt > 5000) console.error('Galaxy map frame failed (map keeps running):', err);
+            lastRenderErrorAt = Date.now();
+            try { resize(); } catch (_) {}
+        }
+        requestAnimationFrame(renderLoop);
+    }
+    renderLoop();
 };
