@@ -309,7 +309,7 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
             if (cargo.synth_capacity !== 10) { cargo.synth_capacity = 10; changed = true; }
             
             if (cargo.perishables) {
-                let rationIdx = cargo.perishables.findIndex(i => i.name.toLowerCase().includes('ration') || i.name.toLowerCase().includes('food'));
+                let rationIdx = cargo.perishables.findIndex(i => (i.name || '').toLowerCase().includes('ration') || (i.name || '').toLowerCase().includes('food'));
                 // Bug fix (bug hunt, this session), two issues in the original:
                 // (1) rations were only ever deducted by a flat 1 per call, but
                 // processFleetGroupProduction/processSalvageConversion right
@@ -385,6 +385,16 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
 
 // Small shared helper — every write path below ends by applying the same
 // button-state refresh, so this stays in one place instead of five.
+// Bug-hunt pass (2026-09-24): time advancement can be triggered from several
+// places at once -- the DM's 4-second time-flow interval, manual +/- time
+// buttons, DRADIS scans and FTL jumps -- and one run can easily take longer
+// than 4s (it does many DB writes). Overlapping runs raced each other on the
+// same cached cargo and could complete the same manufacturing order twice.
+// Every call now waits for the previous one to finish (same arguments,
+// same behavior, just one at a time). Callers that `await` it still wait
+// for their own run to complete.
+window.processTimeAdvancement = window.serializeAsync(window.processTimeAdvancement, 'processTimeAdvancement');
+
 function syncTimeFlowButton() {
     const btn = document.getElementById('time-flow-btn');
     if (btn) { btn.innerText = window.timeFlowActive ? '⏸ PAUSE FLOW' : '▶ RESUME FLOW'; btn.style.borderColor = window.timeFlowActive ? '#3c4e36' : '#00e5a3'; }
@@ -1354,7 +1364,7 @@ window.saveTerminalProfile = async function() {
         // blanked out on the next save.
     };
     const { data: charData, error: charErr } = await db.from('characters').upsert(charPayload, { onConflict: 'profile_id' }).select().single();
-    if (charErr) return;
+    if (charErr) { alert("Failed to save character sheet: " + charErr.message); return; } // bug-hunt pass: used to fail silently
 
     let skillsPayload = { character_id: charData.id };
     skillList.forEach(skill => { const safeKey = skill.toLowerCase().replace(/[^a-z0-9]/g, '_'); skillsPayload[safeKey] = parseInt(safeGet(`skill-${safeKey}`)) || 0; });
@@ -1804,7 +1814,7 @@ window.closeCodexFullscreen = function() {
 window.openCodexAttachment = function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry || !entry.doc_data) return;
     if (entry.doc_type === 'image' || entry.doc_type === 'pdf') {
-        const win = window.open(); win.document.write(`<iframe src="${entry.doc_data}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`);
+        const win = window.open(); if (!win) { alert('Your browser blocked the popup -- allow popups for this site to view attachments.'); return; } win.document.write(`<iframe src="${entry.doc_data}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`);
     } else {
         const blob = new Blob([entry.doc_data], { type: 'text/plain;charset=utf-8' }); const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = entry.doc_name || 'document.txt'; a.click(); URL.revokeObjectURL(url);
@@ -1973,7 +1983,7 @@ window.openNoteFullscreen = function(id) {
    preference — it never touches the underlying conversation, and the tab
    auto-reopens the moment a new incoming message arrives on it. */
 window.activeCommsTab = 'general';
-window.closedPmTabs = new Set(JSON.parse(localStorage.getItem('odyssey_closed_pm_tabs') || '[]'));
+window.closedPmTabs = new Set(window.safeJsonParse(window.safeLocalGet('odyssey_closed_pm_tabs', '[]'), []));
 window.commsUnread = {};
 
 function persistClosedPmTabs() {
@@ -2113,7 +2123,12 @@ window.sendChatMessage = async function(inputId) {
     if (tab === 'dice') return; // read-only stream, not a chat room
 
     const recipientId = tab.startsWith('pm:') ? tab.slice(3) : null;
-    const { data, error } = await db.from('chat_logs').insert({ sender_id: currentUserId, content: content, message_type: 'text', recipient_id: recipientId }).select().single();
+    // Bug-hunt pass (2026-09-24): the chat feed renders message content as
+    // HTML (system/diagnostic messages rely on that), so a typed message
+    // containing "<" could swallow the rest of the text or inject markup.
+    // Player-typed text is now escaped before it's stored -- it displays
+    // exactly as typed. System-generated messages are unaffected.
+    const { data, error } = await db.from('chat_logs').insert({ sender_id: currentUserId, content: window.escapeHtml(content), message_type: 'text', recipient_id: recipientId }).select().single();
     input.value = '';
     if (!error && data) window.appendLocalChatLog(data);
 };
