@@ -917,16 +917,10 @@ window.applyTerritoryToGalaxy = async function(territoryId) {
     for (const id of newOwnedIds) {
         const sys = allSystems.find(s => s.id === id);
         if (!sys) continue;
-        // Control follow-on (this session, confirmed design): Apply stamps a
-        // default Control (= the new owning faction) ONLY on a genuinely new
-        // claim (current ownership isn't already this faction) — a system
-        // this territory already owned before this Apply keeps whatever
-        // Control value the DM may have hand-edited, so re-applying the same
-        // (or reshaped) territory never clobbers a manually-set "owned by A,
-        // controlled by B" override. Computed BEFORE sys.ownership is
-        // overwritten below, since that's the "was this already ours" check.
-        const isNewClaim = sys.ownership !== faction;
-        const controlValue = isNewClaim ? faction : (sys.control || 'None');
+        // DM decision 2026-09-26: EVERY Apply (not just a new claim) now
+        // resets Control to the owning faction -- a hand-set "owned by A,
+        // controlled by B" override is overwritten on re-apply.
+        const controlValue = faction;
         if (sys.isCustom) {
             await db.from('star_systems').update({ ownership: faction, control: controlValue }).eq('id', id);
         } else {
