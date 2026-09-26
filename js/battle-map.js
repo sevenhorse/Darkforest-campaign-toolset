@@ -2206,6 +2206,10 @@ function battleTokenFactionColor(vessel) {
    inside the arena rather than a whole floating panel. A short-drag (< 5px)
    is treated as a click (opens the vessel terminal) rather than a move.
 
+   ** SUPERSEDED 2026-09-26: movement is now enforced for players (owner-
+   only, own-turn-only once initiative is rolled, hard-capped at
+   move_remaining; DM exempt) -- see the comment inside wireTokenDrag. The
+   original design note below is kept for history. **
    Movement (added this session, confirmed design): DM-trusted, not
    code-enforced — the drag itself is never blocked or snapped back. On
    drop, the straight-line distance moved is subtracted from the token's
@@ -2250,14 +2254,62 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     // touch listeners -- same math, same save, same tap-vs-drag rule (more
     // than 5 grid units = a drag, otherwise it's a tap that opens the vessel
     // or auto-targets a hostile). Desktop mouse behavior is unchanged.
+    // Movement enforcement (DM decision 2026-09-26 -- replaces the old
+    // honor-system "overdrawn in red" behavior for players):
+    //   - DM is exempt: can drag any token any distance at any time, and a
+    //     DM drag does NOT spend move_remaining (pure repositioning).
+    //   - A player can only drag a token they own (vesselHasOwner); on
+    //     anyone else's token a press is always treated as a tap.
+    //   - Once initiative is rolled, a player's token that HAS a turn slot
+    //     can only move during its own turn (tokens with no slot --
+    //     AI-stance / ai_controlled -- are unrestricted, same rule as
+    //     spendTokenAp). Movement still does not cost AP.
+    //   - Distance is hard-capped at move_remaining: the token stops at
+    //     max reach along the drag direction instead of overspending.
+    // dragMode is decided at press time: 'free' (DM), 'capped' (player,
+    // allowed), or 'tap' (not allowed to move -- press only opens/targets).
     let isDragging = false, moved = false, startX, startY, initialLeft, initialTop;
+    let dragMode = 'tap', maxReach = 0, blockReason = '';
     let lastTouchX = 0, lastTouchY = 0, lastTouchEndAt = 0;
+    function resolveDragMode(liveToken) {
+        blockReason = '';
+        if (currentUserRole === 'dm') return 'free';
+        const v = globalShipMarkersCache.find(m => m.id === shipMarkerId);
+        if (!v || !window.vesselHasOwner(v, currentUserId)) return 'tap';
+        const enc = window.globalBattleEncounterCache;
+        if (enc && enc.initiative_rolled && liveToken) {
+            const order = enc.turn_order || [];
+            if (order.includes(liveToken.token_id) && order[enc.current_turn_index] !== liveToken.token_id) {
+                blockReason = "It's not this unit's turn yet — it can only move on its own turn.";
+                return 'tap';
+            }
+        }
+        const rem = liveToken && liveToken.move_remaining !== undefined ? liveToken.move_remaining : (v.tactical_speed ?? 160);
+        maxReach = Math.max(0, rem);
+        if (maxReach <= 0) { blockReason = 'No movement remaining this round.'; return 'tap'; }
+        return 'capped';
+    }
+    // Clamp a proposed position to the grid AND (for capped drags) to
+    // maxReach from the start point along the same direction.
+    function constrainPos(x, y) {
+        let pos = clampToGrid(x, y);
+        if (dragMode === 'capped') {
+            const ddx = pos.x - initialLeft, ddy = pos.y - initialTop;
+            const d = Math.hypot(ddx, ddy);
+            if (d > maxReach && d > 0) {
+                const k = maxReach / d;
+                pos = clampToGrid(initialLeft + ddx * k, initialTop + ddy * k);
+            }
+        }
+        return pos;
+    }
     function beginDrag(clientX, clientY) {
         isDragging = true; moved = false;
         startX = clientX; startY = clientY;
         const liveToken = ((window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || []).find(t => t.token_id === tokenId);
         initialLeft = liveToken ? liveToken.x : (parseFloat(tokenEl.style.left) || 0);
         initialTop = liveToken ? liveToken.y : (parseFloat(tokenEl.style.top) || 0);
+        dragMode = resolveDragMode(liveToken);
         // Suspend the CSS position transition (see .battle-token-el in
         // style.css) for the duration of this drag -- otherwise every move
         // write would animate TOWARD the new value instead of tracking the
@@ -2270,22 +2322,31 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         if (!isDragging) return;
         const dx = (clientX - startX) / BATTLE_GRID_SCALE, dy = (clientY - startY) / BATTLE_GRID_SCALE;
         if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true;
-        const pos = clampToGrid(initialLeft + dx, initialTop + dy);
+        if (dragMode === 'tap') return; // not allowed to move this token -- leave it where it is
+        const pos = constrainPos(initialLeft + dx, initialTop + dy);
         tokenEl.style.left = pos.x + 'px'; tokenEl.style.top = pos.y + 'px';
     }
     function endDrag(clientX, clientY) {
         if (!isDragging) return;
         isDragging = false;
         tokenEl.style.transition = '';
+        if (moved && dragMode === 'tap' && blockReason) {
+            // A real drag attempt on the player's OWN token that isn't allowed
+            // right now -- say why instead of silently opening the terminal.
+            alert(blockReason);
+            return;
+        }
+        if (moved && dragMode === 'tap') return; // a drag/swipe on a token you can't move -- neither move it nor treat it as a tap
         if (moved) {
             const dx = (clientX - startX) / BATTLE_GRID_SCALE, dy = (clientY - startY) / BATTLE_GRID_SCALE;
-            const pos = clampToGrid(initialLeft + dx, initialTop + dy);
+            const pos = constrainPos(initialLeft + dx, initialTop + dy);
             const distMoved = Math.hypot(pos.x - initialLeft, pos.y - initialTop);
             const dragVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
             const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
                 if (t.token_id !== tokenId) return t;
+                if (dragMode === 'free') return { ...t, x: pos.x, y: pos.y }; // DM reposition: no move spent
                 const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : (dragVessel?.tactical_speed ?? 160);
-                return { ...t, x: pos.x, y: pos.y, move_remaining: Math.round((prevRemaining - distMoved) * 10) / 10 };
+                return { ...t, x: pos.x, y: pos.y, move_remaining: Math.max(0, Math.round((prevRemaining - distMoved) * 10) / 10) };
             });
             saveBattleTokens(tokens).then(() => window.renderBattleMapPanel());
         } else {
@@ -2317,6 +2378,7 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     }, { passive: true });
     tokenEl.addEventListener('touchmove', (e) => {
         if (!isDragging || e.touches.length !== 1) return;
+        if (dragMode === 'tap') { const t0 = e.touches[0]; lastTouchX = t0.clientX; lastTouchY = t0.clientY; if (Math.abs(t0.clientX - startX) > 5 || Math.abs(t0.clientY - startY) > 5) moved = true; return; } // let the page scroll/pan normally
         e.preventDefault(); // keep the page from scrolling while a token is being dragged
         const t = e.touches[0];
         lastTouchX = t.clientX; lastTouchY = t.clientY;
