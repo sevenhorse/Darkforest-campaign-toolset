@@ -2252,7 +2252,11 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
     } else if (info.shieldMode === 'ion') {
         let ionShieldDmg = Math.min(s, remainingDmg * 2);
         s -= ionShieldDmg;
-        remainingDmg = Math.max(0, Math.floor((remainingDmg - Math.ceil(ionShieldDmg / 2)) * 0.25));
+        // Fix (2026-09-26, DM-confirmed): this used to ALSO multiply by 0.25
+        // here, and then DAMAGE_TYPES.Ion.hullMult (0.25) applied again at the
+        // Hull step -- Hull took ~1/16 instead of the intended 1/4. The Hull
+        // step's hullMult is now the only place Ion's hull reduction happens.
+        remainingDmg = Math.max(0, remainingDmg - Math.ceil(ionShieldDmg / 2));
         log += `[ION SURGE] Shield capacitors overloaded (-${ionShieldDmg}). Physical armor bypassed entirely. `;
     } else {
         let absorb = Math.min(s, remainingDmg); s -= absorb; remainingDmg -= absorb;
@@ -3089,7 +3093,15 @@ window.rollArsenalWeapon = async function(id) {
    the schema only has one modifier field per weapon, so a well-modified
    weapon is being treated as both more accurate and harder-hitting
    rather than splitting it into two fields. Flag any of this to revisit
-   after it's actually played. */
+   after it's actually played.
+
+   DM decisions 2026-09-26 (supersede the above where they differ): the
+   d20 stays non-exploding; `wpn.modifier` now applies to DAMAGE ONLY, not
+   to-hit; the defender now gets modifiers -- a PC defender adds perk +
+   augment + gear bonuses on the chosen stat (and uses any augment
+   explode_threshold on that stat), an NPC defender gets a DM-entered flat
+   NPC Defense Mod, and ANY defender gets a Situational Mod (cover, prone,
+   etc.) typed into the attack popup. */
 window.DAMAGE_TYPE_TO_SKILL = {
     'Impact': 'Ballistic Weapons', 'Piercing': 'Ballistic Weapons', 'Flak': 'Ballistic Weapons',
     'Cold': 'Ballistic Weapons', 'Corrosive': 'Ballistic Weapons',
@@ -3160,7 +3172,9 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
                 <select id="atk-defense-die-select" style="border-color:#ff3333;">
                     <option value="d4">d4</option><option value="d6">d6</option><option value="d8" selected>d8</option>
                     <option value="d10">d10</option><option value="d12">d12</option><option value="d20">d20</option>
-                </select>`;
+                </select>
+                <label for="atk-npc-def-mod" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">NPC Defense Mod (flat +/-)</label>
+                <input type="number" id="atk-npc-def-mod" value="0" step="1" style="border-color:#ff3333;">`;
         }
     }
 
@@ -3197,6 +3211,8 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
                 ${skillList.map(s => `<option value="${s}">${s}</option>`).join('')}
             </select>
             <div id="atk-defense-group" style="margin-top:6px;"></div>
+            <label for="atk-situational-mod" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Situational Defense Mod (cover, prone, etc. — any defender)</label>
+            <input type="number" id="atk-situational-mod" value="0" step="1" style="border-color:#ff3333;">
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="atk-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
                 <button id="atk-resolve-btn" class="btn-deploy" style="flex:1; margin-top:0;">⚔ RESOLVE ATTACK</button>
@@ -3226,6 +3242,7 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
         const dt = wpn.damage_type ? window.normalizeDamageType(wpn.damage_type) : null;
         document.getElementById('atk-skill-select').value = (dt && window.DAMAGE_TYPE_TO_SKILL[dt]) || 'Ballistic Weapons';
         renderDefenseGroup();
+        const sitEl = document.getElementById('atk-situational-mod'); if (sitEl) sitEl.value = 0;
         overlay.style.display = 'flex';
     };
 
@@ -3249,13 +3266,13 @@ window.resolveArsenalAttack = async function(weaponId) {
     if (!target) { alert("Select a target first."); return; }
     const skillName = document.getElementById('atk-skill-select').value;
 
-    // --- Attacker roll: flat d20 (no explode) + weapon mod + skill mod + perk bonus on that skill ---
+    // --- Attacker roll: flat d20 (no explode) + skill mod + perk/augment/gear bonus on that skill ---
+    // (DM decision 2026-09-26: weapon modifier is damage-only, NOT added to to-hit.)
     let atkBreakdown = [];
     let atkTotal = Math.floor(Math.random() * 20) + 1;
     atkBreakdown.push(`d20: ${atkTotal}`);
 
-    let modVal = parseInt(wpn.modifier) || 0;
-    if (modVal !== 0) { atkTotal += modVal; atkBreakdown.push(`Weapon Mod: ${modVal >= 0 ? '+' : ''}${modVal}`); }
+    const modVal = parseInt(wpn.modifier) || 0; // used for the damage roll below only
 
     const safeSkillKey = skillName.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const skillMod = (myProf.skills || {})[safeSkillKey] || 0;
@@ -3283,9 +3300,20 @@ window.resolveArsenalAttack = async function(weaponId) {
         const statName = document.getElementById('atk-defense-stat-select').value;
         const statKey = 'stat_' + statName.toLowerCase();
         const faces = parseInt((targetProfile.character[statKey] || 'd4').replace('d', '')) || 4;
-        const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2);
+        // Defense modifiers (DM decision 2026-09-26): same stat bonuses the
+        // self-service dice-pool roller already applies -- perk/augment/gear
+        // bonuses on this stat, plus any augment explode_threshold.
+        const defThreshold = typeof window.getAugmentExplodeThreshold === 'function' ? window.getAugmentExplodeThreshold(targetProfile.augments, statName) : null;
+        const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2, defThreshold);
         defTotal = rollTotal;
-        defLabel = `${target.name} defends with ${statName} (d${faces}: ${subRolls.join('💥')})`;
+        const thrNote = (defThreshold != null && defThreshold < faces) ? `, explodes ${defThreshold}+` : '';
+        defLabel = `${target.name} defends with ${statName} (d${faces}${thrNote}: ${subRolls.join('💥')})`;
+        const dPerk = window.getPerkBonusFor(targetProfile.perks, 'stat', statName);
+        if (dPerk.total !== 0) { defTotal += dPerk.total; defLabel += ` + [Perks: ${dPerk.sources.join(', ')}]`; }
+        const dAug = typeof window.getAugmentBonusFor === 'function' ? window.getAugmentBonusFor(targetProfile.augments, 'stat', statName) : { total: 0, sources: [] };
+        if (dAug.total !== 0) { defTotal += dAug.total; defLabel += ` + [Augments: ${dAug.sources.join(', ')}]`; }
+        const dGear = typeof window.getGearBonusFor === 'function' ? window.getGearBonusFor(targetProfile.gear, 'stat', statName) : { total: 0, sources: [] };
+        if (dGear.total !== 0) { defTotal += dGear.total; defLabel += ` + [Gear: ${dGear.sources.join(', ')}]`; }
     } else {
         // Bug fix (bug hunt, this session): a combatant can have is_npc:
         // false (joined initiative as a PC) but no character sheet saved
@@ -3296,7 +3324,13 @@ window.resolveArsenalAttack = async function(weaponId) {
         const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2);
         defTotal = rollTotal;
         defLabel = `${target.name} defends (DM-picked d${faces}: ${subRolls.join('💥')})`;
+        const npcModEl = document.getElementById('atk-npc-def-mod');
+        const npcMod = npcModEl ? (parseInt(npcModEl.value) || 0) : 0;
+        if (npcMod !== 0) { defTotal += npcMod; defLabel += ` + [NPC Mod: ${npcMod >= 0 ? '+' : ''}${npcMod}]`; }
     }
+    const sitModEl = document.getElementById('atk-situational-mod');
+    const sitMod = sitModEl ? (parseInt(sitModEl.value) || 0) : 0;
+    if (sitMod !== 0) { defTotal += sitMod; defLabel += ` + [Situational: ${sitMod >= 0 ? '+' : ''}${sitMod}]`; }
 
     // --- Resolution: higher total wins. On a tie, the player-controlled side
     // wins; if that's ambiguous (both sides player-controlled, or neither is —
