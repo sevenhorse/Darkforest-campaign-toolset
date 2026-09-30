@@ -2546,9 +2546,24 @@ window.initGalaxyEngine = function() {
     // and the canvas state is reset (resize() reassigns the canvas size,
     // which clears any unbalanced ctx.save() stack left by the throw).
     let lastRenderErrorAt = 0;
+    // Mobile lag fix (2026-09-30, live report: ~1s touch lag on the Battle
+    // Map on a Galaxy S21 Ultra): this loop redrew the whole galaxy (~2,569
+    // systems, full-screen canvas at the phone's native pixel density) every
+    // single frame even while the full-screen Battle Map covered it
+    // completely, starving touch handling on phones. Skip the redraw while
+    // the Battle Map overlay is open or the tab is in the background; the
+    // loop keeps running and redraws the moment the map is visible again.
+    // Nothing time-critical lives in render() (the campaign clock runs on
+    // its own setInterval in js/ui.js); hyperlane/DRADIS discovery done
+    // during render just catches up once the galaxy is visible again.
+    const battleMapPanelEl = document.getElementById('battle-map-panel');
+    function galaxyIsCovered() {
+        if (document.hidden) return true;
+        return !!(battleMapPanelEl && battleMapPanelEl.style.display === 'block');
+    }
     function renderLoop() {
         try {
-            render();
+            if (!galaxyIsCovered()) render();
         } catch (err) {
             if (Date.now() - lastRenderErrorAt > 5000) console.error('Galaxy map frame failed (map keeps running):', err);
             lastRenderErrorAt = Date.now();
