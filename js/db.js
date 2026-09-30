@@ -97,6 +97,12 @@ window.preserveFormState = function(container, render, selector) {
    hidden feature still downloads to every browser, so a player poking in
    devtools could force it on for themselves. Anything that must be truly
    secret lives in DM-only tables instead (e.g. encounter presets). */
+// Build stamp for this copy of the app. Bump it (format YYYY-MM-DD.NN) on
+// every deploy that changes how data is stored, THEN (after the push is
+// live) raise app_settings 'min_client_build'.value to match -- any browser
+// still running an older cached copy then shows a "reload" banner instead
+// of quietly writing data the new build can't see (2026-09-30 live bug).
+window.DARKFOREST_BUILD = '2026-09-30.02';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -115,9 +121,26 @@ window.loadAppSettings = async function() {
     const next = {};
     (data || []).forEach(r => { next[r.feature_key] = r; });
     window.appSettingsCache = next;
+    window.checkClientBuildIsCurrent();
     if (typeof window.renderFeatureSwitchPanel === 'function') window.renderFeatureSwitchPanel();
     // Anything gated by a switch re-checks itself on this event.
     document.dispatchEvent(new CustomEvent('darkforest:features-changed'));
+};
+window.checkClientBuildIsCurrent = function() {
+    const row = window.appSettingsCache['min_client_build'];
+    const min = row && row.value;
+    const stale = !!min && String(min) > String(window.DARKFOREST_BUILD);
+    let banner = document.getElementById('stale-build-banner');
+    if (!stale) { if (banner) banner.remove(); return false; }
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'stale-build-banner';
+        banner.setAttribute('role', 'alert');
+        banner.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:20000; background:#3a0d0d; color:#ffd2d2; border-bottom:2px solid #ff3333; padding:8px 12px; font-size:12px; text-align:center; font-family:inherit;';
+        banner.innerHTML = '⚠ A newer version of Darkforest is live. Reload this page to keep playing in sync (Ctrl+F5 on PC; pull down to refresh on a phone). <button type="button" onclick="location.reload()" style="margin-left:8px; font-size:11px; width:auto;">RELOAD NOW</button>';
+        document.body.appendChild(banner);
+    }
+    return true;
 };
 let appSettingsRealtimeChannel = null;
 window.initAppSettingsRealtimeChannel = function() {
@@ -149,7 +172,7 @@ window.toggleFeatureTester = async function(key, profileId, on) {
 window.renderFeatureSwitchPanel = function() {
     const box = document.getElementById('feature-switch-list');
     if (!box || currentUserRole !== 'dm') return;
-    const keys = Object.keys(window.appSettingsCache).sort();
+    const keys = Object.keys(window.appSettingsCache).filter(k => k !== 'min_client_build').sort();
     if (keys.length === 0) { box.innerHTML = '<div style="font-size:9px; color:#6b826a;">No feature switches found.</div>'; return; }
     const players = (typeof allProfiles !== 'undefined' ? allProfiles : []).filter(p => p.role !== 'dm');
     const modeLabels = { off: 'OFF', dm: 'DM ONLY', testers: 'TESTERS', everyone: 'EVERYONE' };
