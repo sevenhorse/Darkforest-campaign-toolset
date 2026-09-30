@@ -302,7 +302,13 @@ async function importLegacyBattleTokens(encounter, existingRows) {
         const { error } = await db.from('battle_tokens').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
         if (error) { console.error('importLegacyBattleTokens: copy failed', error); return false; }
     }
-    const { error: flagErr } = await db.from('battle_encounters').update({ tokens_migrated: true }).eq('id', encounter.id);
+    // Empty the legacy column once its contents are copied, so anything that
+    // shows up in it LATER can only have come from a browser still running
+    // the pre-2026-09-30 code (a stale cache) -- and gets picked up by the
+    // next load instead of silently vanishing (live bug, 2026-09-30: the DM's
+    // browser was on the old build, placed two ships into this column, and
+    // nobody on the new build could see them).
+    const { error: flagErr } = await db.from('battle_encounters').update({ tokens_migrated: true, tokens: [] }).eq('id', encounter.id);
     if (flagErr) console.error('importLegacyBattleTokens: could not set tokens_migrated', flagErr);
     return true;
 }
@@ -330,7 +336,9 @@ async function loadBattleEncountersInner() {
             // same battle rather than blanking the grid on a network blip.
             encounter.tokens = (prevCache && prevCache.id === encounter.id) ? (prevCache.tokens || []) : [];
         } else {
-            if (!encounter.tokens_migrated) {
+            const legacyTokens = Array.isArray(encounter.tokens) ? encounter.tokens : [];
+            if (!encounter.tokens_migrated || legacyTokens.length > 0) {
+                if (encounter.tokens_migrated && legacyTokens.length > 0) console.warn('Battle Map: tokens found in the legacy column -- a browser is still running the old build. Importing them.');
                 await importLegacyBattleTokens(encounter, rows);
                 const again = await fetchBattleTokenRows(encounter.id);
                 if (again !== null) rows = again;
