@@ -408,6 +408,15 @@ canvas { display: block; width: 100%; height: 100%; }
     from { background-position: 0 0; }
     to { background-position: 460px -380px; }
 }
+/* Mobile lag fix (2026-09-30): the two drifting starfield layers animate
+   background-position, which forces the whole (1.5x-scaled) grid to be
+   repainted every frame -- cheap on a desktop GPU, a real cost on a phone
+   at 3x pixel density, competing with touch input. Phones/tablets (coarse
+   pointer) and anyone with reduced-motion set get a still starfield; the
+   look is otherwise identical. Desktop keeps the drift. */
+@media (pointer: coarse), (prefers-reduced-motion: reduce) {
+    #battle-map-grid::before, #battle-map-grid::after { animation: none; }
+}
 
 /* Destruction effect (Visual Polish build) -- a bigger, hotter burst than
    .battle-impact-flash (ordnance's smaller flash, still used for non-impact
