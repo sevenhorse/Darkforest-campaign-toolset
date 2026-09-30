@@ -81,6 +81,98 @@ window.preserveFormState = function(container, render, selector) {
     saved.filter(s => !s.id.startsWith('sq-wpn-select-')).forEach(apply);
 };
 
+/* --- FEATURE SWITCHES (Command Terminal refactor, Phase 0, 2026-09-30) ---
+   DM-controlled switches that keep new, unfinished features hidden from
+   players until the DM unlocks them. Backed by the `app_settings` table
+   (one row per feature: feature_key, mode, tester_ids). RLS: everyone
+   logged in can READ it, only the DM can WRITE it (same role check as
+   saved_fleets). Streams over realtime, so flipping a switch takes effect
+   on every open browser without a redeploy.
+
+   Modes: 'off' (nobody), 'dm' (DM only), 'testers' (DM + the picked
+   tester accounts), 'everyone'. An unknown key counts as OFF -- a missing
+   row can never expose anything.
+
+   HONOR SYSTEM, same trust model as the rest of this app: the code for a
+   hidden feature still downloads to every browser, so a player poking in
+   devtools could force it on for themselves. Anything that must be truly
+   secret lives in DM-only tables instead (e.g. encounter presets). */
+window.appSettingsCache = {};
+window.isFeatureOn = function(key) {
+    const row = window.appSettingsCache[key];
+    if (!row) return false;
+    const isDm = (typeof currentUserRole !== 'undefined') && currentUserRole === 'dm';
+    switch (row.mode) {
+        case 'everyone': return true;
+        case 'testers': return isDm || (Array.isArray(row.tester_ids) && typeof currentUserId !== 'undefined' && row.tester_ids.includes(currentUserId));
+        case 'dm': return isDm;
+        default: return false;
+    }
+};
+window.loadAppSettings = async function() {
+    const { data, error } = await db.from('app_settings').select('*');
+    if (error) { console.error('loadAppSettings failed', error); return; }
+    const next = {};
+    (data || []).forEach(r => { next[r.feature_key] = r; });
+    window.appSettingsCache = next;
+    if (typeof window.renderFeatureSwitchPanel === 'function') window.renderFeatureSwitchPanel();
+    // Anything gated by a switch re-checks itself on this event.
+    document.dispatchEvent(new CustomEvent('darkforest:features-changed'));
+};
+let appSettingsRealtimeChannel = null;
+window.initAppSettingsRealtimeChannel = function() {
+    if (appSettingsRealtimeChannel) return;
+    appSettingsRealtimeChannel = db.channel('app_settings_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, () => { window.loadAppSettings(); })
+        .subscribe();
+};
+window.setFeatureMode = async function(key, mode) {
+    if (currentUserRole !== 'dm') return;
+    const { error } = await db.from('app_settings').update({ mode, updated_at: new Date().toISOString() }).eq('feature_key', key);
+    if (error) { alert('Failed to change feature switch: ' + error.message); return; }
+    if (window.appSettingsCache[key]) window.appSettingsCache[key].mode = mode;
+    window.loadAppSettings();
+};
+window.toggleFeatureTester = async function(key, profileId, on) {
+    if (currentUserRole !== 'dm') return;
+    const row = window.appSettingsCache[key];
+    if (!row) return;
+    const ids = new Set(row.tester_ids || []);
+    if (on) ids.add(profileId); else ids.delete(profileId);
+    const tester_ids = Array.from(ids);
+    const { error } = await db.from('app_settings').update({ tester_ids, updated_at: new Date().toISOString() }).eq('feature_key', key);
+    if (error) { alert('Failed to update testers: ' + error.message); return; }
+    row.tester_ids = tester_ids;
+    window.loadAppSettings();
+};
+// DM Tools -> MAINT -> Feature Switches box (#feature-switch-list).
+window.renderFeatureSwitchPanel = function() {
+    const box = document.getElementById('feature-switch-list');
+    if (!box || currentUserRole !== 'dm') return;
+    const keys = Object.keys(window.appSettingsCache).sort();
+    if (keys.length === 0) { box.innerHTML = '<div style="font-size:9px; color:#6b826a;">No feature switches found.</div>'; return; }
+    const players = (typeof allProfiles !== 'undefined' ? allProfiles : []).filter(p => p.role !== 'dm');
+    const modeLabels = { off: 'OFF', dm: 'DM ONLY', testers: 'TESTERS', everyone: 'EVERYONE' };
+    box.innerHTML = keys.map(key => {
+        const row = window.appSettingsCache[key];
+        const esc = window.escapeHtml;
+        const opts = Object.keys(modeLabels).map(m => `<option value="${m}" ${row.mode === m ? 'selected' : ''}>${modeLabels[m]}</option>`).join('');
+        const testers = row.mode === 'testers' ? `<div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px;">${players.map(p => {
+            const checked = (row.tester_ids || []).includes(p.id) ? 'checked' : '';
+            const name = esc(p.username || (p.character && p.character.name) || 'player');
+            return `<label style="font-size:9px; color:#d4c5a9;"><input type="checkbox" ${checked} onchange="window.toggleFeatureTester('${esc(key)}', '${p.id}', this.checked)"> ${name}</label>`;
+        }).join('') || '<span style="font-size:9px; color:#6b826a;">No player accounts.</span>'}</div>` : '';
+        return `<div style="border:1px solid #2a3a2a; padding:6px; margin-bottom:6px; background:#050805;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                <div><div style="font-size:10px; color:#00e5a3; font-weight:bold;">${esc(key)}</div>
+                <div style="font-size:9px; color:#6b826a;">${esc(row.description || '')}</div></div>
+                <label for="feature-mode-${esc(key)}" style="display:none;">Mode for ${esc(key)}</label>
+                <select id="feature-mode-${esc(key)}" onchange="window.setFeatureMode('${esc(key)}', this.value)" style="font-size:10px; width:auto;">${opts}</select>
+            </div>${testers}
+        </div>`;
+    }).join('');
+};
+
 let db = null;
 if (window.supabase) {
     db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -270,6 +362,9 @@ async function fetchUserProfile(user) {
         if (savedScratch) document.getElementById('dm-scratchpad-input').value = savedScratch;
     }
 
+    // Feature switches first, so anything gated by one renders correctly.
+    window.initAppSettingsRealtimeChannel();
+    window.loadAppSettings();
     initPresenceChannel(data);
     initChatRealtimeChannel();
     initCombatTrackerRealtimeChannel();
@@ -347,6 +442,7 @@ async function loadAllProfiles() {
             return { ...p, character: c, skills: s, arsenal: a, perks: pk, augments: ag, gear: gr };
         });
         
+        if (typeof window.renderFeatureSwitchPanel === 'function') window.renderFeatureSwitchPanel(); // tester picker needs the player list
         const myProf = allProfiles.find(p => p.id === currentUserId);
         if (myProf) {
             document.getElementById('term-username').value = myProf.username || '';
@@ -1032,9 +1128,12 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      // Bug-hunt pass (2026-09-24): cargo_item_catalog (the DM's cargo item
      // catalog) was missing from the backup entirely. No other table
      // references it, so it sits safely in this parent group.
-     'cargo_item_catalog'],
+     'cargo_item_catalog',
+     // Command Terminal refactor Phase 0 (2026-09-30): DM feature switches.
+     'app_settings'],
     ['ship_markers', 'system_hazards'],
-    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker'],
+    // battle_tokens (2026-09-30): one row per Battle Map token, child of battle_encounters.
+    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens'],
     ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
 ];
 // Primary key column per table -- verified directly against the live schema.
@@ -1045,7 +1144,8 @@ window.FULL_BACKUP_TABLE_GROUPS = [
 window.FULL_BACKUP_PK_COLUMN = {
     character_skills: 'character_id',
     planetary_modifiers: 'body_id',
-    system_ownership_overrides: 'system_id'
+    system_ownership_overrides: 'system_id',
+    app_settings: 'feature_key'
 };
 // Tables with a column that references another row in the SAME table.
 window.FULL_BACKUP_SELF_REF_TABLES = { ship_markers: ['docked_to', 'parent_id'] };
