@@ -232,33 +232,248 @@ let battleMapOrdnanceEls = {};     // salvo_id -> ordnance marker DOM element
 let battleMapPrevOrdnanceIds = new Set(); // salvo_ids seen on the previous render, to detect resolved/removed payloads
 let battleMapLastEncounterId = null; // hard-resets the three maps above when the active battle itself changes
 
-async function loadBattleEncounters() {
+/* --- PER-ROW TOKEN STORAGE (Command Terminal refactor, Phase 0, 2026-09-30) ---
+   Battle Map tokens used to live in ONE jsonb array on the battle_encounters
+   row, and every move rewrote the whole array -- two people dragging at the
+   same moment could silently undo each other (last writer wins), and every
+   single move made every client reload the whole encounter. Tokens now live
+   in the `battle_tokens` table, one row per token (id = the old token_id).
+
+   The IN-MEMORY shape is deliberately unchanged:
+   window.globalBattleEncounterCache.tokens is still an array of
+   { token_id, ship_marker_id, x, y, move_remaining, initiative?, ap_current?, ... }
+   so every one of the ~30 places that READS tokens keeps working untouched.
+   Only the write path changed: saveBattleTokens(newArray) now diffs the new
+   array against the last-known saved state and writes just what changed --
+   an insert for a new token, a column-level update for a changed one, a
+   delete for a removed one. Other clients get per-row realtime deltas
+   (battle_tokens_stream below) instead of a full encounter reload.
+
+   Legacy battles: the first time any client loads an encounter whose
+   `tokens_migrated` flag is false, its old jsonb tokens are copied into
+   battle_tokens (duplicate-safe) and the flag is set. The old
+   battle_encounters.tokens column is left in place as dead schema, never
+   written again (same precedent as ship_markers.owner_id). */
+const BATTLE_TOKEN_COLUMNS = ['ship_marker_id', 'x', 'y', 'z', 'facing', 'move_remaining', 'initiative', 'ap_current', 'turned_round', 'callsign_base', 'callsign_index'];
+let battleTokenSnapshot = {};           // token_id -> row fields as last saved/received (diff baseline)
+let battleTokenSnapshotEncounterId = null;
+let battleTokenLocalWriteAt = {};       // token_id -> ISO time of this client's newest write (ignores older echoes)
+let battleTokenSortSeq = 0;
+
+function battleTokenRowToObj(r) {
+    const t = { token_id: r.id, ship_marker_id: r.ship_marker_id, x: r.x, y: r.y };
+    BATTLE_TOKEN_COLUMNS.forEach(c => {
+        if (c === 'ship_marker_id' || c === 'x' || c === 'y') return;
+        if (r[c] !== null && r[c] !== undefined) t[c] = r[c];
+    });
+    if (r.extra && typeof r.extra === 'object') Object.keys(r.extra).forEach(k => { if (!(k in t)) t[k] = r.extra[k]; });
+    return t;
+}
+function battleTokenObjToFields(t) {
+    const f = {};
+    BATTLE_TOKEN_COLUMNS.forEach(c => { f[c] = (t[c] === undefined) ? null : t[c]; });
+    if (f.x === null) f.x = 0;
+    if (f.y === null) f.y = 0;
+    if (f.z === null) f.z = 0;
+    if (f.facing === null) f.facing = 0;
+    const extra = {};
+    Object.keys(t).forEach(k => { if (k !== 'token_id' && !BATTLE_TOKEN_COLUMNS.includes(k)) extra[k] = t[k]; });
+    f.extra = extra;
+    return f;
+}
+function resetBattleTokenSnapshot(encounterId, tokens) {
+    battleTokenSnapshotEncounterId = encounterId;
+    battleTokenSnapshot = {};
+    (tokens || []).forEach(t => { battleTokenSnapshot[t.token_id] = battleTokenObjToFields(t); });
+}
+function nextBattleTokenSortOrder() {
+    battleTokenSortSeq = (battleTokenSortSeq + 1) % 1000;
+    return Date.now() + battleTokenSortSeq / 1000;
+}
+
+async function importLegacyBattleTokens(encounter, existingRows) {
+    const legacy = Array.isArray(encounter.tokens) ? encounter.tokens : [];
+    const have = new Set((existingRows || []).map(r => r.id));
+    const base = Date.now();
+    const rows = legacy.filter(t => t && t.token_id && !have.has(t.token_id)).map((t, i) => ({
+        id: t.token_id, encounter_id: encounter.id, ...battleTokenObjToFields(t), sort_order: base + i / 1000
+    }));
+    if (rows.length > 0) {
+        const { error } = await db.from('battle_tokens').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+        if (error) { console.error('importLegacyBattleTokens: copy failed', error); return false; }
+    }
+    const { error: flagErr } = await db.from('battle_encounters').update({ tokens_migrated: true }).eq('id', encounter.id);
+    if (flagErr) console.error('importLegacyBattleTokens: could not set tokens_migrated', flagErr);
+    return true;
+}
+
+async function fetchBattleTokenRows(encounterId) {
+    const { data, error } = await db.from('battle_tokens').select('*').eq('encounter_id', encounterId).order('sort_order', { ascending: true });
+    if (error) { console.error('fetchBattleTokenRows failed', error); return null; }
+    return (data || []).slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+}
+
+async function loadBattleEncountersInner() {
     // Battle music hook (2026-08 audio polish): this function already runs
     // on EVERY connected client via battle_encounters_stream below, whoever
     // started/ended the fight -- so comparing the active-state edge here
     // fires the music bed for the whole table, not just the DM's browser.
     const wasActive = !!window.globalBattleEncounterCache;
+    const prevCache = window.globalBattleEncounterCache;
     const { data, error } = await db.from('battle_encounters').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(1);
     if (error) { console.error('loadBattleEncounters failed', error); return; }
-    window.globalBattleEncounterCache = (data && data.length > 0) ? data[0] : null;
+    const encounter = (data && data.length > 0) ? data[0] : null;
+    if (encounter) {
+        let rows = await fetchBattleTokenRows(encounter.id);
+        if (rows === null) {
+            // Token fetch failed -- keep whatever tokens we already had for this
+            // same battle rather than blanking the grid on a network blip.
+            encounter.tokens = (prevCache && prevCache.id === encounter.id) ? (prevCache.tokens || []) : [];
+        } else {
+            if (!encounter.tokens_migrated) {
+                await importLegacyBattleTokens(encounter, rows);
+                const again = await fetchBattleTokenRows(encounter.id);
+                if (again !== null) rows = again;
+            }
+            // A token this client wrote more recently than the row we just
+            // read keeps its local (newer) value -- avoids a load that raced a
+            // local save from snapping a token back for a moment.
+            const prevById = {};
+            if (prevCache && prevCache.id === encounter.id) (prevCache.tokens || []).forEach(t => { prevById[t.token_id] = t; });
+            encounter.tokens = rows.map(r => {
+                const localAt = battleTokenLocalWriteAt[r.id];
+                if (localAt && prevById[r.id] && (!r.updated_at || localAt > r.updated_at)) return prevById[r.id];
+                return battleTokenRowToObj(r);
+            });
+        }
+        resetBattleTokenSnapshot(encounter.id, encounter.tokens);
+    }
+    window.globalBattleEncounterCache = encounter;
     const isActive = !!window.globalBattleEncounterCache;
     if (window.AudioEngine) {
         if (isActive && !wasActive) window.AudioEngine.startBattleMusic();
         else if (!isActive && wasActive) window.AudioEngine.stopBattleMusic();
     }
+    if (typeof window.syncBattleBroadcastChannel === 'function') window.syncBattleBroadcastChannel();
+    if (typeof window.maybeResolvePendingRoundTick === 'function') window.maybeResolvePendingRoundTick();
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+}
+// Coalesced: many realtime events in a burst collapse into one reload, and
+// an await-er always gets a load that started after its own call.
+const loadBattleEncounters = window.coalesceAsync(loadBattleEncountersInner);
+
+// Coalesce many per-row token events (e.g. a whole fleet deploy) into one render.
+let battleMapRenderScheduled = false;
+function scheduleBattleMapRender() {
+    if (battleMapRenderScheduled) return;
+    battleMapRenderScheduled = true;
+    setTimeout(() => {
+        battleMapRenderScheduled = false;
+        if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+    }, 16);
+}
+
+function applyBattleTokenRealtime(payload) {
+    const enc = window.globalBattleEncounterCache;
+    if (!enc || !payload) return;
+    const type = payload.eventType;
+    if (type === 'DELETE') {
+        const id = payload.old && payload.old.id;
+        if (!id) return;
+        if (!(enc.tokens || []).some(t => t.token_id === id)) { delete battleTokenSnapshot[id]; return; }
+        enc.tokens = (enc.tokens || []).filter(t => t.token_id !== id);
+        delete battleTokenSnapshot[id];
+        scheduleBattleMapRender();
+        return;
+    }
+    const r = payload.new;
+    if (!r || r.encounter_id !== enc.id) return;
+    const localAt = battleTokenLocalWriteAt[r.id];
+    if (localAt && r.updated_at && r.updated_at < localAt) return; // stale echo of an older write of ours
+    const obj = battleTokenRowToObj(r);
+    const list = (enc.tokens || []).slice();
+    const idx = list.findIndex(t => t.token_id === r.id);
+    if (idx >= 0) {
+        if (JSON.stringify(battleTokenObjToFields(list[idx])) === JSON.stringify(battleTokenObjToFields(obj))) { battleTokenSnapshot[r.id] = battleTokenObjToFields(obj); return; }
+        list[idx] = obj;
+    } else {
+        list.push(obj);
+    }
+    enc.tokens = list;
+    battleTokenSnapshot[r.id] = battleTokenObjToFields(obj);
+    scheduleBattleMapRender();
 }
 
 let battleEncountersRealtimeChannel = null;
+let battleTokensRealtimeChannel = null;
 function initBattleEncountersRealtimeChannel() {
     battleEncountersRealtimeChannel = db.channel('battle_encounters_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'battle_encounters' }, () => {
             loadBattleEncounters();
         })
         .subscribe();
+    battleTokensRealtimeChannel = db.channel('battle_tokens_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'battle_tokens' }, (payload) => {
+            applyBattleTokenRealtime(payload);
+        })
+        .subscribe();
 }
 window.initBattleEncountersRealtimeChannel = initBattleEncountersRealtimeChannel;
 window.loadBattleEncounters = loadBattleEncounters;
+window.applyBattleTokenRealtime = applyBattleTokenRealtime;
+
+/* --- BATTLE BROADCAST CHANNEL (Command Terminal refactor, Phase 0, 2026-09-30) ---
+   An ephemeral Supabase Realtime *broadcast* channel per battle
+   ('battle:<encounter id>'), for things that should be SEEN by everyone but
+   never STORED: weapon-fire effects and destruction explosions today;
+   drag previews, rulers and pings in later phases. Nothing here touches
+   the database. Before this, fire/explosion effects only ever played on
+   the firing player's own screen (see the old note on
+   window.playWeaponFireEffect). Same broadcast mechanism db.js already
+   uses for tactical pings. self:false -- a sender never receives its own
+   message, so nothing plays twice. Receivers skip any effect involving a
+   vessel they aren't allowed to see (hidden ships). */
+let battleBroadcastChannel = null;
+let battleBroadcastEncounterId = null;
+window.syncBattleBroadcastChannel = function() {
+    const enc = window.globalBattleEncounterCache;
+    const id = enc ? enc.id : null;
+    if (id === battleBroadcastEncounterId) return;
+    if (battleBroadcastChannel) {
+        try { if (typeof db.removeChannel === 'function') db.removeChannel(battleBroadcastChannel); } catch (e) { console.warn('battle broadcast: removeChannel failed', e); }
+        battleBroadcastChannel = null;
+    }
+    battleBroadcastEncounterId = id;
+    if (!id) return;
+    battleBroadcastChannel = db.channel('battle:' + id, { config: { broadcast: { self: false } } })
+        .on('broadcast', { event: 'fx' }, (msg) => { handleRemoteBattleFx(msg && msg.payload); })
+        .subscribe();
+};
+window.sendBattleBroadcast = function(event, payload) {
+    if (!battleBroadcastChannel || typeof battleBroadcastChannel.send !== 'function') return;
+    try {
+        const p = battleBroadcastChannel.send({ type: 'broadcast', event, payload: Object.assign({ v: 1, u: currentUserId }, payload) });
+        if (p && typeof p.then === 'function') p.then(null, err => console.warn('battle broadcast: send failed', err));
+    } catch (e) { console.warn('battle broadcast: send failed', e); }
+};
+function handleRemoteBattleFx(p) {
+    if (!p || p.v !== 1 || !window.globalBattleEncounterCache) return;
+    const visible = (id) => {
+        const v = globalShipMarkersCache.find(m => m.id === id);
+        if (!v) return true; // already gone (e.g. destroyed) -- nothing left to hide
+        return (typeof window.isVesselVisibleToMe === 'function') ? window.isVesselVisibleToMe(v) : true;
+    };
+    if (p.k === 'fire') {
+        if (!visible(p.src) || !visible(p.dst)) return;
+        window.playWeaponFireEffect(p.src, p.dst, p.col || undefined, p.dmg || undefined, true);
+    } else if (p.k === 'boom') {
+        if (p.marker && !visible(p.marker)) return;
+        const grid = document.getElementById('battle-map-grid');
+        if (!grid || typeof p.x !== 'number' || typeof p.y !== 'number') return;
+        spawnDestructionEffect(grid, p.x, p.y);
+    }
+}
+window.handleRemoteBattleFx = handleRemoteBattleFx;
 
 window.toggleBattleMap = function() {
     const panel = document.getElementById('battle-map-panel');
@@ -278,7 +493,7 @@ window.startBattleEncounter = async function() {
         await db.from('battle_encounters').update({ is_active: false }).eq('id', window.globalBattleEncounterCache.id);
     }
 
-    const { error } = await db.from('battle_encounters').insert({ name, is_active: true, created_by: currentUserId, tokens: [] });
+    const { error } = await db.from('battle_encounters').insert({ name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true });
     if (error) { alert('Failed to start battle: ' + error.message); return; }
     if (nameInput) nameInput.value = '';
     await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement started: "${name}".`, message_type: 'system' });
@@ -294,11 +509,54 @@ window.endBattleEncounter = async function() {
     loadBattleEncounters();
 };
 
+/* Same signature every caller already used: hand it the complete new token
+   array. It updates the local cache immediately, then writes ONLY the
+   differences to battle_tokens (see the PER-ROW TOKEN STORAGE comment near
+   the top of this file). Returns once every write has settled. */
 async function saveBattleTokens(tokens) {
-    if (!window.globalBattleEncounterCache) return;
-    window.globalBattleEncounterCache.tokens = tokens;
-    await db.from('battle_encounters').update({ tokens }).eq('id', window.globalBattleEncounterCache.id);
+    const enc = window.globalBattleEncounterCache;
+    if (!enc) return;
+    enc.tokens = tokens;
+    await persistBattleTokenDiff(enc, tokens);
 }
+async function persistBattleTokenDiff(enc, tokens) {
+    if (battleTokenSnapshotEncounterId !== enc.id) resetBattleTokenSnapshot(enc.id, []);
+    const nowIso = new Date().toISOString();
+    const seen = new Set();
+    const inserts = [];
+    const updates = [];
+    (tokens || []).forEach(t => {
+        if (!t || !t.token_id) return;
+        seen.add(t.token_id);
+        const fields = battleTokenObjToFields(t);
+        const prev = battleTokenSnapshot[t.token_id];
+        if (!prev) {
+            inserts.push({ id: t.token_id, encounter_id: enc.id, ...fields, sort_order: nextBattleTokenSortOrder(), updated_at: nowIso });
+        } else {
+            const changed = {};
+            Object.keys(fields).forEach(k => { if (JSON.stringify(fields[k]) !== JSON.stringify(prev[k])) changed[k] = fields[k]; });
+            if (Object.keys(changed).length > 0) updates.push({ id: t.token_id, changed: { ...changed, updated_at: nowIso } });
+        }
+        battleTokenSnapshot[t.token_id] = fields;
+    });
+    const deletes = Object.keys(battleTokenSnapshot).filter(id => !seen.has(id));
+    deletes.forEach(id => { delete battleTokenSnapshot[id]; });
+    inserts.forEach(r => { battleTokenLocalWriteAt[r.id] = nowIso; });
+    updates.forEach(u => { battleTokenLocalWriteAt[u.id] = nowIso; });
+
+    const ops = [];
+    if (inserts.length > 0) ops.push(db.from('battle_tokens').insert(inserts));
+    updates.forEach(u => ops.push(db.from('battle_tokens').update(u.changed).eq('id', u.id)));
+    if (deletes.length > 0) ops.push(db.from('battle_tokens').delete().in('id', deletes));
+    if (ops.length === 0) return;
+    const results = await Promise.all(ops.map(q => Promise.resolve(q).then(r => r, err => ({ error: err }))));
+    const failed = results.filter(r => r && r.error);
+    if (failed.length > 0) {
+        console.error('saveBattleTokens: some token writes failed -- resyncing from the database', failed.map(f => f.error));
+        loadBattleEncounters();
+    }
+}
+window.saveBattleTokens = saveBattleTokens;
 
 function clampToGrid(x, y) {
     return {
@@ -467,7 +725,9 @@ window.rollBattleInitiative = async function() {
     const firstVessel = firstTok ? globalShipMarkersCache.find(m => m.id === firstTok.ship_marker_id) : null;
     if (firstTok) firstTok.ap_current = window.getTokenApMax(firstVessel);
 
-    const updatePayload = { tokens: newTokens, turn_order: turnOrder, current_turn_index: 0, round_number: 1, initiative_rolled: true };
+    const updatePayload = { turn_order: turnOrder, current_turn_index: 0, round_number: 1, initiative_rolled: true, pending_round_tick: false };
+    // Tokens are per-row now (battle_tokens) -- saved separately from the encounter's own fields.
+    await saveBattleTokens(newTokens);
     await db.from('battle_encounters').update(updatePayload).eq('id', encounter.id);
     Object.assign(encounter, updatePayload);
 
@@ -529,8 +789,9 @@ window.ensureNewTokensInTurnOrder = async function() {
         // trusting the old numeric index, which the splice(s) above may
         // have invalidated.
         const newCurrentIndex = currentTokenId ? newOrder.indexOf(currentTokenId) : encounter.current_turn_index;
-        await db.from('battle_encounters').update({ tokens: newTokens, turn_order: newOrder, current_turn_index: newCurrentIndex < 0 ? encounter.current_turn_index : newCurrentIndex }).eq('id', encounter.id);
-        Object.assign(encounter, { tokens: newTokens, turn_order: newOrder, current_turn_index: newCurrentIndex < 0 ? encounter.current_turn_index : newCurrentIndex });
+        await saveBattleTokens(newTokens);
+        await db.from('battle_encounters').update({ turn_order: newOrder, current_turn_index: newCurrentIndex < 0 ? encounter.current_turn_index : newCurrentIndex }).eq('id', encounter.id);
+        Object.assign(encounter, { turn_order: newOrder, current_turn_index: newCurrentIndex < 0 ? encounter.current_turn_index : newCurrentIndex });
         if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     } catch (err) {
         console.error('ensureNewTokensInTurnOrder: failed to roll in a newly-added token', err);
@@ -558,6 +819,10 @@ window.spendTokenAp = function(shipMarkerId, amount) {
     const turnOrder = encounter.turn_order || [];
     const curTokId = turnOrder[encounter.current_turn_index];
     if (!turnOrder.includes(tok.token_id)) return true; // this token was never given an individual slot (AI-stance/ai_controlled) -- unrestricted, matches its always-acts-at-round-boundary behavior
+    if (encounter.pending_round_tick) {
+        alert('This round is waiting for the DM to resolve it.');
+        return false;
+    }
     if (tok.token_id !== curTokId) {
         alert("It's not this unit's turn yet.");
         return false;
@@ -568,14 +833,16 @@ window.spendTokenAp = function(shipMarkerId, amount) {
         return false;
     }
     const newTokens = tokens.map(t => t.token_id === tok.token_id ? { ...t, ap_current: apCur - amount } : t);
-    encounter.tokens = newTokens;
     // Bug-hunt pass (2026-09-24): this used to end in `.catch(...)` -- but a
     // Supabase query builder has no .catch() (only .then), so it threw a
     // TypeError right here: the AP spend was never saved and every manual
     // shot/launch/withdraw aborted the moment initiative had been rolled.
     // `.then(({ error }) => ...)` is the correct fire-and-forget form.
-    db.from('battle_encounters').update({ tokens: newTokens }).eq('id', encounter.id)
-        .then(({ error }) => { if (error) console.error('spendTokenAp: failed to persist AP spend', error); });
+    // Per-row token storage (2026-09-30): saveBattleTokens updates the cache
+    // synchronously, then writes just this token's ap_current. Fire-and-forget
+    // (this function must stay synchronous for its callers); it logs + resyncs
+    // on failure itself.
+    saveBattleTokens(newTokens);
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     return true;
 };
@@ -592,16 +859,36 @@ window.spendTokenAp = function(shipMarkerId, amount) {
    the top of the order. Callable by the DM or by whoever owns the vessel
    whose turn it currently is -- matches how a player already fires their
    own weapons without DM involvement elsewhere in this app. */
-window.endCurrentTurn = async function() {
+/* DM-AUTHORITATIVE ROUND TICK (Command Terminal refactor, Phase 0,
+   2026-09-30): a player's END TURN still advances turns on its own, with no
+   DM input -- EXCEPT the wrap into a new round. That wrap used to run the
+   whole round tick (AI fire, point defense, ordnance, cooldowns, refills)
+   inside whichever browser pressed the button, which means results could
+   depend on who clicked. Now a player's wrap just sets
+   battle_encounters.pending_round_tick = true, and the DM's browser, which
+   sees that flag through realtime, runs the tick exactly once
+   (window.maybeResolvePendingRoundTick, called after every encounter load).
+   Needed for full undo (one place records every automated result) and for
+   any future server-side Fog of War (a player's browser won't be able to
+   see hidden ships). If the DM's tab isn't open the round waits, with an
+   "awaiting DM" line in the turn bar -- the DM can also just press END TURN. */
+let battleRoundTickInFlight = false;
+window.endCurrentTurn = async function(opts) {
+    opts = opts || {};
     const encounter = window.globalBattleEncounterCache;
     if (!encounter || !encounter.initiative_rolled) return;
     const turnOrder = encounter.turn_order || [];
     if (turnOrder.length === 0) return;
 
     const isDm = currentUserRole === 'dm';
+    if (encounter.pending_round_tick && !isDm) {
+        alert('This round is waiting for the DM to resolve it.');
+        return;
+    }
     const curTok = (encounter.tokens || []).find(t => t.token_id === turnOrder[encounter.current_turn_index]);
     const curVessel = curTok ? globalShipMarkersCache.find(m => m.id === curTok.ship_marker_id) : null;
     if (!isDm && !(curVessel && window.vesselHasOwner(curVessel, currentUserId))) return;
+    if (isDm && battleRoundTickInFlight) return;
 
     let idx = encounter.current_turn_index;
     let wrapped = false;
@@ -621,34 +908,70 @@ window.endCurrentTurn = async function() {
         return;
     }
 
-    if (wrapped && typeof window.resolveRoundTick === 'function') {
-        await window.resolveRoundTick();
-        // resolveRoundTick can destroy/change tokens (PD, AI fire) -- re-read
-        // the freshly-picked next token's vessel fresh rather than trust a
-        // now-possibly-stale reference. A token destroyed by the round tick
-        // right as it becomes its own turn is a known, accepted edge case
-        // this pass doesn't fully solve -- the DM/owner just clicks END TURN
-        // again to skip it.
-        nextVessel = globalShipMarkersCache.find(m => m.id === nextTok.ship_marker_id);
-        if (!nextVessel || (nextVessel.integrity_hull || 0) <= 0) {
-            if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
-            return;
-        }
+    if (wrapped && !isDm) {
+        // Hand the round boundary to the DM's browser.
+        const { error } = await db.from('battle_encounters').update({ pending_round_tick: true }).eq('id', encounter.id);
+        if (error) { alert('Failed to end the round: ' + error.message); return; }
+        encounter.pending_round_tick = true;
+        await db.from('chat_logs').insert({ sender_id: null, content: `⏳ [INITIATIVE] Round ${encounter.round_number || 1} complete — awaiting the DM to resolve the round.`, message_type: 'system' });
+        if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+        return;
     }
 
-    const apMax = window.getTokenApMax(nextVessel);
-    const freshEncounter = window.globalBattleEncounterCache; // resolveRoundTick may have reloaded/updated this
-    const newTokens = (freshEncounter.tokens || []).map(t => t.token_id === nextTok.token_id ? { ...t, ap_current: apMax } : t);
+    if (wrapped) battleRoundTickInFlight = true;
+    try {
+        if (wrapped && encounter.pending_round_tick) {
+            // Claim the pending flag first, so a second DM tab (or a manual
+            // END TURN racing the automatic pickup) can't resolve it twice.
+            const { data: claimed, error: claimErr } = await db.from('battle_encounters')
+                .update({ pending_round_tick: false }).eq('id', encounter.id).eq('pending_round_tick', true).select();
+            if (claimErr) { console.error('endCurrentTurn: failed to claim pending round', claimErr); return; }
+            if (!claimed || claimed.length === 0) return; // someone else already resolved it
+            encounter.pending_round_tick = false;
+        }
+        if (wrapped && typeof window.resolveRoundTick === 'function') {
+            await window.resolveRoundTick();
+            // resolveRoundTick can destroy/change tokens (PD, AI fire) -- re-read
+            // the freshly-picked next token's vessel fresh rather than trust a
+            // now-possibly-stale reference. A token destroyed by the round tick
+            // right as it becomes its own turn is a known, accepted edge case
+            // this pass doesn't fully solve -- the DM/owner just clicks END TURN
+            // again to skip it.
+            nextVessel = globalShipMarkersCache.find(m => m.id === nextTok.ship_marker_id);
+            if (!nextVessel || (nextVessel.integrity_hull || 0) <= 0) {
+                if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+                return;
+            }
+        }
 
-    const updatePayload = { tokens: newTokens, current_turn_index: idx };
-    if (wrapped) updatePayload.round_number = (freshEncounter.round_number || 1) + 1;
+        const apMax = window.getTokenApMax(nextVessel);
+        const freshEncounter = window.globalBattleEncounterCache; // resolveRoundTick may have reloaded/updated this
+        if (!freshEncounter) return;
+        const newTokens = (freshEncounter.tokens || []).map(t => t.token_id === nextTok.token_id ? { ...t, ap_current: apMax } : t);
 
-    await db.from('battle_encounters').update(updatePayload).eq('id', freshEncounter.id);
-    Object.assign(freshEncounter, updatePayload);
+        const updatePayload = { current_turn_index: idx, pending_round_tick: false };
+        if (wrapped) updatePayload.round_number = (freshEncounter.round_number || 1) + 1;
 
-    await db.from('chat_logs').insert({ sender_id: null, content: `⏭️ [INITIATIVE] ${nextVessel.name}'s turn (${apMax} AP)${wrapped ? `, round ${updatePayload.round_number}` : ''}.`, message_type: 'system' });
+        await saveBattleTokens(newTokens);
+        await db.from('battle_encounters').update(updatePayload).eq('id', freshEncounter.id);
+        Object.assign(freshEncounter, updatePayload);
 
-    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+        await db.from('chat_logs').insert({ sender_id: null, content: `⏭️ [INITIATIVE] ${nextVessel.name}'s turn (${apMax} AP)${wrapped ? `, round ${updatePayload.round_number}` : ''}.`, message_type: 'system' });
+
+        if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+    } finally {
+        if (wrapped) battleRoundTickInFlight = false;
+    }
+};
+
+/* DM browser only: if a player has handed off a round boundary, resolve it.
+   Safe to call any number of times (in-flight guard + the claim above). */
+window.maybeResolvePendingRoundTick = function() {
+    if (currentUserRole !== 'dm') return;
+    const enc = window.globalBattleEncounterCache;
+    if (!enc || !enc.initiative_rolled || !enc.pending_round_tick || battleRoundTickInFlight) return;
+    // Defer a tick so the loader that called us finishes rendering first.
+    setTimeout(() => { window.endCurrentTurn({ autoResolve: true }); }, 0);
 };
 
 
@@ -756,6 +1079,8 @@ window.checkBattleTokenDestroyed = async function(vessel) {
     // ship_markers realtime channel in this codebase for other clients to
     // detect "this token just now hit 0 hull" independently.
     battleMapPendingExplosions.push({ token_id: tok.token_id, x: tok.x, y: tok.y });
+    // Battle broadcast (2026-09-30): other clients now see the explosion too.
+    if (typeof window.sendBattleBroadcast === 'function') window.sendBattleBroadcast('fx', { k: 'boom', marker: vessel.id, x: tok.x, y: tok.y });
     const remaining = tokens.filter(t => t.token_id !== tok.token_id);
     await saveBattleTokens(remaining);
     await db.from('chat_logs').insert({ sender_id: null, content: `💥 [TACTICAL BATTLE MAP] ${vessel.name} destroyed — removed from the engagement.`, message_type: 'system' });
@@ -2277,6 +2602,10 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         const v = globalShipMarkersCache.find(m => m.id === shipMarkerId);
         if (!v || !window.vesselHasOwner(v, currentUserId)) return 'tap';
         const enc = window.globalBattleEncounterCache;
+        if (enc && enc.initiative_rolled && enc.pending_round_tick) {
+            blockReason = 'This round is waiting for the DM to resolve it.';
+            return 'tap';
+        }
         if (enc && enc.initiative_rolled && liveToken) {
             const order = enc.turn_order || [];
             if (order.includes(liveToken.token_id) && order[enc.current_turn_index] !== liveToken.token_id) {
@@ -2517,14 +2846,16 @@ window.renderBattleMapPanel = function() {
             const curTok = tokens.find(t => t.token_id === curTokId);
             const curVessel = curTok ? globalShipMarkersCache.find(m => m.id === curTok.ship_marker_id) : null;
             const turnInfo = document.getElementById('battle-map-turn-info');
-            if (turnInfo) {
+            if (turnInfo && encounter.pending_round_tick) {
+                turnInfo.innerText = `Round ${encounter.round_number || 1} complete — ⏳ awaiting DM to resolve the round`;
+            } else if (turnInfo) {
                 turnInfo.innerText = curVessel
                     ? `Round ${encounter.round_number || 1} — ${curVessel.name}'s turn (AP ${curTok.ap_current || 0}/${window.getTokenApMax(curVessel)})`
                     : `Round ${encounter.round_number || 1} — (current unit not found)`;
             }
             const endTurnBtn = document.getElementById('battle-map-endturn-btn');
             if (endTurnBtn) {
-                const canEndTurn = isDm || (curVessel && window.vesselHasOwner(curVessel, currentUserId));
+                const canEndTurn = isDm || (!encounter.pending_round_tick && curVessel && window.vesselHasOwner(curVessel, currentUserId));
                 endTurnBtn.style.display = canEndTurn ? 'inline-block' : 'none';
             }
             // Cheap, idempotent tail check (own in-flight guard) -- picks up
@@ -2914,7 +3245,10 @@ function spawnImpactFlash(grid, x, y, colorHex) {
    target, no line from source), or a Restorative pulse for Healing (also
    target-only, no attack-style effect). See spawnBeamEffect/
    spawnTracerEffect/spawnBurstEffect/spawnHealPulseEffect below for the
-   family-specific rendering. LOCAL to this client only -- unlike
+   family-specific rendering. [UPDATE 2026-09-30: no longer local-only --
+   every call is now also sent over the battle broadcast channel, see
+   BATTLE BROADCAST CHANNEL near the top of this file. The note below is
+   the original rationale, kept for history.] LOCAL to this client only -- unlike
    the ordnance visualization above, a direct-fire shot has no persisted
    in-flight row to piggyback sync off of, and this app has no ephemeral
    broadcast channel (every existing realtime channel here is a real DB
@@ -2929,13 +3263,20 @@ function spawnImpactFlash(grid, x, y, colorHex) {
    Silently no-ops if the Battle Map isn't open, there's no active battle,
    or either vessel isn't currently a token in it — safe to call
    unconditionally after every resolved shot regardless of context. */
-window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex, dmgType) {
-    const grid = document.getElementById('battle-map-grid');
-    if (!grid || !window.globalBattleEncounterCache) return;
+window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex, dmgType, fromRemote) {
+    if (!window.globalBattleEncounterCache) return;
     const tokens = window.globalBattleEncounterCache.tokens || [];
     const sourceTok = tokens.find(t => t.ship_marker_id === sourceVesselId);
     const targetTok = tokens.find(t => t.ship_marker_id === targetVesselId);
     if (!sourceTok || !targetTok) return;
+    // Battle broadcast (Phase 0, 2026-09-30): tell every other open Battle
+    // Map to play the same effect -- sent even if THIS client's map isn't
+    // open (e.g. firing from the Vessel Deck). Never re-sent by a receiver.
+    if (!fromRemote && typeof window.sendBattleBroadcast === 'function') {
+        window.sendBattleBroadcast('fx', { k: 'fire', src: sourceVesselId, dst: targetVesselId, col: colorHex || null, dmg: dmgType || null });
+    }
+    const grid = document.getElementById('battle-map-grid');
+    if (!grid) return;
 
     const half = BATTLE_TOKEN_SIZE / 2;
     const sx = sourceTok.x + half, sy = sourceTok.y + half;
