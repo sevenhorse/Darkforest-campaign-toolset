@@ -473,6 +473,9 @@ function handleRemoteBattleFx(p) {
     };
     if (p.k === 'fire') {
         if (!visible(p.src) || !visible(p.dst)) return;
+        // Everyone at the table now hears the shot too (it used to play only
+        // on the shooter's own device); the impact sound follows it.
+        if (window.AudioEngine && window.AudioEngine.playShoot) { try { window.AudioEngine.playShoot(); } catch (e) {} }
         window.playWeaponFireEffect(p.src, p.dst, p.col || undefined, p.dmg || undefined, true);
     } else if (p.k === 'boom') {
         if (p.marker && !visible(p.marker)) return;
@@ -3079,6 +3082,7 @@ const DomBattleRenderer = {
 window.DomBattleRenderer = DomBattleRenderer;
 window.battleRenderer = DomBattleRenderer;
 
+let lastAnnouncedTurnKey = null;
 window.renderBattleMapPanel = function() {
     const dmControls = document.getElementById('battle-map-dm-controls');
     const inactiveMsg = document.getElementById('battle-map-inactive-msg');
@@ -3133,6 +3137,14 @@ window.renderBattleMapPanel = function() {
             const curTok = tokens.find(t => t.token_id === curTokId);
             const curVessel = curTok ? globalShipMarkersCache.find(m => m.id === curTok.ship_marker_id) : null;
             const turnInfo = document.getElementById('battle-map-turn-info');
+            // "Your turn" alert (2026-10-01): a chime on the owning player's
+            // own device the moment their ship's turn comes up -- once per
+            // turn, so re-renders don't repeat it. The DM doesn't get it.
+            const turnKey = `${encounter.id}:${encounter.round_number || 1}:${encounter.current_turn_index}`;
+            if (!isDm && !encounter.pending_round_tick && curVessel && window.vesselHasOwner(curVessel, currentUserId) && lastAnnouncedTurnKey !== turnKey) {
+                lastAnnouncedTurnKey = turnKey;
+                if (window.AudioEngine && window.AudioEngine.playTurnStart) { try { window.AudioEngine.playTurnStart(); } catch (e) {} }
+            }
             if (turnInfo && encounter.pending_round_tick) {
                 turnInfo.innerText = `Round ${encounter.round_number || 1} complete — ⏳ awaiting DM to resolve the round`;
             } else if (turnInfo) {
@@ -3428,7 +3440,24 @@ window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex,
     // call sites from breaking) falls back to the original beam look.
     const family = (dmgType && window.DAMAGE_TYPE_FAMILY && window.DAMAGE_TYPE_FAMILY[dmgType]) || 'beam';
     window.battleRenderer.fireEffect(sx, sy, tx, ty, color, family);
+    if (family !== 'pulse') playBattleImpactSound(targetVesselId);
 };
+
+/* Impact sound (Phase 1, 2026-10-01): a moment after a shot lands, a shield
+   shimmer if the target still has shields up, otherwise a hull thud. This
+   runs after the damage was applied, so "shields still up" is the right
+   read. Throttled so an AI volley of many guns doesn't stack into noise. */
+let lastBattleImpactSoundAt = 0;
+function playBattleImpactSound(targetVesselId) {
+    const ae = window.AudioEngine;
+    if (!ae || !ae.playShieldHit) return;
+    const now = Date.now();
+    if (now - lastBattleImpactSoundAt < 150) return;
+    lastBattleImpactSoundAt = now;
+    const target = globalShipMarkersCache.find(m => m.id === targetVesselId);
+    const shieldsUp = !!(target && (target.integrity_shields || 0) > 0);
+    setTimeout(() => { try { shieldsUp ? ae.playShieldHit() : ae.playHullHit(); } catch (e) {} }, 180);
+}
 
 // Beam family (Energy, Ion, Exotic, Antimatter, Heat -- see
 // window.DAMAGE_TYPE_FAMILY) -- the original/default fire effect from the
@@ -3660,6 +3689,7 @@ window.autoTargetAllMyWeapons = function(targetVesselId) {
 let battleMapTargetHighlightTimeout = null;
 window.flashBattleTargetHighlight = function(vesselId) {
     if (!vesselId || !window.globalBattleEncounterCache) return;
+    if (window.AudioEngine && window.AudioEngine.playTargetLock) window.AudioEngine.playTargetLock(); // target-lock beep (2026-10-01)
     const grid = document.getElementById('battle-map-grid');
     if (!grid) return;
     const pos = window.getBattleTokenPosition ? window.getBattleTokenPosition(vesselId) : null;
