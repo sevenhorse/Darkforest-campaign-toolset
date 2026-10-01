@@ -2510,6 +2510,44 @@ window.deployFleetToBattle = async function() {
     window.renderBattleMapPanel();
 };
 
+/* DAMAGE RING (Command Terminal refactor, Phase 1, 2026-10-01) ---
+   Every Battle Map token gets rings showing how much it has left:
+   - inner ring = HULL: filled clockwise from 12 o'clock in the existing
+     hull color (green > 66%, amber > 33%, red below), the lost part grey.
+   - outer ring = SHIELDS (cyan), only for ships that have shields at all
+     and never for strike craft (their tokens are too small for two rings).
+   Pure CSS (conic-gradient + a mask that hollows it into a ring), so it
+   costs nothing per frame on phones. Numbers are in the token's tooltip.
+   Visibility follows the token itself -- anyone who can see a token sees
+   its rings (same as the side card's health bars for visible ships). */
+function battleTokenFraction(cur, max) {
+    if (!(max > 0)) return null;
+    const c = (cur === undefined || cur === null) ? max : cur;
+    return Math.max(0, Math.min(1, c / max));
+}
+function battleTokenDamageRingsHtml(vessel, isStrikeCraft, isStation) {
+    if (!vessel) return '';
+    const radius = isStation ? '7px' : '50%';
+    const ring = (insetPx, thickPx, frac, fill, empty, cls) => {
+        const deg = Math.round(frac * 360);
+        return `<div class="battle-token-ring ${cls}" style="inset:-${insetPx}px; padding:${thickPx}px; border-radius:${radius}; background:conic-gradient(${fill} 0deg ${deg}deg, ${empty} ${deg}deg 360deg);"></div>`;
+    };
+    let html = '';
+    const hull = battleTokenFraction(vessel.integrity_hull, vessel.max_hull || 100);
+    if (hull !== null) html += ring(isStrikeCraft ? 5 : 6, isStrikeCraft ? 2 : 3, hull, battleTokenHpColor(vessel), 'rgba(70,74,72,0.85)', 'battle-token-ring-hull');
+    const shields = isStrikeCraft ? null : battleTokenFraction(vessel.integrity_shields, vessel.max_shields || 0);
+    if (shields !== null) html += ring(10, 2, shields, '#00e1ff', 'rgba(0,60,80,0.7)', 'battle-token-ring-shields');
+    return html;
+}
+function battleTokenIntegrityText(vessel) {
+    const parts = [];
+    const hullMax = vessel.max_hull || 100;
+    parts.push(`Hull ${vessel.integrity_hull !== undefined && vessel.integrity_hull !== null ? vessel.integrity_hull : hullMax}/${hullMax}`);
+    if ((vessel.max_shields || 0) > 0) parts.push(`Shields ${vessel.integrity_shields !== undefined && vessel.integrity_shields !== null ? vessel.integrity_shields : vessel.max_shields}/${vessel.max_shields}`);
+    return ' — ' + parts.join(' · ');
+}
+window.battleTokenDamageRingsHtml = battleTokenDamageRingsHtml;
+
 function battleTokenHpColor(vessel) {
     if (!vessel) return '#6b826a';
     const max = vessel.max_hull || 100;
@@ -2918,6 +2956,7 @@ const DomBattleRenderer = {
                     : isStrikeCraftTok
                     ? `${vessel.name} — strike craft, Move: ${moveRemaining}/${vessel.tactical_speed ?? 160} px remaining. Fire from the Hangar Bay panel, not this token.`
                     : `${vessel ? vessel.name : '(vessel not found)'} — Move: ${moveRemaining}${vessel ? '/' + (vessel.tactical_speed ?? 160) : ''} px remaining this round`;
+                if (vessel) tokenEl.title += battleTokenIntegrityText(vessel);
                 // left/top set separately from the rest so re-applying the same
                 // value every render (nothing moved) never re-triggers the CSS
                 // transition -- only an ACTUAL change animates.
@@ -2932,14 +2971,20 @@ const DomBattleRenderer = {
                 // visual differentiator (kept intentionally light — squadrons
                 // don't get their own ship-status card, see the checkpoint notes
                 // for why the data model doesn't fit renderBattleShipCards).
-                tokenEl.style.border = `2px ${isStrikeCraftTok ? 'dashed' : 'solid'} ${battleTokenHpColor(vessel)}`;
+                // Damage ring build (Phase 1, 2026-10-01): the token's own
+                // border now carries the FACTION color (whose ship it is),
+                // and hull/shields are shown by the rings drawn around it
+                // (battleTokenDamageRingsHtml below) -- the old HP-colored
+                // border is superseded by the hull ring, which shows the
+                // same color AND how much is left.
+                tokenEl.style.border = `2px ${isStrikeCraftTok ? 'dashed' : 'solid'} ${battleTokenFactionColor(vessel)}`;
                 // Initiative + Action Economy build (this session): a bright
                 // glow on whichever token currently has the turn -- purely
                 // additive to the existing HP-color border above, cleared for
                 // every other token by re-setting boxShadow unconditionally
                 // every render (same "re-apply every render" pattern the rest
                 // of this loop already uses).
-                tokenEl.style.boxShadow = (currentTurnTokenId && tok.token_id === currentTurnTokenId) ? '0 0 8px 3px #ffd700' : 'none';
+                const isCurrentTurnTok = !!(currentTurnTokenId && tok.token_id === currentTurnTokenId);
                 tokenEl.style.display = 'flex';
                 tokenEl.style.alignItems = 'center';
                 tokenEl.style.justifyContent = 'center';
@@ -2965,16 +3010,21 @@ const DomBattleRenderer = {
                 // rather than replacing that border -- HP state stays visible,
                 // ownership becomes ALSO visible at a glance without a click
                 // into the side card.
-                tokenEl.style.boxShadow = `0 0 0 2px ${battleTokenFactionColor(vessel)}, 0 0 6px rgba(0,0,0,0.6)`;
+                // Bug fix (2026-10-01): this line used to overwrite the gold
+                // "current turn" glow set a few lines above on every render,
+                // so the glow never actually showed. The faction color is on
+                // the border now; the shadow only carries the turn glow.
+                tokenEl.style.boxShadow = isCurrentTurnTok ? '0 0 10px 5px rgba(255,215,0,0.85)' : '0 0 6px rgba(0,0,0,0.6)';
                 tokenEl.style.textAlign = 'center';
-                tokenEl.style.overflow = 'hidden';
+                tokenEl.style.overflow = 'visible'; // rings sit outside the token; the name text clips itself below
                 tokenEl.style.padding = '1px';
                 tokenEl.style.zIndex = '2';
 
-                tokenEl.innerHTML = '';
-                tokenEl.appendChild(document.createTextNode(
-                    !vessel ? '???' : isStrikeCraftTok ? '🛩️' : vessel.name.slice(0, 6)
-                ));
+                tokenEl.innerHTML = battleTokenDamageRingsHtml(vessel, isStrikeCraftTok, isStationTok);
+                const label = document.createElement('span');
+                label.style.cssText = 'position:relative; z-index:1; max-width:100%; overflow:hidden; white-space:nowrap; pointer-events:none;';
+                label.textContent = !vessel ? '???' : isStrikeCraftTok ? '🛩️' : vessel.name.slice(0, 6);
+                tokenEl.appendChild(label);
                 if (!isStationTok && moveRemaining < 0) {
                     const moveBadge = document.createElement('div');
                     moveBadge.style.cssText = 'position:absolute; top:-8px; right:-4px; background:#ff3333; color:#030403; font-size:7px; font-weight:bold; border-radius:6px; padding:0 3px; pointer-events:none;';
