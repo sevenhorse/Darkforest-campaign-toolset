@@ -23,6 +23,66 @@ window.AudioEngine = (function() {
         }
     }
 
+    // Sound-effects volume + mute (2026-10-01). Until now "Mute Music" only
+    // covered the music beds -- every synthesized effect went straight to the
+    // speakers with no way to turn it down. All effects now route through one
+    // gain node controlled from the 🔊 AUDIO menu (per device, localStorage).
+    let sfxVolume = (function() {
+        try { const v = parseFloat(localStorage.getItem('darkforest_sfx_volume')); return isNaN(v) ? 1 : Math.max(0, Math.min(1, v)); } catch (e) { return 1; }
+    })();
+    let sfxMuted = (function() {
+        try { return localStorage.getItem('darkforest_sfx_muted') === 'true'; } catch (e) { return false; }
+    })();
+    let sfxGainNode = null;
+    function sfxOut() {
+        if (!sfxGainNode) {
+            sfxGainNode = audioCtx.createGain();
+            sfxGainNode.connect(audioCtx.destination);
+        }
+        sfxGainNode.gain.value = sfxMuted ? 0 : sfxVolume;
+        return sfxGainNode;
+    }
+    function setSfxVolume(v) {
+        sfxVolume = Math.max(0, Math.min(1, parseFloat(v)));
+        try { localStorage.setItem('darkforest_sfx_volume', String(sfxVolume)); } catch (e) {}
+        if (sfxGainNode) sfxGainNode.gain.value = sfxMuted ? 0 : sfxVolume;
+    }
+    function setSfxMuted(b) {
+        sfxMuted = !!b;
+        try { localStorage.setItem('darkforest_sfx_muted', sfxMuted ? 'true' : 'false'); } catch (e) {}
+        if (sfxGainNode) sfxGainNode.gain.value = sfxMuted ? 0 : sfxVolume;
+    }
+    // Small helpers for the new effects below.
+    function tone(type, f0, f1, t0, dur, vol) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(f0, audioCtx.currentTime + t0);
+        if (f1 && f1 !== f0) osc.frequency.exponentialRampToValueAtTime(f1, audioCtx.currentTime + t0 + dur);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime + t0);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + t0 + dur);
+        osc.connect(gain);
+        gain.connect(sfxOut());
+        osc.start(audioCtx.currentTime + t0);
+        osc.stop(audioCtx.currentTime + t0 + dur + 0.02);
+    }
+    function noiseBurst(t0, dur, vol, filterHz) {
+        const len = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+        const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = filterHz;
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime + t0);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + t0 + dur);
+        src.connect(filter); filter.connect(gain); gain.connect(sfxOut());
+        src.start(audioCtx.currentTime + t0);
+    }
+
     /* ----------------------------------------------------------------------
        MUSIC BEDS -- real Battlestar Galactica soundtrack (Bear McCreary),
        served from a PRIVATE Supabase Storage bucket, not a public file
@@ -343,6 +403,10 @@ window.AudioEngine = (function() {
         const sld = document.getElementById('audio-volume-slider');
         if (chk) chk.checked = muted;
         if (sld) sld.value = Math.round(musicVolume * 100);
+        const sfxChk = document.getElementById('sfx-mute-toggle');
+        const sfxSld = document.getElementById('sfx-volume-slider');
+        if (sfxChk) sfxChk.checked = sfxMuted;
+        if (sfxSld) sfxSld.value = Math.round(sfxVolume * 100);
     }
     document.addEventListener('DOMContentLoaded', syncControlsUI);
 
@@ -401,7 +465,7 @@ window.AudioEngine = (function() {
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 0.5);
         },
@@ -417,7 +481,7 @@ window.AudioEngine = (function() {
             gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 0.3);
         },
@@ -434,7 +498,7 @@ window.AudioEngine = (function() {
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime + 0.2);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 0.3);
         },
@@ -455,7 +519,7 @@ window.AudioEngine = (function() {
             gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.8);
 
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 0.8);
         },
@@ -472,7 +536,7 @@ window.AudioEngine = (function() {
             gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 1.0);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 1.5);
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 1.5);
         },
@@ -490,7 +554,7 @@ window.AudioEngine = (function() {
             gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 0.22);
         },
@@ -507,7 +571,7 @@ window.AudioEngine = (function() {
                 gain.gain.setValueAtTime(0.08, audioCtx.currentTime + t);
                 gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + t + 0.08);
                 osc.connect(gain);
-                gain.connect(audioCtx.destination);
+                gain.connect(sfxOut());
                 osc.start(audioCtx.currentTime + t);
                 osc.stop(audioCtx.currentTime + t + 0.08);
             });
@@ -525,7 +589,7 @@ window.AudioEngine = (function() {
             gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 0.05);
         },
@@ -544,7 +608,7 @@ window.AudioEngine = (function() {
                 gain.gain.setValueAtTime(0.09, audioCtx.currentTime + t);
                 gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + t + 0.12);
                 osc.connect(gain);
-                gain.connect(audioCtx.destination);
+                gain.connect(sfxOut());
                 osc.start(audioCtx.currentTime + t);
                 osc.stop(audioCtx.currentTime + t + 0.12);
             });
@@ -566,7 +630,7 @@ window.AudioEngine = (function() {
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(sfxOut());
             osc.start();
             osc.stop(audioCtx.currentTime + 0.25);
         },
@@ -587,11 +651,43 @@ window.AudioEngine = (function() {
                 gain.gain.setValueAtTime(0.09, audioCtx.currentTime + t);
                 gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + t + 0.35);
                 osc.connect(gain);
-                gain.connect(audioCtx.destination);
+                gain.connect(sfxOut());
                 osc.start(audioCtx.currentTime + t);
                 osc.stop(audioCtx.currentTime + t + 0.35);
             });
         },
+
+        // --- Battle sounds (Phase 1, 2026-10-01) ---
+        // Two quick rising beeps: a weapon has a target.
+        playTargetLock: function() {
+            init();
+            tone('square', 1300, 1300, 0, 0.06, 0.035);
+            tone('square', 1750, 1750, 0.09, 0.08, 0.035);
+        },
+        // Shot absorbed by shields: a bright shimmering sweep.
+        playShieldHit: function() {
+            init();
+            tone('sine', 1500, 600, 0, 0.35, 0.07);
+            tone('triangle', 2200, 900, 0.02, 0.3, 0.035);
+            noiseBurst(0, 0.18, 0.05, 4000);
+        },
+        // Shot through to the hull: a low thud with a crunch.
+        playHullHit: function() {
+            init();
+            tone('sine', 110, 45, 0, 0.35, 0.22);
+            noiseBurst(0, 0.25, 0.14, 900);
+        },
+        // It's now YOUR ship's turn (plays only on that player's own device).
+        playTurnStart: function() {
+            init();
+            tone('sine', 660, 660, 0, 0.12, 0.08);
+            tone('sine', 880, 880, 0.13, 0.12, 0.08);
+            tone('sine', 1320, 1320, 0.26, 0.22, 0.07);
+        },
+        setSfxVolume: function(v) { setSfxVolume(v); },
+        setSfxMuted: function(b) { setSfxMuted(b); },
+        isSfxMuted: function() { return sfxMuted; },
+        getSfxVolume: function() { return sfxVolume; },
 
         // --- Music beds (2026-08 audio polish) ---
         startAmbient: startAmbient,
