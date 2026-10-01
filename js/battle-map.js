@@ -3014,7 +3014,11 @@ const DomBattleRenderer = {
                 // "current turn" glow set a few lines above on every render,
                 // so the glow never actually showed. The faction color is on
                 // the border now; the shadow only carries the turn glow.
-                tokenEl.style.boxShadow = isCurrentTurnTok ? '0 0 10px 5px rgba(255,215,0,0.85)' : '0 0 6px rgba(0,0,0,0.6)';
+                tokenEl.style.boxShadow = '0 0 6px rgba(0,0,0,0.6)';
+                // The current-turn glow is a pulsing ring drawn by CSS
+                // (.battle-token-current-turn::after in style.css), so it
+                // survives re-renders and animates without per-frame repaints.
+                tokenEl.classList.toggle('battle-token-current-turn', isCurrentTurnTok);
                 tokenEl.style.textAlign = 'center';
                 tokenEl.style.overflow = 'visible'; // rings sit outside the token; the name text clips itself below
                 tokenEl.style.padding = '1px';
