@@ -1543,7 +1543,9 @@ window.renderCodexMatrix = function() {
     let html = '';
     ordered.forEach(e => {
         let cleanSubtitle = (e.subtitle || '').replace(/\|\s*LINK:.+/, '').trim();
-        let docHtml = (e.doc_data && e.doc_name) ? `<div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">📎 ATTACHMENT: ${e.doc_name} (${(e.doc_type || 'FILE').toUpperCase()})</div>` : '';
+        let docHtml = (e.doc_data && e.doc_name) ? `<div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">📎 ATTACHMENT: ${window.escapeHtml(e.doc_name)} (${window.escapeHtml((e.doc_type || 'FILE').toUpperCase())})</div>` : '';
+        // Images (Phase 1, 2026-10-01): small clickable thumbnail beside the title.
+        const thumbHtml = window.mediaThumbHtml(e.image_url, { size: 48, caption: e.title || '' });
         let authorName = allProfiles.find(p => p.id === e.created_by)?.username || 'Unknown';
         // Codex "hide" checkbox (this session) — badge is DM-view-only
         // (isDM already gates everything else in this card that shouldn't
@@ -1554,7 +1556,7 @@ window.renderCodexMatrix = function() {
         html += `
             <div class="codex-entry-card category-${e.category}">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div><strong style="color:#00e5a3; font-size:13px;">${e.title}</strong> ${hiddenBadge}<div style="font-size:10px; color:#6b826a; margin-top:2px;">${cleanSubtitle || 'General Record'}</div></div>
+                    <div style="display:flex; gap:8px; align-items:flex-start;">${thumbHtml}<div><strong style="color:#00e5a3; font-size:13px;">${window.escapeHtml(e.title || '')}</strong> ${hiddenBadge}<div style="font-size:10px; color:#6b826a; margin-top:2px;">${window.escapeHtml(cleanSubtitle || 'General Record')}</div></div></div>
                     <div style="display:flex; gap:6px; align-items:center;">
                         ${window.renderReorderArrows(orderKey, ordered, e.id, 'moveCodexEntryOrder')}
                         <button class="layer-edit" onclick="window.openCodexFullscreen('${e.id}')" style="font-size:9px; padding:3px 8px;">⛶ FULLSCREEN</button>
@@ -1562,7 +1564,7 @@ window.renderCodexMatrix = function() {
                         ${isDM ? `<button class="layer-del" onclick="window.deleteCodexEntry('${e.id}')" style="font-size:9px; padding:3px 6px;">✕</button>` : ''}
                     </div>
                 </div>
-                <p style="margin:8px 0 4px 0; font-size:11px; color:#d4c5a9; line-height:1.5; max-height:80px; overflow:hidden; text-overflow:ellipsis;">${e.content || ''}</p>
+                <p style="margin:8px 0 4px 0; font-size:11px; color:#d4c5a9; line-height:1.5; max-height:80px; overflow:hidden; text-overflow:ellipsis;">${window.escapeHtml(e.content || '')}</p>
                 ${docHtml}
                 <span class="author-tag">author: ${authorName}</span>
             </div>
@@ -1614,6 +1616,11 @@ window.editCodexEntry = function(id) {
     document.getElementById('new-codex-subtitle').value = sub;
     const hiddenCheckbox = document.getElementById('new-codex-hidden');
     if (hiddenCheckbox) hiddenCheckbox.checked = !!entry.is_hidden;
+    // Phase 1 (2026-10-01): image + the entry's existing attachment are
+    // loaded into the form so saving an edit keeps them (attachments were
+    // never loaded or saved before -- see saveNewCodexEntry).
+    window.setMediaPickerValue('codex', entry.image_url || '');
+    setCodexFormAttachment(entry.doc_name, entry.doc_data, entry.doc_type);
     document.getElementById('btn-save-codex-entry').innerText = "✓ UPDATE CODEX ENTRY";
     document.getElementById('btn-cancel-codex-edit').style.display = "block";
 };
@@ -1634,15 +1641,27 @@ window.saveNewCodexEntry = async function() {
     const hiddenCheckbox = document.getElementById('new-codex-hidden');
     const isHidden = hiddenCheckbox ? hiddenCheckbox.checked : false;
 
+    // Phase 1 (2026-10-01): image, plus the file attachment -- the
+    // attachment upload has always filled these hidden fields, but they
+    // were never included in the save, so no attachment was ever stored
+    // (0 of 29 live entries had one). Fixed here.
+    const imageRef = window.getMediaPickerValue('codex');
+    const docName = (document.getElementById('new-codex-doc-name') || {}).value || '';
+    const docData = (document.getElementById('new-codex-doc-data') || {}).value || '';
+    const docType = (document.getElementById('new-codex-doc-type') || {}).value || '';
+    const media = { image_url: imageRef, doc_name: docData ? docName : null, doc_data: docData || null, doc_type: docData ? (docType || null) : null };
+
+    let saveError = null;
     if (window.editingCodexId) {
         // Never touch created_by on an edit — it should stay whoever
         // originally authored the entry, not whoever most recently edited it.
-        const payload = { category: cat, title: title, subtitle: subtitle, content: content, is_hidden: isHidden };
-        await db.from('codex_entries').update(payload).eq('id', window.editingCodexId);
+        const payload = { category: cat, title: title, subtitle: subtitle, content: content, is_hidden: isHidden, ...media };
+        ({ error: saveError } = await db.from('codex_entries').update(payload).eq('id', window.editingCodexId));
     } else {
-        const payload = { category: cat, title: title, subtitle: subtitle, content: content, created_by: currentUserId, is_hidden: isHidden };
-        await db.from('codex_entries').insert(payload);
+        const payload = { category: cat, title: title, subtitle: subtitle, content: content, created_by: currentUserId, is_hidden: isHidden, ...media };
+        ({ error: saveError } = await db.from('codex_entries').insert(payload));
     }
+    if (saveError) { alert('Failed to save Codex entry: ' + saveError.message); return; }
 
     window.cancelCodexEdit(); window.switchCodexCategory(cat); if (typeof loadCodexEntries === 'function') loadCodexEntries();
 };
@@ -1654,6 +1673,8 @@ window.cancelCodexEdit = function() {
     document.getElementById('new-codex-content').value = '';
     const linkInput = document.getElementById('new-codex-link'); if(linkInput) linkInput.value = '';
     const hiddenCheckbox = document.getElementById('new-codex-hidden'); if (hiddenCheckbox) hiddenCheckbox.checked = false;
+    window.setMediaPickerValue('codex', '');
+    setCodexFormAttachment('', '', '');
     document.getElementById('btn-save-codex-entry').innerText = "+ PUBLISH TO CODEX";
     document.getElementById('btn-cancel-codex-edit').style.display = "none";
 };
@@ -1736,6 +1757,18 @@ window.renderCodexMarkdown = function(rawContent) {
     let html;
     if (typeof marked !== 'undefined') {
         html = (typeof marked.parse === 'function') ? marked.parse(withoutCharts) : marked(withoutCharts);
+        // HTML cleaning (Phase 1, 2026-10-01): run marked's output through
+        // DOMPurify (index.html loads it) so a Codex entry can never carry a
+        // <script>, an onclick=, a javascript: link, etc. -- formatting,
+        // tables, images and links all survive. If DOMPurify failed to load
+        // (CDN blocked), fail SAFE: show the entry as plain text instead of
+        // rendering unchecked HTML. Chart canvases are inserted after this
+        // step, from our own trusted markup.
+        if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+            html = window.DOMPurify.sanitize(html, { ADD_ATTR: ['target'] });
+        } else {
+            html = window.escapeHtml(withoutCharts).replace(/\n/g, '<br>');
+        }
     } else {
         // marked.js failed to load (offline CDN, ad-blocker, etc.) --
         // fails open to a plain-text-with-line-breaks rendering rather
@@ -1776,7 +1809,10 @@ window.openCodexFullscreen = function(id) {
     const rendered = (typeof window.renderCodexMarkdown === 'function')
         ? window.renderCodexMarkdown(entry.content || 'No narrative content recorded.')
         : { html: entry.content || 'No narrative content recorded.', charts: [] };
-    document.getElementById('reader-body-content').innerHTML = `<div class="codex-markdown">${rendered.html}</div>`;
+    const readerImage = window.isMediaRef(entry.image_url)
+        ? `<div style="text-align:center; margin-bottom:12px;"><img data-media-ref="${window.escapeHtml(entry.image_url)}" alt="${window.escapeHtml(entry.title || '')}" title="Click to enlarge" onclick="window.openImageLightbox(this.getAttribute('data-media-ref'), this.getAttribute('alt'))" style="max-width:100%; max-height:320px; object-fit:contain; border:1px solid #3c4e36; background:#040605; cursor:zoom-in;"></div>`
+        : '';
+    document.getElementById('reader-body-content').innerHTML = `${readerImage}<div class="codex-markdown">${rendered.html}</div>`;
 
     if (typeof Chart !== 'undefined') {
         const palette = ['#00e5a3', '#00e1ff', '#ffaa00', '#ff6b6b', '#c778dd', '#7cbf3f', '#66d9ff', '#ffe066'];
@@ -1821,6 +1857,16 @@ window.openCodexAttachment = function(id) {
     }
 };
 
+// Fills (or clears) the Codex form's attachment fields + its little "attached" tag.
+function setCodexFormAttachment(name, data, type) {
+    const n = document.getElementById('new-codex-doc-name'), d = document.getElementById('new-codex-doc-data'), t = document.getElementById('new-codex-doc-type');
+    if (!n || !d || !t) return;
+    n.value = (data && name) ? name : ''; d.value = data || ''; t.value = data ? (type || '') : '';
+    const wrap = document.getElementById('codex-current-doc-wrapper'), tag = document.getElementById('codex-current-doc-name'), label = document.getElementById('codex-file-label');
+    if (wrap) wrap.style.display = data ? 'block' : 'none';
+    if (tag) tag.innerText = data ? `📎 ${name}` : '';
+    if (label) label.innerText = 'Click to upload .txt, .md, .pdf, or image';
+}
 window.removeCodexAttachmentFromForm = function() {
     document.getElementById('new-codex-doc-name').value = ''; document.getElementById('new-codex-doc-data').value = ''; document.getElementById('new-codex-doc-type').value = '';
     document.getElementById('codex-current-doc-wrapper').style.display = 'none'; document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
@@ -2208,6 +2254,10 @@ function initFileHandlers() {
         reader.readAsDataURL(file);
     }
 
+    // Phase 1 (2026-10-01): the Codex form's image field.
+    const codexMediaSlot = document.getElementById('codex-media-picker-slot');
+    if (codexMediaSlot && typeof window.renderMediaPickerHtml === 'function') codexMediaSlot.innerHTML = window.renderMediaPickerHtml('codex', '', 'Header image (optional) — upload or paste a link');
+
     const codexDropzone = document.getElementById('codex-file-dropzone'); const codexFileInput = document.getElementById('codex-file-input');
     if (codexDropzone && codexFileInput) {
         codexDropzone.addEventListener('click', () => codexFileInput.click());
@@ -2218,6 +2268,10 @@ function initFileHandlers() {
     }
 
     function processCodexDoc(file) {
+        // Phase 1 (2026-10-01): attachments now actually save, and they're
+        // stored inside the entry itself (loaded by every player at login),
+        // so cap them. Pictures should go in the image field above instead.
+        if (file.size > 2 * 1024 * 1024) { alert(`"${file.name}" is ${(file.size / 1048576).toFixed(1)} MB -- attachments are limited to 2 MB. For pictures, use the image field above instead (it shrinks them automatically).`); return; }
         const isImage = file.type.startsWith('image/'); const isPDF = file.type === 'application/pdf';
         const docNameInput = document.getElementById('new-codex-doc-name'); const docDataInput = document.getElementById('new-codex-doc-data'); const docTypeInput = document.getElementById('new-codex-doc-type');
         docNameInput.value = file.name;
