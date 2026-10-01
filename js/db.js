@@ -352,7 +352,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // live) raise app_settings 'min_client_build'.value to match -- any browser
 // still running an older cached copy then shows a "reload" banner instead
 // of quietly writing data the new build can't see (2026-09-30 live bug).
-window.DARKFOREST_BUILD = '2026-10-01.02';
+window.DARKFOREST_BUILD = '2026-10-01.03';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -1403,11 +1403,13 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      // references it, so it sits safely in this parent group.
      'cargo_item_catalog',
      // Command Terminal refactor Phase 0 (2026-09-30): DM feature switches.
-     'app_settings'],
+     // encounter_presets (2026-10-01): DM-only saved battle setups.
+     'app_settings', 'encounter_presets'],
     ['ship_markers', 'system_hazards'],
     // battle_tokens (2026-09-30): one row per Battle Map token, child of battle_encounters.
     // battle_events (2026-10-01): the Battle Map undo log, also a child of battle_encounters.
-    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events'],
+    // battle_reinforcements (2026-10-01): DM-only pending preset waves, child of battle_encounters.
+    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events', 'battle_reinforcements'],
     ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
 ];
 // Primary key column per table -- verified directly against the live schema.
