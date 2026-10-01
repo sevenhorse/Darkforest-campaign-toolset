@@ -2441,8 +2441,13 @@ window.deployTemplateToBattle = async function() {
     if (currentUserRole !== 'dm' || !window.globalBattleEncounterCache) return;
     const select = document.getElementById('battle-map-template-select');
     if (!select || !select.value) { alert('Select a template first.'); return; }
-    const newId = await window.deployShipTemplate(select.value);
+    // 2026-10-01 (DM report): ships deployed from the Battle Map used to
+    // appear on the galaxy map too. They're Battle-Map-only now, same as
+    // preset NPCs and hangar-launched strike craft (hide_from_galaxy_map).
+    // silent: no "deployed to your DRADIS position" toast -- it isn't there.
+    const newId = await window.deployShipTemplate(select.value, { silent: true, overrides: { hide_from_galaxy_map: true } });
     if (!newId) return; // deployShipTemplate already alerted on failure
+    if (window.AudioEngine) window.AudioEngine.playPing();
     // deployShipTemplate fires its own loadGalaxyData() without awaiting it,
     // so globalShipMarkersCache may not have the new marker yet — await our
     // own call here so the token we're about to place doesn't briefly render
@@ -2497,7 +2502,7 @@ window.deployFleetToBattle = async function() {
     for (const member of members) {
         if (!findAnyTemplateById(member.template_id)) continue; // already warned above — skip entirely, don't attempt
         for (let i = 0; i < (member.quantity || 1); i++) {
-            const newId = await window.deployShipTemplate(member.template_id);
+            const newId = await window.deployShipTemplate(member.template_id, { silent: true, overrides: { hide_from_galaxy_map: true } }); // Battle-Map-only, see deployTemplateToBattle
             if (!newId) continue; // deployShipTemplate already alerted on a real DB error — skip this unit, keep going with the rest of the fleet
             if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
             const pos = staggeredTokenPos(tokens.length);
