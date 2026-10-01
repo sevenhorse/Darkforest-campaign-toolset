@@ -102,7 +102,7 @@ window.preserveFormState = function(container, render, selector) {
 // live) raise app_settings 'min_client_build'.value to match -- any browser
 // still running an older cached copy then shows a "reload" banner instead
 // of quietly writing data the new build can't see (2026-09-30 live bug).
-window.DARKFOREST_BUILD = '2026-09-30.02';
+window.DARKFOREST_BUILD = '2026-10-01.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -1156,7 +1156,8 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      'app_settings'],
     ['ship_markers', 'system_hazards'],
     // battle_tokens (2026-09-30): one row per Battle Map token, child of battle_encounters.
-    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens'],
+    // battle_events (2026-10-01): the Battle Map undo log, also a child of battle_encounters.
+    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events'],
     ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
 ];
 // Primary key column per table -- verified directly against the live schema.
