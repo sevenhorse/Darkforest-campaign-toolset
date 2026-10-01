@@ -204,7 +204,8 @@ window.deleteShipTemplate = async function(id) {
     return true;
 };
 
-window.deployShipTemplate = async function(id) {
+window.deployShipTemplate = async function(id, opts) {
+    opts = opts || {};
     const t = findAnyTemplateById(id);
     if (!t) return;
 
@@ -266,8 +267,16 @@ window.deployShipTemplate = async function(id) {
     // callers can learn the new marker's id — e.g. to immediately place it
     // as a battle-map token. Purely additive: existing callers that ignore
     // the return value (deploying to the galaxy map) are unaffected.
+    // opts.overrides (Encounter Presets): per-deployment field overrides
+    // (iff / is_hidden / ai_controlled / hide_from_galaxy_map) written in the
+    // same insert, so a hidden ship is never briefly visible.
+    if (opts.overrides && typeof opts.overrides === 'object') Object.assign(payload, opts.overrides);
     const { data, error } = await db.from('ship_markers').insert(payload).select().single();
     if (error) { alert("Failed to deploy vessel: " + error.message); return null; }
+    // opts.silent (Encounter Presets, 2026-10-01): a preset launch deploys
+    // many ships at once -- skip the per-ship reload/ping/toast; the caller
+    // reloads once at the end.
+    if (opts.silent) return data ? data.id : null;
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
     if (window.AudioEngine) window.AudioEngine.playPing();
     if (typeof window.showToast === 'function') window.showToast(`${t.name} deployed to your current DRADIS position.`);
