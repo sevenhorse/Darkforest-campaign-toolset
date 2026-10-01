@@ -1471,6 +1471,9 @@ window.resetShipStats = async function(vesselId) {
                 <label for="maxstats-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="DM-AI-for-NPCs: when ON, this deployed vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round. DM-only field.">
                     <input type="checkbox" id="maxstats-ai-controlled" style="margin:0;"> 🤖 AI Controlled — DM only
                 </label>
+                <label for="maxstats-galaxy-visible" style="font-size:10px; color:#00e1ff; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="Ships deployed from the Battle Map (and encounter presets / hangar-launched strike craft) are Battle-Map-only. Tick this to put the ship on the galaxy map too -- e.g. a captured NPC you want to keep. It appears at its last galaxy position. DM-only field.">
+                    <input type="checkbox" id="maxstats-galaxy-visible" style="margin:0;"> 🌌 Show on galaxy map — DM only
+                </label>
             </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="maxstats-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
@@ -1499,6 +1502,8 @@ window.resetShipStats = async function(vesselId) {
                 iff: document.getElementById('maxstats-iff').value || null,
                 is_hidden: document.getElementById('maxstats-hidden').checked,
                 ai_controlled: document.getElementById('maxstats-ai-controlled').checked,
+                // 2026-10-01: same read-back-unchanged rule as the fields above.
+                hide_from_galaxy_map: !document.getElementById('maxstats-galaxy-visible').checked,
                 image_url: window.getMediaPickerValue('maxstats')
             };
             const clamped = {
@@ -1529,6 +1534,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-iff').value = vessel.iff || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
+        document.getElementById('maxstats-galaxy-visible').checked = !vessel.hide_from_galaxy_map;
         window.setMediaPickerValue('maxstats', vessel.image_url || '');
         const dmWrap = document.getElementById('maxstats-dm-wrap');
         if (dmWrap) dmWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
