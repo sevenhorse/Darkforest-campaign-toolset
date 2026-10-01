@@ -81,13 +81,13 @@ window.renderShipDesignerPanel = function() {
         html += `
             <div class="note-card">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div>
+                    <div style="display:flex; gap:8px; align-items:flex-start;">${window.mediaThumbHtml(t.image_url, { size: 44, caption: t.name })}<div>
                         <strong style="color:#00e1ff; font-size:12px;">${t.name}</strong>${stationBadge}${classBadge}${iffBadge}
                         <p style="margin:2px 0 0 0; font-size:10px; color:#d4c5a9;">${classLine}</p>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">Shields ${t.max_shields || 0} · Reactive ${t.max_reactive || 0} · Ablative ${t.max_ablative || 0} · Hardened ${t.max_hardened || 0} · Hull ${t.max_hull || 0}</p>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">${hardpointLine}</p>
                         <span class="author-tag">designer: ${owner ? (owner.username || 'Commander') : 'Unknown'}</span>
-                    </div>
+                    </div></div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:120px;">
                         ${window.renderReorderArrows('ship_templates', ordered, t.id, 'moveShipTemplateOrder')}
                         <button class="btn-deploy" onclick="window.deployShipTemplate('${t.id}')" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">🚀 DEPLOY</button>
@@ -255,6 +255,9 @@ window.deployShipTemplate = async function(id) {
         // afterward per-deployment via the Vessel Deck's EDIT BASE STATS
         // modal (js/combat.js), independent of the source template.
         ai_controlled: !!t.ai_controlled,
+        // Phase 1 (2026-10-01): the ship's picture travels with it, same
+        // carry-from-template pattern; editable per ship afterward.
+        image_url: t.image_url || null,
         ship_weapons: JSON.parse(JSON.stringify(t.ship_weapons || [])),
         ship_decks: JSON.parse(JSON.stringify(t.ship_decks || [])),
         ship_hangar: newHangar
@@ -318,6 +321,7 @@ window.deployShipTemplate = async function(id) {
                     <option value="Escort">Escort</option>
                 </select>
             </div>
+            ${window.renderMediaPickerHtml('tmpl', '', 'Ship image (optional) — upload or paste a link')}
             <div id="tmpl-edit-iff-wrap" style="display:none;">
                 <label for="tmpl-edit-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) -- controls whether players can see/edit a deployed copy of this template in their Vessel Deck. Friendly is visible alongside a player's own ships; Neutral/Hostile/unset stay DM-only. DM-only field.">IFF Designation (DM only)</label>
                 <select id="tmpl-edit-iff" style="border-color:#ff6b6b;">
@@ -356,7 +360,8 @@ window.deployShipTemplate = async function(id) {
                 is_station: isStation,
                 vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null,
                 iff: document.getElementById('tmpl-edit-iff').value || null,
-                ai_controlled: document.getElementById('tmpl-edit-ai-controlled').checked
+                ai_controlled: document.getElementById('tmpl-edit-ai-controlled').checked,
+                image_url: window.getMediaPickerValue('tmpl')
             };
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -388,6 +393,7 @@ window.deployShipTemplate = async function(id) {
         if (aiWrap) aiWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         document.getElementById('tmpl-edit-ai-controlled').checked = !!t.ai_controlled;
         document.getElementById('tmpl-edit-station').checked = !!t.is_station;
+        window.setMediaPickerValue('tmpl', t.image_url || '');
         window.toggleStationFields('tmpl-edit');
         overlay.style.display = 'flex';
     };
@@ -1043,6 +1049,7 @@ window.renderSecretRepoEditorPanel = function() {
             <label for="repo-edit-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="DM-AI-for-NPCs: when ON, a deployed copy of this vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round.">
                 <input type="checkbox" id="repo-edit-ai-controlled" ${t.ai_controlled ? 'checked' : ''} style="margin:0;"> 🤖 AI Controlled
             </label>
+            ${window.renderMediaPickerHtml('repo', t.image_url || '', 'Ship image (optional) — upload or paste a link')}
 
             <h4 style="margin:16px 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#ff6b6b;">Base Stats (design max values)</h4>
             <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px;">
@@ -1190,7 +1197,8 @@ window.saveSecretRepoIdentityStats = async function() {
         is_station: isStation,
         vessel_class: document.getElementById('repo-edit-vesselclass').value || null,
         iff: document.getElementById('repo-edit-iff').value || null,
-        ai_controlled: document.getElementById('repo-edit-ai-controlled').checked
+        ai_controlled: document.getElementById('repo-edit-ai-controlled').checked,
+        image_url: window.getMediaPickerValue('repo')
     };
     const { error } = await db.from('ship_templates').update(payload).eq('id', editingRepoTemplateId);
     if (error) { alert("Failed to save template: " + error.message); return; }
