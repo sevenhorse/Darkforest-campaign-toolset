@@ -134,8 +134,13 @@ window.hydrateMediaImages = function(root) {
         img.setAttribute('data-media-loaded', ref);
         window.resolveMediaUrl(ref).then(url => {
             if (img.getAttribute('data-media-ref') !== ref) return; // changed while loading
-            if (url) { img.src = url; img.style.visibility = ''; }
-            else { img.alt = img.alt || 'image unavailable'; img.style.visibility = 'hidden'; }
+            img.style.visibility = '';
+            if (!url) { showMediaUnavailable(img); return; }
+            // A link that isn't really a picture (e.g. a web page) or a host
+            // that blocks embedding loads as a broken image -- show a clear
+            // "unavailable" tile instead of the browser's broken-icon.
+            img.onerror = () => showMediaUnavailable(img);
+            img.src = url;
         });
     });
 };
@@ -151,6 +156,34 @@ if (typeof MutationObserver !== 'undefined') {
     };
     if (document.body) startMediaObserver(); else document.addEventListener('DOMContentLoaded', startMediaObserver);
 }
+
+// Tidy stand-in for an image that can't be shown (bad link, blocked host,
+// deleted upload). Inline SVG, so it never needs the network itself.
+const MEDIA_UNAVAILABLE_SRC = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" fill="#040605"/>' +
+    '<rect x="6" y="6" width="108" height="108" fill="none" stroke="#3c4e36" stroke-dasharray="6 4"/>' +
+    '<text x="60" y="58" fill="#6b826a" font-family="monospace" font-size="13" text-anchor="middle">IMAGE</text>' +
+    '<text x="60" y="76" fill="#6b826a" font-family="monospace" font-size="13" text-anchor="middle">UNAVAILABLE</text></svg>');
+function showMediaUnavailable(img) {
+    img.onerror = null;
+    img.src = MEDIA_UNAVAILABLE_SRC;
+    img.setAttribute('data-media-broken', '1');
+    img.title = "Image unavailable — the link may be broken, blocked by its website, or not a direct link to a picture.";
+}
+
+// Checks that a pasted link really loads as a picture (not a web page, and
+// not blocked by its host). Resolves true/false; gives up after 10s.
+window.probeImageUrl = function(url) {
+    return new Promise(resolve => {
+        const probe = new Image();
+        let done = false;
+        const finish = (ok) => { if (done) return; done = true; clearTimeout(t); probe.onload = probe.onerror = null; resolve(ok); };
+        const t = setTimeout(() => finish(false), 10000);
+        probe.onload = () => finish(probe.naturalWidth > 0);
+        probe.onerror = () => finish(false);
+        probe.src = url;
+    });
+};
 
 // Small clickable thumbnail markup for any screen. Empty string if no image.
 window.mediaThumbHtml = function(ref, opts) {
@@ -186,7 +219,9 @@ window.openImageLightbox = function(ref, caption) {
     img.setAttribute('data-media-ref', ref);
     img.removeAttribute('data-media-loaded');
     window.hydrateMediaImages(img);
-    document.getElementById('media-lightbox-caption').textContent = caption || '';
+    const cap = document.getElementById('media-lightbox-caption');
+    cap.textContent = caption || '';
+    img.onload = () => { if (img.getAttribute('data-media-broken')) cap.textContent = (caption ? caption + ' — ' : '') + 'this image is unavailable (bad link, blocked by its website, or not a direct link to a picture).'; };
     box.style.display = 'flex';
     document.getElementById('media-lightbox-close').focus();
 };
@@ -238,6 +273,7 @@ window.renderMediaPickerHtml = function(prefix, currentRef, label) {
         <div id="${prefix}-media-status" style="font-size:9px; color:#6b826a; margin-top:2px;"></div>
     </div>`;
 };
+const mediaPickerProbeSeq = {};
 window.setMediaPickerValue = function(prefix, ref, fromUrlBox) {
     const hidden = document.getElementById(`${prefix}-media-ref`);
     const preview = document.getElementById(`${prefix}-media-preview`);
@@ -245,7 +281,25 @@ window.setMediaPickerValue = function(prefix, ref, fromUrlBox) {
     const status = document.getElementById(`${prefix}-media-status`);
     if (!hidden) return;
     const valid = window.isMediaRef(ref);
-    if (fromUrlBox && ref && !valid) { if (status) status.textContent = 'Links must start with https://'; return; }
+    if (fromUrlBox && ref && !valid) { hidden.value = ''; if (preview) preview.style.display = 'none'; if (status) status.textContent = 'Links must start with https://'; return; }
+    // A pasted link is only accepted once it actually loads as a picture
+    // (a web page link or a host that blocks embedding would just show
+    // "unavailable" everywhere). Live report 2026-10-01: a forum-page link
+    // was saved as an image.
+    if (fromUrlBox && valid) {
+        const seq = (mediaPickerProbeSeq[prefix] || 0) + 1;
+        mediaPickerProbeSeq[prefix] = seq;
+        hidden.value = '';
+        if (preview) { preview.style.display = 'none'; }
+        if (status) status.textContent = '⏳ Checking link…';
+        window.probeImageUrl(ref).then(ok => {
+            if (mediaPickerProbeSeq[prefix] !== seq) return; // typed something newer since
+            if (ok) { window.setMediaPickerValue(prefix, ref, false); if (status) status.textContent = '✓ Link works'; }
+            else if (status) status.textContent = "✗ That link didn't load as a picture. Use the image's own address: right-click the picture → \"Copy image address\" (on a phone: long-press → Copy image link), or upload the file instead.";
+        });
+        return;
+    }
+    mediaPickerProbeSeq[prefix] = (mediaPickerProbeSeq[prefix] || 0) + 1; // cancel any pending check
     hidden.value = valid ? ref : '';
     if (urlBox && !fromUrlBox) urlBox.value = /^https:/i.test(hidden.value) ? hidden.value : '';
     if (status) status.textContent = hidden.value.startsWith('storage:') ? '✓ Uploaded image attached' : '';
