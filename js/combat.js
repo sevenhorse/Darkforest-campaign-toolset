@@ -591,6 +591,7 @@ window.renderShipStanceHtml = function(vessel) {
         : '';
     return `
         <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center; gap:6px;">
+            ${window.mediaThumbHtml(vessel.image_url, { size: 36, caption: vessel.name })}
             <label for="vessel-stance-${vessel.id}" style="font-size:10px; color:#00e5a3; font-weight:bold; white-space:nowrap;">TACTICAL STANCE:</label>
             <select id="vessel-stance-${vessel.id}" onchange="window.updateShipStance('${vessel.id}', this.value)" style="width:160px; margin:0; padding:4px; font-size:10px; background:#040605; color:#00e5a3; border:1px solid #3c4e36;">
                 <option value="Balanced" ${currentStance === 'Balanced' ? 'selected' : ''}>Balanced (Standard)</option>
@@ -1455,6 +1456,7 @@ window.resetShipStats = async function(vesselId) {
                     <option value="Escort">Escort</option>
                 </select>
             </div>
+            ${window.renderMediaPickerHtml('maxstats', '', 'Ship image (optional) — upload or paste a link')}
             <div id="maxstats-dm-wrap" style="display:none; margin-top:6px; padding-top:8px; border-top:1px dashed #3c4e36;">
                 <label for="maxstats-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) -- controls whether players can see/edit this vessel in their own Vessel Deck. Friendly is visible alongside a player's own ships; Neutral/Hostile/unset stay DM-only. DM-only field.">IFF Designation (DM only)</label>
                 <select id="maxstats-iff" style="border-color:#ff6b6b;">
@@ -1496,7 +1498,8 @@ window.resetShipStats = async function(vesselId) {
                 // than silently resetting them.
                 iff: document.getElementById('maxstats-iff').value || null,
                 is_hidden: document.getElementById('maxstats-hidden').checked,
-                ai_controlled: document.getElementById('maxstats-ai-controlled').checked
+                ai_controlled: document.getElementById('maxstats-ai-controlled').checked,
+                image_url: window.getMediaPickerValue('maxstats')
             };
             const clamped = {
                 integrity_shields: Math.min(vessel.integrity_shields !== undefined ? vessel.integrity_shields : newMax.max_shields, newMax.max_shields),
@@ -1526,6 +1529,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-iff').value = vessel.iff || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
+        window.setMediaPickerValue('maxstats', vessel.image_url || '');
         const dmWrap = document.getElementById('maxstats-dm-wrap');
         if (dmWrap) dmWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         overlay.style.display = 'flex';
