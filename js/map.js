@@ -210,6 +210,7 @@ window.isPositionSensorVisible = function(x, y) {
     if (currentUserRole === 'dm') return true;
     for (let m of globalShipMarkersCache) {
         if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
+        if (m.hide_from_galaxy_map) continue; // Battle-Map-only ships aren't on this map, so they don't give sensor cover here
         if (window.vesselHasOwner(m, currentUserId) || m.iff === 'friendly') {
             if (Math.hypot(m.x - x, m.y - y) <= 300) return true;
         }
@@ -1284,7 +1285,7 @@ window.handleGlobalSearchInput = function(query) {
     let allSystems = globalProceduralSystemsCache.concat(globalDbSystemsCache);
     let results = [];
     allSystems.forEach(s => { if (s.name && s.name.toLowerCase().includes(query)) results.push({ type: 'star', data: s }); });
-    globalShipMarkersCache.forEach(m => { if (m.name && m.name.toLowerCase().includes(query)) results.push({ type: 'ship', data: m }); });
+    globalShipMarkersCache.forEach(m => { if (!m.hide_from_galaxy_map && m.name && m.name.toLowerCase().includes(query)) results.push({ type: 'ship', data: m }); }); // Battle-Map-only ships aren't on this map
     results = results.slice(0, 8);
     window._globalSearchResults = results;
 
@@ -1832,6 +1833,7 @@ window.initGalaxyEngine = function() {
 
         for (let m of globalShipMarkersCache) {
             if (m.docked_to) continue; // docked craft aren't independently selectable — they're part of their master
+            if (m.hide_from_galaxy_map) continue; // not drawn here, so not clickable/draggable here either (was an invisible grab target)
             if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < tokenHitRadius && (currentUserRole === 'dm' || window.vesselHasOwner(m, currentUserId))) {
                 window.draggedMarker = m; window._dragOrigin = { x: m.x, y: m.y }; window.selectedTarget = { type: 'ship', data: m }; window.addRecentTarget(window.selectedTarget);
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
