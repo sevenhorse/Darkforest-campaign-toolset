@@ -81,6 +81,197 @@ window.preserveFormState = function(container, render, selector) {
     saved.filter(s => !s.id.startsWith('sq-wpn-select-')).forEach(apply);
 };
 
+/* --- MEDIA IMAGES (Command Terminal refactor, Phase 1, 2026-10-01) ---
+   Images on Codex entries and ships. DM-confirmed: an image can be either
+   UPLOADED (shrunk to max 1600px, stored in the PRIVATE Supabase Storage
+   bucket 'media' -- only logged-in users can load it, via short-lived
+   signed links) or a PASTED https:// link. Who can set one = whoever can
+   already edit that Codex entry / ship.
+
+   One stored value ("media ref") covers both:
+     'https://...'          -> an outside link, used as-is
+     'storage:<path>'       -> an uploaded file in the 'media' bucket
+   Images on screen are written as <img data-media-ref="..."> with no src;
+   one watcher (below) notices them and fills in the real (signed) address,
+   so every screen that shows an image just writes that one attribute.
+   Click any such image to open it full-size (window.openImageLightbox). */
+const MEDIA_BUCKET = 'media';
+const MEDIA_MAX_PX = 1600;
+const mediaSignedUrlCache = {}; // path -> { url, exp, pending }
+
+window.isMediaRef = function(ref) {
+    return typeof ref === 'string' && (/^https:\/\/\S+$/i.test(ref) || /^storage:[\w\-./]+$/.test(ref));
+};
+window.resolveMediaUrl = async function(ref) {
+    if (!window.isMediaRef(ref)) return null;
+    if (/^https:/i.test(ref)) return ref;
+    const path = ref.slice('storage:'.length);
+    const hit = mediaSignedUrlCache[path];
+    if (hit && hit.url && hit.exp > Date.now()) return hit.url;
+    if (hit && hit.pending) return hit.pending;
+    const pending = (async () => {
+        try {
+            const { data, error } = await db.storage.from(MEDIA_BUCKET).createSignedUrl(path, 3600);
+            if (error || !data) { console.warn('media: could not get a link for', path, error); return null; }
+            mediaSignedUrlCache[path] = { url: data.signedUrl, exp: Date.now() + 55 * 60 * 1000 };
+            return data.signedUrl;
+        } catch (err) { console.warn('media: link request failed', err); return null; }
+        finally { if (mediaSignedUrlCache[path]) delete mediaSignedUrlCache[path].pending; }
+    })();
+    mediaSignedUrlCache[path] = Object.assign(mediaSignedUrlCache[path] || {}, { pending });
+    return pending;
+};
+
+// Fill in any <img data-media-ref> that doesn't have its real address yet.
+window.hydrateMediaImages = function(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    const imgs = [];
+    if (scope.matches && scope.matches('img[data-media-ref]')) imgs.push(scope);
+    scope.querySelectorAll('img[data-media-ref]').forEach(el => imgs.push(el));
+    imgs.forEach(img => {
+        const ref = img.getAttribute('data-media-ref');
+        if (!ref || img.getAttribute('data-media-loaded') === ref) return;
+        img.setAttribute('data-media-loaded', ref);
+        window.resolveMediaUrl(ref).then(url => {
+            if (img.getAttribute('data-media-ref') !== ref) return; // changed while loading
+            if (url) { img.src = url; img.style.visibility = ''; }
+            else { img.alt = img.alt || 'image unavailable'; img.style.visibility = 'hidden'; }
+        });
+    });
+};
+if (typeof MutationObserver !== 'undefined') {
+    const startMediaObserver = () => {
+        new MutationObserver(muts => {
+            for (const m of muts) {
+                if (m.type === 'attributes') { window.hydrateMediaImages(m.target); continue; }
+                m.addedNodes.forEach(n => { if (n.nodeType === 1) window.hydrateMediaImages(n); });
+            }
+        }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-media-ref'] });
+        window.hydrateMediaImages(document);
+    };
+    if (document.body) startMediaObserver(); else document.addEventListener('DOMContentLoaded', startMediaObserver);
+}
+
+// Small clickable thumbnail markup for any screen. Empty string if no image.
+window.mediaThumbHtml = function(ref, opts) {
+    if (!window.isMediaRef(ref)) return '';
+    opts = opts || {};
+    const size = opts.size || 40;
+    const esc = window.escapeHtml;
+    const caption = esc(opts.caption || '');
+    return `<img data-media-ref="${esc(ref)}" alt="${caption}" title="${caption ? caption + ' — ' : ''}click to enlarge" onclick="event.stopPropagation(); window.openImageLightbox(this.getAttribute('data-media-ref'), this.getAttribute('alt'))" style="width:${opts.width || size}px; height:${size}px; object-fit:cover; border:1px solid #3c4e36; border-radius:2px; background:#040605; cursor:zoom-in; flex-shrink:0; ${opts.style || ''}">`;
+};
+
+// Full-size popup. Click anywhere, the ✕, or press Esc to close.
+window.openImageLightbox = function(ref, caption) {
+    if (!window.isMediaRef(ref)) return;
+    let box = document.getElementById('media-lightbox');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'media-lightbox';
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+        box.style.cssText = 'position:fixed; inset:0; z-index:13000; background:rgba(2,3,4,0.92); display:none; flex-direction:column; align-items:center; justify-content:center; padding:16px; box-sizing:border-box; cursor:zoom-out;';
+        box.innerHTML = `<button type="button" id="media-lightbox-close" aria-label="Close image" style="position:absolute; top:12px; right:12px; width:auto; padding:4px 10px; font-size:12px;">✕</button>
+            <img id="media-lightbox-img" alt="" style="max-width:100%; max-height:85vh; object-fit:contain; border:1px solid #3c4e36; background:#040605;">
+            <div id="media-lightbox-caption" style="margin-top:10px; font-size:12px; color:#d4c5a9; text-align:center;"></div>`;
+        document.body.appendChild(box);
+        const close = () => { box.style.display = 'none'; };
+        box.addEventListener('click', close);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && box.style.display !== 'none') close(); });
+    }
+    const img = document.getElementById('media-lightbox-img');
+    img.removeAttribute('src');
+    img.alt = caption || '';
+    img.setAttribute('data-media-ref', ref);
+    img.removeAttribute('data-media-loaded');
+    window.hydrateMediaImages(img);
+    document.getElementById('media-lightbox-caption').textContent = caption || '';
+    box.style.display = 'flex';
+    document.getElementById('media-lightbox-close').focus();
+};
+
+// Shrink an image file (max 1600px on the long side) and upload it.
+// Returns a 'storage:<path>' ref, or throws with a readable message.
+window.uploadMediaImage = async function(file, folder) {
+    if (!file || !/^image\//.test(file.type)) throw new Error('That file is not an image.');
+    const bitmapUrl = URL.createObjectURL(file);
+    let blob, ext;
+    try {
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Could not read that image.')); i.src = bitmapUrl; });
+        const scale = Math.min(1, MEDIA_MAX_PX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale)), h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        const keepPng = file.type === 'image/png'; // keep transparency for PNGs (ship cut-outs, logos)
+        if (!keepPng) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h); }
+        ctx.drawImage(img, 0, 0, w, h);
+        ext = keepPng ? 'png' : 'jpg';
+        blob = await new Promise(res => canvas.toBlob(res, keepPng ? 'image/png' : 'image/jpeg', 0.86));
+        if (!blob) throw new Error('Could not process that image.');
+    } finally { URL.revokeObjectURL(bitmapUrl); }
+    if (blob.size > 5 * 1024 * 1024) throw new Error('Image is still over 5 MB after shrinking -- try a smaller one.');
+    const safeFolder = String(folder || 'misc').replace(/[^\w\-]/g, '');
+    const path = `${safeFolder}/${currentUserId || 'anon'}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await db.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: blob.type, upsert: false });
+    if (error) throw new Error('Upload failed: ' + error.message);
+    return 'storage:' + path;
+};
+
+// Reusable image field for forms: preview + UPLOAD + "or paste a link" + clear.
+// The chosen value lives in a hidden input #<prefix>-media-ref; read it with
+// window.getMediaPickerValue(prefix).
+window.renderMediaPickerHtml = function(prefix, currentRef, label) {
+    const esc = window.escapeHtml;
+    const ref = window.isMediaRef(currentRef) ? currentRef : '';
+    const urlVal = /^https:/i.test(ref) ? ref : '';
+    return `<div class="media-picker" id="${prefix}-media" style="margin-top:6px;">
+        <label for="${prefix}-media-url" style="font-size:9px; color:#6b826a; display:block;">${esc(label || 'Image (optional)')}</label>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <img id="${prefix}-media-preview" ${ref ? `data-media-ref="${esc(ref)}"` : ''} alt="Image preview" onclick="window.openImageLightbox(document.getElementById('${prefix}-media-ref').value, 'Preview')" style="width:44px; height:44px; object-fit:cover; border:1px solid #3c4e36; background:#040605; cursor:zoom-in; ${ref ? '' : 'display:none;'}">
+            <button type="button" class="layer-edit" onclick="document.getElementById('${prefix}-media-file').click()" style="width:auto; font-size:9px; padding:3px 8px; margin:0;">📷 UPLOAD</button>
+            <input type="file" id="${prefix}-media-file" accept="image/*" style="display:none;" onchange="window.handleMediaPickerUpload('${prefix}', this)">
+            <input type="text" inputmode="url" autocomplete="off" id="${prefix}-media-url" value="${esc(urlVal)}" placeholder="or paste an image link (https://…)" oninput="window.setMediaPickerValue('${prefix}', this.value.trim(), true)" style="flex:1; min-width:140px; font-size:10px; margin:0;">
+            <button type="button" class="layer-del" onclick="window.setMediaPickerValue('${prefix}', '')" title="Remove image" style="width:auto; font-size:9px; padding:3px 6px; margin:0;">✕</button>
+        </div>
+        <input type="hidden" id="${prefix}-media-ref" value="${esc(ref)}">
+        <div id="${prefix}-media-status" style="font-size:9px; color:#6b826a; margin-top:2px;"></div>
+    </div>`;
+};
+window.setMediaPickerValue = function(prefix, ref, fromUrlBox) {
+    const hidden = document.getElementById(`${prefix}-media-ref`);
+    const preview = document.getElementById(`${prefix}-media-preview`);
+    const urlBox = document.getElementById(`${prefix}-media-url`);
+    const status = document.getElementById(`${prefix}-media-status`);
+    if (!hidden) return;
+    const valid = window.isMediaRef(ref);
+    if (fromUrlBox && ref && !valid) { if (status) status.textContent = 'Links must start with https://'; return; }
+    hidden.value = valid ? ref : '';
+    if (urlBox && !fromUrlBox) urlBox.value = /^https:/i.test(hidden.value) ? hidden.value : '';
+    if (status) status.textContent = hidden.value.startsWith('storage:') ? '✓ Uploaded image attached' : '';
+    if (preview) {
+        if (hidden.value) { preview.style.display = ''; preview.removeAttribute('data-media-loaded'); preview.setAttribute('data-media-ref', hidden.value); window.hydrateMediaImages(preview); }
+        else { preview.style.display = 'none'; preview.removeAttribute('data-media-ref'); preview.removeAttribute('src'); }
+    }
+};
+window.getMediaPickerValue = function(prefix) {
+    const hidden = document.getElementById(`${prefix}-media-ref`);
+    const v = hidden ? hidden.value.trim() : '';
+    return window.isMediaRef(v) ? v : null;
+};
+window.handleMediaPickerUpload = async function(prefix, input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const status = document.getElementById(`${prefix}-media-status`);
+    if (status) status.textContent = '⏳ Uploading…';
+    try {
+        const ref = await window.uploadMediaImage(file, prefix.split('-')[0]);
+        window.setMediaPickerValue(prefix, ref);
+    } catch (err) {
+        if (status) status.textContent = '⚠ ' + err.message;
+    } finally { input.value = ''; }
+};
+
 /* --- FEATURE SWITCHES (Command Terminal refactor, Phase 0, 2026-09-30) ---
    DM-controlled switches that keep new, unfinished features hidden from
    players until the DM unlocks them. Backed by the `app_settings` table
@@ -102,7 +293,7 @@ window.preserveFormState = function(container, render, selector) {
 // live) raise app_settings 'min_client_build'.value to match -- any browser
 // still running an older cached copy then shows a "reload" banner instead
 // of quietly writing data the new build can't see (2026-09-30 live bug).
-window.DARKFOREST_BUILD = '2026-10-01.01';
+window.DARKFOREST_BUILD = '2026-10-01.02';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
