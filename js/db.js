@@ -100,11 +100,16 @@ const MEDIA_MAX_PX = 1600;
 const mediaSignedUrlCache = {}; // path -> { url, exp, pending }
 
 window.isMediaRef = function(ref) {
-    return typeof ref === 'string' && (/^https:\/\/\S+$/i.test(ref) || /^storage:[\w\-./]+$/.test(ref));
+    return typeof ref === 'string' && (/^https:\/\/\S+$/i.test(ref) || /^storage:[\w\-./]+$/.test(ref) || isInlineImageRef(ref));
 };
+// Older Codex picture *attachments* are stored inline (data:image/...;base64);
+// accepted for DISPLAY so they can show as thumbnails / in the popup.
+function isInlineImageRef(ref) {
+    return typeof ref === 'string' && /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(ref);
+}
 window.resolveMediaUrl = async function(ref) {
     if (!window.isMediaRef(ref)) return null;
-    if (/^https:/i.test(ref)) return ref;
+    if (/^https:/i.test(ref) || isInlineImageRef(ref)) return ref;
     const path = ref.slice('storage:'.length);
     const hit = mediaSignedUrlCache[path];
     if (hit && hit.url && hit.exp > Date.now()) return hit.url;
