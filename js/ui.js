@@ -1545,7 +1545,7 @@ window.renderCodexMatrix = function() {
         let cleanSubtitle = (e.subtitle || '').replace(/\|\s*LINK:.+/, '').trim();
         let docHtml = (e.doc_data && e.doc_name) ? `<div class="codex-doc-pill" onclick="window.openCodexAttachment('${e.id}')">📎 ATTACHMENT: ${window.escapeHtml(e.doc_name)} (${window.escapeHtml((e.doc_type || 'FILE').toUpperCase())})</div>` : '';
         // Images (Phase 1, 2026-10-01): small clickable thumbnail beside the title.
-        const thumbHtml = window.mediaThumbHtml(e.image_url, { size: 48, caption: e.title || '' });
+        const thumbHtml = window.mediaThumbHtml(codexDisplayImageRef(e), { size: 48, caption: e.title || '' });
         let authorName = allProfiles.find(p => p.id === e.created_by)?.username || 'Unknown';
         // Codex "hide" checkbox (this session) — badge is DM-view-only
         // (isDM already gates everything else in this card that shouldn't
@@ -1809,8 +1809,9 @@ window.openCodexFullscreen = function(id) {
     const rendered = (typeof window.renderCodexMarkdown === 'function')
         ? window.renderCodexMarkdown(entry.content || 'No narrative content recorded.')
         : { html: entry.content || 'No narrative content recorded.', charts: [] };
-    const readerImage = window.isMediaRef(entry.image_url)
-        ? `<div style="text-align:center; margin-bottom:12px;"><img data-media-ref="${window.escapeHtml(entry.image_url)}" alt="${window.escapeHtml(entry.title || '')}" title="Click to enlarge" onclick="window.openImageLightbox(this.getAttribute('data-media-ref'), this.getAttribute('alt'))" style="max-width:100%; max-height:320px; object-fit:contain; border:1px solid #3c4e36; background:#040605; cursor:zoom-in;"></div>`
+    const readerRef = codexDisplayImageRef(entry);
+    const readerImage = readerRef
+        ? `<div style="text-align:center; margin-bottom:12px;"><img data-media-ref="${window.escapeHtml(readerRef)}" alt="${window.escapeHtml(entry.title || '')}" title="Click to enlarge" onclick="window.openImageLightbox(this.getAttribute('data-media-ref'), this.getAttribute('alt'))" style="max-width:100%; max-height:320px; object-fit:contain; border:1px solid #3c4e36; background:#040605; cursor:zoom-in;"></div>`
         : '';
     document.getElementById('reader-body-content').innerHTML = `${readerImage}<div class="codex-markdown">${rendered.html}</div>`;
 
@@ -1849,6 +1850,9 @@ window.closeCodexFullscreen = function() {
 
 window.openCodexAttachment = function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry || !entry.doc_data) return;
+    // Phase 1 follow-up (2026-10-01): picture attachments open in the same
+    // full-size popup as images, instead of a new browser tab.
+    if (entry.doc_type === 'image' && window.isMediaRef(entry.doc_data)) { window.openImageLightbox(entry.doc_data, entry.doc_name || entry.title || ''); return; }
     if (entry.doc_type === 'image' || entry.doc_type === 'pdf') {
         const win = window.open(); if (!win) { alert('Your browser blocked the popup -- allow popups for this site to view attachments.'); return; } win.document.write(`<iframe src="${entry.doc_data}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`);
     } else {
@@ -1857,6 +1861,15 @@ window.openCodexAttachment = function(id) {
     }
 };
 
+// The picture to show for a Codex entry: its image, or (for older entries)
+// a picture that was put in the attachment box. null if neither.
+function codexDisplayImageRef(e) {
+    if (!e) return null;
+    if (window.isMediaRef(e.image_url)) return e.image_url;
+    if (e.doc_type === 'image' && window.isMediaRef(e.doc_data)) return e.doc_data;
+    return null;
+}
+window.codexDisplayImageRef = codexDisplayImageRef;
 // Fills (or clears) the Codex form's attachment fields + its little "attached" tag.
 function setCodexFormAttachment(name, data, type) {
     const n = document.getElementById('new-codex-doc-name'), d = document.getElementById('new-codex-doc-data'), t = document.getElementById('new-codex-doc-type');
@@ -1865,7 +1878,7 @@ function setCodexFormAttachment(name, data, type) {
     const wrap = document.getElementById('codex-current-doc-wrapper'), tag = document.getElementById('codex-current-doc-name'), label = document.getElementById('codex-file-label');
     if (wrap) wrap.style.display = data ? 'block' : 'none';
     if (tag) tag.innerText = data ? `📎 ${name}` : '';
-    if (label) label.innerText = 'Click to upload .txt, .md, .pdf, or image';
+    if (label) label.innerText = 'Click to upload .txt, .md, or .pdf (pictures go in the image field above)';
 }
 window.removeCodexAttachmentFromForm = function() {
     document.getElementById('new-codex-doc-name').value = ''; document.getElementById('new-codex-doc-data').value = ''; document.getElementById('new-codex-doc-type').value = '';
@@ -2272,7 +2285,19 @@ function initFileHandlers() {
         // stored inside the entry itself (loaded by every player at login),
         // so cap them. Pictures should go in the image field above instead.
         if (file.size > 2 * 1024 * 1024) { alert(`"${file.name}" is ${(file.size / 1048576).toFixed(1)} MB -- attachments are limited to 2 MB. For pictures, use the image field above instead (it shrinks them automatically).`); return; }
-        const isImage = file.type.startsWith('image/'); const isPDF = file.type === 'application/pdf';
+        // Phase 1 follow-up (2026-10-01, live report): a picture put in the
+        // ATTACHMENT box only showed as a 📎 label that opened a new tab.
+        // Pictures now go to the image field instead (thumbnail + popup).
+        if (file.type.startsWith('image/')) {
+            const label = document.getElementById('codex-file-label');
+            if (label) label.innerText = `⏳ Moving "${file.name}" to the image field…`;
+            window.uploadMediaImage(file, 'codex').then(ref => {
+                window.setMediaPickerValue('codex', ref);
+                if (label) label.innerText = `✓ "${file.name}" set as this entry's image (above). This box is for documents.`;
+            }).catch(err => { if (label) label.innerText = '⚠ ' + err.message; });
+            return;
+        }
+        const isImage = false; const isPDF = file.type === 'application/pdf';
         const docNameInput = document.getElementById('new-codex-doc-name'); const docDataInput = document.getElementById('new-codex-doc-data'); const docTypeInput = document.getElementById('new-codex-doc-type');
         docNameInput.value = file.name;
         if (isImage || isPDF) {
