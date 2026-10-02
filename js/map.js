@@ -401,6 +401,9 @@ window.loadGalaxyData = window.coalesceAsync(async function() {
     // of at every individual save/delete call site) keeps it in sync for
     // free, including the very first population at login.
     if (typeof window.renderDmCustomStarsList === 'function') window.renderDmCustomStarsList();
+    // Phase 4d fog of war (js/battle-map.js): re-fetch battle tokens if a ship
+    // just became visible to this player. First call after login only seeds.
+    if (markerData && typeof window.battleFogCheckReveal === 'function') window.battleFogCheckReveal();
     // Bug-hunt pass (2026-09-24): the caches above are rebuilt as brand-new
     // objects, so a selected ship/custom star (and an active jump plot)
     // kept pointing at the OLD object -- the HUD showed stale position/

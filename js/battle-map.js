@@ -426,6 +426,27 @@ function initBattleEncountersRealtimeChannel() {
         })
         .subscribe();
 }
+/* Phase 4d (2026-10-02): server-side fog of war. battle_tokens' read rule now
+   withholds tokens of hidden ships from everyone except the DM and the ship's
+   owner(s) (public.df_battle_token_visible). Realtime never re-sends a row
+   that just BECAME visible, so when a ship this player couldn't see turns
+   visible (un-hidden, or handed to them) we re-fetch the battle's tokens.
+   Called from the ship_markers realtime handler (js/db.js) after the vessel
+   cache refreshes. First call only seeds the set. DM sees everything: no-op. */
+let battleFogHiddenFromMe = null;
+window.battleFogCheckReveal = function() {
+    if (typeof currentUserRole !== 'undefined' && currentUserRole === 'dm') return false;
+    const ships = (typeof globalShipMarkersCache !== 'undefined' && Array.isArray(globalShipMarkersCache)) ? globalShipMarkersCache : [];
+    const visible = (typeof window.isVesselVisibleToMe === 'function') ? window.isVesselVisibleToMe : (v => !v || !v.is_hidden);
+    const now = new Set(ships.filter(s => s && !visible(s)).map(s => String(s.id)));
+    const prev = battleFogHiddenFromMe;
+    battleFogHiddenFromMe = now;
+    if (!prev) return false;
+    let revealed = false;
+    prev.forEach(id => { if (!now.has(id)) revealed = true; });
+    if (revealed && window.globalBattleEncounterCache) { loadBattleEncounters(); return true; }
+    return false;
+};
 window.initBattleEncountersRealtimeChannel = initBattleEncountersRealtimeChannel;
 window.loadBattleEncounters = loadBattleEncounters;
 window.applyBattleTokenRealtime = applyBattleTokenRealtime;
@@ -4611,3 +4632,4 @@ async function assignBattleCallsignsOnce() {
     }
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 }
+
