@@ -434,7 +434,7 @@ window.deployShipTemplate = async function(id, opts) {
             const assignedDeck = w.assigned_deck_id ? t.ship_decks.find(d => d.id === w.assigned_deck_id) : null;
             const deckTag = assignedDeck ? ` · <span style="color:#6b826a;">🔧 ${assignedDeck.name}</span>` : '';
             html += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
-                <span style="font-size:10px; color:#d4c5a9;">${w.name} — ${w.dice}${w.modifier} ${w.explodes ? '💥' : ''} · <span style="color:${info.color};">${dt}</span> · ${w.gun_count || 1}x guns${deckTag}</span>
+                <span style="font-size:10px; color:#d4c5a9;">${w.name} — ${w.dice}${w.modifier} ${w.explodes ? '💥' : ''} · <span style="color:${info.color};">${dt}</span> · ${w.gun_count || 1}x guns${deckTag}${typeof window.weaponArcBadgeHtml === 'function' ? window.weaponArcBadgeHtml(w, t) : ''}</span>
                 <button class="layer-del" onclick="window.removeTemplateWeapon(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
             </div>`;
         });
@@ -509,6 +509,7 @@ window.deployShipTemplate = async function(id, opts) {
         ensureModal();
         currentId = id;
         renderLoadoutList();
+        if (typeof window.ensureArcSelect === 'function') window.ensureArcSelect('tmpl-loadout-name', 'tmpl-loadout-arc', ''); // Phase 3 firing arcs
         overlay.style.display = 'flex';
     };
 
@@ -540,6 +541,7 @@ window.deployShipTemplate = async function(id, opts) {
         const assignedDeckId = (deckSelect && deckSelect.value) ? deckSelect.value : null;
 
         weapons.push({ loc: 'Hardpoint', name, dice, modifier: mod, explodes, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, gun_count: gunCount, damage_type: dmgType, assigned_deck_id: assignedDeckId });
+        if (typeof window.applyArcToWeapon === 'function') window.applyArcToWeapon(weapons[weapons.length - 1], window.readArcSelect('tmpl-loadout-arc'));
         const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', currentId);
         if (error) { alert("Failed to add weapon: " + error.message); return; }
         t.ship_weapons = weapons;
@@ -947,7 +949,7 @@ function renderSecretRepoWeaponCard(w, idx) {
     return `<div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
             <div>
-                <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${cooldownBadge}${singleBadge}${deckBadge}
+                <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${typeof window.weaponArcBadgeHtml === 'function' ? window.weaponArcBadgeHtml(w, t) : ''}${cooldownBadge}${singleBadge}${deckBadge}
                 <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span style="color:${info.color};">${dt}</span> · Ammo: ${ammoLabel}${standbyLabel}</div>
             </div>
             <div style="display:flex; gap:6px;">
@@ -1186,6 +1188,7 @@ window.renderSecretRepoEditorPanel = function() {
         </div>
     `;
     window.toggleStationFields('repo-edit');
+    if (typeof window.ensureArcSelect === 'function') window.ensureArcSelect('repo-wpn-loc', 'repo-wpn-arc', ''); // Phase 3 firing arcs
 };
 
 window.saveSecretRepoIdentityStats = async function() {
@@ -1256,6 +1259,7 @@ window.addSecretRepoWeapon = async function() {
         standby_ammo: 0, max_standby_ammo: standbyMax, ammo_type: ammoType,
         reload_cooldown_period: reloadCooldownPeriod, ordnance_pattern: ordnancePattern
     });
+    if (typeof window.applyArcToWeapon === 'function') window.applyArcToWeapon(weapons[weapons.length - 1], window.readArcSelect('repo-wpn-arc'));
 
     const { error } = await db.from('ship_templates').update({ ship_weapons: weapons }).eq('id', editingRepoTemplateId);
     if (error) { alert("Failed to add weapon: " + error.message); return; }
@@ -1472,6 +1476,7 @@ window.updateSecretRepoSynthCapacity = async function(val) {
             let wpn = Object.assign({}, weapons[currentIdx]);
 
             wpn.loc = document.getElementById('rwe-loc').value.trim() || 'Hardpoint';
+            if (typeof window.applyArcToWeapon === 'function') window.applyArcToWeapon(wpn, window.readArcSelect('rwe-arc'));
             wpn.name = document.getElementById('rwe-name').value.trim() || wpn.name;
             let dice = document.getElementById('rwe-dice').value.trim().toLowerCase();
             wpn.dice = dice || wpn.dice;
@@ -1522,6 +1527,7 @@ window.updateSecretRepoSynthCapacity = async function(val) {
         ensureModal();
         currentIdx = idx;
         document.getElementById('rwe-loc').value = wpn.loc || '';
+        if (typeof window.ensureArcSelect === 'function') window.ensureArcSelect('rwe-loc', 'rwe-arc', wpn.arc);
         document.getElementById('rwe-name').value = wpn.name || '';
         document.getElementById('rwe-dice').value = wpn.dice || '';
         document.getElementById('rwe-mod').value = wpn.modifier || '';

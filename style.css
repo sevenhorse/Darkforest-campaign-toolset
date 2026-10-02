@@ -1244,3 +1244,23 @@ div[style*="grid-template-columns"] > div,
     #tutorial-card { width: auto; max-height: 55vh; }
     #tutorial-card.tutorial-card-center { width: calc(100vw - 20px); }
 }
+
+/* --- Firing arcs (Command Terminal Phase 3, 2026-10-02) --- */
+/* Heading overlay on each token: rotated as a whole by the facing angle. */
+.battle-token-heading { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.battle-token-nose { position: absolute; left: 50%; top: -17px; width: 0; height: 0; margin-left: -6px;
+    border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 8px solid #00e1ff;
+    filter: drop-shadow(0 0 2px rgba(0,225,255,0.8)); }
+.battle-token-rotate-knob { position: absolute; left: 50%; width: 12px; height: 12px; margin-left: -6px;
+    border-radius: 50%; background: #030403; border: 2px solid #00e1ff; pointer-events: auto; cursor: grab; touch-action: none; top: -34px; }
+.battle-token-rotate-knob::after { content: ''; position: absolute; inset: -8px; } /* bigger touch target */
+.battle-token-rotate-knob:hover { background: #00e1ff; }
+.battle-arc-overlay { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 1; display: none; overflow: visible; }
+.battle-arc-wedge { fill: rgba(0,225,255,0.10); stroke: rgba(0,225,255,0.55); stroke-width: 1; }
+.battle-arc-wedge-hl { fill: rgba(255,215,0,0.16); stroke: rgba(255,215,0,0.85); stroke-width: 1.5; }
+.battle-arc-wedge-turret { fill: rgba(0,225,255,0.04); stroke-dasharray: 4 4; }
+.battle-arc-heading { stroke: #00e1ff; stroke-width: 2; }
+.arc-review-table td, .arc-review-table th { padding: 3px 4px; border-bottom: 1px solid #1a2a1a; }
+@media (pointer: coarse) {
+    .battle-token-rotate-knob { width: 16px; height: 16px; margin-left: -8px; top: -38px; }
+}

@@ -662,7 +662,7 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
     if (weapons.length === 0) return '<span style="font-size:10px; color:#6b826a;">No weapon hardpoints installed.</span>';
     let wHtml = '';
     weapons.forEach((w, idx) => {
-        const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range, { firerVessel: vessel, wpn: w }) : null;
+        const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range, { firerVessel: vessel, wpn: w, includeOutOfArc: true }) : null;
         // Fog of War build (this session): the battle-scoped path already
         // filters hidden vessels (see getBattleScopedTargets, js/battle-map.js)
         // -- this fallback (no active battle / no token) needs the same
@@ -670,7 +670,10 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         // target list whenever there's no battle grid to scope against.
         const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
         let targetOptions = '<option value="">-- No Target --</option>';
-        targetCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
+        // Out-of-arc targets (Phase 3) stay listed but greyed + unselectable.
+        targetCandidates.forEach(m => { targetOptions += m.out_of_arc
+            ? `<option value="${m.id}" disabled style="color:#5a5a5a;">${m.is_strike_craft ? '🛩️ ' : ''}${m.name} (out of arc)</option>`
+            : `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
         let wDmgType = window.normalizeDamageType(w.damage_type || window.inferLegacyDamageType(w.name));
         let wDmgInfo = window.DAMAGE_TYPES[wDmgType];
@@ -703,16 +706,16 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                 <div>
-                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${cooldownPeriodBadge}${singlePatternBadge}${deckBadge}
+                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${typeof window.weaponArcBadgeHtml === 'function' ? window.weaponArcBadgeHtml(w, vessel) : ''}${cooldownPeriodBadge}${singlePatternBadge}${deckBadge}
                     <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
                     <label for="${idPrefix}wpn-target-${vessel.id}-${idx}" style="display:none;">Target</label>
                     <select id="${idPrefix}wpn-target-${vessel.id}-${idx}"
-                        onfocus="window.showWeaponRangeRing && window.showWeaponRangeRing('${vessel.id}', ${w.range || 0})"
-                        onmouseenter="window.showWeaponRangeRing && window.showWeaponRangeRing('${vessel.id}', ${w.range || 0})"
-                        onblur="window.hideWeaponRangeRing && window.hideWeaponRangeRing()"
-                        onmouseleave="window.hideWeaponRangeRing && window.hideWeaponRangeRing()"
+                        onfocus="window.showWeaponRangeRing && window.showWeaponRangeRing('${vessel.id}', ${w.range || 0}); window.showWeaponArcWedge && window.showWeaponArcWedge('${vessel.id}', ${idx})"
+                        onmouseenter="window.showWeaponRangeRing && window.showWeaponRangeRing('${vessel.id}', ${w.range || 0}); window.showWeaponArcWedge && window.showWeaponArcWedge('${vessel.id}', ${idx})"
+                        onblur="window.hideWeaponRangeRing && window.hideWeaponRangeRing(); window.hideArcWedges && window.hideArcWedges()"
+                        onmouseleave="window.hideWeaponRangeRing && window.hideWeaponRangeRing(); window.hideArcWedges && window.hideArcWedges()"
                         onchange="window.flashBattleTargetHighlight && window.flashBattleTargetHighlight(this.value)"
                         style="width:120px; height:20px; font-size:9px; margin:0; padding:0; background:#0a1410; color:#00e5a3; border:1px solid #3c4e36; border-radius:2px;">${targetOptions}</select>
                     <label for="${idPrefix}wpn-volley-${vessel.id}-${idx}" style="display:none;">Volley</label>
@@ -754,6 +757,8 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
 };
 
 window.renderVesselDeck = function() {
+    // Firing arcs (Phase 3): Arc dropdown in the "Mount New Weapon System" form (kept across re-renders).
+    if (typeof window.ensureArcSelect === 'function') { const cur = document.getElementById('new-ship-wpn-arc'); window.ensureArcSelect('new-ship-wpn-loc', 'new-ship-wpn-arc', cur ? cur.value : ''); }
     const select = document.getElementById('vessel-deck-select');
     if (!select || !select.value) return;
 
@@ -1713,6 +1718,16 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
         }
     }
 
+    // Firing arcs (Phase 3, 2026-10-02): authoritative check (the dropdown
+    // greys out-of-arc targets, but a stale render could still submit one).
+    if (targetId && typeof window.isTargetInArc === 'function' && !window.isTargetInArc(vesselId, targetId, wpn)) {
+        if (opts.auto) return;
+        if (window.AudioEngine) window.AudioEngine.playError();
+        const tgt = globalShipMarkersCache.find(m => m.id === targetId);
+        alert(`[OUT OF ARC] ${tgt ? tgt.name : 'That target'} is outside ${wpn.name}'s firing arc — turn the ship first.`);
+        return;
+    }
+
     let overridingCooldown = false;
     if (wpn.cooldown > 0) {
         if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick, same rule squadron AI-stance fire already follows
@@ -2607,11 +2622,13 @@ window.addShipWeapon = async function() {
         standby_ammo: 0, max_standby_ammo: standbyMax, ammo_type: ammoType,
         reload_cooldown_period: reloadCooldownPeriod, ordnance_pattern: ordnancePattern
     });
+    if (typeof window.applyArcToWeapon === 'function') window.applyArcToWeapon(weapons[weapons.length - 1], window.readArcSelect('new-ship-wpn-arc'));
 
     await db.from('ship_markers').update({ ship_weapons: weapons }).eq('id', vessel.id);
     vessel.ship_weapons = weapons;
 
     document.getElementById('new-ship-wpn-loc').value = '';
+    if (document.getElementById('new-ship-wpn-arc')) document.getElementById('new-ship-wpn-arc').value = '';
     document.getElementById('new-ship-wpn-name').value = '';
     document.getElementById('new-ship-wpn-dice').value = '';
     document.getElementById('new-ship-wpn-mod').value = '';
@@ -2719,6 +2736,7 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             let wpn = vessel.ship_weapons[currentIdx];
 
             wpn.loc = document.getElementById('wpn-edit-loc').value.trim() || 'Hull Mount';
+            if (typeof window.applyArcToWeapon === 'function') window.applyArcToWeapon(wpn, window.readArcSelect('wpn-edit-arc'));
             wpn.name = document.getElementById('wpn-edit-name').value.trim() || wpn.name;
             let dice = document.getElementById('wpn-edit-dice').value.trim().toLowerCase();
             wpn.dice = dice || wpn.dice;
@@ -2770,6 +2788,7 @@ window.deleteShipWeapon = async function(vesselId, idx) {
         ensureEditModal();
         currentVesselId = vesselId; currentIdx = idx;
         document.getElementById('wpn-edit-loc').value = wpn.loc || '';
+        if (typeof window.ensureArcSelect === 'function') window.ensureArcSelect('wpn-edit-loc', 'wpn-edit-arc', wpn.arc);
         document.getElementById('wpn-edit-name').value = wpn.name || '';
         document.getElementById('wpn-edit-dice').value = wpn.dice || '';
         document.getElementById('wpn-edit-mod').value = wpn.modifier || '+0';

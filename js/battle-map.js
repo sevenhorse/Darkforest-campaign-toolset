@@ -1946,6 +1946,12 @@ window.processBattleRoundAutomations = async function() {
         if (movedTokens) await saveBattleTokens(movedTokens);
         const movedSelfTok = movedTokens ? movedTokens.find(t => t.ship_marker_id === v.id) : null;
         const newSelfPos = movedSelfTok ? { x: movedSelfTok.x, y: movedSelfTok.y } : selfPos;
+        // Firing arcs (Phase 3, DM-confirmed): turn to bring the biggest
+        // arc-limited gun to bear before firing. No-op while arcs are off.
+        if (typeof window.aiTurnToward === 'function') {
+            const turnedTo = await window.aiTurnToward(v, target);
+            if (turnedTo !== null) chatLines.push(`🤖 [AI CONTROLLED] ${v.name} comes about to ${String(turnedTo).padStart(3, '0')}°.`);
+        }
 
         // --- Fire every eligible non-PD weapon (direct-fire AND ordnance) ---
         let firedAny = false;
@@ -1957,6 +1963,7 @@ window.processBattleRoundAutomations = async function() {
             const postMoveDist = Math.hypot(targetPos.x - newSelfPos.x, targetPos.y - newSelfPos.y);
             const effRange = getEffectiveWeaponRange(wpn, v, target);
             if (effRange && postMoveDist > effRange) continue; // this weapon holds fire this round; other weapons on this same ship are still checked independently
+            if (typeof window.isTargetInArc === 'function' && !window.isTargetInArc(v.id, target.id, wpn)) continue; // out of arc even after turning
 
             if (wpn.weapon_class === 'ordnance' && typeof window.resolveOrdnanceLaunch === 'function') {
                 await window.resolveOrdnanceLaunch(v.id, wIdx, target.id, { auto: true });
@@ -1967,7 +1974,7 @@ window.processBattleRoundAutomations = async function() {
         }
         chatLines.push(firedAny
             ? `🤖 [AI CONTROLLED] ${v.name} engages ${target.name}.`
-            : `🤖 [AI CONTROLLED] ${v.name} closes on ${target.name} but has no weapon in range -- holds fire.`);
+            : `🤖 [AI CONTROLLED] ${v.name} closes on ${target.name} but has no weapon in range or arc -- holds fire.`);
 
         // --- Persist target lock (informational) + reset this round's hit tracking ---
         await db.from('ship_markers').update({ ai_current_target_id: target.id, round_biggest_hit_amount: 0, round_biggest_hit_by: null }).eq('id', v.id);
@@ -2244,7 +2251,11 @@ window.getBattleScopedTargets = function(vesselId, range, opts) {
     }).map(t => globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id))
       .filter(Boolean)
       .filter(m => (typeof window.isVesselVisibleToMe === 'function') ? window.isVesselVisibleToMe(m) : true)
-      .map(m => ({ id: m.id, name: m.name, is_strike_craft: m.is_strike_craft }));
+      // Firing arcs (Phase 3, 2026-10-02): out-of-arc targets are dropped,
+      // unless the caller asks to keep them flagged (the weapon dropdowns
+      // show them greyed with "out of arc" so they don't silently vanish).
+      .map(m => ({ id: m.id, name: m.name, is_strike_craft: m.is_strike_craft, out_of_arc: !!(wpn && typeof window.isTargetInArc === 'function' && !window.isTargetInArc(vesselId, m.id, wpn)) }))
+      .filter(m => !m.out_of_arc || (opts && opts.includeOutOfArc));
 };
 
 /* Ordnance LAUNCH (Range/Ordnance build, this session). An ordnance-classified
@@ -2365,6 +2376,13 @@ window.resolveOrdnanceLaunch = async function(vesselId, idx, targetId, opts) {
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${launchEffRange}).`);
+        return;
+    }
+    // Firing arcs (Phase 3): checked at LAUNCH only -- after that the salvo homes.
+    if (typeof window.isTargetInArc === 'function' && !window.isTargetInArc(vesselId, targetId, wpn)) {
+        if (opts.auto) return;
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`[OUT OF ARC] ${targetVessel.name} is outside ${wpn.name}'s firing arc — turn the ship first.`);
         return;
     }
 
@@ -3037,6 +3055,8 @@ const DomBattleRenderer = {
                 label.style.cssText = 'position:relative; z-index:1; max-width:100%; overflow:hidden; white-space:nowrap; pointer-events:none;';
                 label.textContent = !vessel ? '???' : isStrikeCraftTok ? '🛩️' : vessel.name.slice(0, 6);
                 tokenEl.appendChild(label);
+                // Phase 3 (2026-10-02): nose chevron + rotate knob (js/firing-arcs.js; no-op while the firing_arcs switch is off).
+                if (typeof window.decorateBattleTokenHeading === 'function') window.decorateBattleTokenHeading(tokenEl, tok, vessel);
                 if (!isStationTok && moveRemaining < 0) {
                     const moveBadge = document.createElement('div');
                     moveBadge.style.cssText = 'position:absolute; top:-8px; right:-4px; background:#ff3333; color:#030403; font-size:7px; font-weight:bold; border-radius:6px; padding:0 3px; pointer-events:none;';
@@ -3682,7 +3702,7 @@ window.autoTargetAllMyWeapons = function(targetVesselId) {
         weapons.forEach((w, idx) => {
             const sel = document.getElementById(`bm-wpn-target-${vessel.id}-${idx}`);
             if (!sel) return;
-            const hasOption = Array.from(sel.options).some(o => o.value === targetVesselId);
+            const hasOption = Array.from(sel.options).some(o => o.value === targetVesselId && !o.disabled); // disabled = out of arc (Phase 3)
             if (!hasOption) return;
             sel.value = targetVesselId;
             appliedAny = true;
@@ -3956,6 +3976,9 @@ window.renderBattleShipCards = function(tokens) {
         const iffColor = iffVal ? ((window.IFF_COLORS && window.IFF_COLORS[iffVal]) || '#00e1ff') : '#6b826a';
         const dmIffBox = isDm ? `<select onchange="window.updateShipIff('${vessel.id}', this.value)" onclick="event.stopPropagation();" style="font-size:8px; padding:2px; background:#0a1410; color:${iffColor}; border:1px solid ${iffColor};" title="DM: change this vessel's IFF tag mid-battle"><option value="" ${!iffVal ? 'selected' : ''} style="color:#6b826a;">-- Unset --</option><option value="friendly" ${iffVal === 'friendly' ? 'selected' : ''} style="color:#00e5a3;">✓ Friendly</option><option value="neutral" ${iffVal === 'neutral' ? 'selected' : ''} style="color:#c9962f;">◌ Neutral</option><option value="hostile" ${iffVal === 'hostile' ? 'selected' : ''} style="color:#ff3333;">⚠ Hostile</option></select>` : '';
 
+        // Firing arcs (Phase 3): heading readout + turn buttons on their own row (empty while the switch is off).
+        const headingCtl = typeof window.renderHeadingControlsHtml === 'function' ? window.renderHeadingControlsHtml(tok, vessel) : '';
+        const headingRow = headingCtl ? `<div style="display:flex; justify-content:flex-end; margin:-2px 0 6px 0;">${headingCtl}</div>` : '';
         const header = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
                 <div style="display:flex; align-items:center; gap:6px; cursor:pointer;" onclick="window.toggleBattleShipCardExpanded('${tok.token_id}')" title="${expanded ? 'Click to collapse' : 'Click to expand full detail'}">
@@ -3970,7 +3993,7 @@ window.renderBattleShipCards = function(tokens) {
                     ${isDm ? `<button class="layer-edit" onclick="window.toggleVesselHidden('${vessel.id}')" style="font-size:8px; padding:2px 6px; border-color:#c778dd; color:#c778dd;" title="Fog of War: toggle whether this vessel is hidden from every non-DM viewer except its own player-owner">${vessel.is_hidden ? '👁 UNHIDE' : '🫥 HIDE'}</button>` : ''}
                     ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
                 </div>
-            </div>`;
+            </div>${headingRow}`;
 
         if (!expanded) {
             return `<div class="battle-ship-card" style="border-color:${accentColor};">${header}${renderCompactHealthLine(vessel)}</div>`;
