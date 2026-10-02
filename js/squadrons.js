@@ -700,18 +700,20 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
             }
             total = Math.ceil(total * categoryMult);
 
-            const result = window.resolveShipDamage(targetShip, dmgType, total);
+            // Directional armor (Phase 5): the side facing the squadron's own token.
+            const result = window.resolveShipDamage(targetShip, dmgType, total, (typeof window.damageSideOpts === 'function' && sqShipSelf) ? window.damageSideOpts(targetShip, { vesselId: sqShipSelf.id }) : undefined);
             combatLog += result.log;
+            const sideFields = typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(result) : {};
 
             await db.from('ship_markers').update({
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened
+                integrity_hardened: result.integrity_hardened, ...sideFields
             }).eq('id', targetShip.id);
             Object.assign(targetShip, {
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened
+                integrity_hardened: result.integrity_hardened, ...sideFields
             });
             await syncSquadronHpToParent(targetShip);
 
@@ -913,6 +915,8 @@ window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId
     ordnance.push({
         salvo_id: (typeof genBattleTokenId === 'function') ? genBattleTokenId() : `${Date.now()}-${Math.random()}`,
         source_vessel_id: sqShipSelf.id, source_vessel_name: sq.name,
+        // Directional armor (Phase 5): launch point, so impact hits the side facing it.
+        ...(function () { const p = typeof window.ordnanceLaunchPoint === 'function' ? window.ordnanceLaunchPoint(sqShipSelf.id) : null; return { launch_x: p ? p.x : null, launch_y: p ? p.y : null }; })(),
         source_weapon_name: wpn.name, dice: scaledDice, modifier: 0, explodes: !!wpn.explodes,
         damage_type: wpn.dmgType || 'Impact',
         target_vessel_id: targetId, target_vessel_name: targetVessel.name,

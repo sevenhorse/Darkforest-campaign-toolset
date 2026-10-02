@@ -644,7 +644,9 @@ window.renderShipHealthBarsHtml = function(vessel, editable) {
         </div>
     `;
 
-    return makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('REACTIVE ARMOR (IMPACT/EXPLOSIVE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT/ENERGY)', a_int, a_max, '#ffaa00', 'ablative') + makeBar('HARDENED ARMOR', hd_int, Math.max(1, hd_max), '#c9962f', 'hardened') + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
+    // Directional armor (Phase 5): four side bars replace the single Hardened bar while the switch is on.
+    const sideBars = typeof window.renderArmorSideBarsHtml === 'function' ? window.renderArmorSideBarsHtml(vessel, editable) : null;
+    return makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('REACTIVE ARMOR (IMPACT/EXPLOSIVE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT/ENERGY)', a_int, a_max, '#ffaa00', 'ablative') + (sideBars || makeBar('HARDENED ARMOR', hd_int, Math.max(1, hd_max), '#c9962f', 'hardened')) + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
 };
 
 // idPrefix distinguishes this weapon row's target/volley element ids from
@@ -1404,7 +1406,8 @@ window.resetShipStats = async function(vesselId) {
         integrity_hull: vessel.max_hull !== undefined ? vessel.max_hull : 300,
         integrity_reactive: vessel.max_reactive !== undefined ? vessel.max_reactive : 10,
         integrity_ablative: vessel.max_ablative !== undefined ? vessel.max_ablative : 10,
-        integrity_hardened: vessel.max_hardened || 0
+        integrity_hardened: vessel.max_hardened || 0,
+        ...(typeof window.fullArmorSidesPayload === 'function' ? window.fullArmorSidesPayload(vessel) : {}) // Phase 5: every side back to max
     };
     Object.assign(vessel, payload);
     
@@ -1518,6 +1521,21 @@ window.resetShipStats = async function(vesselId) {
                 integrity_ablative: Math.min(vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : newMax.max_ablative, newMax.max_ablative),
                 integrity_hardened: Math.min(vessel.integrity_hardened !== undefined ? vessel.integrity_hardened : newMax.max_hardened, newMax.max_hardened)
             };
+            // Directional armor (Phase 5): per-side max from the four side
+            // inputs (undefined when the switch is off -> sides untouched).
+            const sideMax = typeof window.readArmorSideInputs === 'function' ? window.readArmorSideInputs('maxstats') : undefined;
+            if (sideMax) {
+                const before = window.getArmorSides(vessel);
+                const cur = {};
+                window.ARMOR_SIDES.forEach(k => {
+                    // same rule as every other stat on this sheet: current is clamped to the new max
+                    cur[k] = Math.max(0, Math.min(sideMax[k], before.cur[k]));
+                });
+                newMax.max_hardened = window.sumArmorSides(sideMax);
+                newMax.max_armor_sides = sideMax;
+                clamped.armor_sides = cur;
+                clamped.integrity_hardened = window.sumArmorSides(cur);
+            }
             const { error } = await db.from('ship_markers').update({ ...newMax, ...clamped }).eq('id', currentId);
             if (error) { alert("Failed to save base stats: " + error.message); return; }
             Object.assign(vessel, newMax, clamped);
@@ -1535,6 +1553,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-reactive').value = vessel.max_reactive || 0;
         document.getElementById('maxstats-ablative').value = vessel.max_ablative || 0;
         document.getElementById('maxstats-hardened').value = vessel.max_hardened || 0;
+        if (typeof window.ensureArmorSideInputs === 'function') { const usesSides = window.vesselUsesArmorSides(vessel); window.ensureArmorSideInputs('maxstats-hardened', 'maxstats', usesSides ? window.getArmorSides(vessel).max : null, usesSides); }
         document.getElementById('maxstats-vesselclass').value = vessel.vessel_class || '';
         document.getElementById('maxstats-iff').value = vessel.iff || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
@@ -1824,8 +1843,9 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
             }
             total = Math.ceil(total * categoryMult);
 
-            const result = window.resolveShipDamage(targetShip, dmgType, total);
+            const result = window.resolveShipDamage(targetShip, dmgType, total, typeof window.damageSideOpts === 'function' ? window.damageSideOpts(targetShip, { vesselId }) : undefined);
             combatLog += result.log;
+            const sideFields = typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(result) : {};
 
             // DM-AI-for-NPCs build (this session): "biggest single hit this
             // round" threat tracking (confirmed design: NOT a cumulative
@@ -1845,13 +1865,13 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
             await db.from('ship_markers').update({
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened,
+                integrity_hardened: result.integrity_hardened, ...sideFields,
                 round_biggest_hit_amount: roundBiggestHitAmount, round_biggest_hit_by: roundBiggestHitBy
             }).eq('id', targetShip.id);
             Object.assign(targetShip, {
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened,
+                integrity_hardened: result.integrity_hardened, ...sideFields,
                 round_biggest_hit_amount: roundBiggestHitAmount, round_biggest_hit_by: roundBiggestHitBy
             });
             await syncSquadronHpToParent(targetShip);
@@ -2244,14 +2264,27 @@ window.normalizeDamageType = function(dmgType) {
    from DAMAGE_TYPES above — this function is the single place that logic
    actually executes, so NPC/template ships (Overseer repository) and player
    ships resolve identically once deployment wiring exists. */
-window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
+// opts.side (Phase 5 directional armor, 2026-10-02): 'front'|'starboard'|
+// 'rear'|'port' -- when the directional_armor switch is on and the target
+// isn't a strike craft, only that side's Hardened pool is used, and the
+// result also carries armor_sides (+ integrity_hardened = their sum).
+// Callers get opts from window.damageSideOpts (js/directional-armor.js).
+window.resolveShipDamage = function(targetShip, dmgType, totalDamage, opts) {
     let s = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
     let r = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
     let a = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
-    let hd = targetShip.integrity_hardened !== undefined ? targetShip.integrity_hardened : 0;
+    const sideInfo = (opts && opts.side && typeof window.armorSidesFor === 'function') ? window.armorSidesFor(targetShip, opts.side) : null;
+    let hd = sideInfo ? sideInfo.value : (targetShip.integrity_hardened !== undefined ? targetShip.integrity_hardened : 0);
+    const hdLabel = sideInfo ? `${sideInfo.label} Armor` : 'Hardened Armor';
     let h = targetShip.integrity_hull !== undefined ? targetShip.integrity_hull : 300;
     let log = '';
     const info = window.DAMAGE_TYPES[dmgType] || window.DAMAGE_TYPES['Impact'];
+    // Builds the return value; with a side, hd is that side's pool.
+    const finish = () => {
+        if (!sideInfo) return { integrity_shields: s, integrity_reactive: r, integrity_ablative: a, integrity_hardened: hd, integrity_hull: h, log };
+        const sides = Object.assign({}, sideInfo.cur, { [sideInfo.side]: hd });
+        return { integrity_shields: s, integrity_reactive: r, integrity_ablative: a, integrity_hardened: window.sumArmorSides(sides), armor_sides: sides, hit_side: sideInfo.side, integrity_hull: h, log };
+    };
 
     if (dmgType === 'Healing') {
         // Bug fix (bug hunt, this session): same falsy-zero max defect as
@@ -2262,7 +2295,7 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
         let toShields = Math.min(totalDamage, Math.max(0, sMax - s)); s += toShields;
         let toHull = Math.min(totalDamage - toShields, Math.max(0, hMax - h)); h += toHull;
         log += `Repair systems restored ${toShields} Shields`; if (toHull > 0) log += ` and ${toHull} Hull`; log += `. `;
-        return { integrity_shields: s, integrity_reactive: r, integrity_ablative: a, integrity_hardened: hd, integrity_hull: h, log };
+        return finish();
     }
 
     let remainingDmg = totalDamage;
@@ -2300,14 +2333,15 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
             a -= 1; log += `[ABLATIVE ARMOR] charge expended — ${dmgType} damage negated! `; remainingDmg = 0;
         } else {
             if (bypassesHardened) {
-                if (hd > 0) log += `[${dmgType.toUpperCase()}] bypasses Hardened Armor entirely! `;
+                if (hd > 0) log += `[${dmgType.toUpperCase()}] bypasses ${hdLabel} entirely! `;
             } else if (hd > 0) {
                 let hdAbsorb = Math.min(hd, remainingDmg);
                 hd -= hdAbsorb; remainingDmg -= hdAbsorb;
-                if (hdAbsorb > 0) log += `Hardened Armor absorbed ${hdAbsorb}. `;
+                if (hdAbsorb > 0) log += `${hdLabel} absorbed ${hdAbsorb}. `;
             }
 
             if (remainingDmg > 0) {
+                if (sideInfo && hd <= 0 && !bypassesHardened) log += `[${hdLabel.toUpperCase()} BREACHED] `;
                 let hullMult = info.hullMult;
                 if (dmgType === 'Cold' && hd <= 0) hullMult = 1.25; // brittle-fracture bonus once armor's stripped
                 let hullDmg = Math.min(h, Math.ceil(remainingDmg * hullMult));
@@ -2318,7 +2352,7 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage) {
         }
     }
 
-    return { integrity_shields: s, integrity_reactive: r, integrity_ablative: a, integrity_hardened: hd, integrity_hull: h, log };
+    return finish();
 };
 
 /* --- MANUAL DAMAGE APPLICATION (DM Tools, this session) ---
@@ -2504,18 +2538,21 @@ window.applyManualDamage = async function() {
     }
     total = Math.ceil(total * categoryMult);
 
-    const result = window.resolveShipDamage(targetShip, dmgType, total);
+    // Directional armor (Phase 5): side from the DM's picker (Auto = facing the firing ship).
+    const manualSideOpts = (typeof window.damageSideOpts === 'function' && typeof window.manualDamageSideSource === 'function') ? window.damageSideOpts(targetShip, window.manualDamageSideSource(vessel.id)) : undefined;
+    const result = window.resolveShipDamage(targetShip, dmgType, total, manualSideOpts);
     combatLog += result.log;
+    const sideFields = typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(result) : {};
 
     await db.from('ship_markers').update({
         integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
         integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-        integrity_hardened: result.integrity_hardened
+        integrity_hardened: result.integrity_hardened, ...sideFields
     }).eq('id', targetShip.id);
     Object.assign(targetShip, {
         integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
         integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-        integrity_hardened: result.integrity_hardened
+        integrity_hardened: result.integrity_hardened, ...sideFields
     });
     if (typeof syncSquadronHpToParent === 'function') await syncSquadronHpToParent(targetShip);
     if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);

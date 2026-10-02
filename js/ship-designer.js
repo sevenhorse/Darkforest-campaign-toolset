@@ -240,6 +240,9 @@ window.deployShipTemplate = async function(id, opts) {
         integrity_reactive: t.max_reactive || 0, max_reactive: t.max_reactive || 0,
         integrity_ablative: t.max_ablative || 0, max_ablative: t.max_ablative || 0,
         integrity_hardened: t.max_hardened || 0, max_hardened: t.max_hardened || 0,
+        // Directional armor (Phase 5): a template's per-side max travels with
+        // the ship, starting full. null = split 10/40/10/40 when needed.
+        max_armor_sides: t.max_armor_sides || null, armor_sides: t.max_armor_sides || null,
         integrity_hull: t.max_hull || 100, max_hull: t.max_hull || 100,
         tactical_speed: t.is_station ? 0 : (t.tactical_speed || 160),
         is_station: !!t.is_station,
@@ -372,6 +375,9 @@ window.deployShipTemplate = async function(id, opts) {
                 ai_controlled: document.getElementById('tmpl-edit-ai-controlled').checked,
                 image_url: window.getMediaPickerValue('tmpl')
             };
+            // Directional armor (Phase 5): per-side max (only while the switch is on).
+            const tmplSides = typeof window.readArmorSideInputs === 'function' ? window.readArmorSideInputs('tmpl-edit') : undefined;
+            if (tmplSides) { updates.max_armor_sides = tmplSides; updates.max_hardened = window.sumArmorSides(tmplSides); }
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
             overlay.style.display = 'none';
@@ -391,6 +397,7 @@ window.deployShipTemplate = async function(id, opts) {
         document.getElementById('tmpl-edit-reactive').value = t.max_reactive || 0;
         document.getElementById('tmpl-edit-ablative').value = t.max_ablative || 0;
         document.getElementById('tmpl-edit-hardened').value = t.max_hardened || 0;
+        if (typeof window.ensureArmorSideInputs === 'function') window.ensureArmorSideInputs('tmpl-edit-hardened', 'tmpl-edit', t.max_armor_sides, true);
         document.getElementById('tmpl-edit-hull').value = t.max_hull || 0;
         document.getElementById('tmpl-edit-slots').value = t.hardpoint_slots || 4;
         document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 160;
@@ -1188,6 +1195,7 @@ window.renderSecretRepoEditorPanel = function() {
         </div>
     `;
     window.toggleStationFields('repo-edit');
+    if (typeof window.ensureArmorSideInputs === 'function') window.ensureArmorSideInputs('repo-edit-hardened', 'repo-edit', t.max_armor_sides, true); // Phase 5
     if (typeof window.ensureArcSelect === 'function') window.ensureArcSelect('repo-wpn-loc', 'repo-wpn-arc', ''); // Phase 3 firing arcs
 };
 
@@ -1212,6 +1220,9 @@ window.saveSecretRepoIdentityStats = async function() {
         ai_controlled: document.getElementById('repo-edit-ai-controlled').checked,
         image_url: window.getMediaPickerValue('repo')
     };
+    // Directional armor (Phase 5): per-side max (only while the switch is on).
+    const repoSides = typeof window.readArmorSideInputs === 'function' ? window.readArmorSideInputs('repo-edit') : undefined;
+    if (repoSides) { payload.max_armor_sides = repoSides; payload.max_hardened = window.sumArmorSides(repoSides); }
     const { error } = await db.from('ship_templates').update(payload).eq('id', editingRepoTemplateId);
     if (error) { alert("Failed to save template: " + error.message); return; }
     Object.assign(t, payload);

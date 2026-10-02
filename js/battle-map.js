@@ -1461,7 +1461,9 @@ window.processBattleRoundAutomations = async function() {
             // resolveShipDamage unclamped too. Keeping ordnance consistent
             // with direct-fire rather than fixing a speculative edge case
             // only on this path.
-            const result = window.resolveShipDamage(targetVessel, dmgType, total);
+            // Directional armor (Phase 5): side facing the launch point (fallback: the launcher's current spot, else front).
+            const impactSource = (salvo.launch_x !== null && salvo.launch_x !== undefined) ? { point: { x: salvo.launch_x, y: salvo.launch_y } } : { vesselId: salvo.source_vessel_id };
+            const result = window.resolveShipDamage(targetVessel, dmgType, total, typeof window.damageSideOpts === 'function' ? window.damageSideOpts(targetVessel, impactSource) : undefined);
             impactLog += result.log;
             // DM-AI-for-NPCs build (this session): same "biggest single hit
             // this round" tracking as every other damage path (see
@@ -1476,7 +1478,8 @@ window.processBattleRoundAutomations = async function() {
             Object.assign(targetVessel, {
                 integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
                 integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-                integrity_hardened: result.integrity_hardened
+                integrity_hardened: result.integrity_hardened,
+                ...(typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(result) : {})
             });
             markTouched(targetVessel);
             chatLines.push(`💥 [ORDNANCE IMPACT] ${salvo.source_weapon_name} (from ${salvo.source_vessel_name}) strikes ${targetVessel.name} for ${total} ${dmgType} dmg. ${impactLog}`);
@@ -1505,12 +1508,15 @@ window.processBattleRoundAutomations = async function() {
                         if (sStance === 'Defensive') { splashTotal = Math.floor(splashTotal * 0.75); splashLog += `[Target Defensive: -25% Dmg] `; }
                         else if (sStance === 'Evasive') { splashTotal = Math.floor(splashTotal * 0.50); splashLog += `[Target Evasive: -50% Dmg] `; }
                         else if (sStance === 'Aggressive') { splashTotal = Math.floor(splashTotal * 1.25); splashLog += `[Target Aggressive: +25% Dmg] `; }
-                        const splashResult = window.resolveShipDamage(splashVessel, dmgType, splashTotal);
+                        // Directional armor (Phase 5): side facing the blast centre (the primary target).
+                        const blastCentre = typeof window.battleTokenCenter === 'function' ? window.battleTokenCenter(primaryTok) : { x: primaryTok.x, y: primaryTok.y };
+                        const splashResult = window.resolveShipDamage(splashVessel, dmgType, splashTotal, typeof window.damageSideOpts === 'function' ? window.damageSideOpts(splashVessel, { point: blastCentre }) : undefined);
                         splashLog += splashResult.log;
                         Object.assign(splashVessel, {
                             integrity_shields: splashResult.integrity_shields, integrity_hull: splashResult.integrity_hull,
                             integrity_reactive: splashResult.integrity_reactive, integrity_ablative: splashResult.integrity_ablative,
-                            integrity_hardened: splashResult.integrity_hardened
+                            integrity_hardened: splashResult.integrity_hardened,
+                            ...(typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(splashResult) : {})
                         });
                         markTouched(splashVessel);
                         chatLines.push(`💥 [AOE SPLASH] ${salvo.source_weapon_name} (from ${salvo.source_vessel_name}) catches ${splashVessel.name} in the blast for ${splashTotal} ${dmgType} dmg. ${splashLog}`);
@@ -1992,6 +1998,7 @@ window.processBattleRoundAutomations = async function() {
             integrity_shields: v.integrity_shields, integrity_hull: v.integrity_hull,
             integrity_reactive: v.integrity_reactive, integrity_ablative: v.integrity_ablative,
             integrity_hardened: v.integrity_hardened,
+            ...(v.armor_sides ? { armor_sides: v.armor_sides } : {}), // Phase 5 directional armor
             // DM-AI-for-NPCs build (this session): rides along with every
             // other mutation this loop already persists for a touched
             // vessel -- covers the ordnance-impact path above, which (unlike
@@ -2418,9 +2425,13 @@ window.resolveOrdnanceLaunch = async function(vesselId, idx, targetId, opts) {
     const salvoDice = isSinglePattern ? scaleOrdnanceDice(wpn.dice, window.SINGLE_WARHEAD_DICE_MULT) : wpn.dice;
 
     const ordnance = (window.globalBattleEncounterCache.in_flight_ordnance || []).slice();
+    // Directional armor (Phase 5, DM-confirmed): impact hits the side facing
+    // where the salvo was launched from, so snapshot the launch point now.
+    const launchPt = typeof window.ordnanceLaunchPoint === 'function' ? window.ordnanceLaunchPoint(vesselId) : null;
     ordnance.push({
         salvo_id: genBattleTokenId(),
         source_vessel_id: vesselId, source_vessel_name: vessel.name,
+        launch_x: launchPt ? launchPt.x : null, launch_y: launchPt ? launchPt.y : null,
         source_weapon_name: wpn.name, dice: salvoDice, modifier: wpn.modifier, explodes: !!wpn.explodes,
         damage_type: wpn.damage_type || 'Impact',
         target_vessel_id: targetId, target_vessel_name: targetVessel.name,
