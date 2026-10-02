@@ -2653,6 +2653,8 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     if (stationVessel && stationVessel.is_station) {
         tokenEl.addEventListener('mousedown', (e) => { e.stopPropagation(); });
         tokenEl.addEventListener('click', () => {
+            // Phase 4c: with the tactical HUD on, a tap selects the ship in the HUD first.
+            if (typeof window.tv2HandleTokenTap === 'function' && window.tv2HandleTokenTap(shipMarkerId)) return;
             if (stationVessel.iff === 'hostile' && !window.vesselHasOwner(stationVessel, currentUserId)) {
                 window.autoTargetAllMyWeapons(shipMarkerId);
                 return;
@@ -2770,6 +2772,9 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
             // Undo log (2026-10-01): every token move is recorded.
             window.recordBattleAction('Move', () => saveBattleTokens(tokens)).then(() => window.renderBattleMapPanel());
         } else {
+            // Phase 4c: with the tactical HUD on, a tap selects the ship in the HUD
+            // (own ships stop here; FULL SHEET opens the terminal; hostiles still auto-target).
+            if (typeof window.tv2HandleTokenTap === 'function' && window.tv2HandleTokenTap(shipMarkerId)) return;
             const clickedVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
             if (clickedVessel && clickedVessel.iff === 'hostile' && !window.vesselHasOwner(clickedVessel, currentUserId)) {
                 window.autoTargetAllMyWeapons(shipMarkerId);
@@ -3903,6 +3908,9 @@ function renderStrikeCraftCard(tok, isDm, profiles) {
 window.renderBattleShipCards = function(tokens) {
     const container = document.getElementById('battle-map-ship-cards');
     if (!container) return;
+    // Phase 4c: the Vessel HUD replaces these cards (and must be the only
+    // place the bm-wpn-* controls exist, or FIRE would read the wrong copy).
+    if (typeof window.tv2Active === 'function' && window.tv2Active()) { container.innerHTML = ''; return; }
     const isDm = currentUserRole === 'dm';
     const profiles = (typeof allProfiles !== 'undefined' ? allProfiles : []);
     const activeTab = window.battleMapVesselTab || 'friendly';

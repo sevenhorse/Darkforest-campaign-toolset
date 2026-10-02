@@ -1279,3 +1279,92 @@ div[style*="grid-template-columns"] > div,
 .battle-ring-label { fill: #c9c9c9; font-size: 8px; paint-order: stroke; stroke: #030403; stroke-width: 2px; }
 .battle-select-box { fill: rgba(255, 215, 0, 0.06); stroke: #ffd700; stroke-width: 1; stroke-dasharray: 4 3; }
 .battle-token-el.battle-token-selected { outline: 2px dashed #ffd700; outline-offset: 10px; }
+
+/* --- Tactical look (Command Terminal Phase 4c, 2026-10-02; #battle-map-panel.tv2, js/tactical-hud.js) --- */
+#battle-map-stage { width: fit-content; max-width: 100%; }
+#battle-map-panel.tv2 { font-family: 'Oxanium', 'Rajdhani', 'Segoe UI', system-ui, sans-serif; letter-spacing: 0.02em; }
+#battle-map-panel.tv2 #battle-map-vessel-tabs, #battle-map-panel.tv2 #battle-map-ship-cards,
+#battle-map-panel.tv2 .battle-map-right-col > h5 { display: none; }
+.tv2-panel { background: rgba(6, 14, 18, 0.86); border: 1px solid rgba(0, 225, 255, 0.35); color: #d4e4ea;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.tv2-amber { border-color: rgba(255, 170, 0, 0.45); }
+.tv2-ttl { font-size: 10px; letter-spacing: 0.18em; color: #00e1ff; text-transform: uppercase; padding: 5px 10px;
+    border-bottom: 1px solid rgba(0, 225, 255, 0.2); display: flex; justify-content: space-between; gap: 8px; }
+.tv2-amber-ttl { color: #ffaa00; border-bottom-color: rgba(255, 170, 0, 0.25); }
+.tv2-dim { color: #6b8590; }
+.tv2-empty { font-size: 10px; color: #6b8590; padding: 8px 10px; }
+/* roster (desktop: docked table over the grid's top-left) */
+.tv2-roster { position: absolute; left: 8px; top: 8px; width: 290px; max-height: 45%; overflow-y: auto; z-index: 20; }
+.tv2-row { display: grid; grid-template-columns: 4px 1fr 60px 40px; gap: 8px; align-items: center; padding: 5px 8px 5px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04); font-size: 11px; cursor: pointer; }
+.tv2-row:hover { background: rgba(0, 225, 255, 0.06); }
+.tv2-row.cur { background: linear-gradient(90deg, rgba(255, 215, 0, 0.16), transparent); }
+.tv2-row.sel { outline: 1px solid rgba(0, 225, 255, 0.55); outline-offset: -1px; }
+.tv2-row.sc { opacity: 0.8; font-size: 10px; }
+.tv2-iff { align-self: stretch; min-height: 24px; }
+.tv2-nm { text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv2-cl { font-size: 8px; color: #6b8590; letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv2-hb { height: 5px; background: #132026; position: relative; } .tv2-hb i { position: absolute; left: 0; top: 0; bottom: 0; }
+.tv2-ap { display: flex; gap: 2px; justify-content: flex-end; } .tv2-ap b { width: 5px; height: 9px; background: #00e1ff; display: block; transform: skewX(-15deg); } .tv2-ap b.off { background: #16323a; }
+.tv2-ix { font-size: 8px; color: #6b8590; text-align: right; }
+.tv2-chip-dot, .tv2-chip-name { display: none; }
+/* objective (top-right) + name plate (bottom-centre) */
+.tv2-objective { position: absolute; right: 8px; top: 8px; width: 240px; z-index: 20; font-size: 11px; }
+.tv2-objtext { padding: 6px 10px 8px; line-height: 1.35; }
+.tv2-edit { cursor: pointer; color: #ffaa00; }
+.tv2-plate { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 20; padding: 5px 16px;
+    font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; white-space: nowrap; pointer-events: none; }
+/* Vessel HUD (right column) */
+.tv2-hud { display: flex; flex-direction: column; min-height: 200px; }
+.tv2-hero { display: flex; gap: 10px; padding: 10px; border-bottom: 1px solid rgba(0, 225, 255, 0.2); }
+.tv2-por { width: 110px; height: 80px; flex-shrink: 0; background: linear-gradient(135deg, #0e2228, #071014); border: 1px solid rgba(0, 225, 255, 0.3);
+    display: flex; align-items: center; justify-content: center; color: #6b8590; font-size: 9px; letter-spacing: 0.12em; }
+.tv2-big { font-size: 17px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv2-sub { font-size: 9px; color: #6b8590; letter-spacing: 0.14em; margin: 2px 0 5px; text-transform: uppercase; }
+.tv2-tag { display: inline-block; font-size: 8px; letter-spacing: 0.14em; padding: 1px 5px; border: 1px solid #00e1ff; color: #00e1ff; margin: 0 4px 3px 0; }
+.tv2-nav { font-size: 10px; color: #00e1ff; margin-top: 3px; letter-spacing: 0.06em; }
+.tv2-sec { padding: 8px 10px; border-bottom: 1px solid rgba(0, 225, 255, 0.12); }
+.tv2-lab { font-size: 9px; letter-spacing: 0.16em; color: #6b8590; text-transform: uppercase; margin: 2px 0 4px; display: flex; justify-content: space-between; gap: 8px; }
+.tv2-bar { height: 8px; background: #0f1d22; position: relative; margin-bottom: 6px; } .tv2-bar i { position: absolute; left: 0; top: 0; bottom: 0; transition: width 0.3s; }
+.tv2-pips { display: inline-flex; gap: 4px; flex-wrap: wrap; } .tv2-pips b { width: 9px; height: 9px; border: 1px solid #ffaa00; transform: rotate(45deg); display: inline-block; }
+.tv2-armor { display: grid; grid-template-columns: 1fr 110px 1fr; align-items: center; gap: 4px; }
+.tv2-armor-compact { display: none; gap: 4px; font-size: 10px; } .tv2-armor-compact span { flex: 1; text-align: center; border: 1px solid #3a3020; padding: 3px 0; }
+.tv2-side { font-size: 9px; text-align: center; letter-spacing: 0.1em; } .tv2-sv { font-size: 15px; font-weight: 700; }
+.tv2-weapons .note-card { background: rgba(3, 8, 10, 0.7) !important; border-color: rgba(255, 77, 77, 0.35) !important; }
+.tv2-dmrow { display: flex; gap: 6px; padding: 6px 10px; align-items: center; }
+.tv2-acts { display: flex; gap: 6px; padding: 10px; flex-wrap: wrap; margin-top: auto; }
+.tv2-acts .tv2-btn { width: auto !important; min-width: 0 !important; }
+.tv2-btn { flex: 1 1 auto; font-size: 10px; letter-spacing: 0.14em; padding: 7px 8px; margin: 0; background: transparent; border: 1px solid #00e1ff; color: #00e1ff; font-family: inherit; }
+.tv2-amberbtn { border-color: #ffaa00; color: #ffaa00; }
+.tv2-dimbtn { border-color: #6b8590; color: #9fb4bd; }
+.tv2-sheetbtn { display: none; }
+/* grid overlay + focus */
+.tv2-overlay { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; display: none; overflow: visible; }
+.tv2-lock { stroke: #ffd700; stroke-width: 1.5; stroke-dasharray: 6 4; }
+.tv2-lock-label { fill: #ffd700; font-size: 9px; letter-spacing: 0.08em; paint-order: stroke; stroke: #030403; stroke-width: 3px; }
+.tv2-missile { stroke: #c778dd; stroke-width: 1.5; stroke-dasharray: 3 5; }
+.tv2-missile-label { fill: #e3b8f0; font-size: 9px; letter-spacing: 0.06em; paint-order: stroke; stroke: #030403; stroke-width: 3px; }
+#battle-map-panel.tv2 .battle-token-el.tv2-focus { box-shadow: 0 0 0 3px rgba(0, 225, 255, 0.55), 0 0 14px rgba(0, 225, 255, 0.5) !important; }
+/* phones: roster becomes chips, HUD becomes a bottom sheet */
+@media screen and (max-width: 768px) {
+    .tv2-roster { left: 4px; right: 4px; width: auto; top: 4px; max-height: none; overflow-x: auto; overflow-y: hidden; }
+    .tv2-roster .tv2-ttl { display: none; }
+    .tv2-roster .tv2-rows { display: flex !important; gap: 6px; padding: 4px; }
+    .tv2-row { display: inline-flex; grid-template-columns: none; gap: 6px; padding: 4px 8px; border: 1px solid #2a4a54; white-space: nowrap; flex: 0 0 auto; font-size: 10px; }
+    .tv2-row > .tv2-iff, .tv2-row > .tv2-rname, .tv2-row > .tv2-hb, .tv2-row > div:nth-child(4) { display: none; }
+    .tv2-row.cur { border-color: #ffd700; }
+    .tv2-chip-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; align-self: center; }
+    .tv2-chip-name { display: inline; text-transform: uppercase; }
+    .tv2-objective { top: 42px; right: 4px; width: 62%; font-size: 10px; }
+    .tv2-plate { display: none; }
+    .tv2-hud { position: fixed; left: 0; right: 0; bottom: 0; z-index: 150; max-height: 40vh; overflow-y: auto; background: rgba(6, 14, 18, 0.97);
+        clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%, 0 14px); }
+    .tv2-hud.tv2-open { max-height: 85vh; }
+    .tv2-hud:not(.tv2-open) .tv2-weapons { display: none; }
+    .tv2-hud:not(.tv2-open) .tv2-armor { display: none; }
+    .tv2-hud:not(.tv2-open) .tv2-armor-compact { display: flex; }
+    .tv2-hud .tv2-hero { padding: 6px 10px; } .tv2-hud .tv2-sec { padding: 5px 10px; }
+    .tv2-hud .tv2-sheetbtn { display: inline-block; }
+    .tv2-hud .tv2-por, .tv2-hud .tv2-hero img { width: 64px !important; height: 48px !important; }
+    #battle-map-panel.tv2 .battle-map-layout { padding-bottom: 40vh; }
+}

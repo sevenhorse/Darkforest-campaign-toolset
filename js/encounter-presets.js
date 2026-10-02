@@ -120,6 +120,8 @@ window.stagerSave = async function() {
     if (nameEl) stagerPreset.name = nameEl.value.trim() || 'Untitled Encounter';
     const notesEl = document.getElementById('stager-notes');
     if (notesEl) stagerPreset.data.notes = notesEl.value;
+    const objEl = document.getElementById('stager-objective'); // Phase 4c: shown to players at launch
+    if (objEl) stagerPreset.data.objective = objEl.value.trim();
     const row = { name: stagerPreset.name, data: stagerPreset.data, updated_at: new Date().toISOString() };
     let res;
     if (stagerPreset.id) res = await db.from('encounter_presets').update(row).eq('id', stagerPreset.id).select();
@@ -310,6 +312,8 @@ function renderStager() {
             <h4 style="margin:12px 0 4px 0; color:#c9962f; font-size:11px;">Selected ship</h4>${editor}
             <h4 style="margin:12px 0 4px 0; color:#c9962f; font-size:11px;">Waves</h4>${waveRows}
             <button class="layer-edit" onclick="window.stagerAddWave()" style="font-size:9px; margin-top:4px;">+ ADD WAVE</button>
+            <label for="stager-objective" style="font-size:9px; color:#ffaa00; display:block; margin-top:10px;">🎯 Objective (shown to players when launched)</label>
+            <textarea id="stager-objective" rows="2" oninput="markStagerDirty()" style="font-size:10px; width:100%;">${presetEsc(p.data.objective || '')}</textarea>
             <label for="stager-notes" style="font-size:9px; color:#6b826a; display:block; margin-top:10px;">DM notes (never shown to players)</label>
             <textarea id="stager-notes" rows="3" oninput="markStagerDirty()" style="font-size:10px; width:100%;">${presetEsc(p.data.notes || '')}</textarea>`;
     }
@@ -454,7 +458,7 @@ window.launchEncounterPreset = async function(preset) {
         await db.from('battle_encounters').update({ is_active: false }).eq('id', active.id);
         await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement ended: "${active.name}".`, message_type: 'system' });
     }
-    const { data: encRows, error } = await db.from('battle_encounters').insert({ name: preset.name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true }).select();
+    const { data: encRows, error } = await db.from('battle_encounters').insert({ name: preset.name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true, objective: (preset.data.objective || '').trim() || null }).select();
     if (error) { alert('Failed to start the battle: ' + error.message); return null; }
     const newEnc = Array.isArray(encRows) ? encRows[0] : encRows;
     await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement started: "${preset.name}".`, message_type: 'system' });
