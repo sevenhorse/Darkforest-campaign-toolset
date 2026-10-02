@@ -234,3 +234,6 @@ document.addEventListener('darkforest:features-changed', () => {
     window.ensureManualDamageSidePicker();
     if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
 });
+
+// Full undo (Phase 4a): the per-side +/- buttons are undoable steps too.
+if (typeof window.wrapBattleActionForUndo === 'function') window.wrapBattleActionForUndo('modifyArmorSide', 'Adjust armor');

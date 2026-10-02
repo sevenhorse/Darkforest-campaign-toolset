@@ -612,3 +612,7 @@ function closeWavesPopup() { const b = document.getElementById('battle-waves-pop
     window.renderBattleMapPanel = hooked;
 })();
 document.addEventListener('darkforest:features-changed', updatePresetButtons);
+
+// Full undo (Phase 4a): a manually deployed wave is one undoable step
+// (its ships leave the grid and the wave goes back to waiting).
+if (typeof window.wrapBattleActionForUndo === 'function') window.wrapBattleActionForUndo('deployReinforcementWave', 'Deploy wave', { rows: true });
