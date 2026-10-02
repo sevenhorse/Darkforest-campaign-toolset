@@ -481,6 +481,8 @@ function handleRemoteBattleFx(p) {
         if (p.marker && !visible(p.marker)) return;
         if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
         window.battleRenderer.destruction(p.x, p.y);
+    } else if (p.k === 'tape' && typeof window.showRemoteTape === 'function') {
+        window.showRemoteTape(p); // shared measuring tape (Phase 4b, js/grid-tools.js)
     }
 }
 window.handleRemoteBattleFx = handleRemoteBattleFx;
@@ -2975,6 +2977,7 @@ const DomBattleRenderer = {
                 if (!tokenEl) {
                     tokenEl = document.createElement('div');
                     tokenEl.className = 'battle-token-el';
+                    tokenEl.dataset.tokenId = tok.token_id; // Phase 4b: lets grid tools find a token's element
                     tokenEl.style.position = 'absolute';
                     tokenEl.style.left = tok.x + 'px';
                     tokenEl.style.top = tok.y + 'px';

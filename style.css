@@ -1264,3 +1264,18 @@ div[style*="grid-template-columns"] > div,
 @media (pointer: coarse) {
     .battle-token-rotate-knob { width: 16px; height: 16px; margin-left: -8px; top: -38px; }
 }
+
+/* --- Grid tools (Command Terminal Phase 4b, 2026-10-02) --- */
+.battle-tools-overlay { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 4; display: none; overflow: visible; }
+.battle-tape { stroke: #ffd700; stroke-width: 2; stroke-dasharray: 6 4; }
+.battle-tape-end { fill: #ffd700; }
+.battle-tape-remote { stroke: #00e1ff; stroke-width: 2; stroke-dasharray: 6 4; }
+.battle-tape-remote-end { fill: #00e1ff; }
+.battle-tape-label { fill: #ffd700; font-size: 11px; font-family: inherit; paint-order: stroke; stroke: #030403; stroke-width: 3px; }
+.battle-ring { fill: none; stroke-width: 1; stroke-dasharray: 3 5; }
+.battle-ring-short { stroke: rgba(255, 99, 99, 0.8); }
+.battle-ring-medium { stroke: rgba(255, 170, 0, 0.75); }
+.battle-ring-long { stroke: rgba(0, 229, 163, 0.7); }
+.battle-ring-label { fill: #c9c9c9; font-size: 8px; paint-order: stroke; stroke: #030403; stroke-width: 2px; }
+.battle-select-box { fill: rgba(255, 215, 0, 0.06); stroke: #ffd700; stroke-width: 1; stroke-dasharray: 4 3; }
+.battle-token-el.battle-token-selected { outline: 2px dashed #ffd700; outline-offset: 10px; }
