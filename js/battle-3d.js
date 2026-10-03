@@ -22,6 +22,13 @@
      uses placeArmedTokenAt, a tap uses battleTokenTapped.
    - Renders on demand only: 0 FPS while nothing changes or moves.
    - Behind the 'battle_3d' feature switch.
+   Phase 6b (2026-10-03, DM defaults): ships glide to new positions/headings
+   with a fading engine trail (moves only -- no constant animation); weapon
+   effects per damage family; shields-up hits flash a blue bubble, shields-
+   down hits throw hull sparks; bigger explosions; measuring tape in 3D
+   (shared tapes both ways with the 2D view); quality HIGH/LOW (auto by
+   device, ⚙ toggle remembered per device); on a phone in 3D the HUD bottom
+   sheet starts as a slim bar (tap the name to open).
 
    Coordinates: grid (gx, gy) -> 3D (gx - W/2, altitude, gy - H/2). Y is up.
    Facing 0 (top of grid) = -Z; a hull's rotation.y = -facing.
@@ -38,7 +45,8 @@ const B3 = {
     groups: {}, objs: {}, geo: {}, mats: {},
     cam: { tx: 0, tz: 0, yaw: 0, pitch: 55, dist: 1000 },
     pending: false, drag: null, pointers: {}, fx: [], lastEncId: null,
-    selectedLocal: null, frames: 0, hintShown: false
+    selectedLocal: null, frames: 0, hintShown: false,
+    tool: null, tape: null, sheetMini: true
 };
 window.__b3d = B3;
 
@@ -73,6 +81,26 @@ window.setBattleView = function (v) {
 };
 window.toggleBattleView = function () {
     window.setBattleView(window.battle3dActive() ? 'classic' : 'command');
+};
+
+/* --- Quality (Phase 6b) --- */
+const QUALITY_KEY = 'darkforest_battle_quality';
+window.battle3dQuality = function () {
+    let q = null;
+    try { q = localStorage.getItem(QUALITY_KEY); } catch (e) {}
+    if (q === 'high' || q === 'low') return q;
+    return isPhone() ? 'low' : 'high';
+};
+function lowQ() { return window.battle3dQuality() === 'low'; }
+function applyQuality() {
+    if (!B3.renderer) return;
+    B3.renderer.setPixelRatio(lowQ() ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+    B3._w = null; resize();
+    requestRender();
+}
+window.setBattle3dQuality = function (q) {
+    try { localStorage.setItem(QUALITY_KEY, q === 'low' ? 'low' : 'high'); } catch (e) {}
+    applyQuality(); updateToolbar();
 };
 
 /* --- Small helpers --- */
@@ -165,6 +193,9 @@ function ensureEls() {
             <div class="b3d-toolbar">
                 <button type="button" class="layer-edit" data-act="reset" title="Reset the camera">⟲ VIEW</button>
                 <button type="button" class="layer-edit" data-act="top" title="Look straight down">⊤ TOP</button>
+                <button type="button" class="layer-edit" data-act="tape" title="Measuring tape: drag on the plane (starts at a ship's centre if you start on one). Tap to clear. Right-drag still pans.">📏 TAPE</button>
+                <button type="button" class="layer-edit" data-act="share" title="Show my tape on everyone's map">📡 SHARE</button>
+                <button type="button" class="layer-edit" data-act="quality" title="Graphics quality (remembered on this device)">⚙ HIGH</button>
                 <span class="b3d-sel-tools">
                     <button type="button" class="layer-edit" data-act="turnL" title="Turn the selected ship 15° left">⟲ 15°</button>
                     <button type="button" class="layer-edit" data-act="turnR" title="Turn the selected ship 15° right">⟳ 15°</button>
@@ -206,8 +237,8 @@ function initScene() {
     const T = B3.THREE;
     const host = B3.el.querySelector('.b3d-canvas-host');
     const renderer = B3.createRenderer ? B3.createRenderer(T, host)
-        : new T.WebGLRenderer({ antialias: !isPhone(), powerPreference: 'low-power' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isPhone() ? 1.5 : 2));
+        : new T.WebGLRenderer({ antialias: window.battle3dQuality() === 'high', powerPreference: 'low-power' });
+    renderer.setPixelRatio(window.battle3dQuality() === 'low' ? 1 : Math.min(window.devicePixelRatio || 1, 2));
     if (renderer.domElement && !renderer.domElement.parentNode) host.appendChild(renderer.domElement);
     const scene = new T.Scene();
     scene.background = new T.Color(0x03070b);
@@ -235,7 +266,7 @@ function initScene() {
     scene.add(lines(major, 0x2a7f8f, 0.7));
     scene.add(lines([-W / 2, 0.3, -H / 2, W / 2, 0.3, -H / 2, W / 2, 0.3, -H / 2, W / 2, 0.3, H / 2, W / 2, 0.3, H / 2, -W / 2, 0.3, H / 2, -W / 2, 0.3, H / 2, -W / 2, 0.3, -H / 2], 0x3fc6d8, 0.9));
 
-    ['tokens', 'overlay', 'fx', 'preview'].forEach(k => { B3.groups[k] = new T.Group(); scene.add(B3.groups[k]); });
+    ['tokens', 'overlay', 'fx', 'preview', 'tape'].forEach(k => { B3.groups[k] = new T.Group(); scene.add(B3.groups[k]); });
     Object.assign(B3, { renderer, scene, camera, plane });
     resetCamera();
     try { window.addEventListener('resize', () => { resize(); requestRender(); }); } catch (e) {}
@@ -280,6 +311,8 @@ function geo(key) {
     else if (key === 'craft') { g = new T.ConeGeometry(5, 14, 3); g.rotateX(-Math.PI / 2); g.scale(1, 0.35, 1); }
     else if (key === 'station') { g = new T.TorusGeometry(13, 2.6, 6, 18); g.rotateX(Math.PI / 2); }
     else if (key === 'stationCore') { g = new T.CylinderGeometry(4.5, 4.5, 11, 8); }
+    else if (key === 'glow') { g = new T.SphereGeometry(2.2, 10, 8); }
+    else if (key === 'unitLine') { g = new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 1, 0)]); }
     else if (key.startsWith('ring:')) { const [, a, b] = key.split(':').map(Number); g = new T.RingGeometry(a, b, 40); g.rotateX(-Math.PI / 2); }
     else if (key.startsWith('disc:')) { const r = Number(key.split(':')[1]); g = new T.CircleGeometry(r, 40); g.rotateX(-Math.PI / 2); }
     B3.geo[key] = g;
@@ -293,6 +326,7 @@ function mat(kind, color, opacity) {
     let m;
     if (kind === 'hull') m = new T.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.22, metalness: 0.35, roughness: 0.55, flatShading: true, transparent, opacity: opacity == null ? 1 : opacity });
     else if (kind === 'line') m = new T.LineBasicMaterial({ color, transparent: true, opacity: opacity == null ? 1 : opacity });
+    else if (kind === 'glow') m = new T.MeshBasicMaterial({ color, transparent: true, opacity: opacity == null ? 1 : opacity, blending: T.AdditiveBlending, depthWrite: false });
     else if (kind === 'dash') m = new T.LineDashedMaterial({ color, transparent: true, opacity: opacity == null ? 1 : opacity, dashSize: 8, gapSize: 6 });
     else m = new T.MeshBasicMaterial({ color, transparent: true, opacity: opacity == null ? 1 : opacity, side: T.DoubleSide, depthWrite: false });
     B3.mats[key] = m;
@@ -320,6 +354,12 @@ function buildHull(kind, color, ghost) {
         g.add(new T.Mesh(geo('stationCore'), m));
     } else {
         g.add(new T.Mesh(geo(kind), m));
+        // Engine glow at the stern (Phase 6b); brightens while the ship moves.
+        const glow = new T.Mesh(geo('glow'), mat('glow', '#9ff3ff', ghost ? 0.35 : 0.85));
+        glow.position.set(0, 0, kind === 'craft' ? 7.5 : kind === 'escort' ? 13.5 : 18);
+        glow.userData.isGlow = true;
+        g.add(glow);
+        g.userData.glow = glow;
         if (kind !== 'craft') {
             const br = new T.Mesh(geo('bridge'), m);
             br.position.set(0, 3.2, kind === 'escort' ? 4 : 6);
@@ -353,25 +393,19 @@ function upsertToken(tok, v, enc, currentTurnId, selId) {
         const label = document.createElement('div');
         label.className = 'b3d-label';
         B3.el.querySelector('.b3d-labels').appendChild(label);
-        o = { group, hull, disc, rim, turn, sel, noseHolder, drop: null, label, sig, alt: null };
+        const drop = new T.Line(geo('unitLine'), mat('line', color, 0.55));
+        group.add(drop);
+        o = { group, hull, disc, rim, turn, sel, noseHolder, drop, label, sig, cur: null, shown: null, anim: null };
         B3.objs[id] = o;
         B3.groups.tokens.add(group);
     }
     const c = tokCenter(tok);
     const dragging = B3.drag && B3.drag.kind === 'ship' && B3.drag.tokenId === id && B3.drag.moved;
-    if (!dragging) o.group.position.copy(V(c.x, c.y, 0));
-    const alt = window.battle3dAltitude(v, tok);
-    o.hull.position.y = alt;
-    const rot = -((Number(tok.facing) || 0) * Math.PI / 180);
-    o.hull.rotation.y = rot;
-    o.noseHolder.rotation.y = rot;
+    const target = { x: c.x - BATTLE_GRID_W / 2, z: c.y - BATTLE_GRID_H / 2, y: window.battle3dAltitude(v, tok), rot: -((Number(tok.facing) || 0) * Math.PI / 180) };
+    if (!o.cur) { o.cur = target; o.shown = Object.assign({}, target); }
+    else if (!dragging && stateDiffers(o.cur, target)) startTween(o, target, color);
+    if (!dragging && !o.anim) applyShown(o, o.cur);
     o.noseHolder.visible = !!(v && !v.is_strike_craft && !v.is_station && window.firingArcsOn && window.firingArcsOn());
-    if (o.alt !== alt) {
-        if (o.drop) { o.group.remove(o.drop); o.drop.geometry.dispose(); }
-        o.drop = lineObj([new T.Vector3(0, 0.5, 0), new T.Vector3(0, alt, 0)], color, 0.55);
-        o.group.add(o.drop);
-        o.alt = alt;
-    }
     o.turn.visible = !!(currentTurnId && currentTurnId === id);
     o.sel.visible = !!(selId && v && selId === v.id);
     o.vesselId = tok.ship_marker_id;
@@ -387,6 +421,57 @@ function upsertToken(tok, v, enc, currentTurnId, selId) {
     o.label.classList.toggle('b3d-label-sel', o.sel.visible);
     o.label.classList.toggle('b3d-label-craft', kind === 'craft');
 }
+/* --- Movement tweens + trails (Phase 6b) --- */
+function angDiff(a, b) { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+function stateDiffers(a, b) { return Math.hypot(a.x - b.x, a.z - b.z) > 0.5 || Math.abs(a.y - b.y) > 0.1 || Math.abs(angDiff(a.rot, b.rot)) > 0.002; }
+function applyShown(o, st) {
+    o.shown = Object.assign({}, st);
+    o.group.position.set(st.x, 0, st.z);
+    o.hull.position.y = st.y;
+    o.hull.rotation.y = st.rot;
+    o.noseHolder.rotation.y = st.rot;
+    o.drop.scale.y = Math.max(0.5, st.y);
+}
+function startTween(o, target, color) {
+    const from = Object.assign({}, o.shown || o.cur);
+    const dist = Math.hypot(target.x - from.x, target.z - from.z);
+    o.cur = target;
+    o.anim = { from, to: target, t0: nowMs(), dur: dist > 1 ? Math.min(900, 350 + dist * 2.5) : 320 };
+    if (dist > 3) addTrail({ x: from.x, y: from.y, z: from.z }, { x: target.x, y: target.y, z: target.z }, color);
+    requestRender();
+}
+window.battle3dCommitDragPosition = function (tokenId, gx, gy) { // a local drag already shows the ship at the drop point
+    const o = B3.objs[tokenId];
+    if (!o || !o.cur) return;
+    const start = Object.assign({}, o.cur);
+    o.cur = Object.assign({}, o.cur, { x: gx - BATTLE_GRID_W / 2, z: gy - BATTLE_GRID_H / 2 });
+    o.anim = null;
+    applyShown(o, o.cur);
+    const col = o.sig.split('|')[1];
+    if (Math.hypot(o.cur.x - start.x, o.cur.z - start.z) > 3) addTrail(start, o.cur, col);
+};
+function stepAnims(now) {
+    let busy = false;
+    Object.values(B3.objs).forEach(o => {
+        const glow = o.hull.userData.glow;
+        if (!o.anim) { if (glow) glow.scale.setScalar(1); return; }
+        const k = Math.min(1, (now - o.anim.t0) / o.anim.dur);
+        const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // ease in-out
+        const f = o.anim.from, t = o.anim.to;
+        applyShown(o, { x: f.x + (t.x - f.x) * e, z: f.z + (t.z - f.z) * e, y: f.y + (t.y - f.y) * e, rot: f.rot + angDiff(f.rot, t.rot) * e });
+        if (glow) glow.scale.setScalar(1 + 0.9 * Math.sin(Math.PI * k));
+        if (k >= 1) { o.anim = null; applyShown(o, o.cur); } else busy = true;
+    });
+    return busy;
+}
+function addTrail(a, b, color) {
+    const T = B3.THREE;
+    const ya = a.y, yb = b.y;
+    const line = lineObj([new T.Vector3(a.x, ya, a.z), new T.Vector3(b.x, yb, b.z)], color, 0.7);
+    line.material = line.material.clone(); line.userData.ownMat = true;
+    addFx(line, lowQ() ? 900 : 1600, (k, f) => { f.obj.material.opacity = 0.7 * (1 - k); }, null, 'trail');
+}
+
 function removeToken(id) {
     const o = B3.objs[id];
     if (!o) return;
@@ -395,7 +480,7 @@ function removeToken(id) {
     if (o.label && o.label.parentNode) o.label.parentNode.removeChild(o.label);
     delete B3.objs[id];
 }
-function clearAll() { Object.keys(B3.objs).forEach(removeToken); clearGroup(B3.groups.overlay); clearGroup(B3.groups.preview); B3.overlayLabels = []; }
+function clearAll() { B3.tape = null; clearGroup(B3.groups.tape); Object.keys(B3.objs).forEach(removeToken); clearGroup(B3.groups.overlay); clearGroup(B3.groups.preview); B3.overlayLabels = []; }
 function clearGroup(g) { if (!g) return; while (g.children.length) { const c = g.children[0]; g.remove(c); disposeTree(c); } }
 
 /* --- Overlay: arcs, range rings, ordnance, lock lines --- */
@@ -521,6 +606,7 @@ function syncScene() {
     });
     Object.keys(B3.objs).forEach(id => { if (!seen.has(id)) removeToken(id); });
     rebuildOverlay(enc, visibleToks);
+    drawTape();
     updateToolbar();
     const st = B3.el && B3.el.querySelector('.b3d-status');
     if (st) {
@@ -539,6 +625,14 @@ function updateToolbar() {
     const canAlt = !!(tok && v && canControl(v) && !v.is_station);
     const show = (act, on) => { const b = B3.el.querySelector(`[data-act="${act}"]`); if (b) b.style.display = on ? '' : 'none'; };
     show('turnL', canTurn); show('turnR', canTurn); show('altU', canAlt); show('altD', canAlt);
+    const tapeBtn = B3.el.querySelector('[data-act="tape"]');
+    if (tapeBtn) tapeBtn.classList.toggle('b3d-on', B3.tool === 'tape');
+    const gt = window.__gridTools;
+    show('share', B3.tool === 'tape');
+    const shareBtn = B3.el.querySelector('[data-act="share"]');
+    if (shareBtn) shareBtn.classList.toggle('b3d-on', !!(gt && gt.share));
+    const qBtn = B3.el.querySelector('[data-act="quality"]');
+    if (qBtn) qBtn.textContent = lowQ() ? '⚙ LOW' : '⚙ HIGH';
 }
 function onToolbar(e) {
     const btn = e.target.closest && e.target.closest('[data-act]');
@@ -546,6 +640,9 @@ function onToolbar(e) {
     const act = btn.dataset.act;
     if (act === 'reset') return resetCamera();
     if (act === 'top') return topCamera();
+    if (act === 'tape') { B3.tool = B3.tool === 'tape' ? null : 'tape'; if (!B3.tool) clearTape(); updateToolbar(); return; }
+    if (act === 'share') { if (typeof window.toggleTapeShare === 'function') window.toggleTapeShare(); updateToolbar(); return; }
+    if (act === 'quality') return window.setBattle3dQuality(lowQ() ? 'high' : 'low');
     const selId = selectedVesselId();
     const tok = selId && encTokens().find(t => t.ship_marker_id === selId);
     if (!tok) return;
@@ -570,7 +667,8 @@ function projectToScreen(p) {
 function draw() {
     if (!B3.renderer || !B3.el || B3.el.style.display === 'none') return;
     applyCamera();
-    const now = (window.performance && performance.now) ? performance.now() : Date.now();
+    const now = nowMs();
+    const animating = stepAnims(now);
     stepFx(now);
     B3.renderer.render(B3.scene, B3.camera);
     B3.frames++;
@@ -583,7 +681,7 @@ function draw() {
     });
     const host = B3.el.querySelector('.b3d-labels');
     host.querySelectorAll('.b3d-anchor').forEach(n => n.remove());
-    (B3.overlayLabels || []).concat(B3.previewLabels || []).forEach(a => {
+    (B3.overlayLabels || []).concat(B3.previewLabels || [], B3.tapeLabels || []).forEach(a => {
         const s = projectToScreen(a.pos);
         if (s.behind) return;
         const n = document.createElement('div');
@@ -592,55 +690,184 @@ function draw() {
         n.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px) translate(-50%, -50%)`;
         host.appendChild(n);
     });
-    if (B3.fx.length) requestRender();
+    if (B3.fx.length || animating) requestRender();
 }
 
-/* --- Effects (basic; the full set is Phase 6b) --- */
-function altNear(gx, gy) {
-    let best = null, bd = 30;
-    encTokens().forEach(t => { const c = tokCenter(t); const d = Math.hypot(c.x - gx, c.y - gy); if (d < bd) { bd = d; best = t; } });
-    return best ? window.battle3dAltitude(vesselById(best.ship_marker_id), best) : 30;
-}
-function spawnFx(kind, a, b, color) {
-    if (!window.battle3dActive() || !B3.renderer) return;
-    const T = B3.THREE;
-    const now = (window.performance && performance.now) ? performance.now() : Date.now();
-    let obj, life = 550;
-    if (kind === 'beam' || kind === 'tracer') {
-        obj = lineObj([V(a.x, a.y, altNear(a.x, a.y)), V(b.x, b.y, altNear(b.x, b.y))], color, 1, kind === 'tracer');
-        obj.material = obj.material.clone(); obj.userData.ownMat = true;
-    } else {
-        const m = new T.Mesh(new T.SphereGeometry(kind === 'boom' ? 14 : 8, 12, 8), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 }));
-        m.userData.ownGeo = true; m.userData.ownMat = true;
-        m.position.copy(V(b.x, b.y, altNear(b.x, b.y)));
-        obj = m; life = kind === 'boom' ? 1000 : 600;
-    }
+/* --- Effects (Phase 6b) ---
+   Every effect is a short-lived object in the fx group, stepped by draw()
+   while any is alive (render on demand otherwise). LOW quality draws fewer
+   particles and skips the outer glows. */
+function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+function addFx(obj, life, update, onEnd, kind, delay) {
+    if (!B3.renderer) return null;
+    const f = { obj, life, update, onEnd, kind: kind || 'fx', t0: nowMs() + (delay || 0) };
+    if (delay) obj.visible = false;
     B3.groups.fx.add(obj);
-    B3.fx.push({ obj, kind, t0: now, life });
+    B3.fx.push(f);
     requestRender();
+    return f;
 }
 function stepFx(now) {
+    const ended = [];
     B3.fx = B3.fx.filter(f => {
+        if (now < f.t0) return true;
+        f.obj.visible = true;
         const k = (now - f.t0) / f.life;
-        if (k >= 1) {
-            B3.groups.fx.remove(f.obj);
-            if (f.obj.geometry) f.obj.geometry.dispose();
-            if (f.obj.userData.ownMat && f.obj.material) f.obj.material.dispose();
-            return false;
-        }
-        f.obj.material.opacity = 1 - k;
-        if (f.kind === 'boom' || f.kind === 'burst' || f.kind === 'pulse') f.obj.scale.setScalar(1 + k * (f.kind === 'boom' ? 3 : 1.5));
+        if (k >= 1) { ended.push(f); return false; }
+        try { if (f.update) f.update(k, f); } catch (e) {}
         return true;
     });
+    ended.forEach(f => {
+        B3.groups.fx.remove(f.obj);
+        disposeFx(f.obj);
+        if (f.onEnd) { try { f.onEnd(); } catch (e) {} }
+    });
 }
-window.battle3dFx = spawnFx; // for tests
+function disposeFx(obj) {
+    obj.traverse(o => {
+        if (o.geometry && (o.userData.ownGeo || o.userData.fxGeo)) o.geometry.dispose();
+        if (o.material && (o.userData.ownMat || o.userData.fxMat)) o.material.dispose();
+    });
+}
+function fxMat(color, opacity, additive) {
+    const T = B3.THREE;
+    return new T.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: additive === false ? T.NormalBlending : T.AdditiveBlending, side: T.DoubleSide });
+}
+function fxMesh(geometry, material) { const m = new B3.THREE.Mesh(geometry, material); m.userData.fxGeo = true; m.userData.fxMat = true; return m; }
+function altNear(gx, gy) {
+    const t = tokenNear(gx, gy);
+    return t ? window.battle3dAltitude(vesselById(t.ship_marker_id), t) : 30;
+}
+function tokenNear(gx, gy) {
+    let best = null, bd = 30;
+    encTokens().forEach(t => { const c = tokCenter(t); const d = Math.hypot(c.x - gx, c.y - gy); if (d < bd) { bd = d; best = t; } });
+    return best;
+}
+function P3(g) { return V(g.x, g.y, altNear(g.x, g.y)); }
+// A cylinder between two 3D points (beams, tracer bolts).
+function rod(a, b, radius, material) {
+    const T = B3.THREE;
+    const len = a.distanceTo(b) || 0.01;
+    const m = fxMesh(new T.CylinderGeometry(radius, radius, len, 6, 1, true), material);
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    return m;
+}
+function flash(pos, r, color, life, grow, opacity, delay) {
+    const T = B3.THREE;
+    const m = fxMesh(new T.SphereGeometry(r, 14, 10), fxMat(color, opacity == null ? 0.9 : opacity));
+    m.position.copy(pos);
+    const op0 = m.material.opacity;
+    addFx(m, life, (k) => { m.material.opacity = op0 * (1 - k); m.scale.setScalar(1 + k * (grow == null ? 1.5 : grow)); }, null, 'flash', delay);
+    return m;
+}
+function sparks(pos, color, n, speed, life, delay) {
+    const T = B3.THREE;
+    const pts = new Float32Array(n * 3), vel = [];
+    for (let i = 0; i < n; i++) {
+        const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), sp = speed * (0.5 + Math.random() * 0.7);
+        vel.push([Math.sin(ph) * Math.cos(th) * sp, Math.cos(ph) * sp * 0.6, Math.sin(ph) * Math.sin(th) * sp]);
+        pts[i * 3] = pos.x; pts[i * 3 + 1] = pos.y; pts[i * 3 + 2] = pos.z;
+    }
+    const g = new T.BufferGeometry();
+    g.setAttribute('position', new T.BufferAttribute(pts, 3));
+    const m = new T.Points(g, new T.PointsMaterial({ color, size: 6, transparent: true, opacity: 1, depthWrite: false, blending: T.AdditiveBlending }));
+    m.userData.fxGeo = true; m.userData.fxMat = true;
+    addFx(m, life, (k) => {
+        const arr = g.attributes.position.array, t = k * life / 1000;
+        for (let i = 0; i < n; i++) { arr[i * 3] = pos.x + vel[i][0] * t; arr[i * 3 + 1] = pos.y + vel[i][1] * t; arr[i * 3 + 2] = pos.z + vel[i][2] * t; }
+        g.attributes.position.needsUpdate = true;
+        m.material.opacity = 1 - k;
+    }, null, 'sparks', delay);
+    return m;
+}
+function planeRing(pos, r0, r1, color, life, delay) {
+    const T = B3.THREE;
+    const m = fxMesh(new T.RingGeometry(0.85, 1, 48), fxMat(color, 0.8));
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(pos.x, Math.max(1, pos.y), pos.z);
+    addFx(m, life, (k) => { m.scale.setScalar(r0 + (r1 - r0) * k); m.material.opacity = 0.8 * (1 - k); }, null, 'ring', delay);
+    return m;
+}
+// Where a shot lands: shields up -> blue bubble; shields down -> hull sparks.
+function impactAt(gpt, delay) {
+    const pos = P3(gpt);
+    const tok = tokenNear(gpt.x, gpt.y);
+    const v = tok && vesselById(tok.ship_marker_id);
+    const shieldsUp = !!(v && (v.integrity_shields || 0) > 0);
+    const low = lowQ();
+    if (shieldsUp) {
+        const T = B3.THREE;
+        const r = (v.is_strike_craft ? 14 : v.is_station ? 34 : 30);
+        const bub = fxMesh(new T.SphereGeometry(r, low ? 16 : 28, low ? 12 : 20), fxMat('#4db8ff', 0.42));
+        bub.position.copy(pos);
+        addFx(bub, 600, (k) => { bub.material.opacity = 0.42 * (1 - k); bub.scale.setScalar(0.88 + 0.22 * k); }, null, 'shield', delay);
+        if (!low) flash(pos, 6, '#cfeeff', 280, 2, 0.9, delay);
+        return 'shield';
+    }
+    flash(pos, 9, '#ffb066', 380, 2.2, 0.95, delay);
+    sparks(pos, '#ff9a3d', low ? 7 : 18, 90, 700, delay);
+    return 'hull';
+}
+window.battle3dImpactAt = impactAt; // for tests
+function fireFx(family, s, t, color) {
+    if (!window.battle3dActive() || !B3.renderer) return;
+    const a = P3(s), b = P3(t);
+    const low = lowQ();
+    if (family === 'pulse') {                                   // healing
+        planeRing(b, 10, 55, '#5dff9d', 1000);
+        flash(b, 12, '#5dff9d', 800, 1.2, 0.5);
+        if (!low) sparks(b, '#9dffbf', 10, 25, 900);
+        return;
+    }
+    if (family === 'tracer') {                                  // kinetic: bolts that travel
+        const n = low ? 2 : 4, flight = 300, gap = 80;
+        const dir = b.clone().sub(a), len = dir.length() || 1;
+        for (let i = 0; i < n; i++) {
+            const bolt = rod(new B3.THREE.Vector3(0, 0, 0), dir.clone().normalize().multiplyScalar(Math.min(22, len * 0.3)), 1.7, fxMat(color, 1));
+            const off = bolt.position.clone();
+            addFx(bolt, flight, (k) => { bolt.position.copy(a).addScaledVector(dir, k).add(off); bolt.material.opacity = 1; }, i === n - 1 ? () => impactAt(t) : null, 'tracer', i * gap);
+        }
+        return;
+    }
+    if (family === 'burst') {                                   // explosive: a shell, then a cloud
+        const shell = fxMesh(new B3.THREE.SphereGeometry(4.5, 10, 8), fxMat(color, 1));
+        shell.position.copy(a);
+        addFx(shell, 330, (k) => { shell.position.copy(a).lerp(b, k); }, () => {
+            flash(b, 16, color, 700, 2.4, 0.7);
+            sparks(b, color, low ? 10 : 26, 70, 850);
+            impactAt(t);
+        }, 'shell');
+        return;
+    }
+    // beam (default): an instant glowing line that fades
+    const core = rod(a, b, 1.6, fxMat('#ffffff', 0.95));
+    addFx(core, 520, (k) => { core.material.opacity = 0.95 * (1 - k); }, null, 'beam');
+    const glowRod = rod(a, b, low ? 3 : 5, fxMat(color, 0.5));
+    addFx(glowRod, 650, (k) => { glowRod.material.opacity = 0.5 * (1 - k); }, null, 'beamglow');
+    if (!low) flash(a, 6, color, 300, 1.5, 0.8);
+    impactAt(t);
+}
+window.battle3dFireFx = fireFx; // for tests
+function destructionFx(c) {
+    if (!window.battle3dActive() || !B3.renderer) return;
+    const pos = V(c.x, c.y, altNear(c.x, c.y));
+    const low = lowQ();
+    flash(pos, 16, '#ffffff', 350, 2, 1);
+    flash(pos, 26, '#ff9a3d', 1100, 3, 0.85);
+    if (!low) flash(pos, 20, '#ff4d1a', 1400, 4, 0.5, 120);
+    planeRing(pos, 14, 170, '#ffb066', 1300);
+    sparks(pos, '#ffb066', low ? 16 : 44, 130, 1500);
+    if (!low) sparks(pos, '#ffffff', 14, 190, 800);
+}
+window.battle3dDestructionFx = destructionFx; // for tests
 (function hookEffects() {
     const dom = window.DomBattleRenderer;
     if (dom && !dom.__b3dHooked) {
         const origFire = dom.fireEffect;
         dom.fireEffect = function (sx, sy, tx, ty, color, family) {
             const r = origFire.apply(this, arguments);
-            try { spawnFx(family === 'tracer' ? 'tracer' : family === 'burst' ? 'burst' : family === 'pulse' ? 'pulse' : 'beam', { x: sx, y: sy }, { x: tx, y: ty }, color || '#ff3333'); } catch (e) {}
+            try { fireFx(family || 'beam', { x: sx, y: sy }, { x: tx, y: ty }, color || '#ff3333'); } catch (e) { console.error('3D view: effect failed', e); }
             return r;
         };
         dom.__b3dHooked = true;
@@ -649,12 +876,59 @@ window.battle3dFx = spawnFx; // for tests
         const origBoom = window.spawnDestructionEffect;
         const wrapped = function (grid, x, y) {
             const r = origBoom.apply(this, arguments);
-            try { const c = { x: x + BATTLE_TOKEN_SIZE / 2, y: y + BATTLE_TOKEN_SIZE / 2 }; spawnFx('boom', c, c, '#ff9a3d'); } catch (e) {}
+            try { destructionFx({ x: x + BATTLE_TOKEN_SIZE / 2, y: y + BATTLE_TOKEN_SIZE / 2 }); } catch (e) {}
             return r;
         };
         wrapped.__b3d = true;
         window.spawnDestructionEffect = wrapped;
     }
+})();
+
+/* --- Measuring tape (Phase 6b) --- same range bands as the 2D tape; shares
+   through the same broadcast, and shows tapes shared from the 2D view. */
+function tapeObjects(a, b, color, labelHtml, cls) {
+    const T = B3.THREE;
+    const g = new T.Group();
+    const pa = V(a.x, a.y, 2), pb = V(b.x, b.y, 2);
+    g.add(lineObj([pa, pb], color, 0.95));
+    g.add(circleLine(a, 4, color, 0.9));
+    g.add(circleLine(b, 4, color, 0.9));
+    return { g, label: { pos: pa.clone().add(pb).multiplyScalar(0.5).setY(6), html: labelHtml, cls } };
+}
+function drawTape() {
+    clearGroup(B3.groups.tape);
+    B3.tapeLabels = [];
+    if (B3.tape) {
+        const t = tapeObjects(B3.tape.a, B3.tape.b, '#ffe066', esc(window.tapeLabel ? window.tapeLabel(B3.tape.a, B3.tape.b) : ''), 'b3d-tape-label');
+        B3.groups.tape.add(t.g); B3.tapeLabels.push(t.label);
+    }
+    const gt = window.__gridTools;
+    const now = Date.now();
+    ((gt && gt.remoteTapes) || []).filter(r => r.until > now).forEach(r => {
+        const t = tapeObjects(r.a, r.b, '#c9a6ff', `${esc(r.who || '')} · ${esc(window.tapeLabel ? window.tapeLabel(r.a, r.b) : '')}`, 'b3d-tape-label b3d-tape-remote');
+        B3.groups.tape.add(t.g); B3.tapeLabels.push(t.label);
+    });
+    requestRender();
+}
+function clearTape() { B3.tape = null; drawTape(); }
+function shareTape3d() {
+    const gt = window.__gridTools;
+    if (!gt || !gt.share || !B3.tape || typeof window.sendBattleBroadcast !== 'function') return;
+    const profs = (typeof allProfiles !== 'undefined' && Array.isArray(allProfiles)) ? allProfiles : [];
+    const me = profs.find(p => p.id === currentUserId);
+    const who = currentUserRole === 'dm' ? 'DM' : ((me && me.username) || 'player');
+    window.sendBattleBroadcast('fx', { k: 'tape', a: B3.tape.a, b: B3.tape.b, who });
+}
+(function hookRemoteTape() {
+    const orig = window.showRemoteTape;
+    if (typeof orig !== 'function' || orig.__b3d) return;
+    const wrapped = function () {
+        const r = orig.apply(this, arguments);
+        try { if (window.battle3dActive() && B3.renderer) { drawTape(); setTimeout(drawTape, 6100); } } catch (e) {}
+        return r;
+    };
+    wrapped.__b3d = true;
+    window.showRemoteTape = wrapped;
 })();
 
 /* --- Picking --- */
@@ -727,6 +1001,13 @@ function onDown(e) {
     }
     if (ps.length > 2) return;
     const base = { sx: e.clientX, sy: e.clientY, moved: false, button: e.button || 0 };
+    if (B3.tool === 'tape' && base.button === 0 && !e.shiftKey) {
+        const pk = window.battle3dPickToken(e.clientX, e.clientY);
+        const tk = pk && encTokens().find(t => t.token_id === pk.tokenId);
+        const a = tk ? tokCenter(tk) : planeHit(e.clientX, e.clientY);
+        B3.drag = Object.assign(base, { kind: 'tape', a });
+        return;
+    }
     const pick = (base.button === 0 && !e.shiftKey) ? window.battle3dPickToken(e.clientX, e.clientY) : null;
     if (pick) {
         const tok = encTokens().find(t => t.token_id === pick.tokenId);
@@ -773,6 +1054,11 @@ function onMove(e) {
     } else if (d.kind === 'pan') {
         panBy(dx, dy, d.tx0, d.tz0);
         requestRender();
+    } else if (d.kind === 'tape' && d.a) {
+        const hit = planeHit(e.clientX, e.clientY);
+        if (!hit) return;
+        B3.tape = { a: d.a, b: hit };
+        drawTape();
     } else if (d.kind === 'ship' && d.rule.mode !== 'tap') {
         const hit = planeHit(e.clientX, e.clientY);
         if (!hit) return;
@@ -822,8 +1108,12 @@ function onUp(e) {
             syncScene();
             return;
         }
-        if (d.pos) window.battleCommitMove(d.rule, d.pos);
+        if (d.pos) { window.battle3dCommitDragPosition(d.tokenId, d.pos.x + d.size / 2, d.pos.y + d.size / 2); window.battleCommitMove(d.rule, d.pos); }
         else syncScene();
+        return;
+    }
+    if (d.kind === 'tape') {
+        if (!d.moved) clearTape(); else shareTape3d();
         return;
     }
     if (d.kind === 'place' && !d.moved) {
@@ -872,12 +1162,32 @@ function syncView() {
     syncScene();
 }
 window.battle3dSyncView = syncView;
+// Phone + 3D: the tactical HUD's bottom sheet starts as a slim bar (name,
+// tags, buttons). Tapping the name toggles it; WEAPONS ▸ still opens fully.
+function narrowScreen() { try { return window.matchMedia('(max-width: 768px)').matches; } catch (e) { return false; } }
+function applyMiniSheet() {
+    const box = document.getElementById('tv2-hud');
+    if (!box) return;
+    const on = narrowScreen() && window.battle3dActive();
+    box.classList.toggle('b3d-mini', on && B3.sheetMini);
+    box.classList.toggle('b3d-mini-able', on);
+    if (!box.__b3dMini) {
+        box.__b3dMini = true;
+        box.addEventListener('click', e => {
+            if (!box.classList.contains('b3d-mini-able') || box.classList.contains('tv2-open')) return;
+            if (!(e.target.closest && e.target.closest('.tv2-hero'))) return;
+            B3.sheetMini = !B3.sheetMini;
+            applyMiniSheet();
+        });
+    }
+}
+window.battle3dApplyMiniSheet = applyMiniSheet;
 (function hookRender() {
     const orig = window.renderBattleMapPanel;
     if (typeof orig !== 'function' || orig.__b3dHooked) return;
     const hooked = function (...args) {
         const r = orig.apply(this, args);
-        try { syncView(); } catch (err) { console.error('3D view: render failed', err); }
+        try { syncView(); applyMiniSheet(); } catch (err) { console.error('3D view: render failed', err); }
         return r;
     };
     hooked.__b3dHooked = true;
@@ -898,7 +1208,9 @@ window.battle3dSyncView = syncView;
 try {
     document.addEventListener('darkforest:features-changed', () => { if (window.globalBattleEncounterCache) { try { syncView(); } catch (e) {} } });
     document.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && window.battle3dActive() && B3.drag) cancelDrag();
+        if (e.key !== 'Escape' || !window.battle3dActive()) return;
+        if (B3.drag) cancelDrag();
+        else if (B3.tape) clearTape();
     });
 } catch (e) {}
 })();

@@ -1392,6 +1392,9 @@ div[style*="grid-template-columns"] > div,
 .b3d-status { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); font-size: 11px; color: #00e1ff; background: rgba(0,0,0,0.75); padding: 3px 10px; border: 1px solid #12404a; z-index: 4; pointer-events: none; }
 .b3d-hint { position: absolute; left: 8px; bottom: 8px; max-width: 45%; font-size: 9px; color: #7fa7b0; background: rgba(0,0,0,0.6); padding: 3px 6px; z-index: 3; pointer-events: none; transition: opacity 1.5s ease; }
 .b3d-hint-fade { opacity: 0; }
+.b3d-toolbar .layer-edit.b3d-on { background: rgba(0,225,255,0.22); border-color: #00e1ff; color: #fff; }
+.b3d-tape-label { font-size: 10px; color: #ffe066; background: rgba(0,0,0,0.75); padding: 1px 5px; border: 1px solid rgba(255,224,102,0.6); }
+.b3d-tape-remote { color: #c9a6ff; border-color: rgba(201,166,255,0.6); }
 /* With the tactical HUD on, its name plate sits bottom-centre of the stage. */
 #battle-map-panel.tv2 .b3d-toolbar, #battle-map-panel.tv2 .b3d-hint { bottom: 44px; }
 @media screen and (max-width: 768px) {
@@ -1399,4 +1402,11 @@ div[style*="grid-template-columns"] > div,
     .b3d-view { width: calc(100vw - 32px) !important; height: 50vh !important; }
     .b3d-hint { display: none; }
     .b3d-toolbar { max-width: 100%; left: 8px; }
+    /* Phase 6b: in 3D the HUD sheet starts as a slim bar; tap the name to open. */
+    .tv2-hud.b3d-mini:not(.tv2-open) { min-height: 0; }
+    .tv2-hud.b3d-mini:not(.tv2-open) > .tv2-sec, .tv2-hud.b3d-mini:not(.tv2-open) > .tv2-dmrow { display: none; }
+    .tv2-hud.b3d-mini:not(.tv2-open) .tv2-hero > :first-child:not(:last-child) { display: none; }
+    .tv2-hud.b3d-mini-able:not(.tv2-open) .tv2-hero { cursor: pointer; position: relative; }
+    .tv2-hud.b3d-mini-able:not(.tv2-open) .tv2-hero::after { content: '▴ DETAILS'; position: absolute; right: 10px; top: 8px; font-size: 9px; color: #7fa7b0; letter-spacing: 0.08em; }
+    .tv2-hud.b3d-mini-able:not(.tv2-open):not(.b3d-mini) .tv2-hero::after { content: '▾ LESS'; }
 }
