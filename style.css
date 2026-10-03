@@ -1690,6 +1690,19 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .dkv-modal-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
 .atk-deck-info { font-size: 10px; letter-spacing: 0.04em; margin: 4px 0 6px; padding: 4px 6px; border: 1px solid; }
 .atk-deck-info.ok { color: #00e5a3; border-color: rgba(0, 229, 163, 0.5); } .atk-deck-info.blocked { color: #ff8a8a; border-color: rgba(255, 77, 77, 0.6); }
+/* Phase 9: boarding loop */
+.atk-deck-info.warn { color: #ffd27a; border-color: rgba(255, 170, 0, 0.6); }
+.dkv-green { border-color: #00e5a3; color: #00e5a3; }
+.dkv-modal-p { font-size: 11px; line-height: 1.5; color: #b8cbd2; margin: 8px 0; }
+.dkv-modal .dkv-modal-acts .dkv-btn { padding: 6px 10px; }
+.dkv-check { display: flex; align-items: center; gap: 6px; font-size: 9px; letter-spacing: 0.1em; color: #8fa7b0; margin: 8px 0 0; cursor: pointer; }
+.dkv-check input { width: auto; margin: 0; accent-color: #00e1ff; }
+.dkv-dice { margin-top: 8px; font-size: 9px; letter-spacing: 0.12em; color: #6b8590; }
+.dkv-log { font-size: 10px; line-height: 1.45; color: #ffd27a; max-height: 160px; overflow-y: auto; }
+.dkv-log div { padding: 3px 0; border-bottom: 1px solid rgba(255, 170, 0, 0.15); }
+.dkv-fogchip { color: #9fb4bc; border-color: rgba(159, 180, 188, 0.4); }
+.dkv-tplsel { width: auto; max-width: 150px; margin: 0 6px 0 auto; font-size: 9px; padding: 2px 4px; background: #030403; border: 1px solid #00e1ff; color: #00e1ff; font-family: inherit; }
+#deck-plan-editor input.bad { border-color: #ff4d4d !important; color: #ff8a8a; }
 .dpe-wrap { overflow: auto; max-width: 100%; }
 .dpe-wrap canvas { display: block; cursor: crosshair; touch-action: none; border: 1px solid #12404a; }
 .dpe-brush { display: inline-flex; align-items: center; gap: 5px; --k: #9fb4bd; }

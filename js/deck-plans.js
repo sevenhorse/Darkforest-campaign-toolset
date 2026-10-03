@@ -25,6 +25,24 @@
    - Doors: a token next to a door can open/close it on its owner's turn;
      the DM can toggle any door any time.
 
+   Phase 9 (boarding loop, DM decisions 2026-10-03):
+   - Starting a fight from a ship's deck marks that deck CONTESTED; END FIGHT
+     asks SECURE / CAPTURED / LEAVE AS IS. When every deck is CAPTURED, the
+     DM is offered the ship transfer (defaults to the boarders' player).
+   - Hazard squares: a token ending its turn on one rolls the plan's hazard
+     dice (default 1d6) into chat; the DM applies the damage.
+   - 💨 VENT (DM): click an airlock; every token within 3 squares that can
+     see it rolls the plan's vent dice (default 2d6) into chat, and open
+     doors within 3 squares slam shut.
+   - Personal weapons get short/long range (squares): past short = -2 to
+     hit, past long = no shot.
+   - Fog of war (on by default per fight): shared party vision from every
+     PC token. ENFORCED ON THE SERVER: deck_tokens rows are only readable
+     when df_deck_token_visible() says so; NEXT TURN runs on the server
+     (df_deck_advance_turn) because a player's client can't see every
+     token; every token write bumps deck_fights.rev so all clients reload.
+     Squares seen once stay "explored" (deck_fights.explored, '0'/'1').
+
    Storage: deck_plans (library, DM only); deck_fights (one active; a
    SNAPSHOT of the plan + open-door state + turn pointer; readable by
    everyone); deck_tokens (one row per placed combatant). Feature switch
@@ -124,7 +142,42 @@ window.loadDeckPlans = async function () {
     return window.deckPlansList;
 };
 window.deckPlanById = (id) => id ? (window.deckPlansList || []).find(p => p.id === id) || null : null;
-function snapshotPlan(p) { return { plan_id: p.id || null, name: p.name, cols: p.cols, rows: p.rows, tiles: normTiles(p) }; }
+function snapshotPlan(p) {
+    return { plan_id: p.id || null, name: p.name, cols: p.cols, rows: p.rows, tiles: normTiles(p),
+        hazard_dice: validDice(p.hazard_dice) || '1d6', vent_dice: validDice(p.vent_dice) || '2d6' };
+}
+
+/* --- Dice (hazard / vent) --- */
+function validDice(s) {
+    const m = String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase().match(/^(\d{1,2})?d(\d{1,3})([+-]\d{1,3})?$/);
+    if (!m) return null;
+    const n = parseInt(m[1] || '1', 10), f = parseInt(m[2], 10);
+    if (n < 1 || f < 2) return null;
+    return `${n}d${f}${m[3] || ''}`;
+}
+window.deckValidDice = validDice;
+window.deckRollDice = function (expr) {
+    const e = validDice(expr) || '1d6';
+    const m = e.match(/^(\d+)d(\d+)([+-]\d+)?$/);
+    const rolls = [];
+    for (let i = 0; i < parseInt(m[1], 10); i++) rolls.push(Math.floor(Math.random() * parseInt(m[2], 10)) + 1);
+    const mod = parseInt(m[3] || '0', 10);
+    return { expr: e, rolls, mod, total: rolls.reduce((a, b) => a + b, 0) + mod };
+};
+function rollText(r) { return `${r.expr} → [${r.rolls.join(', ')}]${r.mod ? (r.mod > 0 ? ' +' : ' ') + r.mod : ''} = ${r.total}`; }
+async function postDeckChat(content) {
+    try { await db.from('chat_logs').insert({ sender_id: null, content, message_type: 'system' }); } catch (e) { console.warn('deck chat failed', e); }
+}
+// NPC results while fog is on would give away where a hidden enemy stands,
+// so they stay on the DM's screen (DECK LOG in the Deck View side panel)
+// instead of going to chat. NPC turns are only ever ended by the DM, so
+// the DM's client is the one that rolls them.
+const dmLog = [];
+function dmNotice(msg) {
+    dmLog.unshift(msg); if (dmLog.length > 8) dmLog.length = 8;
+    if (typeof window.showToast === 'function') window.showToast(msg);
+}
+window.__deckDmLog = dmLog;
 
 /* --- Movement allowance --- */
 function combatantById(id) { return (typeof combatantsList !== 'undefined' ? combatantsList : []).find(c => String(c.id) === String(id)) || null; }
@@ -160,13 +213,16 @@ window.loadDeckFight = async function () {
     return fight;
 };
 let subscribed = false;
+// One move fires a deck_tokens event AND a deck_fights (rev) event: reload once.
+let reloadTimer = null;
+function queueReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => window.loadDeckFight(), 120); }
 function subscribe() {
     if (subscribed || !db.channel) return;
     subscribed = true;
     try {
         db.channel('deck_fights_stream')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'deck_fights' }, () => window.loadDeckFight())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'deck_tokens' }, () => window.loadDeckFight())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'deck_fights' }, queueReload)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'deck_tokens' }, queueReload)
             .subscribe();
     } catch (e) { console.warn('deck fights realtime unavailable', e); }
 }
@@ -180,25 +236,155 @@ window.deckTurnOrder = turnOrder;
 function currentTok() { return F.fight ? F.tokens.find(t => String(t.combatant_id) === String(F.fight.current_combatant_id)) || null : null; }
 function myTurn(tok) { return !!(F.fight && tok && String(F.fight.current_combatant_id) === String(tok.combatant_id)); }
 
+/* --- Fog of war (shared party vision) ---
+   The server decides which NPC tokens a player receives at all
+   (df_deck_token_visible, same LOS rule); this is the client half:
+   which SQUARES to draw, and the "explored" memory. */
+function fogOn() { return !!(F.fight && F.fight.fog !== false); }
+function isPcTok(t) { const c = combatantById(t.combatant_id); return !!(c && c.is_npc === false); }
+function visibleSet() {
+    const fight = F.fight; if (!fight) return new Set();
+    const plan = fight.plan, doors = fight.doors || {};
+    const pcs = F.tokens.filter(isPcTok);
+    const key = fight.id + '|' + pcs.map(t => t.x + ',' + t.y).sort().join(';') + '|' + Object.keys(doors).sort().join(',');
+    if (F._visKey === key && F._vis) return F._vis;
+    const vis = new Set();
+    pcs.forEach(t => vis.add(t.y * plan.cols + t.x));
+    for (let y = 0; y < plan.rows; y++) for (let x = 0; x < plan.cols; x++) {
+        const k = y * plan.cols + x;
+        if (vis.has(k) || tileAt(plan, x, y) === '.') continue;
+        if (pcs.some(t => window.deckLineOfSight(plan, doors, t.x, t.y, x, y))) vis.add(k);
+    }
+    F._visKey = key; F._vis = vis;
+    return vis;
+}
+window.deckVisibleSet = visibleSet;
+// Returns the new explored string, or null when nothing new was seen.
+function mergeExplored(vis) {
+    const plan = F.fight.plan, n = plan.cols * plan.rows;
+    const cur = String(F.fight.explored || '');
+    const arr = (cur.length >= n ? cur.slice(0, n) : cur + '0'.repeat(n - cur.length)).split('');
+    let changed = false;
+    vis.forEach(k => { if (arr[k] !== '1') { arr[k] = '1'; changed = true; } });
+    return changed ? arr.join('') : null;
+}
+// After any write that moves a token or a door: bump rev (so every client,
+// including players who can't see the moved token, reloads) and remember
+// newly seen squares. `extra` rides along in the same update (doors).
+async function afterWrite(extra) {
+    if (!F.fight) return;
+    const upd = Object.assign({ rev: (F.fight.rev || 0) + 1 }, extra || {});
+    Object.assign(F.fight, upd);
+    if (fogOn()) { const ex = mergeExplored(visibleSet()); if (ex) { upd.explored = ex; F.fight.explored = ex; } }
+    const { error } = await db.from('deck_fights').update(upd).eq('id', F.fight.id);
+    if (error) console.error('deck fight update failed', error);
+}
+
 window.startDeckFight = async function (opts) {
     if (!isDm()) return null;
     const plan = opts.plan || window.deckPlanById(opts.planId);
     if (!plan) { alert('Pick a deck plan first.'); return null; }
     if (F.fight && !(await window.showConfirmModal(`A deck fight ("${F.fight.name}") is running. Starting a new one ends it. Continue?`))) return null;
     if (F.fight) await db.from('deck_fights').update({ is_active: false }).eq('id', F.fight.id);
-    const { data, error } = await db.from('deck_fights').insert({ name: opts.name || plan.name, plan: snapshotPlan(plan), ship_marker_id: opts.shipId || null, deck_id: opts.deckId || null, created_by: currentUserId, doors: {}, round: 1, is_active: true }).select().single();
+    const fog = opts.fog !== false;
+    const { data, error } = await db.from('deck_fights').insert({ name: opts.name || plan.name, plan: snapshotPlan(plan), ship_marker_id: opts.shipId || null, deck_id: opts.deckId || null, created_by: currentUserId, doors: {}, round: 1, is_active: true, fog, explored: '', rev: 0 }).select().single();
     if (error) { alert('Could not start the deck fight: ' + error.message); return null; }
-    await db.from('chat_logs').insert({ sender_id: null, content: `🚪 [DECK FIGHT] Boarding action on "${opts.name || plan.name}".`, message_type: 'system' });
+    if (opts.shipId && opts.deckId) await setShipDeckStatus(opts.shipId, opts.deckId, 'contested');
+    await postDeckChat(`🚪 [DECK FIGHT] Boarding action on "${opts.name || plan.name}".`);
     F.view = true;
     await window.loadDeckFight();
     return data;
 };
+// Writes one deck's boarding_status on a ship token (same field the Vessel
+// Deck's SECURE/CONTESTED/CAPTURED badge cycles).
+async function setShipDeckStatus(vesselId, deckId, status) {
+    const v = (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).find(m => m.id === vesselId);
+    if (!v) return false;
+    const decks = JSON.parse(JSON.stringify(v.ship_decks || []));
+    const d = decks.find(x => x.id === deckId);
+    if (!d) return false;
+    d.boarding_status = status;
+    const { error } = await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
+    if (error) { console.error('deck status update failed', error); return false; }
+    v.ship_decks = decks;
+    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
+    return true;
+}
+window.deckSetShipDeckStatus = setShipDeckStatus;
+// Small choice modal; resolves with the chosen value (null = cancel).
+function choiceModal(title, bodyHtml, buttons) {
+    return new Promise(resolve => {
+        let box = document.getElementById('deck-choice-modal');
+        if (!box) { box = document.createElement('div'); box.id = 'deck-choice-modal'; box.className = 'dkv-modal'; document.body.appendChild(box); }
+        box.innerHTML = `<div class="dkv-modal-card" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+            <div class="dkv-ttl">${esc(title)}</div>${bodyHtml || ''}
+            <div class="dkv-modal-acts">${buttons.map((b, i) => `<button type="button" class="dkv-btn${b.cls ? ' ' + b.cls : ''}" data-i="${i}">${esc(b.label)}</button>`).join('')}</div></div>`;
+        box.style.display = 'flex';
+        box.querySelectorAll('button[data-i]').forEach(btn => btn.onclick = () => {
+            const b = buttons[+btn.getAttribute('data-i')];
+            const val = typeof b.value === 'function' ? b.value(box) : b.value;
+            box.style.display = 'none';
+            resolve(val);
+        });
+    });
+}
+window.__deckChoiceModal = choiceModal;
+// Who boarded: owners of PC tokens on the board who don't already own the ship.
+function boarderIds(vessel) {
+    const owners = typeof window.vesselOwnerIds === 'function' ? window.vesselOwnerIds(vessel) : (vessel.owner_ids || []);
+    const ids = [];
+    F.tokens.forEach(t => {
+        const c = combatantById(t.combatant_id);
+        if (c && c.is_npc === false && c.owner_id && !owners.includes(c.owner_id) && !ids.includes(c.owner_id)) ids.push(c.owner_id);
+    });
+    return ids;
+}
+async function offerTransfer(vessel, boarders) {
+    const players = (typeof allProfiles !== 'undefined' ? allProfiles : []).filter(p => p.role !== 'dm');
+    if (!players.length) return false;
+    const def = boarders[0] || players[0].id;
+    const body = `<p class="dkv-modal-p">Every deck of "${esc(vessel.name)}" is CAPTURED. Transfer the ship? This replaces ALL current owners.</p>
+        <label class="dkv-lab" for="dcm-owner">NEW OWNER</label>
+        <select id="dcm-owner">${players.map(p => `<option value="${esc(p.id)}" ${p.id === def ? 'selected' : ''}>${esc(p.username || 'Commander')}${boarders.includes(p.id) ? ' (boarder)' : ''}</option>`).join('')}</select>`;
+    const pick = await choiceModal('SHIP CAPTURED', body, [
+        { label: 'TRANSFER', cls: 'dkv-gold', value: (box) => box.querySelector('#dcm-owner').value },
+        { label: 'NOT NOW', value: null }]);
+    if (!pick) return false;
+    const { error } = await db.from('ship_markers').update({ owner_ids: [pick] }).eq('id', vessel.id);
+    if (error) { alert('Could not transfer the ship: ' + error.message); return false; }
+    vessel.owner_ids = [pick];
+    const name = (players.find(p => p.id === pick) || {}).username || 'Commander';
+    await postDeckChat(`⚔️ BOARDING RESOLVED: "${vessel.name}" has been captured — ownership transferred to ${name}.`);
+    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
+    if (typeof window.showToast === 'function') window.showToast(`Ownership of ${vessel.name} transferred.`);
+    return true;
+}
 window.endDeckFight = async function () {
     if (!isDm() || !F.fight) return;
-    if (!(await window.showConfirmModal(`End the deck fight "${F.fight.name}"?`))) return;
-    await db.from('deck_fights').update({ is_active: false }).eq('id', F.fight.id);
+    const fight = F.fight;
+    const vessel = fight.ship_marker_id ? (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).find(m => m.id === fight.ship_marker_id) : null;
+    const deck = vessel && fight.deck_id ? (vessel.ship_decks || []).find(d => d.id === fight.deck_id) : null;
+    let outcome = 'keep';
+    if (deck) {
+        outcome = await choiceModal(`END DECK FIGHT · ${String(fight.name).toUpperCase()}`,
+            `<p class="dkv-modal-p">How did the fight for ${esc(deck.name)} end?</p>`, [
+            { label: 'SECURE (defenders held)', cls: 'dkv-green', value: 'secure' },
+            { label: 'CAPTURED (boarders took it)', cls: 'dkv-red', value: 'captured' },
+            { label: 'LEAVE AS IS', value: 'keep' },
+            { label: 'CANCEL', value: null }]);
+        if (!outcome) return;
+    } else if (!(await window.showConfirmModal(`End the deck fight "${fight.name}"?`))) return;
+    const boarders = vessel ? boarderIds(vessel) : [];
+    await db.from('deck_fights').update({ is_active: false }).eq('id', fight.id);
+    if (deck && outcome !== 'keep') {
+        await setShipDeckStatus(vessel.id, deck.id, outcome);
+        await postDeckChat(`🚪 [DECK FIGHT] ${vessel.name} — ${deck.name}: ${outcome === 'captured' ? 'CAPTURED by the boarders' : 'SECURED by the defenders'}.`);
+    }
     F.view = false;
     await window.loadDeckFight();
+    if (deck && outcome === 'captured' && (vessel.ship_decks || []).length && vessel.ship_decks.every(d => (d.boarding_status || 'secure') === 'captured')) {
+        await offerTransfer(vessel, boarders);
+    }
 };
 window.openDeckView = function () { if (!F.fight) return; F.view = true; renderDeckView(); };
 window.closeDeckView = function () { F.view = false; F.placing = null; F.sel = null; F.los = null; renderDeckView(); };
@@ -206,12 +392,13 @@ window.closeDeckView = function () { F.view = false; F.placing = null; F.sel = n
 window.deckPlaceArm = function (combatantId) { if (!isDm()) return; F.placing = String(combatantId); F.sel = null; renderDeckView(); };
 async function placeToken(combatantId, x, y) {
     const tok = F.tokens.find(t => String(t.combatant_id) === String(combatantId));
-    if (tok) { await updateToken(tok, { x, y }); return; }
+    if (tok) { await updateToken(tok, { x, y }); await afterWrite(); return; }
     const row = { fight_id: F.fight.id, combatant_id: String(combatantId), x, y, move_left: 0 };
     const { data, error } = await db.from('deck_tokens').insert(row).select().single();
     if (error) { alert('Could not place the token: ' + error.message); return; }
     F.tokens.push(data);
     if (!F.fight.current_combatant_id) await setTurn(String(combatantId), F.fight.round || 1);
+    await afterWrite();
 }
 async function updateToken(tok, fields) {
     Object.assign(tok, fields);
@@ -223,6 +410,7 @@ window.deckRemoveToken = async function (tokId) {
     await db.from('deck_tokens').delete().eq('id', tokId);
     F.tokens = F.tokens.filter(t => t.id !== tokId);
     if (F.sel === tokId) F.sel = null;
+    await afterWrite();
     renderDeckView();
 };
 window.deckSetMoveMax = async function (tokId, val) {
@@ -230,6 +418,7 @@ window.deckSetMoveMax = async function (tokId, val) {
     const tok = F.tokens.find(t => t.id === tokId); if (!tok) return;
     const n = parseInt(val, 10);
     await updateToken(tok, { move_max: isFinite(n) && n >= 0 ? Math.min(30, n) : null });
+    await afterWrite();
     renderDeckView();
 };
 async function setTurn(combatantId, round) {
@@ -238,19 +427,51 @@ async function setTurn(combatantId, round) {
     F.fight.current_combatant_id = combatantId; F.fight.round = round;
     await db.from('deck_fights').update({ current_combatant_id: combatantId, round }).eq('id', F.fight.id);
 }
-// NEXT TURN (DM) / END TURN (the current token's owner).
+// NEXT TURN (DM) / END TURN (the current token's owner). Runs on the
+// server (df_deck_advance_turn): with fog on, a player's client can't see
+// every token, so it can't work out the order itself. The local version is
+// only a fallback for when the function answers with nothing at all (the
+// offline test harness).
+function localNextTurn() {
+    const order = turnOrder();
+    if (!order.length) return null;
+    const i = order.findIndex(c => String(c.id) === String(F.fight.current_combatant_id));
+    const nextIdx = i < 0 ? 0 : (i + 1) % order.length;
+    return { id: String(order[nextIdx].id), round: (F.fight.round || 1) + (i >= 0 && nextIdx === 0 ? 1 : 0) };
+}
 window.deckNextTurn = async function () {
     if (!F.fight) return;
     const cur = currentTok();
     if (!isDm() && !(cur && controls(cur))) return;
-    const order = turnOrder();
-    if (!order.length) return;
-    const i = order.findIndex(c => String(c.id) === String(F.fight.current_combatant_id));
-    const nextIdx = i < 0 ? 0 : (i + 1) % order.length;
-    const round = (F.fight.round || 1) + (i >= 0 && nextIdx === 0 ? 1 : 0);
-    await setTurn(String(order[nextIdx].id), round);
+    if (!F.tokens.length) return;
+    const ended = cur ? { tok: Object.assign({}, cur), plan: F.fight.plan } : null;
+    const { data, error } = await db.rpc('df_deck_advance_turn', { p_fight: F.fight.id });
+    if (error) { alert('Could not advance the turn: ' + error.message); return; }
+    if (data) {
+        await hazardCheck(ended);
+        await window.loadDeckFight();
+        return;
+    }
+    const nxt = localNextTurn();
+    if (!nxt) return;
+    await setTurn(nxt.id, nxt.round);
+    await hazardCheck(ended);
+    await afterWrite();
     renderDeckView();
 };
+// A token that ENDS its turn on a hazard square rolls the plan's hazard
+// dice; the DM applies the damage.
+async function hazardCheck(ended) {
+    if (!ended || !ended.tok) return null;
+    const t = ended.tok, plan = ended.plan;
+    if (tileAt(plan, t.x, t.y) !== 'h') return null;
+    const c = combatantById(t.combatant_id);
+    const r = window.deckRollDice(plan.hazard_dice || '1d6');
+    const msg = `☣️ [DECK HAZARD] ${c ? c.name : 'A combatant'} ended the turn on a hazard square: ${rollText(r)} damage (DM applies).`;
+    if (fogOn() && !(c && c.is_npc === false)) dmNotice(msg); else await postDeckChat(msg);
+    return r;
+}
+window.__deckHazardCheck = hazardCheck;
 // Moves a token; returns '' on success or the reason it was refused.
 window.deckTryMove = async function (tokId, x, y) {
     const tok = F.tokens.find(t => t.id === tokId);
@@ -260,6 +481,7 @@ window.deckTryMove = async function (tokId, x, y) {
     if (isDm()) {
         if (!walkable(plan, doors, x, y) || occ.has(y * plan.cols + x)) return 'That square is blocked.';
         await updateToken(tok, { x, y });
+        await afterWrite();
         return '';
     }
     if (!controls(tok)) return "That isn't your character.";
@@ -268,6 +490,7 @@ window.deckTryMove = async function (tokId, x, y) {
     const cost = reach.get(y * plan.cols + x);
     if (cost == null) return 'Too far, or the way is blocked.';
     await updateToken(tok, { x, y, move_left: Math.max(0, (tok.move_left || 0) - cost) });
+    await afterWrite();
     return '';
 };
 window.deckToggleDoor = async function (x, y) {
@@ -283,8 +506,7 @@ window.deckToggleDoor = async function (x, y) {
     const doors = Object.assign({}, F.fight.doors || {});
     if (doors[k] && F.tokens.some(t => t.x === x && t.y === y)) return 'Someone is standing in the doorway.';
     if (doors[k]) delete doors[k]; else doors[k] = true;
-    F.fight.doors = doors;
-    await db.from('deck_fights').update({ doors }).eq('id', F.fight.id);
+    await afterWrite({ doors });
     renderDeckView();
     return '';
 };
@@ -295,6 +517,52 @@ window.deckRelation = function (combatantA, combatantB) {
     const b = F.tokens.find(t => String(t.combatant_id) === String(combatantB));
     if (!a || !b) return null;
     return { squares: window.deckDistance(a.x, a.y, b.x, b.y), los: window.deckLineOfSight(F.fight.plan, F.fight.doors || {}, a.x, a.y, b.x, b.y) };
+};
+
+// 💨 VENT (DM): blow an airlock. Tokens within 3 squares that can see the
+// airlock roll the plan's vent dice; open doors within 3 squares slam shut
+// (unless someone is standing in the doorway).
+const VENT_RADIUS = 3;
+window.deckVentArm = function () { if (!isDm()) return; F.vent = !F.vent; F.los = null; F.placing = null; renderDeckView(); };
+window.deckVent = async function (x, y) {
+    if (!isDm() || !F.fight) return null;
+    const plan = F.fight.plan, doors = F.fight.doors || {};
+    if (tileAt(plan, x, y) !== 'a') return null;
+    const hit = F.tokens.filter(t => window.deckDistance(t.x, t.y, x, y) <= VENT_RADIUS && window.deckLineOfSight(plan, doors, x, y, t.x, t.y));
+    const results = hit.map(t => ({ tok: t, c: combatantById(t.combatant_id), r: window.deckRollDice(plan.vent_dice || '2d6') }));
+    const nd = Object.assign({}, doors);
+    let closed = 0;
+    Object.keys(nd).forEach(k => {
+        const dx = k % plan.cols, dy = Math.floor(k / plan.cols);
+        if (window.deckDistance(dx, dy, x, y) <= VENT_RADIUS && !F.tokens.some(t => t.x === dx && t.y === dy)) { delete nd[k]; closed++; }
+    });
+    F.vent = false;
+    await afterWrite({ doors: nd });
+    const hidden = fogOn() ? results.filter(o => !(o.c && o.c.is_npc === false)) : [];
+    const shown = results.filter(o => !hidden.includes(o));
+    const line = (o) => `${o.c ? o.c.name : '?'} ${rollText(o.r)}`;
+    await postDeckChat(`💨 [AIRLOCK VENT] ${F.fight.name}: ${shown.length ? shown.map(line).join(' · ') : 'no one caught in the blast'}${closed ? ` · ${closed} door${closed > 1 ? 's' : ''} slammed shut` : ''}. (DM applies damage.)`);
+    if (hidden.length) dmNotice(`💨 VENT (hidden from players): ${hidden.map(line).join(' · ')}`);
+    renderDeckView();
+    return results;
+};
+// Arsenal attack hook (combat.js resolveArsenalAttack): range bands and
+// fog. Returns null (no deck fight / not both on the board), {refuse} or
+// {mod, label}.
+window.deckRangeCheck = function (wpn, targetId) {
+    if (!F.fight) return null;
+    const meTok = F.tokens.find(t => String(t.combatant_id) === String(myCombatantId()));
+    if (!meTok) return null;
+    const tc = combatantById(targetId);
+    if (!tc || tc.is_strike_craft) return null;
+    const tTok = F.tokens.find(t => String(t.combatant_id) === String(targetId));
+    if (!tTok) return (fogOn() && !isDm() && tc.is_npc !== false) ? { refuse: "You can't see that target on the deck plan." } : null;
+    const d = window.deckDistance(meTok.x, meTok.y, tTok.x, tTok.y);
+    const rs = wpn && wpn.range_short != null ? +wpn.range_short : null;
+    const rl = wpn && wpn.range_long != null ? +wpn.range_long : null;
+    if (rl != null && d > rl) return { refuse: `Out of range: ${d} squares, ${wpn.name} reaches ${rl}.` };
+    if (rs != null && d > rs) return { mod: -2, label: `Long range (${d} squares): -2` };
+    return { mod: 0, squares: d };
 };
 
 /* --- Deck View rendering --- */
@@ -343,7 +611,12 @@ function renderDeckView() {
     const plan = fight.plan, doors = fight.doors || {};
     const dm = isDm();
     const order = turnOrder();
-    const cur = currentTok(), curC = cur ? combatantById(cur.combatant_id) : null;
+    const cur = currentTok(), curC = fight.current_combatant_id ? combatantById(fight.current_combatant_id) : null;
+    const fog = fogOn(), vis = fog ? visibleSet() : null;
+    // Players never draw an NPC on a square their party can't see (the
+    // server normally withholds those rows already; this covers the moment
+    // before the reload lands).
+    const shownToks = (!dm && fog) ? F.tokens.filter(t => isPcTok(t) || vis.has(t.y * plan.cols + t.x)) : F.tokens;
     const availW = Math.max(300, (window.innerWidth || 1200) - (window.innerWidth > 900 ? 340 : 40));
     const availH = Math.max(260, (window.innerHeight || 800) - 150);
     // Phones: keep squares big enough to drag (the board scrolls sideways instead).
@@ -363,13 +636,13 @@ function renderDeckView() {
                 : `<button type="button" class="dkv-mini${F.placing === String(c.id) ? ' on' : ''}" onclick="window.deckPlaceArm('${esc(c.id)}')">PLACE</button>`) : ''}
         </div>`;
     }).join('') || '<div class="dkv-empty">Nobody is in the Initiative Tracker yet.</div>';
-    const tokensHtml = F.tokens.map(t => {
+    const tokensHtml = shownToks.map(t => {
         const c = combatantById(t.combatant_id);
         const isCur = cur && cur.id === t.id;
         return `<div class="dkv-tok ${c && c.is_npc === false ? 'pc' : 'npc'}${isCur ? ' cur' : ''}${F.sel === t.id ? ' sel' : ''}${controls(t) ? ' mine' : ''}" data-tok="${t.id}" style="left:${t.x * cell}px; top:${t.y * cell}px; width:${cell}px; height:${cell}px; font-size:${Math.max(8, Math.round(cell * 0.38))}px;" title="${esc(c ? c.name : '?')}">${esc(initials(c ? c.name : '?'))}<span class="dkv-tokname">${esc(c ? c.name : '?')}</span></div>`;
     }).join('');
-    const canEnd = cur && (dm || controls(cur));
-    const help = F.placing ? 'Click a floor square to place the token.' : F.los ? 'Line of sight: click a second square.' : (dm ? 'Drag any token (free for you). Click a door to open/close it. ' : 'On your turn, drag your token; highlighted squares are in reach. Click a door next to you to open/close it. ') + 'Use 👁 LOS to check sight between two squares.';
+    const canEnd = dm ? F.tokens.length > 0 : !!(cur && controls(cur));
+    const help = F.placing ? 'Click a floor square to place the token.' : F.vent ? 'VENT: click an airlock square. Everyone within 3 squares who can see it rolls ' + esc(plan.vent_dice || '2d6') + '; open doors nearby slam shut.' : F.los ? 'Line of sight: click a second square.' : (dm ? 'Drag any token (free for you). Click a door to open/close it. ' : 'On your turn, drag your token; highlighted squares are in reach. Click a door next to you to open/close it. ') + 'Use 👁 LOS to check sight between two squares.';
     v.innerHTML = `
         <div class="dkv-head">
             <div><span class="dkv-kicker">DECK FIGHT · 1 SQUARE = 1.5 M</span><h3 class="dkv-title">${esc(fight.name.toUpperCase())}</h3></div>
@@ -377,8 +650,11 @@ function renderDeckView() {
             <span class="dkv-chip dkv-turn">${curC ? '▶ ' + esc(curC.name.toUpperCase()) + "'S TURN" : 'NO TURN YET'}</span>
             ${canEnd ? `<button type="button" class="dkv-btn dkv-gold" onclick="window.deckNextTurn()">${dm ? 'NEXT TURN ⏭' : 'END MY TURN ⏭'}</button>` : ''}
             <span class="dkv-grow"></span>
+            ${fog ? '<span class="dkv-chip dkv-fogchip" title="Fog of war: you only see what your party can see">🌫 FOG</span>' : ''}
             <button type="button" class="dkv-btn${F.los ? ' on' : ''}" onclick="window.deckLosArm()">👁 LOS</button>
-            ${dm ? '<button type="button" class="dkv-btn dkv-red" onclick="window.endDeckFight()">END FIGHT</button>' : ''}
+            ${dm ? `<button type="button" class="dkv-btn${F.vent ? ' on' : ''}" onclick="window.deckVentArm()" title="Blow an airlock">💨 VENT</button>
+                <button type="button" class="dkv-btn" onclick="window.deckToggleFog()" title="Fog of war for the players">${fog ? 'FOG: ON' : 'FOG: OFF'}</button>
+                <button type="button" class="dkv-btn dkv-red" onclick="window.endDeckFight()">END FIGHT</button>` : ''}
             <button type="button" class="dkv-btn" onclick="window.closeDeckView()">✕ CLOSE</button>
         </div>
         <div class="dkv-body">
@@ -388,6 +664,8 @@ function renderDeckView() {
                 ${sel && dm ? `<div class="dkv-ttl dkv-ttl2">SELECTED</div><label class="dkv-lab" for="dkv-mm">SQUARES PER TURN (blank = from Dexterity / 6)</label>
                     <input id="dkv-mm" type="number" min="0" max="30" value="${sel.move_max != null ? sel.move_max : ''}" onchange="window.deckSetMoveMax('${sel.id}', this.value)">` : ''}
                 <div class="dkv-legend">${['f', 'w', 'd', 'c', 'h', 'a'].map(k => `<span><i class="dkv-sw dkv-sw-${k}"></i>${TILES[k].name}</span>`).join('')}</div>
+                <div class="dkv-dice">HAZARD ${esc(plan.hazard_dice || '1d6')} · VENT ${esc(plan.vent_dice || '2d6')}</div>
+                ${dm && dmLog.length ? `<div class="dkv-ttl dkv-ttl2">DECK LOG (DM ONLY)</div><div class="dkv-log">${dmLog.map(m => `<div>${esc(m)}</div>`).join('')}</div>` : ''}
             </aside>
             <main class="dkv-main">
                 <div class="dkv-board" id="dkv-board" style="width:${plan.cols * cell}px; height:${plan.rows * cell}px;">
@@ -410,6 +688,17 @@ function redrawBoard() {
             ctx.fillStyle = 'rgba(0,225,255,0.18)';
             F.reach.forEach((_, k) => { const x = k % plan.cols, y = Math.floor(k / plan.cols); ctx.fillRect(x * cell + 1, y * cell + 1, cell - 2, cell - 2); });
         }
+        if (fogOn()) {
+            const vis = visibleSet(), ex = String(fight.explored || ''), dm = isDm();
+            for (let y = 0; y < plan.rows; y++) for (let x = 0; x < plan.cols; x++) {
+                const k = y * plan.cols + x;
+                if (vis.has(k)) continue;
+                // DM: a light veil shows what the players can't see.
+                // Players: never seen = black; seen before = dimmed.
+                ctx.fillStyle = dm ? 'rgba(0,0,0,0.28)' : (ex[k] === '1' ? 'rgba(2,5,8,0.62)' : '#020406');
+                ctx.fillRect(x * cell, y * cell, cell, cell);
+            }
+        }
         if (F.los && F.los.b) {
             const a = F.los.a, b = F.los.b;
             ctx.strokeStyle = F.los.clear ? '#00e5a3' : '#ff4d4d'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
@@ -424,7 +713,12 @@ function boardSquare(ev) {
 }
 function say(msg) { const h = document.getElementById('dkv-help'); if (h && msg) { h.textContent = msg; h.classList.add('warn'); } }
 window.deckSelect = function (tokId) { F.sel = F.sel === tokId ? null : tokId; renderDeckView(); };
-window.deckLosArm = function () { F.los = F.los ? null : { a: null, b: null }; F.placing = null; renderDeckView(); };
+window.deckLosArm = function () { F.los = F.los ? null : { a: null, b: null }; F.placing = null; F.vent = false; renderDeckView(); };
+window.deckToggleFog = async function () {
+    if (!isDm() || !F.fight) return;
+    await afterWrite({ fog: !fogOn() });
+    renderDeckView();
+};
 // Board pointer handling, exposed for tests as window.__deckBoard.
 async function onBoardDown(ev) {
     if (!F.fight) return;
@@ -435,6 +729,10 @@ async function onBoardDown(ev) {
         if (!walkable(plan, F.fight.doors || {}, x, y) || F.tokens.some(t => t.x === x && t.y === y)) { say('Place tokens on an open floor square.'); return; }
         const id = F.placing; F.placing = null;
         await placeToken(id, x, y); renderDeckView(); return;
+    }
+    if (F.vent) {
+        if (tileAt(plan, x, y) !== 'a') { say('VENT: click an airlock square.'); return; }
+        await window.deckVent(x, y); return;
     }
     if (F.los) {
         if (!F.los.a || F.los.b) F.los = { a: [x, y], b: null };
@@ -484,7 +782,7 @@ window.addEventListener('resize', () => { if (F.view) renderDeckView(); });
 
 /* --- Library editor (DM) --- */
 const P = { plan: null, dirty: false, brush: 'f', tool: 'paint', drag: null };
-function blankPlan() { return { id: null, name: 'New Deck', cols: 32, rows: 24, tiles: '.'.repeat(32 * 24), notes: '' }; }
+function blankPlan() { return { id: null, name: 'New Deck', cols: 32, rows: 24, tiles: '.'.repeat(32 * 24), notes: '', hazard_dice: '1d6', vent_dice: '2d6' }; }
 function ensureEditor() {
     let ov = document.getElementById('deck-plan-editor');
     if (!ov) { ov = document.createElement('div'); ov.id = 'deck-plan-editor'; ov.className = 'bme dpe'; ov.style.display = 'none'; document.body.appendChild(ov); }
@@ -518,6 +816,13 @@ window.dpeTool = function (t) { P.tool = t; renderEditor(); };
 window.dpeField = function (field, value) {
     if (field === 'name') P.plan.name = String(value).slice(0, 80);
     else if (field === 'notes') P.plan.notes = String(value).slice(0, 2000);
+    else if (field === 'hazard_dice' || field === 'vent_dice') {
+        const ok = validDice(value);
+        const el = document.getElementById(field === 'hazard_dice' ? 'dpe-hazard' : 'dpe-vent');
+        if (el) el.classList.toggle('bad', !ok);
+        if (!ok) return;
+        P.plan[field] = ok;
+    }
     else if (field === 'cols' || field === 'rows') {
         const lim = field === 'cols' ? [6, 64] : [6, 48];
         const n = Math.max(lim[0], Math.min(lim[1], parseInt(value, 10) || P.plan[field]));
@@ -551,7 +856,8 @@ window.dpeRoom = function (x0, y0, x1, y1) {
 window.dpeSave = async function () {
     if (!P.plan || !isDm()) return false;
     const n = document.getElementById('dpe-name'); if (n) P.plan.name = n.value.trim() || 'Untitled Deck';
-    const payload = { name: P.plan.name, cols: P.plan.cols, rows: P.plan.rows, tiles: normTiles(P.plan), notes: P.plan.notes || null, updated_at: new Date().toISOString() };
+    const payload = { name: P.plan.name, cols: P.plan.cols, rows: P.plan.rows, tiles: normTiles(P.plan), notes: P.plan.notes || null,
+        hazard_dice: validDice(P.plan.hazard_dice) || '1d6', vent_dice: validDice(P.plan.vent_dice) || '2d6', updated_at: new Date().toISOString() };
     const res = P.plan.id ? await db.from('deck_plans').update(payload).eq('id', P.plan.id).select().single()
         : await db.from('deck_plans').insert(Object.assign({ created_by: currentUserId }, payload)).select().single();
     if (res.error) { alert('Could not save the deck plan: ' + res.error.message); return false; }
@@ -573,8 +879,10 @@ window.dpeDelete = async function () {
 };
 window.dpeStartFight = async function () {
     if (P.dirty && !(await window.dpeSave())) return;
+    const fogEl = document.getElementById('dpe-fog');
+    const fog = fogEl ? fogEl.checked : true;
     await window.closeDeckPlanEditor();
-    await window.startDeckFight({ plan: P.plan });
+    await window.startDeckFight({ plan: P.plan, fog });
 };
 function renderEditor() {
     const ov = ensureEditor();
@@ -607,9 +915,12 @@ function renderEditor() {
                 <div style="display:flex; gap:8px;"><div style="flex:1;"><label class="bme-lab" for="dpe-cols">WIDTH (6–64)</label><input type="number" id="dpe-cols" min="6" max="64" value="${p.cols}" onchange="window.dpeField('cols', this.value)"></div>
                     <div style="flex:1;"><label class="bme-lab" for="dpe-rows">HEIGHT (6–48)</label><input type="number" id="dpe-rows" min="6" max="48" value="${p.rows}" onchange="window.dpeField('rows', this.value)"></div></div>
                 <div class="bme-note">1 square = 1.5 m. Movement per turn comes from the Dexterity die (d4 = 4 … d12 = 8 squares; NPCs 6).</div>
+                <div style="display:flex; gap:8px;"><div style="flex:1;"><label class="bme-lab" for="dpe-hazard" title="Rolled when a token ends its turn on a hazard square">HAZARD DICE</label><input type="text" id="dpe-hazard" value="${esc(p.hazard_dice || '1d6')}" placeholder="1d6" oninput="window.dpeField('hazard_dice', this.value)"></div>
+                    <div style="flex:1;"><label class="bme-lab" for="dpe-vent" title="Rolled for each token caught by an airlock VENT">VENT DICE</label><input type="text" id="dpe-vent" value="${esc(p.vent_dice || '2d6')}" placeholder="2d6" oninput="window.dpeField('vent_dice', this.value)"></div></div>
                 <label class="bme-lab" for="dpe-notes">DM NOTES</label>
                 <textarea id="dpe-notes" rows="3" oninput="window.dpeField('notes', this.value)">${esc(p.notes || '')}</textarea>
                 <div class="bme-actions"><button type="button" class="bme-btn bme-primary" onclick="window.dpeSave()">SAVE PLAN</button><button type="button" class="bme-btn bme-red" onclick="window.dpeDelete()">${p.id ? 'DELETE' : 'DISCARD'}</button></div>
+                <label class="dkv-check"><input type="checkbox" id="dpe-fog" checked> FOG OF WAR (players see only what their party sees)</label>
                 <button type="button" class="bme-btn bme-amber" style="width:100%; margin-top:8px;" onclick="window.dpeStartFight()">🚪 START A DECK FIGHT HERE</button>
             </aside>
         </div>`;
@@ -671,6 +982,8 @@ window.openDeckLinkPicker = async function (vesselId, idx) {
         <div class="dkv-ttl">DECK PLAN · ${esc(v.name.toUpperCase())} · ${esc(String(deck.name || '').toUpperCase())}</div>
         <label class="dkv-lab" for="dlp-select">LINKED PLAN</label>
         <select id="dlp-select"><option value="">— none —</option>${window.deckPlansList.map(p => `<option value="${esc(p.id)}" ${p.id === deck.plan_id ? 'selected' : ''}>${esc(p.name)} (${p.cols}×${p.rows})</option>`).join('')}</select>
+        <label class="dkv-check"><input type="checkbox" id="dlp-fog" checked> FOG OF WAR</label>
+        <p class="dkv-modal-p">Starting marks this deck CONTESTED; END FIGHT asks how it ended.</p>
         <div class="dkv-modal-acts">
             <button type="button" class="dkv-btn" onclick="window.saveDeckLink('${esc(vesselId)}', ${idx})">SAVE LINK</button>
             <button type="button" class="dkv-btn dkv-gold" onclick="window.startDeckFightFromShip('${esc(vesselId)}', ${idx})">🚪 START DECK FIGHT</button>
@@ -702,8 +1015,33 @@ window.startDeckFightFromShip = async function (vesselId, idx) {
     const planId = (sel && sel.value) || (deck && deck.plan_id);
     if (!planId) { alert('Link a deck plan first.'); return; }
     if (deck && deck.plan_id !== planId) await window.saveDeckLink(vesselId, idx, planId);
+    const fogEl = document.getElementById('dlp-fog');
+    const fog = fogEl ? fogEl.checked : true;
     const box = document.getElementById('deck-link-picker'); if (box) box.style.display = 'none';
-    await window.startDeckFight({ planId, shipId: vesselId, deckId: deck && deck.id, name: `${v.name} — ${deck.name}` });
+    await window.startDeckFight({ planId, shipId: vesselId, deckId: deck && deck.id, name: `${v.name} — ${deck.name}`, fog });
+};
+
+/* --- Ship templates: a template's deck can carry a plan link; Deploy
+   deep-copies ship_decks, so the deployed ship arrives already linked. --- */
+window.templateDeckPlanHtml = function (t, d, idx) {
+    if (!window.deckPlansAllowed() || !t || !d) return '';
+    const plans = window.deckPlansList || [];
+    const known = !d.plan_id || plans.some(p => p.id === d.plan_id);
+    return `<select class="dkv-tplsel" aria-label="Deck plan for ${esc(d.name)}" title="Deck plan used when this deck is boarded (DM only)" onchange="window.setTemplateDeckPlan('${esc(t.id)}', ${idx}, this.value)">
+        <option value="">🗺 no plan</option>${known ? '' : `<option value="${esc(d.plan_id)}" selected>🗺 (linked plan)</option>`}
+        ${plans.map(p => `<option value="${esc(p.id)}" ${p.id === d.plan_id ? 'selected' : ''}>🗺 ${esc(p.name)}</option>`).join('')}</select>`;
+};
+window.setTemplateDeckPlan = async function (templateId, idx, planId) {
+    if (!isDm()) return false;
+    const t = typeof findAnyTemplateById === 'function' ? findAnyTemplateById(templateId) : null;
+    if (!t) return false;
+    const decks = JSON.parse(JSON.stringify(t.ship_decks || []));
+    if (!decks[idx]) return false;
+    if (planId) decks[idx].plan_id = planId; else delete decks[idx].plan_id;
+    const { error } = await db.from('ship_templates').update({ ship_decks: decks }).eq('id', templateId);
+    if (error) { alert('Could not save the deck plan link: ' + error.message); return false; }
+    t.ship_decks = decks;
+    return true;
 };
 
 /* --- Arsenal attack form: distance + line of sight --- */
@@ -716,16 +1054,23 @@ function updateAttackInfo() {
     if (!sel) return;
     let info = document.getElementById('atk-deck-info');
     const rel = F.fight ? window.deckRelation(myCombatantId(), sel.value) : null;
-    if (!rel) { if (info) info.style.display = 'none'; return; }
+    const prof = (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === currentUserId);
+    const wpn = prof && F.atkWeapon ? (prof.arsenal || []).find(w => w.id === F.atkWeapon) : null;
+    const rc = F.fight ? window.deckRangeCheck(wpn, sel.value) : null;
+    if (!rel && !(rc && rc.refuse)) { if (info) info.style.display = 'none'; return; }
     if (!info) { info = document.createElement('div'); info.id = 'atk-deck-info'; info.className = 'atk-deck-info'; sel.parentNode.insertBefore(info, sel.nextSibling); }
     info.style.display = '';
-    info.className = 'atk-deck-info ' + (rel.los ? 'ok' : 'blocked');
-    info.textContent = `🚪 Deck: ${rel.squares} squares (${(rel.squares * 1.5).toFixed(1)} m) · ${rel.los ? 'line of sight clear' : 'NO line of sight — the shot will be refused'}`;
+    if (!rel) { info.className = 'atk-deck-info blocked'; info.textContent = `🚪 Deck: ${rc.refuse} The shot will be refused.`; return; }
+    const blocked = !rel.los || (rc && rc.refuse);
+    info.className = 'atk-deck-info ' + (blocked ? 'blocked' : (rc && rc.mod ? 'warn' : 'ok'));
+    info.textContent = `🚪 Deck: ${rel.squares} squares (${(rel.squares * 1.5).toFixed(1)} m) · ` + (!rel.los ? 'NO line of sight — the shot will be refused'
+        : rc && rc.refuse ? rc.refuse + ' — the shot will be refused' : rc && rc.mod ? 'line of sight clear · past short range: -2 to hit' : 'line of sight clear');
 }
 window.deckAttackInfoRefresh = updateAttackInfo;
 const origOpen = window.openArsenalAttackModal;
 if (typeof origOpen === 'function') {
-    window.openArsenalAttackModal = function () {
+    window.openArsenalAttackModal = function (weaponId) {
+        F.atkWeapon = weaponId;
         const r = origOpen.apply(this, arguments);
         const sel = document.getElementById('atk-target-select');
         if (sel && !sel.dataset.deckHooked) { sel.dataset.deckHooked = '1'; sel.addEventListener('change', updateAttackInfo); }

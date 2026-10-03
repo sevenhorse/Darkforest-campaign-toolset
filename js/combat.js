@@ -2909,6 +2909,11 @@ window.renderArsenal = function() {
             if (w.ammo !== null && w.ammo !== undefined) {
                 ammoLabel = `<div style="font-size:9px; color:${w.ammo <= 0 ? '#ff3333' : '#6b826a'};">Ammo: ${w.ammo}/${w.max_ammo !== null && w.max_ammo !== undefined ? w.max_ammo : '∞'}</div>`;
             }
+            if ((w.range_short !== null && w.range_short !== undefined) || (w.range_long !== null && w.range_long !== undefined)) {
+                const rs = (w.range_short === null || w.range_short === undefined) ? '∞' : w.range_short;
+                const rl = (w.range_long === null || w.range_long === undefined) ? '∞' : w.range_long;
+                ammoLabel += `<div style="font-size:9px; color:#6b826a;" title="Deck fights: past short = -2 to hit, past long = no shot">Range: ${rs}/${rl} sq</div>`;
+            }
             html += `
                 <div class="arsenal-row">
                     <div><strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>${ammoLabel}</div>
@@ -3028,6 +3033,10 @@ window.deleteArsenalItem = async function(id) {
                 <div style="flex:1;"><label for="arsenal-edit-ammo" style="font-size:9px; color:#6b826a;">Ammo (blank=∞)</label><input type="number" id="arsenal-edit-ammo" min="0" style="border-color:#ffaa00; text-align:center;"></div>
                 <div style="flex:1;"><label for="arsenal-edit-maxammo" style="font-size:9px; color:#6b826a;">Max Ammo</label><input type="number" id="arsenal-edit-maxammo" min="0" style="border-color:#ffaa00; text-align:center;"></div>
             </div>
+            <div style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="arsenal-edit-rshort" style="font-size:9px; color:#6b826a;" title="Deck plans only: past this many squares = -2 to hit">Short range (squares, blank=∞)</label><input type="number" id="arsenal-edit-rshort" min="0" style="border-color:#ffaa00; text-align:center;"></div>
+                <div style="flex:1;"><label for="arsenal-edit-rlong" style="font-size:9px; color:#6b826a;" title="Deck plans only: past this many squares the shot is refused">Long range (squares, blank=∞)</label><input type="number" id="arsenal-edit-rlong" min="0" style="border-color:#ffaa00; text-align:center;"></div>
+            </div>
             <label for="arsenal-edit-dmgtype" style="font-size:9px; color:#6b826a;">Damage Type (optional)</label>
             <select id="arsenal-edit-dmgtype" style="border-color:#ffaa00;"><option value="">None</option></select>
             <label for="arsenal-edit-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;">
@@ -3054,7 +3063,9 @@ window.deleteArsenalItem = async function(id) {
                 explodes: document.getElementById('arsenal-edit-explodes').checked,
                 damage_type: document.getElementById('arsenal-edit-dmgtype').value || null,
                 ammo: ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0),
-                max_ammo: maxAmmoStr === '' ? (ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0)) : Math.max(0, parseInt(maxAmmoStr) || 0)
+                max_ammo: maxAmmoStr === '' ? (ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0)) : Math.max(0, parseInt(maxAmmoStr) || 0),
+                range_short: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-rshort').value.trim()),
+                range_long: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-rlong').value.trim())
             };
             const { error } = await db.from('character_arsenal').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -3075,6 +3086,8 @@ window.deleteArsenalItem = async function(id) {
         document.getElementById('arsenal-edit-maxammo').value = (wpn.max_ammo === null || wpn.max_ammo === undefined) ? '' : wpn.max_ammo;
         document.getElementById('arsenal-edit-dmgtype').value = wpn.damage_type || '';
         document.getElementById('arsenal-edit-explodes').checked = !!wpn.explodes;
+        document.getElementById('arsenal-edit-rshort').value = (wpn.range_short === null || wpn.range_short === undefined) ? '' : wpn.range_short;
+        document.getElementById('arsenal-edit-rlong').value = (wpn.range_long === null || wpn.range_long === undefined) ? '' : wpn.range_long;
         overlay.style.display = 'flex';
     };
 })();
@@ -3333,6 +3346,11 @@ window.resolveArsenalAttack = async function(weaponId) {
     const targetSel = document.getElementById('atk-target-select');
     const target = targetSel ? combatantsList.find(c => c.id === targetSel.value) : null;
     if (!target) { alert("Select a target first."); return; }
+    // Phase 9 (2026-10-03): on a deck plan, the weapon's optional Short/Long
+    // range applies (js/deck-plans.js): past Long = refused (nothing spent),
+    // past Short = -2 to hit. Off the board, range isn't used.
+    const deckRange = typeof window.deckRangeCheck === 'function' ? window.deckRangeCheck(wpn, target.id) : null;
+    if (deckRange && deckRange.refuse) { alert(deckRange.refuse); return; }
     const skillName = document.getElementById('atk-skill-select').value;
 
     // --- Attacker roll: flat d20 (no explode) + skill mod + perk/augment/gear bonus on that skill ---
@@ -3346,6 +3364,7 @@ window.resolveArsenalAttack = async function(weaponId) {
     const safeSkillKey = skillName.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const skillMod = (myProf.skills || {})[safeSkillKey] || 0;
     if (skillMod !== 0) { atkTotal += skillMod; atkBreakdown.push(`${skillName}: ${skillMod >= 0 ? '+' : ''}${skillMod}`); }
+    if (deckRange && deckRange.mod) { atkTotal += deckRange.mod; atkBreakdown.push(deckRange.label); }
 
     const perkBonus = window.getPerkBonusFor(myProf.perks, 'skill', skillName);
     if (perkBonus.total !== 0) { atkTotal += perkBonus.total; atkBreakdown.push(`${skillName} Perks: ${perkBonus.sources.join(', ')}`); }

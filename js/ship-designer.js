@@ -470,6 +470,7 @@ window.deployShipTemplate = async function(id, opts) {
         decks.forEach((d, idx) => {
             deckHtml += `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
                 <span style="font-size:10px; color:#d4c5a9;">${d.name} — ${d.hp}/${d.max_hp} HP</span>
+                ${typeof window.templateDeckPlanHtml === 'function' ? window.templateDeckPlanHtml(t, d, idx) : ''}
                 <button class="layer-del" onclick="window.removeTemplateDeck(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
             </div>`;
         });
@@ -1009,6 +1010,7 @@ window.renderSecretRepoEditorPanel = function() {
         ? '<span style="font-size:10px; color:#6b826a;">No internal decks configured.</span>'
         : t.ship_decks.map((d, idx) => `<div style="display:flex; justify-content:space-between; align-items:center; background:#030403; padding:6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:4px;">
             <span style="font-size:10px; color:#d4c5a9;">${d.name} — ${d.hp}/${d.max_hp} HP</span>
+            ${typeof window.templateDeckPlanHtml === 'function' ? window.templateDeckPlanHtml(t, d, idx) : ''}
             <button class="layer-del" onclick="window.removeSecretRepoDeck(${idx})" style="padding:2px 6px; font-size:9px;">✕</button>
         </div>`).join('');
 

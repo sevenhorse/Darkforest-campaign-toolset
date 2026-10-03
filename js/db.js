@@ -352,7 +352,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // live) raise app_settings 'min_client_build'.value to match -- any browser
 // still running an older cached copy then shows a "reload" banner instead
 // of quietly writing data the new build can't see (2026-09-30 live bug).
-window.DARKFOREST_BUILD = '2026-10-01.03';
+window.DARKFOREST_BUILD = '2026-10-03.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
