@@ -1385,6 +1385,8 @@ div[style*="grid-template-columns"] > div,
 .b3d-bar-sh i { background: #4db8ff; }
 .b3d-ring-label { font-size: 9px; color: #8fd8e4; opacity: 0.8; letter-spacing: 0.08em; text-shadow: 0 0 3px #000; }
 .b3d-ord-label { font-size: 9px; color: #ff8a3d; letter-spacing: 0.06em; text-shadow: 0 0 3px #000; background: rgba(20,8,0,0.65); padding: 1px 4px; border: 1px solid rgba(255,138,61,0.5); }
+.b3d-terr-label { font-size: 9px; letter-spacing: 0.18em; color: #c9d6db; text-shadow: 0 0 4px #000, 0 0 2px #000; pointer-events: none; white-space: nowrap; opacity: 0.85; }
+.b3d-terr-nebula { color: #d2b4ff; } .b3d-terr-planet { color: #8fd0ee; } .b3d-terr-station { color: #7fefff; } .b3d-terr-asteroid, .b3d-terr-debris { color: #d8c7ad; }
 .b3d-move-label { font-size: 10px; color: #fff; background: rgba(0,0,0,0.7); padding: 1px 5px; border: 1px solid rgba(255,255,255,0.4); }
 .b3d-toolbar { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 70%; z-index: 4; }
 .b3d-toolbar .layer-edit, .b3d-sel-tools .layer-edit { font-size: 9px; padding: 3px 7px; margin: 0; background: rgba(3,10,14,0.85); }
@@ -1419,6 +1421,11 @@ div[style*="grid-template-columns"] > div,
 .model-picker-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d6f6ff; }
 .model-picker select, .model-picker input[type=number] { width: auto; max-width: 90px; }
 .model-picker-help { color: #7fa7b0; font-size: 10px; line-height: 1.4; }
+.model-picker-tips { margin-top: 6px; font-size: 10px; color: #9fb4bd; }
+.model-picker-tips summary { cursor: pointer; color: #00e1ff; letter-spacing: 0.08em; }
+.model-picker-tips ol { margin: 6px 0 0 16px; padding: 0; line-height: 1.5; }
+.model-picker-tips li { margin-bottom: 4px; }
+.model-picker-tips b { color: #d4e4ea; }
 
 /* ===== Phase 6d: Codex restyle (js/codex-v2.js, switch 'codex_restyle') ===== */
 #term-panel-codex.cx2-on > :not(#cx2-root) { display: none !important; }
@@ -1493,6 +1500,24 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .cx2-text .codex-markdown th, .cx2-text .codex-markdown td { border: 1px solid rgba(0, 225, 255, 0.2); padding: 5px 8px; }
 .cx2-text .codex-markdown th { font-family: 'Oxanium', sans-serif; letter-spacing: 0.1em; color: #9fe9f5; }
 .cx2-text .codex-markdown pre, .cx2-text .codex-markdown code { background: #050c0f; border-color: rgba(0, 225, 255, 0.2); color: #9fe9f5; }
+/* Phase 11: drag to reorder + fullscreen reader restyle */
+.cx2-row[draggable="true"] { cursor: grab; }
+.cx2-row.cx2-dragging { opacity: 0.45; }
+.cx2-row.cx2-drop-before { box-shadow: inset 0 2px 0 var(--cx-cyan); }
+.cx2-row.cx2-drop-after { box-shadow: inset 0 -2px 0 var(--cx-cyan); }
+#codex-fullscreen-reader.cx2-fs { font-family: 'Oxanium', 'Rajdhani', 'Segoe UI', system-ui, sans-serif; background: radial-gradient(1200px 600px at 20% -10%, rgba(0, 225, 255, 0.07), transparent 60%), rgba(3, 7, 10, 0.985); border: 1px solid rgba(0, 225, 255, 0.45); color: #d4e4ea; --cx-cyan: #00e1ff; --cx-dim: #6b8590; }
+#codex-fullscreen-reader.cx2-fs .reader-header { border-bottom: 1px solid rgba(0, 225, 255, 0.25); max-width: 900px; margin: 0 auto 20px; gap: 16px; }
+#codex-fullscreen-reader.cx2-fs #reader-category-badge { color: var(--cx-cyan) !important; border-color: rgba(0, 225, 255, 0.5) !important; letter-spacing: 0.2em; font-weight: 400 !important; font-size: 10px !important; }
+#codex-fullscreen-reader.cx2-fs #reader-title { color: #f2fbfd !important; font-size: 30px !important; letter-spacing: 0.06em !important; text-transform: uppercase; border: 0; padding: 0; }
+#codex-fullscreen-reader.cx2-fs #reader-subtitle { color: var(--cx-dim) !important; letter-spacing: 0.12em; font-size: 11px !important; }
+#codex-fullscreen-reader.cx2-fs .reader-header button { font-family: inherit; background: transparent !important; border: 1px solid var(--cx-cyan) !important; color: var(--cx-cyan) !important; letter-spacing: 0.14em; font-size: 10px !important; padding: 8px 16px !important; flex-shrink: 0; }
+#codex-fullscreen-reader.cx2-fs .reader-header button:hover { background: rgba(0, 225, 255, 0.1) !important; }
+#codex-fullscreen-reader.cx2-fs #reader-doc-action-bar, #codex-fullscreen-reader.cx2-fs .reader-body { max-width: 900px; margin-left: auto; margin-right: auto; }
+#codex-fullscreen-reader.cx2-fs .reader-body.cx2-text { padding: 4px 0 40px; font-size: 16.5px; line-height: 1.75; max-width: 900px; background: transparent; border: 0; box-shadow: none; }
+#codex-fullscreen-reader.cx2-fs .reader-body.cx2-text .codex-markdown { max-width: 760px; }
+#codex-fullscreen-reader.cx2-fs .btn-reveal { font-family: inherit; background: transparent; border: 1px solid #ffaa00; color: #ffaa00; letter-spacing: 0.1em; }
+#codex-fullscreen-reader.cx2-fs img { border-color: rgba(0, 225, 255, 0.3) !important; background: #050c0f !important; }
+@media (max-width: 768px) { #codex-fullscreen-reader.cx2-fs .reader-header { flex-direction: column; } #codex-fullscreen-reader.cx2-fs #reader-title { font-size: 22px !important; } }
 .cx2-facts { display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 6px 16px; margin: 0 0 18px; padding: 12px 14px; font-size: 13.5px; background: rgba(0, 225, 255, 0.04); border: 1px solid rgba(0, 225, 255, 0.14); }
 .cx2-facts dt { font-family: 'Oxanium', sans-serif; font-size: 10px; letter-spacing: 0.16em; color: var(--cx-dim); padding-top: 3px; }
 .cx2-facts dd { margin: 0; }

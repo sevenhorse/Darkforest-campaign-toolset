@@ -121,6 +121,16 @@ function factionColor(v) {
     return '#00e1ff';
 }
 function canControl(v) { return !!v && (currentUserRole === 'dm' || window.vesselHasOwner(v, currentUserId)); }
+// Phase 11 (DM 2026-10-03): the header's 📏 MEASURE / ⬚ SELECT
+// (js/grid-tools.js) drive the 3D view too. The 3D toolbar's own TAPE /
+// SHARE buttons only show when the grid_tools switch is off.
+function gtOn3() { return typeof window.gridToolsOn === 'function' && window.gridToolsOn() && !!window.__gridTools; }
+function tool3d() {
+    if (gtOn3()) { const t = window.__gridTools.tool; return t === 'measure' ? 'tape' : t === 'select' ? 'select' : null; }
+    return B3.tool === 'tape' ? 'tape' : null;
+}
+function groupSel() { return gtOn3() ? window.__gridTools.selected : new Set(); }
+window.battle3dTool = tool3d; // for tests
 function selectedVesselId() {
     if (typeof window.tv2Active === 'function' && window.tv2Active() && window.__tv2) return window.__tv2.selected;
     return B3.selectedLocal;
@@ -204,7 +214,7 @@ function ensureEls() {
                     <button type="button" class="layer-edit" data-act="altD" title="Lower the selected ship (looks only)">ALT ▼</button>
                 </span>
             </div>
-            <div class="b3d-hint">Drag empty space to orbit · right-drag or Shift-drag to pan · wheel / pinch to zoom · drag your ship to move it · tap a ship to select it</div>`;
+            <div class="b3d-hint">Drag empty space to orbit · right-drag or Shift-drag to pan · wheel / pinch to zoom · drag your ship to move it · tap a ship to select it · header 📏 / ⬚ tools work here</div>`;
         const wrap = document.getElementById('battle-map-grid-wrap');
         stage.insertBefore(el, wrap ? wrap.nextSibling : null);
         el.querySelector('.b3d-toolbar').addEventListener('click', onToolbar);
@@ -319,6 +329,7 @@ function buildTerrain(map) {
     const low = lowQ();
     const rockGeo = own(new T.Mesh(new T.DodecahedronGeometry(1, 0))).geometry;
     const shardGeo = own(new T.Mesh(new T.TetrahedronGeometry(1, 0))).geometry;
+    B3.terrainLabels = [];
     list.forEach(t => {
         const holder = new T.Group();
         holder.userData.terrainKey = t.key;
@@ -371,6 +382,12 @@ function buildTerrain(map) {
             holder.add(body, ring);
         }
         g.add(holder);
+        // Phase 11 (DM 2026-10-03): float the name over NAMED terrain only.
+        if (t.label) {
+            const r = t.shape.type === 'circle' ? t.shape.r : 0;
+            const h = t.kind === 'planet' ? r * 0.45 + 14 : t.kind === 'station' ? Math.max(8, r * 0.3) + 22 : 62;
+            B3.terrainLabels.push({ pos: V(c.x, c.y, h), html: esc(t.label.toUpperCase()), cls: `b3d-terr-label b3d-terr-${t.kind}` });
+        }
     });
     B3.terrainCount = list.length;
 }
@@ -609,7 +626,7 @@ function upsertToken(tok, v, enc, currentTurnId, selId) {
     if (!dragging && !o.anim) applyShown(o, o.cur);
     o.noseHolder.visible = !!(v && !v.is_strike_craft && !v.is_station && window.firingArcsOn && window.firingArcsOn());
     o.turn.visible = !!(currentTurnId && currentTurnId === id);
-    o.sel.visible = !!(selId && v && selId === v.id);
+    o.sel.visible = !!(selId && v && selId === v.id) || groupSel().has(id);
     o.vesselId = tok.ship_marker_id;
     // Label: name + hull/shield bars
     const name = v ? v.name : '???';
@@ -801,6 +818,7 @@ function syncScene() {
     });
     Object.keys(B3.objs).forEach(id => { if (!seen.has(id)) removeToken(id); });
     rebuildOverlay(enc, visibleToks);
+    try { ordnanceArrivals(enc); } catch (e) { console.error('3D view: ordnance effect failed', e); }
     drawTape();
     updateToolbar();
     const st = B3.el && B3.el.querySelector('.b3d-status');
@@ -823,7 +841,8 @@ function updateToolbar() {
     const tapeBtn = B3.el.querySelector('[data-act="tape"]');
     if (tapeBtn) tapeBtn.classList.toggle('b3d-on', B3.tool === 'tape');
     const gt = window.__gridTools;
-    show('share', B3.tool === 'tape');
+    show('tape', !gtOn3());
+    show('share', !gtOn3() && B3.tool === 'tape');
     const shareBtn = B3.el.querySelector('[data-act="share"]');
     if (shareBtn) shareBtn.classList.toggle('b3d-on', !!(gt && gt.share));
     const qBtn = B3.el.querySelector('[data-act="quality"]');
@@ -881,7 +900,7 @@ function draw() {
     });
     const host = B3.el.querySelector('.b3d-labels');
     host.querySelectorAll('.b3d-anchor').forEach(n => n.remove());
-    (B3.overlayLabels || []).concat(B3.previewLabels || [], B3.tapeLabels || []).forEach(a => {
+    (B3.terrainLabels || []).concat(B3.overlayLabels || [], B3.previewLabels || [], B3.tapeLabels || []).forEach(a => {
         const s = projectToScreen(a.pos);
         if (s.behind) return;
         const n = document.createElement('div');
@@ -1061,6 +1080,63 @@ function destructionFx(c) {
     if (!low) sparks(pos, '#ffffff', 14, 190, 800);
 }
 window.battle3dDestructionFx = destructionFx; // for tests
+/* Phase 11: missiles / torpedoes arriving (DM 2026-10-03: hit = blast on the
+   target, miss = small puff). Ordnance never rolls to hit: a payload that
+   leaves in_flight_ordnance either IMPACTED, was SHOT DOWN (point defense /
+   squadron intercept) or FIZZLED (target left the grid). The round-advance
+   code saves which, per payload, in battle_encounters.ordnance_outcomes in
+   the same update, so every client sees the same thing. A payload that
+   vanished because it split into six (its children carry parent_salvo_id)
+   plays nothing; one with no saved outcome (an undo, an older client)
+   counts as a hit, like the 2D flash. */
+function ordnanceArrivals(enc) {
+    const list = enc.in_flight_ordnance || [];
+    if (B3.ordEnc !== enc.id) { B3.ordEnc = enc.id; B3.ordPrev = null; }
+    const toks = encTokens();
+    const center = (vid) => { const t = toks.find(x => x.ship_marker_id === vid); return t ? tokCenter(t) : null; };
+    const prev = B3.ordPrev;
+    const now = new Map();
+    list.forEach(s => {
+        const b = center(s.target_vessel_id);
+        const a = center(s.source_vessel_id) || (typeof s.launch_x === 'number' ? { x: s.launch_x, y: s.launch_y } : null);
+        now.set(s.salvo_id, { a, b, dmg: s.damage_type, parent: s.parent_salvo_id || null });
+    });
+    B3.ordPrev = now;
+    if (!prev) return [];                       // first look at this battle: nothing "arrived"
+    const parents = new Set(list.map(s => s.parent_salvo_id).filter(Boolean));
+    const outcomes = enc.ordnance_outcomes || {};
+    const played = [];
+    prev.forEach((p, id) => {
+        if (now.has(id) || parents.has(id) || !p.b) return;
+        const o = (outcomes[id] && outcomes[id].o) || 'hit';
+        played.push({ id, o: ordnanceFx(o, p) });
+    });
+    return played;
+}
+window.battle3dOrdnanceArrivals = ordnanceArrivals; // for tests
+function ordnanceFx(o, p) {
+    if (!window.battle3dActive() || !B3.renderer) return o;
+    const low = lowQ();
+    const dmgType = typeof window.normalizeDamageType === 'function' ? window.normalizeDamageType(p.dmg || 'Impact') : 'Impact';
+    const color = (window.DAMAGE_TYPES && window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ff8a3d';
+    if (o === 'hit') {
+        const pos = V(p.b.x, p.b.y, altNear(p.b.x, p.b.y));
+        flash(pos, 14, '#ffffff', 260, 1.8, 1);
+        flash(pos, 22, color, 900, 2.8, 0.8);
+        planeRing(pos, 10, 90, color, 900);
+        sparks(pos, color, low ? 12 : 30, 110, 1000);
+        impactAt(p.b, 80);
+        return 'hit';
+    }
+    // shot down: a puff short of the target; fizzled: where the target was
+    const a = p.a || p.b;
+    const k = o === 'intercept' ? 0.82 : 1;
+    const pt = { x: a.x + (p.b.x - a.x) * k, y: a.y + (p.b.y - a.y) * k };
+    const pos = V(pt.x, pt.y, altNear(pt.x, pt.y) + 10);
+    flash(pos, 7, '#c9d6db', 520, 1.8, 0.55);
+    if (!low) sparks(pos, '#9fb4bc', 8, 40, 600);
+    return o;
+}
 (function hookEffects() {
     const dom = window.DomBattleRenderer;
     if (dom && !dom.__b3dHooked) {
@@ -1119,6 +1195,26 @@ function shareTape3d() {
     const who = currentUserRole === 'dm' ? 'DM' : ((me && me.username) || 'player');
     window.sendBattleBroadcast('fx', { k: 'tape', a: B3.tape.a, b: B3.tape.b, who });
 }
+// Grid-tool state lives in js/grid-tools.js; refresh the 3D view whenever
+// the tool or the selection changes there (buttons, Esc, taps).
+(function hookGridTools() {
+    ['setGridTool', 'clearGridTools', 'toggleBattleTokenSelected', 'selectBattleTokensInBox', 'clearBattleSelection', 'toggleTapeShare'].forEach(name => {
+        const orig = window[name];
+        if (typeof orig !== 'function' || orig.__b3d) return;
+        const wrapped = function () {
+            const r = orig.apply(this, arguments);
+            try {
+                if (window.battle3dActive() && B3.renderer) {
+                    if (tool3d() !== 'tape' && B3.tape) clearTape();
+                    syncScene();
+                }
+            } catch (e) {}
+            return r;
+        };
+        wrapped.__b3d = true;
+        window[name] = wrapped;
+    });
+})();
 (function hookRemoteTape() {
     const orig = window.showRemoteTape;
     if (typeof orig !== 'function' || orig.__b3d) return;
@@ -1201,14 +1297,27 @@ function onDown(e) {
     }
     if (ps.length > 2) return;
     const base = { sx: e.clientX, sy: e.clientY, moved: false, button: e.button || 0 };
-    if (B3.tool === 'tape' && base.button === 0 && !e.shiftKey) {
+    const tool = tool3d();
+    if (tool === 'tape' && base.button === 0 && !e.shiftKey) {
         const pk = window.battle3dPickToken(e.clientX, e.clientY);
         const tk = pk && encTokens().find(t => t.token_id === pk.tokenId);
         const a = tk ? tokCenter(tk) : planeHit(e.clientX, e.clientY);
-        B3.drag = Object.assign(base, { kind: 'tape', a });
+        B3.drag = Object.assign(base, { kind: 'tape', a, vesselId: pk ? pk.vesselId : null });
         return;
     }
     const pick = (base.button === 0 && !e.shiftKey) ? window.battle3dPickToken(e.clientX, e.clientY) : null;
+    const sel = groupSel();
+    // SELECT: tap a ship to add/remove it, drag empty space for a box;
+    // dragging a selected ship (any tool) moves the whole group.
+    if (pick && sel.has(pick.tokenId) && sel.size > 1) {
+        B3.drag = Object.assign(base, { kind: 'group', tokenId: pick.tokenId, a: planeHit(e.clientX, e.clientY), selTap: tool === 'select' });
+        return;
+    }
+    if (tool === 'select' && base.button === 0 && !e.shiftKey) {
+        if (pick) B3.drag = Object.assign(base, { kind: 'selTap', tokenId: pick.tokenId });
+        else B3.drag = Object.assign(base, { kind: 'box', a: planeHit(e.clientX, e.clientY) });
+        return;
+    }
     if (pick) {
         const tok = encTokens().find(t => t.token_id === pick.tokenId);
         const rule = window.battleMoveRule(pick.tokenId, pick.vesselId);
@@ -1254,6 +1363,16 @@ function onMove(e) {
     } else if (d.kind === 'pan') {
         panBy(dx, dy, d.tx0, d.tz0);
         requestRender();
+    } else if (d.kind === 'box' && d.a) {
+        const hit = planeHit(e.clientX, e.clientY);
+        if (!hit) return;
+        d.b = hit;
+        showBoxPreview(d.a, d.b);
+    } else if (d.kind === 'group' && d.a) {
+        const hit = planeHit(e.clientX, e.clientY);
+        if (!hit) return;
+        d.dx = hit.x - d.a.x; d.dy = hit.y - d.a.y;
+        showGroupPreview(d.dx, d.dy);
     } else if (d.kind === 'tape' && d.a) {
         const hit = planeHit(e.clientX, e.clientY);
         if (!hit) return;
@@ -1291,6 +1410,33 @@ function showMovePreview(d) {
     B3.previewLabels.push({ pos: V((s.x + c.x) / 2, (s.y + c.y) / 2, 4), html: `${Math.round(dist)}${cap} px`, cls: 'b3d-move-label' });
     requestRender();
 }
+function showBoxPreview(a, b) {
+    clearGroup(B3.groups.preview);
+    B3.previewLabels = [];
+    const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+    B3.groups.preview.add(lineObj([V(x0, y0, 1.5), V(x1, y0, 1.5), V(x1, y1, 1.5), V(x0, y1, 1.5), V(x0, y0, 1.5)], '#ffd700', 0.9, true));
+    requestRender();
+}
+// Where each selected ship would end up (same plan the group move uses:
+// the whole group stops when the first ship runs out of movement).
+function showGroupPreview(dx, dy) {
+    clearGroup(B3.groups.preview);
+    B3.previewLabels = [];
+    const plan = typeof window.planGroupMove === 'function' ? window.planGroupMove(dx, dy) : null;
+    if (!plan) return;
+    Object.keys(plan.moves).forEach(id => {
+        const tok = encTokens().find(t => t.token_id === id); if (!tok) return;
+        const v = vesselById(tok.ship_marker_id);
+        const size = tokSize(v), from = tokCenter(tok), to = { x: plan.moves[id].pos.x + size / 2, y: plan.moves[id].pos.y + size / 2 };
+        B3.groups.preview.add(lineObj([V(from.x, from.y, 1.5), V(to.x, to.y, 1.5)], '#ffd700', 0.8, true));
+        B3.groups.preview.add(circleLine(to, size / 2 + 3, '#ffd700', 0.9));
+    });
+    if (plan.blocked.length) {
+        const tok = encTokens().find(t => groupSel().has(t.token_id));
+        if (tok) { const c = tokCenter(tok); B3.previewLabels.push({ pos: V(c.x, c.y, 8), html: esc('Stays put: ' + plan.blocked.join('; ')), cls: 'b3d-move-label' }); }
+    }
+    requestRender();
+}
 function cancelDrag() {
     const d = B3.drag;
     B3.drag = null;
@@ -1323,7 +1469,23 @@ function onUp(e) {
         return;
     }
     if (d.kind === 'tape') {
-        if (!d.moved) clearTape(); else shareTape3d();
+        if (!d.moved) {
+            clearTape();
+            // Same as 2D MEASURE: tapping a ship toggles its range rings.
+            if (d.vesselId && typeof window.toggleRangeRings === 'function') { window.toggleRangeRings(d.vesselId); syncScene(); }
+        } else shareTape3d();
+        return;
+    }
+    if (d.kind === 'selTap') { if (!d.moved) window.toggleBattleTokenSelected(d.tokenId); return; }
+    if (d.kind === 'box') {
+        if (d.moved && d.a && d.b) window.selectBattleTokensInBox(d.a.x, d.a.y, d.b.x, d.b.y);
+        else window.clearBattleSelection();
+        return;
+    }
+    if (d.kind === 'group') {
+        if (!d.moved) { if (d.selTap) window.toggleBattleTokenSelected(d.tokenId); return; }
+        if (Math.hypot(d.dx || 0, d.dy || 0) > 5) window.groupMoveSelected(d.dx, d.dy);
+        else syncScene();
         return;
     }
     if (d.kind === 'place' && !d.moved) {
@@ -1331,6 +1493,7 @@ function onUp(e) {
         if (hit && hit.x >= 0 && hit.y >= 0 && hit.x <= BATTLE_GRID_W && hit.y <= BATTLE_GRID_H) window.placeArmedTokenAt(hit);
         return;
     }
+    if (d.kind === 'orbit' && !d.moved && groupSel().size && typeof window.clearBattleSelection === 'function') window.clearBattleSelection(); // plain tap on empty space, like 2D
     if (d.kind === 'orbit' && !d.moved && B3.selectedLocal) { B3.selectedLocal = null; syncScene(); }
     requestRender();
 }
@@ -1343,6 +1506,7 @@ function syncView() {
         if (B3.el) B3.el.style.display = 'none';
         if (wrap) wrap.style.display = '';
         if (B3.drag) B3.drag = null;
+        B3.ordPrev = null; // don't replay what landed while the 3D view was off
         return;
     }
     if (!ensureEls()) return;

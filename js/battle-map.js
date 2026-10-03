@@ -1464,18 +1464,25 @@ window.processBattleRoundAutomations = async function() {
     // skipping the trailing chat log + UI refresh in advanceCombatRound too.
     // Each salvo/squadron is now isolated the same way.
     const survivingOrdnance = [];
+    // Phase 11: how each payload that leaves the list ended (hit / shot
+    // down / fizzled), saved with the same row update so every client's 3D
+    // view can play the right effect when it disappears.
+    const ordnanceOutcomes = {};
+    const markOutcome = (salvo, o) => { if (salvo && salvo.salvo_id) ordnanceOutcomes[salvo.salvo_id] = { o, r: battle.round_number || null }; };
     for (const salvo of (battle.in_flight_ordnance || [])) {
       try {
         const targetVessel = globalShipMarkersCache.find(m => m.id === salvo.target_vessel_id);
         const targetPos = targetVessel ? window.getBattleTokenPosition(targetVessel.id) : null;
         if (!targetVessel || !targetPos) {
             chatLines.push(`💨 [ORDNANCE] ${salvo.source_weapon_name} from ${salvo.source_vessel_name} loses its lock (${salvo.target_vessel_name} is no longer on the grid) and fizzles.`);
+            markOutcome(salvo, 'fizzle');
             continue;
         }
 
         const engagement = fireEligiblePD(targetPos, window.vesselOwnerIds(targetVessel));
         if (engagement && engagement.roll.total > 0) {
             chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} intercepts a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${engagement.roll.total} dmg) — destroyed!`);
+            markOutcome(salvo, 'intercept');
             continue; // payload destroyed, dropped from survivingOrdnance
         }
         if (engagement) {
@@ -1489,6 +1496,7 @@ window.processBattleRoundAutomations = async function() {
         const sqEngagement = fireEligibleSquadronIntercept(targetPos, window.vesselOwnerIds(targetVessel));
         if (sqEngagement && sqEngagement.roll.total > 0) {
             chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} shoots down a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${sqEngagement.roll.total} dmg) — destroyed!`);
+            markOutcome(salvo, 'intercept');
             continue; // payload destroyed, dropped from survivingOrdnance
         }
         if (sqEngagement) {
@@ -1596,6 +1604,7 @@ window.processBattleRoundAutomations = async function() {
             // sqShipId which stays resolvable in globalShipMarkersCache even
             // after the token is gone. Prune by sqShipId, mirroring pdPool.
             squadronInterceptPool = squadronInterceptPool.filter(entry => entry.sqShipId !== targetVessel.id);
+            markOutcome(salvo, 'hit');
             continue; // consumed on impact, dropped from survivingOrdnance
         }
 
@@ -2077,8 +2086,9 @@ window.processBattleRoundAutomations = async function() {
     }
 
     battle.in_flight_ordnance = survivingOrdnance;
+    battle.ordnance_outcomes = ordnanceOutcomes;
     try {
-        await db.from('battle_encounters').update({ in_flight_ordnance: survivingOrdnance }).eq('id', battle.id);
+        await db.from('battle_encounters').update({ in_flight_ordnance: survivingOrdnance, ordnance_outcomes: ordnanceOutcomes }).eq('id', battle.id);
     } catch (err) {
         console.error('processBattleRoundAutomations: failed to persist in_flight_ordnance', err);
     }

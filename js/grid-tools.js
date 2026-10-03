@@ -131,6 +131,7 @@ function planGroupMove(dx, dy) {
     });
     return { moves, blocked, k };
 }
+window.planGroupMove = planGroupMove; // the 3D view previews group moves with it
 window.groupMoveSelected = async function(dx, dy) {
     if (!gtOn() || GT.selected.size === 0) return null;
     const plan = planGroupMove(dx, dy);

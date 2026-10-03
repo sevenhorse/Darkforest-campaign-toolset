@@ -258,7 +258,7 @@ function renderV2() {
             const tag = cleanTag(e), kind = window.codexTagKind(tag);
             const img = window.codexDisplayImageRef(e);
             const sel = e.id === selId;
-            return `<div class="cx2-row${sel ? ' sel' : ''}${e.is_hidden ? ' hid' : ''}">
+            return `<div class="cx2-row${sel ? ' sel' : ''}${e.is_hidden ? ' hid' : ''}" draggable="true" data-id="${esc(e.id)}" title="Drag to reorder (your order, this browser)">
                 <button type="button" class="cx2-rowbtn" onclick="window.cx2Select('${e.id}')" aria-current="${sel}">
                     <span class="cx2-thumb">${img ? `<img data-media-ref="${esc(img)}" alt="">` : esc(initials(e.title))}</span>
                     <span class="cx2-rowtxt"><span class="cx2-rowtitle">${esc(e.title || 'Untitled')}</span>
@@ -268,9 +268,55 @@ function renderV2() {
             </div>`;
         }).join('') : `<div class="cx2-empty">${window.codexSearchFilter ? 'Nothing here matches your search.' : 'No records located under this classification.'}</div>`}</div>`;
 
+    wireDrag(document.getElementById('cx2-list'), cat);
     const root2 = document.getElementById('cx2-root');
     root2.classList.toggle('cx2-reading', S.view === 'read');
     renderReader(list, selId, catInfo);
+}
+/* Phase 11 (DM 2026-10-03): drag entries to reorder. Same storage as the
+   ▲▼ arrows (this browser's own order, localStorage 'order_codex_<cat>');
+   the arrows stay for phones and keyboards. The new order covers the whole
+   category, so entries hidden by a search keep their places. */
+window.cx2Reorder = function (cat, dragId, targetId, after) {
+    if (!dragId || !targetId || dragId === targetId) return false;
+    const key = 'codex_' + cat;
+    const all = window.applySavedOrder(key, (globalCodexEntriesCache || []).filter(e => e.category === cat));
+    const ids = all.map(e => e.id).filter(id => id !== dragId);
+    let i = ids.indexOf(targetId);
+    if (i < 0 || !all.some(e => e.id === dragId)) return false;
+    ids.splice(after ? i + 1 : i, 0, dragId);
+    window.saveListOrder(key, ids);
+    renderV2();
+    return true;
+};
+function wireDrag(listEl, cat) {
+    if (!listEl || listEl.__cx2Drag) { if (listEl) listEl.__cx2Cat = cat; return; }
+    listEl.__cx2Drag = true; listEl.__cx2Cat = cat;
+    let dragId = null;
+    const rowOf = (ev) => ev.target && ev.target.closest ? ev.target.closest('.cx2-row[data-id]') : null;
+    const clearMarks = () => listEl.querySelectorAll('.cx2-drop-before, .cx2-drop-after').forEach(n => n.classList.remove('cx2-drop-before', 'cx2-drop-after'));
+    listEl.addEventListener('dragstart', (ev) => {
+        const row = rowOf(ev); if (!row) return;
+        dragId = row.dataset.id; row.classList.add('cx2-dragging');
+        try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', dragId); } catch (e) {}
+    });
+    listEl.addEventListener('dragover', (ev) => {
+        const row = rowOf(ev); if (!row || !dragId) return;
+        ev.preventDefault();
+        const r = row.getBoundingClientRect();
+        const after = ev.clientY > r.top + r.height / 2;
+        clearMarks(); row.classList.add(after ? 'cx2-drop-after' : 'cx2-drop-before');
+    });
+    listEl.addEventListener('dragleave', (ev) => { if (!listEl.contains(ev.relatedTarget)) clearMarks(); });
+    listEl.addEventListener('drop', (ev) => {
+        const row = rowOf(ev); if (!row || !dragId) return;
+        ev.preventDefault();
+        const after = row.classList.contains('cx2-drop-after');
+        clearMarks();
+        const id = dragId; dragId = null;
+        window.cx2Reorder(listEl.__cx2Cat, id, row.dataset.id, after);
+    });
+    listEl.addEventListener('dragend', () => { dragId = null; clearMarks(); listEl.querySelectorAll('.cx2-dragging').forEach(n => n.classList.remove('cx2-dragging')); });
 }
 function renderReader(list, selId, catInfo) {
     const box = document.getElementById('cx2-reader');
@@ -375,7 +421,19 @@ window.cx2ToggleHidden = async function (id) {
 /* --- Hooks into the existing Codex (ui.js) --- */
 const orig = {
     render: window.renderCodexMatrix, edit: window.editCodexEntry, cancel: window.cancelCodexEdit,
-    save: window.saveNewCodexEntry, del: window.deleteCodexEntry, closeFull: window.closeCodexFullscreen
+    save: window.saveNewCodexEntry, del: window.deleteCodexEntry, closeFull: window.closeCodexFullscreen,
+    openFull: window.openCodexFullscreen
+};
+// Phase 11: the ⛶ fullscreen reader picks up the new Codex look (same
+// switch). Only classes change; ui.js still fills it.
+window.openCodexFullscreen = function () {
+    const r = orig.openFull.apply(this, arguments);
+    const on = window.codexRestyleOn();
+    const modal = document.getElementById('codex-fullscreen-reader');
+    const body = document.getElementById('reader-body-content');
+    if (modal) modal.classList.toggle('cx2-fs', on);
+    if (body) body.classList.toggle('cx2-text', on);
+    return r;
 };
 window.renderCodexMatrix = function () {
     if (window.codexRestyleOn()) return renderV2();

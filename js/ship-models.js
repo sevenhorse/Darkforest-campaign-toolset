@@ -119,6 +119,16 @@ function refLabel(ref) {
     if (/^https:/i.test(ref)) return 'linked: ' + ref.replace(/^https:\/\//, '').slice(0, 40) + (ref.length > 48 ? '…' : '');
     return '✓ ' + ref.split('/').pop().replace(/^\d+-/, '');
 }
+// Phase 11: short Blender export guide (matches what loadShipModel and the
+// 3D view expect: glTF nose on +Z, Y up; size is set by ship class, so
+// units don't matter).
+const BLENDER_TIPS = `<details class="model-picker-tips"><summary>Blender export tips</summary><ol>
+    <li><b>Facing:</b> point the nose toward Blender's <b>−Y</b> (it faces you in Front view, numpad 1), top toward <b>+Z</b>. Apply rotation and scale (Ctrl+A).</li>
+    <li><b>Export:</b> File › Export › glTF 2.0 › format <b>glTF Binary (.glb)</b>; Include › <b>Selected Objects</b>; Transform › <b>+Y Up</b> on. Turning on Draco compression makes the file smaller.</li>
+    <li><b>Size:</b> any units — the app scales every model to its class (capital, escort, craft). Use SIZE × above to fine-tune.</li>
+    <li><b>Budgets:</b> FULL up to ~50k triangles, LITE ~5–10k (Decimate modifier). Keep files well under 5 MB (10 MB is the upload cap). Plain colours or one small texture; no lights or cameras.</li>
+    <li><b>Wrong way round?</b> Fix it with TURN above instead of re-exporting.</li>
+</ol></details>`;
 window.ensureModelPicker = function (prefix, data) {
     const isDm = typeof currentUserRole !== 'undefined' && currentUserRole === 'dm';
     let box = document.getElementById(`${prefix}-model`);
@@ -155,7 +165,8 @@ window.ensureModelPicker = function (prefix, data) {
             <label class="model-picker-k" for="${prefix}-model-scale">SIZE ×</label>
             <input type="number" id="${prefix}-model-scale" min="0.25" max="4" step="0.05" value="${scale}" title="1 = the normal size for its class; bigger or smaller to taste">
         </div>
-        <div class="model-picker-help" id="${prefix}-model-status">FULL is shown on HIGH quality, LITE on LOW / phones (FULL is used if LITE is empty). Make the files with the ship converter.</div>`;
+        <div class="model-picker-help" id="${prefix}-model-status">FULL is shown on HIGH quality, LITE on LOW / phones (FULL is used if LITE is empty). Make the files with the ship converter, or export from Blender (tips below).</div>
+        ${BLENDER_TIPS}`;
 };
 window.setModelPickerValue = function (prefix, k, ref) {
     const input = document.getElementById(`${prefix}-model-${k}`);
