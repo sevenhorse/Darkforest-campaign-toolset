@@ -440,16 +440,6 @@ function startTween(o, target, color) {
     if (dist > 3) addTrail({ x: from.x, y: from.y, z: from.z }, { x: target.x, y: target.y, z: target.z }, color);
     requestRender();
 }
-window.battle3dCommitDragPosition = function (tokenId, gx, gy) { // a local drag already shows the ship at the drop point
-    const o = B3.objs[tokenId];
-    if (!o || !o.cur) return;
-    const start = Object.assign({}, o.cur);
-    o.cur = Object.assign({}, o.cur, { x: gx - BATTLE_GRID_W / 2, z: gy - BATTLE_GRID_H / 2 });
-    o.anim = null;
-    applyShown(o, o.cur);
-    const col = o.sig.split('|')[1];
-    if (Math.hypot(o.cur.x - start.x, o.cur.z - start.z) > 3) addTrail(start, o.cur, col);
-};
 function stepAnims(now) {
     let busy = false;
     Object.values(B3.objs).forEach(o => {
@@ -460,16 +450,16 @@ function stepAnims(now) {
         const f = o.anim.from, t = o.anim.to;
         applyShown(o, { x: f.x + (t.x - f.x) * e, z: f.z + (t.z - f.z) * e, y: f.y + (t.y - f.y) * e, rot: f.rot + angDiff(f.rot, t.rot) * e });
         if (glow) glow.scale.setScalar(1 + 0.9 * Math.sin(Math.PI * k));
-        if (k >= 1) { o.anim = null; applyShown(o, o.cur); } else busy = true;
+        if (k >= 1) { o.anim = null; applyShown(o, o.cur); B3.overlayDirty = true; } else busy = true;
     });
     return busy;
 }
 function addTrail(a, b, color) {
     const T = B3.THREE;
     const ya = a.y, yb = b.y;
-    const line = lineObj([new T.Vector3(a.x, ya, a.z), new T.Vector3(b.x, yb, b.z)], color, 0.7);
-    line.material = line.material.clone(); line.userData.ownMat = true;
-    addFx(line, lowQ() ? 900 : 1600, (k, f) => { f.obj.material.opacity = 0.7 * (1 - k); }, null, 'trail');
+    const pa = new T.Vector3(a.x, ya, a.z), pb = new T.Vector3(b.x, yb, b.z);
+    const ribbon = rod(pa, pb, lowQ() ? 1.2 : 1.8, fxMat(color, 0.5));
+    addFx(ribbon, lowQ() ? 1000 : 1800, (k, f) => { f.obj.material.opacity = 0.5 * (1 - k); }, null, 'trail');
 }
 
 function removeToken(id) {
@@ -523,8 +513,10 @@ function rebuildOverlay(enc, visibleToks) {
     const selTok = selId && byVessel[selId];
     const selV = selTok && vesselById(selId);
     const tiers = window.BATTLE_RANGE_TIERS || { LONG: 400, MEDIUM: 200, SHORT: 100 };
-    // Selected ship: arc wedges (firing arcs on) + faint range rings
-    if (selTok && selV) {
+    // Selected ship: arc wedges (firing arcs on) + faint range rings.
+    // Hidden while that ship is still gliding; redrawn when it arrives.
+    const selGliding = !!(selTok && B3.objs[selTok.token_id] && B3.objs[selTok.token_id].anim);
+    if (selTok && selV && !selGliding) {
         const c = tokCenter(selTok);
         if (!selV.is_strike_craft && window.firingArcsOn && window.firingArcsOn() && window.ARC_PRESETS) {
             const byArc = {};
@@ -669,6 +661,11 @@ function draw() {
     applyCamera();
     const now = nowMs();
     const animating = stepAnims(now);
+    if (B3.overlayDirty) {
+        B3.overlayDirty = false;
+        const enc = window.globalBattleEncounterCache;
+        if (enc) rebuildOverlay(enc, (enc.tokens || []).filter(t => visibleToMe(vesselById(t.ship_marker_id))));
+    }
     stepFx(now);
     B3.renderer.render(B3.scene, B3.camera);
     B3.frames++;
@@ -1074,7 +1071,17 @@ function showMovePreview(d) {
     if (!o || !d.pos) return;
     const c = { x: d.pos.x + d.size / 2, y: d.pos.y + d.size / 2 };
     const s = { x: d.rule.x0 + d.size / 2, y: d.rule.y0 + d.size / 2 };
-    o.group.position.copy(V(c.x, c.y, 0));
+    // Move order: a see-through ghost marks the destination; the real ship
+    // stays put and glides there once the move is saved (DM request 2026-10-03).
+    const [kind, color] = o.sig.split('|');
+    const ghost = buildHull(kind, color, true);
+    ghost.scale.setScalar(HULL_SCALE);
+    ghost.position.copy(V(c.x, c.y, o.cur ? o.cur.y : 30));
+    ghost.rotation.y = o.cur ? o.cur.rot : 0;
+    B3.groups.preview.add(ghost);
+    const ring = new B3.THREE.Mesh(geo(`ring:${kind === 'craft' ? 9 : 17}:${kind === 'craft' ? 11 : 19}`), mat('flat', color, 0.5));
+    ring.position.copy(V(c.x, c.y, 0.6));
+    B3.groups.preview.add(ring);
     B3.groups.preview.add(lineObj([V(s.x, s.y, 1.5), V(c.x, c.y, 1.5)], '#ffffff', 0.8, true));
     const dist = Math.hypot(d.pos.x - d.rule.x0, d.pos.y - d.rule.y0);
     const cap = d.rule.mode === 'capped' ? ` / ${Math.round(d.rule.maxReach)}` : '';
@@ -1108,7 +1115,7 @@ function onUp(e) {
             syncScene();
             return;
         }
-        if (d.pos) { window.battle3dCommitDragPosition(d.tokenId, d.pos.x + d.size / 2, d.pos.y + d.size / 2); window.battleCommitMove(d.rule, d.pos); }
+        if (d.pos) window.battleCommitMove(d.rule, d.pos); // the ship then glides there (startTween on the next sync)
         else syncScene();
         return;
     }
