@@ -1368,3 +1368,35 @@ div[style*="grid-template-columns"] > div,
     .tv2-hud .tv2-por, .tv2-hud .tv2-hero img { width: 64px !important; height: 48px !important; }
     #battle-map-panel.tv2 .battle-map-layout { padding-bottom: 40vh; }
 }
+
+/* ===== Phase 6a: 3D Command view (js/battle-3d.js) ===== */
+.b3d-view { position: relative; width: 720px; height: 600px; max-width: 100%; flex-shrink: 0; overflow: hidden; background: #03070b; border: 1px solid #12404a; touch-action: none; user-select: none; -webkit-user-select: none; }
+.b3d-canvas-host, .b3d-canvas-host canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.b3d-canvas-host { cursor: grab; }
+.b3d-canvas-host:active { cursor: grabbing; }
+.b3d-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; font-family: 'Oxanium', inherit; }
+.b3d-label, .b3d-anchor { position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; will-change: transform; }
+.b3d-label { text-align: center; padding-bottom: 4px; }
+.b3d-name { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; text-shadow: 0 0 3px #000, 0 0 6px #000; }
+.b3d-label-sel .b3d-name { color: #fff !important; }
+.b3d-label-craft .b3d-name { font-size: 8px; opacity: 0.85; }
+.b3d-bar { width: 44px; height: 3px; margin: 2px auto 0; background: rgba(255,255,255,0.12); }
+.b3d-bar i { display: block; height: 100%; }
+.b3d-bar-sh i { background: #4db8ff; }
+.b3d-ring-label { font-size: 9px; color: #8fd8e4; opacity: 0.8; letter-spacing: 0.08em; text-shadow: 0 0 3px #000; }
+.b3d-ord-label { font-size: 9px; color: #ff8a3d; letter-spacing: 0.06em; text-shadow: 0 0 3px #000; background: rgba(20,8,0,0.65); padding: 1px 4px; border: 1px solid rgba(255,138,61,0.5); }
+.b3d-move-label { font-size: 10px; color: #fff; background: rgba(0,0,0,0.7); padding: 1px 5px; border: 1px solid rgba(255,255,255,0.4); }
+.b3d-toolbar { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 70%; z-index: 4; }
+.b3d-toolbar .layer-edit, .b3d-sel-tools .layer-edit { font-size: 9px; padding: 3px 7px; margin: 0; background: rgba(3,10,14,0.85); }
+.b3d-sel-tools { display: contents; }
+.b3d-status { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); font-size: 11px; color: #00e1ff; background: rgba(0,0,0,0.75); padding: 3px 10px; border: 1px solid #12404a; z-index: 4; pointer-events: none; }
+.b3d-hint { position: absolute; left: 8px; bottom: 8px; max-width: 45%; font-size: 9px; color: #7fa7b0; background: rgba(0,0,0,0.6); padding: 3px 6px; z-index: 3; pointer-events: none; transition: opacity 1.5s ease; }
+.b3d-hint-fade { opacity: 0; }
+/* With the tactical HUD on, its name plate sits bottom-centre of the stage. */
+#battle-map-panel.tv2 .b3d-toolbar, #battle-map-panel.tv2 .b3d-hint { bottom: 44px; }
+@media screen and (max-width: 768px) {
+    /* #battle-map-stage sizes to its content, so a % width would collapse here. */
+    .b3d-view { width: calc(100vw - 32px) !important; height: 50vh !important; }
+    .b3d-hint { display: none; }
+    .b3d-toolbar { max-width: 100%; left: 8px; }
+}

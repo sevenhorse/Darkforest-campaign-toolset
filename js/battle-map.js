@@ -1030,6 +1030,11 @@ window.handleBattleGridClick = function(evt) {
     // is scaled/projected on screen.
     const world = window.battleRenderer.screenToWorld(evt.clientX, evt.clientY);
     if (!world) return;
+    window.placeArmedTokenAt(world);
+};
+// Phase 6a: shared with the 3D view -- drop the armed palette ship centred on a grid point.
+window.placeArmedTokenAt = function(world) {
+    if (!window.battleMapArmedToken || !window.globalBattleEncounterCache || !world) return;
     const raw = { x: world.x - (BATTLE_TOKEN_SIZE / 2), y: world.y - (BATTLE_TOKEN_SIZE / 2) };
     const pos = clampToGrid(raw.x, raw.y);
 
@@ -2706,51 +2711,20 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     // dragMode is decided at press time: 'free' (DM), 'capped' (player,
     // allowed), or 'tap' (not allowed to move -- press only opens/targets).
     let isDragging = false, moved = false, startX, startY, initialLeft, initialTop;
-    let dragMode = 'tap', maxReach = 0, blockReason = '';
+    let dragMode = 'tap', blockReason = '', moveRule = null;
     let lastTouchX = 0, lastTouchY = 0, lastTouchEndAt = 0;
-    function resolveDragMode(liveToken) {
-        blockReason = '';
-        if (currentUserRole === 'dm') return 'free';
-        const v = globalShipMarkersCache.find(m => m.id === shipMarkerId);
-        if (!v || !window.vesselHasOwner(v, currentUserId)) return 'tap';
-        const enc = window.globalBattleEncounterCache;
-        if (enc && enc.initiative_rolled && enc.pending_round_tick) {
-            blockReason = 'This round is waiting for the DM to resolve it.';
-            return 'tap';
-        }
-        if (enc && enc.initiative_rolled && liveToken) {
-            const order = enc.turn_order || [];
-            if (order.includes(liveToken.token_id) && order[enc.current_turn_index] !== liveToken.token_id) {
-                blockReason = "It's not this unit's turn yet — it can only move on its own turn.";
-                return 'tap';
-            }
-        }
-        const rem = liveToken && liveToken.move_remaining !== undefined ? liveToken.move_remaining : (v.tactical_speed ?? 160);
-        maxReach = Math.max(0, rem);
-        if (maxReach <= 0) { blockReason = 'No movement remaining this round.'; return 'tap'; }
-        return 'capped';
-    }
-    // Clamp a proposed position to the grid AND (for capped drags) to
-    // maxReach from the start point along the same direction.
-    function constrainPos(x, y) {
-        let pos = clampToGrid(x, y);
-        if (dragMode === 'capped') {
-            const ddx = pos.x - initialLeft, ddy = pos.y - initialTop;
-            const d = Math.hypot(ddx, ddy);
-            if (d > maxReach && d > 0) {
-                const k = maxReach / d;
-                pos = clampToGrid(initialLeft + ddx * k, initialTop + ddy * k);
-            }
-        }
-        return pos;
-    }
+    // Phase 6a: the move rules now live in shared functions (battleMoveRule /
+    // battleConstrainMove / battleCommitMove / battleTokenTapped, just below
+    // this function) so the 3D Command view applies exactly the same rules.
+    function constrainPos(x, y) { return window.battleConstrainMove(moveRule, x, y); }
     function beginDrag(clientX, clientY) {
         isDragging = true; moved = false;
         startX = clientX; startY = clientY;
-        const liveToken = ((window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || []).find(t => t.token_id === tokenId);
-        initialLeft = liveToken ? liveToken.x : (parseFloat(tokenEl.style.left) || 0);
-        initialTop = liveToken ? liveToken.y : (parseFloat(tokenEl.style.top) || 0);
-        dragMode = resolveDragMode(liveToken);
+        moveRule = window.battleMoveRule(tokenId, shipMarkerId);
+        initialLeft = moveRule.x0 !== null ? moveRule.x0 : (parseFloat(tokenEl.style.left) || 0);
+        initialTop = moveRule.y0 !== null ? moveRule.y0 : (parseFloat(tokenEl.style.top) || 0);
+        moveRule.x0 = initialLeft; moveRule.y0 = initialTop;
+        dragMode = moveRule.mode; blockReason = moveRule.blockReason;
         // Suspend the CSS position transition (see .battle-token-el in
         // style.css) for the duration of this drag -- otherwise every move
         // write would animate TOWARD the new value instead of tracking the
@@ -2782,26 +2756,9 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         if (moved) {
             const { x: dx, y: dy } = window.battleRenderer.screenDeltaToWorld(clientX - startX, clientY - startY);
             const pos = constrainPos(initialLeft + dx, initialTop + dy);
-            const distMoved = Math.hypot(pos.x - initialLeft, pos.y - initialTop);
-            const dragVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
-            const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
-                if (t.token_id !== tokenId) return t;
-                if (dragMode === 'free') return { ...t, x: pos.x, y: pos.y }; // DM reposition: no move spent
-                const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : (dragVessel?.tactical_speed ?? 160);
-                return { ...t, x: pos.x, y: pos.y, move_remaining: Math.max(0, Math.round((prevRemaining - distMoved) * 10) / 10) };
-            });
-            // Undo log (2026-10-01): every token move is recorded.
-            window.recordBattleAction('Move', () => saveBattleTokens(tokens)).then(() => window.renderBattleMapPanel());
+            window.battleCommitMove(moveRule, pos);
         } else {
-            // Phase 4c: with the tactical HUD on, a tap selects the ship in the HUD
-            // (own ships stop here; FULL SHEET opens the terminal; hostiles still auto-target).
-            if (typeof window.tv2HandleTokenTap === 'function' && window.tv2HandleTokenTap(shipMarkerId)) return;
-            const clickedVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
-            if (clickedVessel && clickedVessel.iff === 'hostile' && !window.vesselHasOwner(clickedVessel, currentUserId)) {
-                window.autoTargetAllMyWeapons(shipMarkerId);
-                return;
-            }
-            if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(shipMarkerId);
+            window.battleTokenTapped(shipMarkerId);
         }
     }
     tokenEl.addEventListener('mousedown', (e) => {
@@ -2843,6 +2800,78 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         tokenEl.style.left = initialLeft + 'px'; tokenEl.style.top = initialTop + 'px'; // snap back, nothing saved
     });
 }
+
+/* Phase 6a (2026-10-03): the token move rules, shared by the 2D grid's drag
+   (wireTokenDrag above) and the 3D Command view (js/battle-3d.js). Same
+   rules as before, unchanged:
+     - DM: 'free' -- any token, any distance, no move spent.
+     - Player: only their own token; once initiative is rolled, only on its
+       own turn (tokens with no turn slot are unrestricted); not while the
+       round waits for the DM; capped at move_remaining ('capped').
+     - Otherwise 'tap' (a press only selects / opens / targets).
+     - Stations never move. */
+window.battleMoveRule = function(tokenId, shipMarkerId) {
+    const enc = window.globalBattleEncounterCache;
+    const liveToken = ((enc && enc.tokens) || []).find(t => t.token_id === tokenId);
+    const rule = { tokenId, shipMarkerId, mode: 'tap', maxReach: 0, blockReason: '', x0: liveToken ? liveToken.x : null, y0: liveToken ? liveToken.y : null };
+    const v = globalShipMarkersCache.find(m => m.id === shipMarkerId);
+    if (v && v.is_station) return rule;
+    if (currentUserRole === 'dm') { rule.mode = 'free'; return rule; }
+    if (!v || !window.vesselHasOwner(v, currentUserId)) return rule;
+    if (enc && enc.initiative_rolled && enc.pending_round_tick) { rule.blockReason = 'This round is waiting for the DM to resolve it.'; return rule; }
+    if (enc && enc.initiative_rolled && liveToken) {
+        const order = enc.turn_order || [];
+        if (order.includes(liveToken.token_id) && order[enc.current_turn_index] !== liveToken.token_id) {
+            rule.blockReason = "It's not this unit's turn yet — it can only move on its own turn.";
+            return rule;
+        }
+    }
+    const rem = liveToken && liveToken.move_remaining !== undefined ? liveToken.move_remaining : (v.tactical_speed ?? 160);
+    rule.maxReach = Math.max(0, rem);
+    if (rule.maxReach <= 0) { rule.blockReason = 'No movement remaining this round.'; return rule; }
+    rule.mode = 'capped';
+    return rule;
+};
+// Clamp a proposed top-left position to the grid AND (capped moves) to
+// maxReach from the start point along the same direction.
+window.battleConstrainMove = function(rule, x, y) {
+    let pos = clampToGrid(x, y);
+    if (rule && rule.mode === 'capped') {
+        const ddx = pos.x - rule.x0, ddy = pos.y - rule.y0;
+        const d = Math.hypot(ddx, ddy);
+        if (d > rule.maxReach && d > 0) {
+            const k = rule.maxReach / d;
+            pos = clampToGrid(rule.x0 + ddx * k, rule.y0 + ddy * k);
+        }
+    }
+    return pos;
+};
+// Save a finished move (one undo step). pos must already be constrained.
+window.battleCommitMove = function(rule, pos) {
+    if (!rule || rule.mode === 'tap' || !window.globalBattleEncounterCache) return Promise.resolve();
+    const distMoved = Math.hypot(pos.x - rule.x0, pos.y - rule.y0);
+    const dragVessel = globalShipMarkersCache.find(m => m.id === rule.shipMarkerId);
+    const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
+        if (t.token_id !== rule.tokenId) return t;
+        if (rule.mode === 'free') return { ...t, x: pos.x, y: pos.y }; // DM reposition: no move spent
+        const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : (dragVessel?.tactical_speed ?? 160);
+        return { ...t, x: pos.x, y: pos.y, move_remaining: Math.max(0, Math.round((prevRemaining - distMoved) * 10) / 10) };
+    });
+    // Undo log (2026-10-01): every token move is recorded.
+    return window.recordBattleAction('Move', () => saveBattleTokens(tokens)).then(() => window.renderBattleMapPanel());
+};
+// A tap (press without a drag) on a token.
+window.battleTokenTapped = function(shipMarkerId) {
+    // Phase 4c: with the tactical HUD on, a tap selects the ship in the HUD first
+    // (own ships stop here; FULL SHEET opens the terminal; hostiles still auto-target).
+    if (typeof window.tv2HandleTokenTap === 'function' && window.tv2HandleTokenTap(shipMarkerId)) return;
+    const clickedVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
+    if (clickedVessel && clickedVessel.iff === 'hostile' && !window.vesselHasOwner(clickedVessel, currentUserId)) {
+        window.autoTargetAllMyWeapons(shipMarkerId);
+        return;
+    }
+    if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(shipMarkerId);
+};
 
 /* Called from js/combat.js's advanceCombatRound (the same global tick every
    other per-round mechanic in this app already reuses — confirmed design,
@@ -4632,4 +4661,3 @@ async function assignBattleCallsignsOnce() {
     }
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 }
-
