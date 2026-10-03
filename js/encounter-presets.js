@@ -490,7 +490,12 @@ window.launchEncounterPreset = async function(preset) {
         await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement ended: "${active.name}".`, message_type: 'system' });
     }
     const { data: encRows, error } = await db.from('battle_encounters').insert({ name: preset.name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true, objective: (preset.data.objective || '').trim() || null,
-        map: (preset.data.map && preset.data.map.map_id && typeof window.battleMapSnapshotById === 'function') ? window.battleMapSnapshotById(preset.data.map.map_id) : null }).select();
+        map: (() => {
+            const m = (preset.data.map && preset.data.map.map_id && typeof window.battleMapSnapshotById === 'function') ? window.battleMapSnapshotById(preset.data.map.map_id) : null;
+            // Phase 10: terrain rules default ON when the map has terrain and the DM has the terrain tools.
+            if (m) m.rules = !!(typeof window.terrainRulesAllowed === 'function' && window.terrainRulesAllowed() && Array.isArray(m.terrain) && m.terrain.length);
+            return m;
+        })() }).select();
     if (error) { alert('Failed to start the battle: ' + error.message); return null; }
     const newEnc = Array.isArray(encRows) ? encRows[0] : encRows;
     await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement started: "${preset.name}".`, message_type: 'system' });

@@ -1732,3 +1732,14 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .dpe-wrap canvas { display: block; cursor: crosshair; touch-action: none; border: 1px solid #12404a; }
 .dpe-brush { display: inline-flex; align-items: center; gap: 5px; --k: #9fb4bd; }
 @media screen and (max-width: 768px) { .dkv-side { flex: 1 1 100%; } .dkv-btn { height: 40px; } }
+
+/* Phase 10: terrain rules */
+#battle-terrain-chip.tr-on { border-color: #c9a6ff; color: #e1d2ff; background: rgba(120, 80, 200, 0.18); }
+#battle-terrain-chip:disabled { opacity: 1; cursor: default; }
+.tr-card { width: 520px; }
+.tr-grid { display: grid; gap: 8px; margin-top: 10px; }
+.tr-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; letter-spacing: 0.06em; color: #d4e4ea; }
+.tr-row small { display: block; font-size: 9px; color: #6b8590; letter-spacing: 0.04em; margin-top: 2px; }
+.tr-row input { width: 110px; flex-shrink: 0; margin: 0; background: #050b0e; border: 1px solid rgba(0, 225, 255, 0.3); color: #d4e4ea; font-family: inherit; padding: 5px 8px; text-align: right; }
+.tr-kinds { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 10px; color: #b8cbd2; }
+.tr-kinds input { width: auto; margin: 0 4px 0 0; accent-color: #00e1ff; }

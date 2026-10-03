@@ -673,8 +673,9 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
         let targetOptions = '<option value="">-- No Target --</option>';
         // Out-of-arc targets (Phase 3) stay listed but greyed + unselectable.
-        targetCandidates.forEach(m => { targetOptions += m.out_of_arc
-            ? `<option value="${m.id}" disabled style="color:#5a5a5a;">${m.is_strike_craft ? '🛩️ ' : ''}${m.name} (out of arc)</option>`
+        // Phase 10: terrain-blocked targets the same way, with a short reason.
+        targetCandidates.forEach(m => { targetOptions += (m.out_of_arc || m.terrain_block)
+            ? `<option value="${m.id}" disabled style="color:#5a5a5a;">${m.is_strike_craft ? '🛩️ ' : ''}${m.name} (${m.out_of_arc ? 'out of arc' : (/nebula/i.test(m.terrain_block) ? 'in nebula' : 'blocked')})</option>`
             : `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
         let wDmgType = window.normalizeDamageType(w.damage_type || window.inferLegacyDamageType(w.name));
@@ -1749,6 +1750,16 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
         alert(`[OUT OF ARC] ${tgt ? tgt.name : 'That target'} is outside ${wpn.name}'s firing arc — turn the ship first.`);
         return;
     }
+    // Phase 10: terrain rules (js/terrain-rules.js) -- planet/station in the
+    // line of fire, or the target hidden in a nebula past lock range.
+    const terrainBlock = (targetId && typeof window.terrainFireCheck === 'function') ? window.terrainFireCheck(vesselId, targetId) : '';
+    if (terrainBlock) {
+        if (opts.auto) return;
+        if (window.AudioEngine) window.AudioEngine.playError();
+        const tgt = globalShipMarkersCache.find(m => m.id === targetId);
+        alert(`[NO SHOT] ${tgt ? tgt.name : 'That target'}: ${terrainBlock}.`);
+        return;
+    }
 
     let overridingCooldown = false;
     if (wpn.cooldown > 0) {
@@ -1833,6 +1844,9 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
             if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
             if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
             if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+            // Phase 10: asteroid cover (direct fire only).
+            const cover = (dmgType !== 'Healing' && typeof window.terrainCover === 'function') ? window.terrainCover(targetId) : null;
+            if (cover) { total = Math.floor(total * cover.mult); combatLog += cover.label; }
 
             let categoryMult = 1;
             if (dmgType !== 'Healing') {
@@ -1939,6 +1953,17 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
    hyperlane nodes: an id is added the first time a deck is touched (any
    render pass here or in ship-designer.js's loadout modal) and persisted,
    rather than requiring every existing deck to be manually re-created. */
+// Phase 10: debris damage (js/terrain-rules.js) -- straight to hull, same
+// persist + strike-craft sync + destroyed check as a weapon hit. Called
+// inside the move's undo step, so UNDO puts the hull back with the move.
+window.applyTerrainHullDamage = async function(vessel, amount) {
+    if (!vessel || !(amount > 0)) return;
+    const hull = Math.max(0, (vessel.integrity_hull || 0) - amount);
+    await db.from('ship_markers').update({ integrity_hull: hull }).eq('id', vessel.id);
+    vessel.integrity_hull = hull;
+    try { await syncSquadronHpToParent(vessel); } catch (e) { console.warn('debris: squadron sync failed', e); }
+    if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(vessel);
+};
 function genDeckId() {
     return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('deck-' + Date.now() + '-' + Math.random().toString(36).slice(2));
 }

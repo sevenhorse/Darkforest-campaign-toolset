@@ -623,6 +623,14 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
             alert(`[OUT OF RANGE] ${targetShipForAlert ? targetShipForAlert.name : 'Target'} is beyond ${wpn.name}'s range (${effRange}).`);
             return;
         }
+        // Phase 10: terrain rules (planet/station in the way, nebula shroud).
+        const sqTerrain = (sqShipSelf && typeof window.terrainFireCheck === 'function') ? window.terrainFireCheck(sqShipSelf.id, targetId) : '';
+        if (sqTerrain) {
+            if (opts.auto) return;
+            if (window.AudioEngine) window.AudioEngine.playError();
+            alert(`[NO SHOT] ${targetShipForAlert ? targetShipForAlert.name : 'Target'}: ${sqTerrain}.`);
+            return;
+        }
     }
 
     // Initiative + Action Economy: 1 AP from the squadron's own turn slot.
@@ -687,6 +695,8 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
             if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
             if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
             if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+            const sqCover = (dmgType !== 'Healing' && typeof window.terrainCover === 'function') ? window.terrainCover(targetId) : null; // Phase 10: asteroid cover
+            if (sqCover) { total = Math.floor(total * sqCover.mult); combatLog += sqCover.label; }
 
             let categoryMult = 1;
             if (dmgType !== 'Healing') {
@@ -870,6 +880,13 @@ window.launchSquadronOrdnance = async function(vesselId, sqIdx, wpnIdx, targetId
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[OUT OF RANGE] ${targetVessel.name} is beyond ${wpn.name}'s range (${launchEffRange}).`);
+        return;
+    }
+    const sqLaunchTerrain = (sqShipSelf && typeof window.terrainFireCheck === 'function') ? window.terrainFireCheck(sqShipSelf.id, targetId) : ''; // Phase 10
+    if (sqLaunchTerrain) {
+        if (opts.auto) return;
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`[NO LOCK] ${targetVessel.name}: ${sqLaunchTerrain}.`);
         return;
     }
 

@@ -352,7 +352,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // live) raise app_settings 'min_client_build'.value to match -- any browser
 // still running an older cached copy then shows a "reload" banner instead
 // of quietly writing data the new build can't see (2026-09-30 live bug).
-window.DARKFOREST_BUILD = '2026-10-03.02';
+window.DARKFOREST_BUILD = '2026-10-03.03';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -422,7 +422,7 @@ window.toggleFeatureTester = async function(key, profileId, on) {
 window.renderFeatureSwitchPanel = function() {
     const box = document.getElementById('feature-switch-list');
     if (!box || currentUserRole !== 'dm') return;
-    const keys = Object.keys(window.appSettingsCache).filter(k => k !== 'min_client_build').sort();
+    const keys = Object.keys(window.appSettingsCache).filter(k => k !== 'min_client_build' && !/_config$/.test(k)).sort(); // *_config rows hold numbers, not switches (Phase 10)
     if (keys.length === 0) { box.innerHTML = '<div style="font-size:9px; color:#6b826a;">No feature switches found.</div>'; return; }
     const players = (typeof allProfiles !== 'undefined' ? allProfiles : []).filter(p => p.role !== 'dm');
     const modeLabels = { off: 'OFF', dm: 'DM ONLY', testers: 'TESTERS', everyone: 'EVERYONE' };

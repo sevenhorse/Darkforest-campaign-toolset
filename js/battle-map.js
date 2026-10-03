@@ -553,6 +553,8 @@ window.startBattleEncounter = async function() {
 
     // Phase 7: optional map from the library (js/battle-maps.js), stored as a snapshot.
     const map = typeof window.pickedStartMap === 'function' ? window.pickedStartMap() : null;
+    // Phase 10: terrain rules per battle (stored on the map snapshot).
+    if (map) map.rules = typeof window.terrainRulesAllowed === 'function' && window.terrainRulesAllowed() && typeof window.terrainRulesDefaultFor === 'function' && window.terrainRulesDefaultFor(map);
     const { error } = await db.from('battle_encounters').insert({ name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true, map });
     if (error) { alert('Failed to start battle: ' + error.message); return; }
     if (nameInput) nameInput.value = '';
@@ -650,9 +652,18 @@ function moveTokenToward(shipMarkerId, targetPos, maxDist) {
     const cur = currentTokens[idx];
     const dx = targetPos.x - cur.x, dy = targetPos.y - cur.y;
     const dist = Math.hypot(dx, dy);
-    const newPos = (dist <= maxDist || dist === 0)
+    let newPos = (dist <= maxDist || dist === 0)
         ? { x: targetPos.x, y: targetPos.y }
         : clampToGrid(cur.x + dx * (maxDist / dist), cur.y + dy * (maxDist / dist));
+    // Phase 10: terrain rules (asteroids cost more, planets/stations stop
+    // the move, debris crossed is queued for damage -- flushed by the caller
+    // after it saves the move, via window.terrainFlushDebris).
+    if (typeof window.terrainRulesActive === 'function' && window.terrainRulesActive()) {
+        const v = globalShipMarkersCache.find(m => m.id === shipMarkerId);
+        const walk = window.terrainWalk(v, { x: cur.x, y: cur.y }, clampToGrid(targetPos.x, targetPos.y), maxDist);
+        newPos = walk.pos;
+        window.terrainQueueDebris(shipMarkerId, walk.debrisLen);
+    }
     currentTokens[idx] = { ...cur, x: newPos.x, y: newPos.y };
     return currentTokens;
 }
@@ -1787,7 +1798,7 @@ window.processBattleRoundAutomations = async function() {
                 const carrierPos = window.getBattleTokenPosition(v.id);
                 if (carrierPos) {
                     const movedTokens = moveTokenToward(sqShip.id, carrierPos, moveDist);
-                    if (movedTokens) await saveBattleTokens(movedTokens);
+                    if (movedTokens) { await saveBattleTokens(movedTokens); if (typeof window.terrainFlushDebris === 'function') await window.terrainFlushDebris(); }
                     chatLines.push(`🤖 [AI STANCE] ${sq.name} drops below 30% strength and breaks off, retreating toward ${v.name}.`);
                 } // carrier not on the grid -- nothing to retreat toward, holds position silently
                 continue; // no fire while retreating
@@ -1829,7 +1840,7 @@ window.processBattleRoundAutomations = async function() {
 
             // --- Squadron Movement + Retreat (this session): advance on target ---
             const movedTokens = moveTokenToward(sqShip.id, bestTargetPos, moveDist);
-            if (movedTokens) await saveBattleTokens(movedTokens);
+            if (movedTokens) { await saveBattleTokens(movedTokens); if (typeof window.terrainFlushDebris === 'function') await window.terrainFlushDebris(); }
             const movedSelfTok = movedTokens ? movedTokens.find(t => t.ship_marker_id === sqShip.id) : null;
             const newSelfPos = movedSelfTok ? { x: movedSelfTok.x, y: movedSelfTok.y } : selfPos;
 
@@ -1896,6 +1907,8 @@ window.processBattleRoundAutomations = async function() {
             // violation to whoever's watching the log -- no other visual
             // indicator exists yet for which enemy ships are uplinked this
             // round (flagged, not built -- see Pending list).
+            const sqTerrain = typeof window.terrainFireCheck === 'function' ? window.terrainFireCheck(sqShip.id, bestTarget.id) : '';
+            if (sqTerrain) { chatLines.push(`🤖 [AI STANCE] ${sq.name} can't engage ${bestTarget.name}: ${sqTerrain} -- holds fire.`); continue; }
             const uplinkNote = (wpn.range > 0 && effRangeForFire === 0) ? ' (target uplinked!)' : '';
             chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) engages ${bestTarget.name}${uplinkNote}.`);
             // Squadron Ordnance build (this session): an ordnance-classified
@@ -2013,7 +2026,7 @@ window.processBattleRoundAutomations = async function() {
 
         // --- Move up to tactical_speed px toward the target's current position ---
         const movedTokens = moveTokenToward(v.id, targetPos, moveDist);
-        if (movedTokens) await saveBattleTokens(movedTokens);
+        if (movedTokens) { await saveBattleTokens(movedTokens); if (typeof window.terrainFlushDebris === 'function') await window.terrainFlushDebris(); }
         const movedSelfTok = movedTokens ? movedTokens.find(t => t.ship_marker_id === v.id) : null;
         const newSelfPos = movedSelfTok ? { x: movedSelfTok.x, y: movedSelfTok.y } : selfPos;
         // Firing arcs (Phase 3, DM-confirmed): turn to bring the biggest
@@ -2034,6 +2047,7 @@ window.processBattleRoundAutomations = async function() {
             const effRange = getEffectiveWeaponRange(wpn, v, target);
             if (effRange && postMoveDist > effRange) continue; // this weapon holds fire this round; other weapons on this same ship are still checked independently
             if (typeof window.isTargetInArc === 'function' && !window.isTargetInArc(v.id, target.id, wpn)) continue; // out of arc even after turning
+            if (typeof window.terrainFireCheck === 'function' && window.terrainFireCheck(v.id, target.id)) continue; // Phase 10: blocked by terrain
 
             if (wpn.weapon_class === 'ordnance' && typeof window.resolveOrdnanceLaunch === 'function') {
                 await window.resolveOrdnanceLaunch(v.id, wIdx, target.id, { auto: true });
@@ -2326,8 +2340,10 @@ window.getBattleScopedTargets = function(vesselId, range, opts) {
       // Firing arcs (Phase 3, 2026-10-02): out-of-arc targets are dropped,
       // unless the caller asks to keep them flagged (the weapon dropdowns
       // show them greyed with "out of arc" so they don't silently vanish).
-      .map(m => ({ id: m.id, name: m.name, is_strike_craft: m.is_strike_craft, out_of_arc: !!(wpn && typeof window.isTargetInArc === 'function' && !window.isTargetInArc(vesselId, m.id, wpn)) }))
-      .filter(m => !m.out_of_arc || (opts && opts.includeOutOfArc));
+      .map(m => ({ id: m.id, name: m.name, is_strike_craft: m.is_strike_craft, out_of_arc: !!(wpn && typeof window.isTargetInArc === 'function' && !window.isTargetInArc(vesselId, m.id, wpn)),
+          // Phase 10: terrain (planet/station in the way, or hidden in a nebula past lock range)
+          terrain_block: (typeof window.terrainFireCheck === 'function' ? window.terrainFireCheck(vesselId, m.id) : '') }))
+      .filter(m => (!m.out_of_arc && !m.terrain_block) || (opts && opts.includeOutOfArc));
 };
 
 /* Ordnance LAUNCH (Range/Ordnance build, this session). An ordnance-classified
@@ -2455,6 +2471,14 @@ window.resolveOrdnanceLaunch = async function(vesselId, idx, targetId, opts) {
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[OUT OF ARC] ${targetVessel.name} is outside ${wpn.name}'s firing arc — turn the ship first.`);
+        return;
+    }
+    // Phase 10: terrain (planet/station in the way, or target hidden in a nebula).
+    const launchTerrain = typeof window.terrainFireCheck === 'function' ? window.terrainFireCheck(vesselId, targetId) : '';
+    if (launchTerrain) {
+        if (opts.auto) return;
+        if (window.AudioEngine) window.AudioEngine.playError();
+        alert(`[NO LOCK] ${targetVessel.name}: ${launchTerrain}.`);
         return;
     }
 
@@ -2873,6 +2897,13 @@ window.battleMoveRule = function(tokenId, shipMarkerId) {
 // maxReach from the start point along the same direction.
 window.battleConstrainMove = function(rule, x, y) {
     let pos = clampToGrid(x, y);
+    // Phase 10: with terrain rules on, a capped move walks the straight line
+    // and stops where the budget runs out (asteroids cost more) or where it
+    // would enter a planet / station (js/terrain-rules.js).
+    if (rule && rule.mode === 'capped' && typeof window.terrainRulesActive === 'function' && window.terrainRulesActive()) {
+        const v = globalShipMarkersCache.find(m => m.id === rule.shipMarkerId);
+        return window.terrainWalk(v, { x: rule.x0, y: rule.y0 }, pos, rule.maxReach).pos;
+    }
     if (rule && rule.mode === 'capped') {
         const ddx = pos.x - rule.x0, ddy = pos.y - rule.y0;
         const d = Math.hypot(ddx, ddy);
@@ -2883,11 +2914,25 @@ window.battleConstrainMove = function(rule, x, y) {
     }
     return pos;
 };
+// What a capped move to `pos` would cost (terrain-aware); used by the drag previews.
+window.battleMoveCost = function(rule, pos) {
+    if (!rule || !pos) return 0;
+    if (rule.mode === 'capped' && typeof window.terrainRulesActive === 'function' && window.terrainRulesActive()) {
+        return window.terrainWalk(globalShipMarkersCache.find(m => m.id === rule.shipMarkerId), { x: rule.x0, y: rule.y0 }, pos, null).cost;
+    }
+    return Math.hypot(pos.x - rule.x0, pos.y - rule.y0);
+};
 // Save a finished move (one undo step). pos must already be constrained.
 window.battleCommitMove = function(rule, pos) {
     if (!rule || rule.mode === 'tap' || !window.globalBattleEncounterCache) return Promise.resolve();
-    const distMoved = Math.hypot(pos.x - rule.x0, pos.y - rule.y0);
+    let distMoved = Math.hypot(pos.x - rule.x0, pos.y - rule.y0);
     const dragVessel = globalShipMarkersCache.find(m => m.id === rule.shipMarkerId);
+    // Phase 10: terrain cost + debris crossed (not for DM 'free' repositioning).
+    let terrainWalkResult = null;
+    if (rule.mode === 'capped' && typeof window.terrainRulesActive === 'function' && window.terrainRulesActive()) {
+        terrainWalkResult = window.terrainWalk(dragVessel, { x: rule.x0, y: rule.y0 }, pos, null);
+        distMoved = terrainWalkResult.cost;
+    }
     const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
         if (t.token_id !== rule.tokenId) return t;
         if (rule.mode === 'free') return { ...t, x: pos.x, y: pos.y }; // DM reposition: no move spent
@@ -2895,7 +2940,10 @@ window.battleCommitMove = function(rule, pos) {
         return { ...t, x: pos.x, y: pos.y, move_remaining: Math.max(0, Math.round((prevRemaining - distMoved) * 10) / 10) };
     });
     // Undo log (2026-10-01): every token move is recorded.
-    return window.recordBattleAction('Move', () => saveBattleTokens(tokens)).then(() => window.renderBattleMapPanel());
+    return window.recordBattleAction('Move', async () => {
+        await saveBattleTokens(tokens);
+        if (terrainWalkResult && terrainWalkResult.debrisLen >= 5 && dragVessel) await window.terrainApplyDebris(dragVessel, terrainWalkResult.debrisLen);
+    }).then(() => window.renderBattleMapPanel());
 };
 // A tap (press without a drag) on a token.
 window.battleTokenTapped = function(shipMarkerId) {

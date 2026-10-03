@@ -122,12 +122,29 @@ function planGroupMove(dx, dy) {
     const sel = gtTokens().filter(t => GT.selected.has(t.token_id));
     const rules = sel.map(t => ({ t, r: window.groupMoveRule(t) }));
     const dist = Math.hypot(dx, dy);
+    // Phase 10: with terrain rules on, each capped ship walks its own line
+    // (asteroids cost more, planets/stations stop it); the group still stops
+    // together at the shortest ship's reach so the formation holds.
+    const terrain = typeof window.terrainRulesActive === 'function' && window.terrainRulesActive();
+    const vOf = (t) => gtVessel(t);
     let k = 1;
-    rules.forEach(({ r }) => { if (r.mode === 'capped' && dist > 0) k = Math.min(k, r.reach / dist); });
+    rules.forEach(({ t, r }) => {
+        if (r.mode !== 'capped' || dist <= 0) return;
+        if (terrain) {
+            const to = clampToGrid(t.x + dx, t.y + dy);
+            const full = Math.hypot(to.x - t.x, to.y - t.y);
+            const w = window.terrainWalk(vOf(t), { x: t.x, y: t.y }, to, r.reach);
+            k = Math.min(k, full > 0 ? Math.hypot(w.pos.x - t.x, w.pos.y - t.y) / full : 1);
+        } else k = Math.min(k, r.reach / dist);
+    });
     const moves = {}, blocked = [];
     rules.forEach(({ t, r }) => {
         if (r.mode === 'blocked') { blocked.push(r.reason); return; }
-        moves[t.token_id] = { pos: clampToGrid(t.x + dx * k, t.y + dy * k), spend: r.mode === 'capped' ? dist * k : 0 };
+        const pos = clampToGrid(t.x + dx * k, t.y + dy * k);
+        if (terrain && r.mode === 'capped') {
+            const w = window.terrainWalk(vOf(t), { x: t.x, y: t.y }, pos, null);
+            moves[t.token_id] = { pos, spend: w.cost, debrisLen: w.debrisLen };
+        } else moves[t.token_id] = { pos, spend: r.mode === 'capped' ? dist * k : 0 };
     });
     return { moves, blocked, k };
 }
@@ -147,7 +164,16 @@ window.groupMoveSelected = async function(dx, dy) {
         }
         return out;
     });
-    await window.recordBattleAction('Group move', () => saveBattleTokens(tokens));
+    await window.recordBattleAction('Group move', async () => {
+        await saveBattleTokens(tokens);
+        // Phase 10: debris crossed by each ship (players / capped moves only)
+        for (const id of Object.keys(plan.moves)) {
+            const m = plan.moves[id];
+            if (!(m.debrisLen >= 5)) continue;
+            const v = gtVessel(gtTokens().find(t => t.token_id === id) || { ship_marker_id: null });
+            if (v && typeof window.terrainApplyDebris === 'function') await window.terrainApplyDebris(v, m.debrisLen);
+        }
+    });
     if (plan.blocked.length && typeof window.showToast === 'function') window.showToast(`Stayed put: ${plan.blocked.join('; ')}`);
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     return plan;

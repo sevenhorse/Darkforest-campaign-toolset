@@ -1405,7 +1405,8 @@ function showMovePreview(d) {
     ring.position.copy(V(c.x, c.y, 0.6));
     B3.groups.preview.add(ring);
     B3.groups.preview.add(lineObj([V(s.x, s.y, 1.5), V(c.x, c.y, 1.5)], '#ffffff', 0.8, true));
-    const dist = Math.hypot(d.pos.x - d.rule.x0, d.pos.y - d.rule.y0);
+    // Phase 10: with terrain rules on, the label shows the move's COST (asteroids count extra).
+    const dist = typeof window.battleMoveCost === 'function' ? window.battleMoveCost(d.rule, d.pos) : Math.hypot(d.pos.x - d.rule.x0, d.pos.y - d.rule.y0);
     const cap = d.rule.mode === 'capped' ? ` / ${Math.round(d.rule.maxReach)}` : '';
     B3.previewLabels.push({ pos: V((s.x + c.x) / 2, (s.y + c.y) / 2, 4), html: `${Math.round(dist)}${cap} px`, cls: 'b3d-move-label' });
     requestRender();
