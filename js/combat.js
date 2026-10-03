@@ -884,7 +884,7 @@ window.renderVesselDeck = function() {
                         <button onclick="window.modifyShipDeckHealth('${vessel.id}', ${idx}, 5)" style="width:24px; padding:2px; font-size:10px; margin:0;">+5</button>
                         <button class="layer-del" onclick="window.deleteShipDeck('${vessel.id}', ${idx})" style="padding:2px 6px; font-size:10px; margin:0; margin-left:4px;">✕</button>
                     </div>
-                    <div style="display:flex; justify-content:flex-end;">${boardingControl}</div>
+                    <div style="display:flex; justify-content:flex-end; gap:6px;">${typeof window.deckPlanButtonHtml === 'function' ? window.deckPlanButtonHtml(vessel, d, idx) : ''}${boardingControl}</div>
                 </div>`;
             });
         }
