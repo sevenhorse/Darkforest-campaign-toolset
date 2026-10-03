@@ -1535,3 +1535,59 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
     .cx2-foot { padding: 10px 12px; }
     .cx2-edhelp { display: none; }
 }
+
+/* ===== Phase 6d: Battle Map command bar + left column (js/battle-chrome.js, switch 'battle_chrome') ===== */
+#battle-map-panel.bmx.bmx-active #battle-map-header { display: none !important; }
+#battle-map-panel.bmx.bmx-active .battle-map-layout { height: calc(100vh - 92px); }
+.bmx-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 12px; background: rgba(6, 14, 18, 0.9); border: 1px solid rgba(0, 225, 255, 0.3);
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+.bmx-id { display: flex; flex-direction: column; gap: 2px; margin-right: 6px; min-width: 0; }
+.bmx-kicker { font-size: 9px; letter-spacing: 0.24em; color: #00e1ff; }
+#battle-map-panel.bmx #battle-map-encounter-name { font-size: 17px !important; font-weight: 700; letter-spacing: 0.12em; color: #f2fbfd !important; text-transform: uppercase; }
+.bmx-chip { font-size: 10px; letter-spacing: 0.16em; padding: 4px 8px; border: 1px solid rgba(0, 225, 255, 0.5); color: #9fe9f5; white-space: nowrap; }
+.bmx-grow { flex: 1 1 10px; }
+#battle-map-panel.bmx #battle-map-turn-bar { margin: 0 !important; background: transparent !important; border: 1px solid #ffd700 !important; border-radius: 0 !important; padding: 2px 4px 2px 8px !important; gap: 8px !important; }
+#battle-map-panel.bmx #battle-map-turn-info { color: #ffd700 !important; font-size: 10px !important; letter-spacing: 0.12em; text-transform: uppercase; }
+#bmx-btn-slot .bmx-btns { display: flex; gap: 4px !important; flex-wrap: wrap; }
+#battle-map-panel.bmx .bmx-bar button, #battle-map-panel.bmx #battle-map-turn-bar button { font-family: inherit; height: 32px; width: auto; margin: 0; padding: 0 10px !important; font-size: 10px !important; letter-spacing: 0.12em;
+    background: transparent; border: 1px solid #00e1ff; color: #00e1ff; border-radius: 0; text-transform: uppercase; }
+#battle-map-panel.bmx .bmx-bar button:hover { background: rgba(0, 225, 255, 0.1); }
+#battle-map-panel.bmx #battle-map-undo-btn, #battle-map-panel.bmx #battle-map-redo-btn { border-color: #ffaa00; color: #ffaa00; }
+#battle-map-panel.bmx #battle-map-log-btn { border-color: #6b8590; color: #9fb4bd; }
+#battle-map-panel.bmx #battle-map-end-btn { background: #2a0808; border-color: #ff4d4d; color: #ff8a8a; }
+#battle-map-panel.bmx #battle-map-endturn-btn { height: 26px; border-color: #ffd700; color: #ffd700; }
+#battle-map-panel.bmx .bmx-close { border-color: #6b8590 !important; color: #9fb4bd !important; }
+/* left column panels */
+.bmx-panel, #battle-map-panel.bmx .bmx-comms { background: rgba(6, 14, 18, 0.86); border: 1px solid rgba(0, 225, 255, 0.3); border-top: 1px solid rgba(0, 225, 255, 0.3) !important; padding: 0 !important;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.bmx-ttl { font-size: 10px; letter-spacing: 0.18em; color: #00e1ff; padding: 7px 10px; border-bottom: 1px solid rgba(0, 225, 255, 0.2); }
+.bmx-tabs { display: none; gap: 4px; padding: 8px 10px 0; }
+#battle-map-panel.bmx-dmdeploy .bmx-tabs { display: flex; }
+.bmx-tabs button { flex: 1; height: 30px; margin: 0; width: auto; font-family: inherit; font-size: 9px; letter-spacing: 0.12em; background: transparent; border: 1px solid #2a4a54; color: #8fa7b0; border-radius: 0; }
+.bmx-tabs button.on { background: rgba(0, 225, 255, 0.14); border-color: #00e1ff; color: #e8f6fa; }
+.bmx-deploy-body { padding: 8px 10px 10px; }
+#battle-map-panel.bmx .bmx-palwrap, #battle-map-panel.bmx #battle-map-dm-deploy { border-top: 0 !important; padding-top: 0 !important; }
+#battle-map-panel.bmx .bmx-deploy-body h5 { display: none; }
+#battle-map-panel.bmx[data-bmx-tab="vessels"] #battle-map-dm-deploy { display: none !important; }
+#battle-map-panel.bmx[data-bmx-tab="template"] .bmx-palwrap, #battle-map-panel.bmx[data-bmx-tab="fleet"] .bmx-palwrap { display: none; }
+#battle-map-panel.bmx[data-bmx-tab="template"] .bmx-fleet, #battle-map-panel.bmx[data-bmx-tab="fleet"] .bmx-tpl { display: none; }
+#battle-map-panel.bmx #battle-map-palette { max-height: 260px !important; gap: 6px !important; }
+#battle-map-panel.bmx #battle-map-palette > div { background: transparent !important; border-color: rgba(255, 255, 255, 0.08) !important; border-radius: 0 !important; padding: 6px 8px !important; gap: 8px; }
+#battle-map-panel.bmx #battle-map-palette > div > span { font-size: 11px !important; font-weight: 600; letter-spacing: 0.06em; color: #e8f6fa !important; text-transform: uppercase; }
+#battle-map-panel.bmx #battle-map-palette button { width: auto !important; flex: 0 0 auto; height: 26px; margin: 0 !important; padding: 0 8px !important; font-family: inherit; font-size: 9px !important; letter-spacing: 0.12em; background: transparent; border: 1px solid #00e1ff !important; color: #00e1ff !important; border-radius: 0; }
+#battle-map-panel.bmx .bmx-deploy-body select { background: #050b0e; border: 1px solid rgba(0, 225, 255, 0.3); color: #d4e4ea; font-family: inherit; font-size: 11px !important; height: 32px; }
+#battle-map-panel.bmx .bmx-deploy-body .btn-deploy { font-family: inherit; height: 32px; letter-spacing: 0.12em; border-color: #00e1ff !important; color: #00e1ff !important; background: transparent; border-radius: 0; margin-top: 6px !important; }
+#battle-map-panel.bmx .bmx-comms > div:first-child { padding: 7px 10px; border-bottom: 1px solid rgba(0, 225, 255, 0.2); }
+#battle-map-panel.bmx .bmx-comms > div:first-child h5 { color: #00e1ff !important; font-size: 10px !important; letter-spacing: 0.18em; text-transform: uppercase; }
+#battle-map-panel.bmx #bm-comms-dock-body { padding: 0 10px 10px; }
+#battle-map-panel.bmx #bm-comms-chat-feed { background: #040a0d !important; border-color: rgba(0, 225, 255, 0.18) !important; }
+/* Incoming ordnance as a panel */
+#battle-map-panel.bmx #battle-map-ordnance-list { background: rgba(10, 6, 14, 0.86); border: 1px solid rgba(199, 120, 221, 0.45); border-top: 0; padding: 8px 10px; font-size: 11px !important; color: #e8dcef !important; }
+#battle-map-panel.bmx #battle-map-ordnance-list:empty::before { content: 'No ordnance in flight.'; color: #7d6a85; }
+#battle-map-panel.bmx .battle-map-left-col > h5 { margin: 8px 0 -10px !important; padding: 7px 10px; font-size: 10px !important; letter-spacing: 0.18em; text-transform: uppercase; color: #c778dd !important;
+    background: rgba(10, 6, 14, 0.86); border: 1px solid rgba(199, 120, 221, 0.45); border-bottom: 1px solid rgba(199, 120, 221, 0.25); }
+@media screen and (max-width: 768px) {
+    .bmx-bar { gap: 6px; }
+    #battle-map-panel.bmx .bmx-bar button { height: 40px; }
+    #battle-map-panel.bmx.bmx-active .battle-map-layout { height: auto; }
+}
