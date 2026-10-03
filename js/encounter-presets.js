@@ -44,6 +44,27 @@ function presetEsc(s) { return window.escapeHtml(s == null ? '' : String(s)); }
 function newPresetData() {
     return { schema: 1, entities: [], waves: [{ id: 1, trigger: { type: 'on_launch' } }], notes: '' };
 }
+// Phase 7: the preset's map (library) sets the stager's size and shows its terrain.
+function stagerMap() {
+    const id = stagerPreset && stagerPreset.data.map && stagerPreset.data.map.map_id;
+    return id && typeof window.battleMapById === 'function' ? window.battleMapById(id) : null;
+}
+function stagerDims() {
+    const m = stagerMap();
+    return typeof window.battleMapDims === 'function' ? window.battleMapDims(m) : { w: 920, h: 760 };
+}
+function stagerClamp(x, y) {
+    const { w, h } = stagerDims();
+    return { x: Math.max(0, Math.min(w - STAGE_TOKEN, x)), y: Math.max(0, Math.min(h - STAGE_TOKEN, y)) };
+}
+window.stagerSetMap = function (id) {
+    if (!stagerPreset) return;
+    stagerPreset.data.map = id ? { map_id: id } : null;
+    stagerPreset.data.entities.forEach(e => { const p = stagerClamp(e.pos.x, e.pos.y); e.pos = { x: Math.round(p.x), y: Math.round(p.y) }; });
+    markDirty();
+    renderStager();
+};
+window.renderStagerIfOpen = function () { const ov = document.getElementById('encounter-stager'); if (ov && ov.style.display !== 'none') renderStager(); };
 function presetEntityKey() { return 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function allTemplates() {
     return (typeof shipTemplatesList !== 'undefined' ? shipTemplatesList : []).concat(window.secretShipTemplatesList || []);
@@ -86,6 +107,7 @@ window.openEncounterStager = async function() {
     if (!presetsAllowed()) return;
     ensureStagerOverlay().style.display = 'block';
     await window.loadEncounterPresets();
+    if (typeof window.battleMapsAllowed === 'function' && window.battleMapsAllowed()) await window.loadBattleMaps();
     if (!stagerPreset && encounterPresetsList.length > 0) selectPreset(encounterPresetsList[0].id, true);
     renderStager();
 };
@@ -150,7 +172,7 @@ function markDirty() { stagerDirty = true; const b = document.getElementById('st
 
 function staggerPos(n) {
     const col = n % 8, row = Math.floor(n / 8);
-    return clampToGrid(560 + col * 40 - 140, 120 + row * 50);
+    return stagerClamp(560 + col * 40 - 140, 120 + row * 50);
 }
 window.stagerAddTemplate = function() {
     const sel = document.getElementById('stager-add-template');
@@ -181,7 +203,7 @@ window.stagerAddShip = function() {
     if (!stagerPreset || !sel || !sel.value) return;
     stagerLastPick.ship = sel.value;
     if (stagerPreset.data.entities.some(e => e.source.kind === 'live_marker' && e.source.ship_marker_id === sel.value)) { alert('That ship is already in this preset.'); return; }
-    const e = { key: presetEntityKey(), source: { kind: 'live_marker', ship_marker_id: sel.value }, pos: clampToGrid(80 + (stagerPreset.data.entities.length % 6) * 50, 600), overrides: {}, wave: 1 };
+    const e = { key: presetEntityKey(), source: { kind: 'live_marker', ship_marker_id: sel.value }, pos: stagerClamp(80 + (stagerPreset.data.entities.length % 6) * 50, 600), overrides: {}, wave: 1 };
     stagerPreset.data.entities.push(e);
     stagerSelectedKey = e.key;
     markDirty(); renderStager();
@@ -249,8 +271,16 @@ function renderStager() {
                 <span style="pointer-events:none; overflow:hidden; white-space:nowrap; max-width:30px;">${presetEsc(d.name.slice(0, 6))}</span>
                 <span style="position:absolute; top:-7px; right:-7px; background:#030403; border:1px solid ${col}; border-radius:6px; font-size:7px; padding:0 3px; pointer-events:none;">W${e.wave}${d.ai ? '🤖' : ''}</span></div>`;
         }).join('');
-        center = `<div id="stager-grid-wrap" style="width:100%; overflow:hidden;">
-            <div id="stager-grid" style="position:relative; width:920px; height:760px; background:#050a08; border:1px solid #2a3a2a; transform-origin:0 0; background-image:linear-gradient(rgba(60,78,54,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(60,78,54,0.18) 1px, transparent 1px); background-size:46px 46px;">${tokens}</div></div>
+        const sd = stagerDims(), smap = stagerMap();
+        const terrainSvg = smap && typeof window.renderBattleTerrainSvg === 'function'
+            ? `<svg class="stager-terrain" width="${sd.w}" height="${sd.h}" viewBox="0 0 ${sd.w} ${sd.h}" style="position:absolute; left:0; top:0; pointer-events:none;">${window.renderBattleTerrainSvg(smap, sd.w, sd.h)}</svg>` : '';
+        const mapPick = (typeof window.battleMapsAllowed === 'function' && window.battleMapsAllowed())
+            ? `<div style="display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap;"><label for="stager-map" style="font-size:9px; color:#00e1ff;">🗺 Map</label>
+                <select id="stager-map" onchange="window.stagerSetMap(this.value)" style="font-size:10px; margin:0; max-width:320px;">${window.battleMapOptionsHtml(p.data.map && p.data.map.map_id)}</select>
+                <button class="layer-edit" onclick="window.openBattleMapEditor()" style="width:auto; font-size:9px; padding:3px 8px; margin:0;">EDIT MAPS</button>
+                ${p.data.map && p.data.map.map_id && !smap ? '<span style="font-size:9px; color:#ff6b6b;">That map was deleted — the plain grid will be used.</span>' : ''}</div>` : '';
+        center = `${mapPick}<div id="stager-grid-wrap" style="width:100%; overflow:hidden;">
+            <div id="stager-grid" style="position:relative; width:${sd.w}px; height:${sd.h}px; background:#050a08; border:1px solid #2a3a2a; transform-origin:0 0; background-image:linear-gradient(rgba(60,78,54,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(60,78,54,0.18) 1px, transparent 1px); background-size:46px 46px;">${terrainSvg}${tokens}</div></div>
             <div style="font-size:9px; color:#6b826a; margin-top:4px;">Drag ships to position them. Click one to edit it. Dashed = hidden from players, W = wave, 🤖 = AI-controlled. Player ships (green) are moved onto the grid at launch.</div>`;
 
         const selE = p.data.entities.find(e => e.key === stagerSelectedKey);
@@ -351,9 +381,10 @@ function fitStagerGrid() {
     const wrap = document.getElementById('stager-grid-wrap');
     const grid = document.getElementById('stager-grid');
     if (!wrap || !grid) return;
-    const scale = Math.min(1, (wrap.clientWidth || 920) / 920);
+    const { w, h } = stagerDims();
+    const scale = Math.min(1, (wrap.clientWidth || w) / w);
     grid.style.transform = `scale(${scale})`;
-    wrap.style.height = Math.ceil(760 * scale) + 'px';
+    wrap.style.height = Math.ceil(h * scale) + 'px';
 }
 window.addEventListener('resize', () => { const ov = document.getElementById('encounter-stager'); if (ov && ov.style.display !== 'none') fitStagerGrid(); });
 
@@ -367,14 +398,14 @@ function wireStagerDrag() {
             const e = stagerPreset.data.entities.find(x => x.key === key);
             if (!e) return;
             const rect = grid.getBoundingClientRect();
-            const scale = rect.width / 920 || 1;
+            const scale = rect.width / stagerDims().w || 1;
             const start = { x: ev.clientX, y: ev.clientY, ex: e.pos.x, ey: e.pos.y };
             let moved = false;
             el.setPointerCapture && el.setPointerCapture(ev.pointerId);
             const onMove = (mv) => {
                 const dx = (mv.clientX - start.x) / scale, dy = (mv.clientY - start.y) / scale;
                 if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-                const pos = clampToGrid(start.ex + dx, start.ey + dy);
+                const pos = stagerClamp(start.ex + dx, start.ey + dy);
                 el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
                 e.pos = { x: Math.round(pos.x), y: Math.round(pos.y) };
             };
@@ -458,7 +489,8 @@ window.launchEncounterPreset = async function(preset) {
         await db.from('battle_encounters').update({ is_active: false }).eq('id', active.id);
         await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement ended: "${active.name}".`, message_type: 'system' });
     }
-    const { data: encRows, error } = await db.from('battle_encounters').insert({ name: preset.name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true, objective: (preset.data.objective || '').trim() || null }).select();
+    const { data: encRows, error } = await db.from('battle_encounters').insert({ name: preset.name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true, objective: (preset.data.objective || '').trim() || null,
+        map: (preset.data.map && preset.data.map.map_id && typeof window.battleMapSnapshotById === 'function') ? window.battleMapSnapshotById(preset.data.map.map_id) : null }).select();
     if (error) { alert('Failed to start the battle: ' + error.message); return null; }
     const newEnc = Array.isArray(encRows) ? encRows[0] : encRows;
     await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement started: "${preset.name}".`, message_type: 'system' });

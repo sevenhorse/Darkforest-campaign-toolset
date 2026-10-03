@@ -250,28 +250,144 @@ function initScene() {
     sun.position.set(300, 700, 250);
     scene.add(sun);
 
-    // The tactical plane + grid
+    // The tactical plane + grid (rebuilt when the battle's map size/picture changes -- Phase 7)
+    ['floor', 'terrain', 'tokens', 'overlay', 'fx', 'preview', 'tape'].forEach(k => { B3.groups[k] = new T.Group(); scene.add(B3.groups[k]); });
+    Object.assign(B3, { renderer, scene, camera });
+    buildFloor(null);
+    resetCamera();
+    try { window.addEventListener('resize', () => { resize(); requestRender(); }); } catch (e) {}
+}
+/* --- Floor + map terrain (Phase 7, js/battle-maps.js) --- */
+function own(obj) { obj.traverse(o => { o.userData.ownGeo = true; o.userData.ownMat = true; }); return obj; }
+function buildFloor(map) {
+    const T = B3.THREE, g = B3.groups.floor;
+    if (B3.plane && B3.plane.userData.tex) { B3.plane.userData.tex.dispose(); B3.plane.userData.tex = null; }
+    clearGroup(g);
     const W = BATTLE_GRID_W, H = BATTLE_GRID_H;
-    const plane = new T.Mesh(new T.PlaneGeometry(W, H), new T.MeshBasicMaterial({ color: 0x061318, transparent: true, opacity: 0.92 }));
+    const hasPic = !!(map && map.background_url);
+    const plane = new T.Mesh(new T.PlaneGeometry(W, H), new T.MeshBasicMaterial({ color: hasPic ? 0x9aa6aa : 0x061318, transparent: true, opacity: hasPic ? 1 : 0.92 }));
     plane.rotation.x = -Math.PI / 2;
-    scene.add(plane);
+    g.add(own(plane));
+    B3.plane = plane;
     const minor = [], major = [];
     for (let x = 0; x <= W; x += 40) (x % 200 === 0 ? major : minor).push(x - W / 2, 0.2, -H / 2, x - W / 2, 0.2, H / 2);
     for (let y = 0; y <= H; y += 40) (y % 200 === 0 ? major : minor).push(-W / 2, 0.2, y - H / 2, W / 2, 0.2, y - H / 2);
     const lines = (arr, color, opacity) => {
-        const g = new T.BufferGeometry();
-        g.setAttribute('position', new T.Float32BufferAttribute(arr, 3));
-        return new T.LineSegments(g, new T.LineBasicMaterial({ color, transparent: true, opacity }));
+        const geo = new T.BufferGeometry();
+        geo.setAttribute('position', new T.Float32BufferAttribute(arr, 3));
+        return own(new T.LineSegments(geo, new T.LineBasicMaterial({ color, transparent: true, opacity })));
     };
-    scene.add(lines(minor, 0x1a4652, 0.45));
-    scene.add(lines(major, 0x2a7f8f, 0.7));
-    scene.add(lines([-W / 2, 0.3, -H / 2, W / 2, 0.3, -H / 2, W / 2, 0.3, -H / 2, W / 2, 0.3, H / 2, W / 2, 0.3, H / 2, -W / 2, 0.3, H / 2, -W / 2, 0.3, H / 2, -W / 2, 0.3, -H / 2], 0x3fc6d8, 0.9));
-
-    ['tokens', 'overlay', 'fx', 'preview', 'tape'].forEach(k => { B3.groups[k] = new T.Group(); scene.add(B3.groups[k]); });
-    Object.assign(B3, { renderer, scene, camera, plane });
-    resetCamera();
-    try { window.addEventListener('resize', () => { resize(); requestRender(); }); } catch (e) {}
+    g.add(lines(minor, 0x1a4652, hasPic ? 0.3 : 0.45));
+    g.add(lines(major, 0x2a7f8f, hasPic ? 0.5 : 0.7));
+    g.add(lines([-W / 2, 0.3, -H / 2, W / 2, 0.3, -H / 2, W / 2, 0.3, -H / 2, W / 2, 0.3, H / 2, W / 2, 0.3, H / 2, -W / 2, 0.3, H / 2, -W / 2, 0.3, H / 2, -W / 2, 0.3, -H / 2], 0x3fc6d8, 0.9));
+    if (hasPic) {
+        // The picture is the battlefield floor (DM decision). Loaded async; the plain floor shows until then.
+        const ref = map.background_url;
+        Promise.resolve(/^https:/i.test(ref) ? ref : (window.resolveMediaUrl ? window.resolveMediaUrl(ref) : null)).then(url => {
+            if (!url || B3.plane !== plane) return;
+            const loader = B3.textureLoader || new T.TextureLoader();
+            loader.setCrossOrigin && loader.setCrossOrigin('anonymous');
+            loader.load(url, tex => {
+                if (B3.plane !== plane) { tex.dispose(); return; }
+                if (T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
+                plane.material.map = tex; plane.material.color.set(0xb8c4c8); plane.material.needsUpdate = true;
+                plane.userData.tex = tex;
+                requestRender();
+            }, undefined, () => {});
+        });
+    }
 }
+let nebulaTex = null;
+function nebulaTexture() {
+    if (nebulaTex !== null) return nebulaTex;
+    const T = B3.THREE;
+    try {
+        const c = document.createElement('canvas'); c.width = c.height = 64;
+        const ctx = c.getContext && c.getContext('2d');
+        if (!ctx) { nebulaTex = false; return false; }
+        const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+        g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.5, 'rgba(255,255,255,0.35)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+        nebulaTex = new T.CanvasTexture(c);
+    } catch (e) { nebulaTex = false; }
+    return nebulaTex;
+}
+function buildTerrain(map) {
+    const T = B3.THREE, g = B3.groups.terrain;
+    clearGroup(g);
+    const list = map && window.sanitizeBattleTerrain ? window.sanitizeBattleTerrain(map.terrain) : [];
+    const low = lowQ();
+    const rockGeo = own(new T.Mesh(new T.DodecahedronGeometry(1, 0))).geometry;
+    const shardGeo = own(new T.Mesh(new T.TetrahedronGeometry(1, 0))).geometry;
+    list.forEach(t => {
+        const holder = new T.Group();
+        holder.userData.terrainKey = t.key;
+        const rnd = window.battleTerrainRng(t.key + ':3d');
+        const area = window.battleTerrainArea(t);
+        const c = window.battleTerrainCentroid(t);
+        if (t.kind === 'asteroid' || t.kind === 'debris') {
+            const rock = t.kind === 'asteroid';
+            let n = Math.round(area / (rock ? 900 : 1100));
+            n = Math.max(6, Math.min(low ? 40 : 90, n));
+            const mat = new T.MeshStandardMaterial({ color: rock ? 0x7a6a55 : 0x6e5a4a, roughness: 0.95, metalness: rock ? 0.05 : 0.5, flatShading: true });
+            const mesh = new T.InstancedMesh(rock ? rockGeo : shardGeo, mat, n);
+            const m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), sc = new T.Vector3(), pos = new T.Vector3();
+            window.battleTerrainScatter(t, n).forEach((p, i) => {
+                const size = rock ? 3 + p.s * 10 : 1.5 + p.s * 4;
+                e.set(rnd() * 6.3, rnd() * 6.3, rnd() * 6.3); q.setFromEuler(e);
+                sc.set(size, size * (0.6 + rnd() * 0.5), size * (0.7 + rnd() * 0.5));
+                pos.copy(V(p.x, p.y, 4 + rnd() * (rock ? 46 : 36)));
+                m4.compose(pos, q, sc); mesh.setMatrixAt(i, m4);
+            });
+            const placed = window.battleTerrainScatter(t, n).length;
+            mesh.count = Math.min(n, placed);
+            mesh.userData.ownMat = true; mesh.userData.ownGeo = true; // (shared rock geometry: disposing it twice is harmless)
+            holder.add(mesh);
+        } else if (t.kind === 'nebula') {
+            const tex = nebulaTexture();
+            const n = Math.max(4, Math.min(low ? 10 : 22, Math.round(area / 7000)));
+            window.battleTerrainScatter(t, n).forEach(p => {
+                const size = 70 + p.s * 110;
+                const mat = tex ? new T.SpriteMaterial({ map: tex, color: rnd() < 0.5 ? 0xb47cff : 0x6a8cff, transparent: true, opacity: 0.28, depthWrite: false, blending: T.AdditiveBlending })
+                    : new T.SpriteMaterial({ color: 0xb47cff, transparent: true, opacity: 0.12, depthWrite: false });
+                const sp = new T.Sprite(mat);
+                sp.scale.set(size, size * 0.7, 1);
+                sp.position.copy(V(p.x, p.y, 12 + rnd() * 40));
+                sp.userData.ownMat = true;
+                holder.add(sp);
+            });
+        } else if (t.kind === 'planet' && t.shape.type === 'circle') {
+            const r = t.shape.r;
+            const sphere = own(new T.Mesh(new T.SphereGeometry(r, low ? 20 : 40, low ? 12 : 24), new T.MeshStandardMaterial({ color: 0x2f6f8f, emissive: 0x0c2433, emissiveIntensity: 0.6, roughness: 0.85 })));
+            sphere.position.copy(V(t.shape.x, t.shape.y, -r * 0.55));
+            holder.add(sphere);
+        } else if (t.kind === 'station' && t.shape.type === 'circle') {
+            const r = t.shape.r;
+            const body = own(new T.Mesh(new T.BoxGeometry(r * 0.8, Math.max(8, r * 0.3), r * 0.8), new T.MeshStandardMaterial({ color: 0x5a7680, metalness: 0.6, roughness: 0.5, flatShading: true })));
+            body.position.copy(V(t.shape.x, t.shape.y, Math.max(8, r * 0.3) / 2 + 2));
+            const ring = own(new T.Mesh(new T.TorusGeometry(r * 0.72, Math.max(1.2, r * 0.04), 8, low ? 32 : 64), new T.MeshStandardMaterial({ color: 0x00e1ff, emissive: 0x00b8d4, emissiveIntensity: 0.5 })));
+            ring.rotation.x = Math.PI / 2;
+            ring.position.copy(V(t.shape.x, t.shape.y, 10));
+            holder.add(body, ring);
+        }
+        g.add(holder);
+    });
+    B3.terrainCount = list.length;
+}
+// Called from syncScene: rebuilds floor / terrain only when the battle's map changes.
+function syncMap(enc) {
+    const map = enc && enc.map ? enc.map : null;
+    const floorSig = JSON.stringify([BATTLE_GRID_W, BATTLE_GRID_H, map && map.background_url]);
+    if (B3.floorSig !== floorSig) {
+        const sizeChanged = B3.floorSize && (B3.floorSize[0] !== BATTLE_GRID_W || B3.floorSize[1] !== BATTLE_GRID_H);
+        buildFloor(map);
+        B3.floorSig = floorSig; B3.floorSize = [BATTLE_GRID_W, BATTLE_GRID_H];
+        if (sizeChanged) resetCamera();
+    }
+    const terrSig = JSON.stringify([map && map.terrain, lowQ()]);
+    if (B3.terrainSig !== terrSig) { buildTerrain(map); B3.terrainSig = terrSig; }
+}
+window.__b3dMap = { buildFloor, buildTerrain };
 function resize() {
     if (!B3.renderer || !B3.el) return;
     const w = Math.max(50, B3.el.clientWidth || 720), h = Math.max(50, B3.el.clientHeight || 600);
@@ -669,8 +785,9 @@ function rebuildOverlay(enc, visibleToks) {
 function syncScene() {
     const enc = window.globalBattleEncounterCache;
     if (!enc || !B3.renderer) return;
-    if (enc.id !== B3.lastEncId) { clearAll(); B3.lastEncId = enc.id; B3.selectedLocal = null; resetCamera(); }
+    if (enc.id !== B3.lastEncId) { clearAll(); B3.lastEncId = enc.id; B3.selectedLocal = null; syncMap(enc); resetCamera(); }
     resize();
+    syncMap(enc);
     const currentTurnId = (enc.initiative_rolled && (enc.turn_order || []).length) ? enc.turn_order[enc.current_turn_index] : null;
     const selId = selectedVesselId();
     const seen = new Set();

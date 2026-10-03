@@ -83,8 +83,32 @@ function genBattleTokenId() { return (window.crypto && window.crypto.randomUUID)
 // clipped viewport to a scrollable one since the fully-scaled grid
 // (920*1.5 x 760*1.5 = 1380x1140 CSS px) no longer fits most screens at
 // once -- see that element's comment for the reasoning.
-const BATTLE_GRID_W = 920;
-const BATTLE_GRID_H = 760;
+let BATTLE_GRID_W = 920;
+let BATTLE_GRID_H = 760;
+/* Phase 7 (2026-10-03, DM decision): a saved map picks one of 3 fixed sizes.
+   Weapon range bands (BATTLE_RANGE_TIERS) and tactical_speed stay the SAME
+   distances on every size -- a bigger map just means more room. The size
+   comes from the active battle's map snapshot (battle_encounters.map.size);
+   no map / unknown size = Standard, today's grid. */
+window.BATTLE_MAP_SIZES = { standard: [920, 760], large: [1380, 1140], huge: [1840, 1520] };
+window.battleGridSize = function () { return { w: BATTLE_GRID_W, h: BATTLE_GRID_H }; };
+window.applyBattleGridSize = function (sizeKey) {
+    const s = window.BATTLE_MAP_SIZES[sizeKey] || window.BATTLE_MAP_SIZES.standard;
+    if (s[0] === BATTLE_GRID_W && s[1] === BATTLE_GRID_H) return false;
+    BATTLE_GRID_W = s[0]; BATTLE_GRID_H = s[1];
+    const grid = document.getElementById('battle-map-grid');
+    if (grid) { grid.style.width = BATTLE_GRID_W + 'px'; grid.style.height = BATTLE_GRID_H + 'px'; }
+    // Overlays drawn by other modules size themselves on creation; resize them.
+    ['battle-arc-overlay', 'battle-tools-overlay', 'tv2-overlay', 'battle-terrain-layer'].forEach(id => {
+        const svg = document.getElementById(id);
+        if (!svg) return;
+        svg.setAttribute('width', String(BATTLE_GRID_W));
+        svg.setAttribute('height', String(BATTLE_GRID_H));
+        svg.setAttribute('viewBox', `0 0 ${BATTLE_GRID_W} ${BATTLE_GRID_H}`);
+    });
+    document.dispatchEvent(new CustomEvent('darkforest:grid-size', { detail: { w: BATTLE_GRID_W, h: BATTLE_GRID_H } }));
+    return true;
+};
 const BATTLE_TOKEN_SIZE = 34;
 // Polish pass (this session, DM-reported): strike craft tokens were
 // rendering at the exact same size as capital ships/stations (both used
@@ -357,6 +381,7 @@ async function loadBattleEncountersInner() {
         resetBattleTokenSnapshot(encounter.id, encounter.tokens);
     }
     window.globalBattleEncounterCache = encounter;
+    window.applyBattleGridSize(encounter && encounter.map && encounter.map.size);
     const isActive = !!window.globalBattleEncounterCache;
     if (window.AudioEngine) {
         if (isActive && !wasActive) window.AudioEngine.startBattleMusic();
@@ -526,7 +551,9 @@ window.startBattleEncounter = async function() {
         await db.from('battle_encounters').update({ is_active: false }).eq('id', window.globalBattleEncounterCache.id);
     }
 
-    const { error } = await db.from('battle_encounters').insert({ name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true });
+    // Phase 7: optional map from the library (js/battle-maps.js), stored as a snapshot.
+    const map = typeof window.pickedStartMap === 'function' ? window.pickedStartMap() : null;
+    const { error } = await db.from('battle_encounters').insert({ name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true, map });
     if (error) { alert('Failed to start battle: ' + error.message); return; }
     if (nameInput) nameInput.value = '';
     await db.from('chat_logs').insert({ sender_id: null, content: `⚔️ [TACTICAL BATTLE MAP] Engagement started: "${name}".`, message_type: 'system' });
