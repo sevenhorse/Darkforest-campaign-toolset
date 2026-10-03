@@ -1524,6 +1524,8 @@ window.resetShipStats = async function(vesselId) {
             // Directional armor (Phase 5): per-side max from the four side
             // inputs (undefined when the switch is off -> sides untouched).
             const sideMax = typeof window.readArmorSideInputs === 'function' ? window.readArmorSideInputs('maxstats') : undefined;
+            // Phase 6c: per-ship 3D model override (DM only; undefined = untouched).
+            if (typeof window.readModelPicker === 'function') Object.assign(newMax, window.readModelPicker('maxstats') || {});
             if (sideMax) {
                 const before = window.getArmorSides(vessel);
                 const cur = {};
@@ -1560,6 +1562,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
         document.getElementById('maxstats-galaxy-visible').checked = !vessel.hide_from_galaxy_map;
         window.setMediaPickerValue('maxstats', vessel.image_url || '');
+        if (typeof window.ensureModelPicker === 'function') window.ensureModelPicker('maxstats', vessel); // Phase 6c
         const dmWrap = document.getElementById('maxstats-dm-wrap');
         if (dmWrap) dmWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         overlay.style.display = 'flex';

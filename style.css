@@ -1410,3 +1410,12 @@ div[style*="grid-template-columns"] > div,
     .tv2-hud.b3d-mini-able:not(.tv2-open) .tv2-hero::after { content: '▴ DETAILS'; position: absolute; right: 10px; top: 8px; font-size: 9px; color: #7fa7b0; letter-spacing: 0.08em; }
     .tv2-hud.b3d-mini-able:not(.tv2-open):not(.b3d-mini) .tv2-hero::after { content: '▾ LESS'; }
 }
+
+/* --- Phase 6c: 3D model picker (template editors + EDIT BASE STATS, DM only) --- */
+.model-picker { margin-top: 8px; padding: 8px; border: 1px dashed #2f5560; border-radius: 4px; background: rgba(0, 225, 255, 0.04); font-size: 11px; }
+.model-picker-title { color: #7fdcef; letter-spacing: 0.06em; margin-bottom: 6px; }
+.model-picker-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.model-picker-k { color: #8fb1b8; min-width: 34px; font-size: 10px; letter-spacing: 0.08em; }
+.model-picker-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d6f6ff; }
+.model-picker select, .model-picker input[type=number] { width: auto; max-width: 90px; }
+.model-picker-help { color: #7fa7b0; font-size: 10px; line-height: 1.4; }
