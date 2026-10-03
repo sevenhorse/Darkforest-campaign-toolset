@@ -381,8 +381,19 @@ function buildHull(kind, color, ghost) {
    the grid -- the grid is tactical, not to scale. */
 const MODEL_LEN = { craft: 24, escort: 46, capital: 61, station: 44 }; // world units, after HULL_SCALE
 B3.models = B3.models || {};     // ref -> { scene, length, center } once loaded, or 'failed'
-function modelSpec(v) {
-    if (!v || typeof window.loadShipModel !== 'function') return null;
+// A launched squadron token has no model of its own; it uses its chassis's
+// (Strike Craft Designer), found through the carrier's deployed squadron.
+function modelSource(v) {
+    if (v.model_url || v.model_lite_url || !v.is_strike_craft) return v;
+    try {
+        const rec = typeof getSquadronRecordForToken === 'function' ? getSquadronRecordForToken(v) : null;
+        const ch = rec && typeof STRIKE_CRAFT_DB !== 'undefined' ? STRIKE_CRAFT_DB[rec.sq.type] : null;
+        return ch || v;
+    } catch (e) { return v; }
+}
+function modelSpec(vessel) {
+    if (!vessel || typeof window.loadShipModel !== 'function') return null;
+    const v = modelSource(vessel);
     const ref = lowQ() ? (v.model_lite_url || v.model_url) : (v.model_url || v.model_lite_url);
     if (!ref || !(window.isModelRef && window.isModelRef(ref))) return null;
     const yaw = [0, 90, 180, 270].includes(Number(v.model_yaw_offset)) ? Number(v.model_yaw_offset) : 0;

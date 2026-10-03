@@ -32,6 +32,14 @@
 window.globalStrikeCraftTemplatesList = [];
 let editingStrikeCraftId = null;
 
+// Phase 6c follow-up (2026-10-03): a chassis can carry a 3D model. Launched
+// squadron tokens are made at launch time and have no model of their own, so
+// the 3D view looks the model up from the chassis (js/battle-3d.js modelSpec)
+// -- already-launched squadrons pick it up too, and a changed chassis model
+// shows on every squadron of that type.
+function chassisModelFields(row) {
+    return { model_url: row.model_url || null, model_lite_url: row.model_lite_url || null, model_yaw_offset: row.model_yaw_offset || 0, model_scale: row.model_scale || 1 };
+}
 window.loadStrikeCraftTemplates = async function() {
     const { data, error } = await db.from('strike_craft_templates').select('*').order('created_at', { ascending: true });
     if (error) { console.error('loadStrikeCraftTemplates failed:', error.message); return; }
@@ -39,7 +47,7 @@ window.loadStrikeCraftTemplates = async function() {
     // Merge into the shared STRIKE_CRAFT_DB catalog (js/squadrons.js) --
     // additive only, never deletes a key wholesale, see header comment.
     (data || []).forEach(row => {
-        STRIKE_CRAFT_DB[row.key] = { label: row.label, base_hp: row.base_hp, weapons: row.weapons || [], _dbId: row.id };
+        STRIKE_CRAFT_DB[row.key] = { label: row.label, base_hp: row.base_hp, weapons: row.weapons || [], _dbId: row.id, ...chassisModelFields(row) };
     });
     if (typeof window.renderSquadronTypeOptions === 'function') window.renderSquadronTypeOptions();
     if (typeof window.renderStrikeCraftDesignerPanel === 'function') window.renderStrikeCraftDesignerPanel();
@@ -168,6 +176,7 @@ window.renderStrikeCraftEditorPanel = function() {
                 <div><label for="sc-edit-label" style="font-size:9px; color:#6b826a;">Chassis Name:</label><input type="text" id="sc-edit-label" value="${t.label || ''}" style="border-color:#00e1ff;"></div>
                 <div><label for="sc-edit-hp" style="font-size:9px; color:#6b826a;">Base HP (per unit):</label><input type="number" id="sc-edit-hp" value="${t.base_hp || 100}" min="1" style="border-color:#00e1ff; text-align:center;"></div>
             </div>
+            <div id="sc-media"></div>
             <p style="font-size:9px; color:#6b826a; margin:6px 0 0;">The key (<code>${t.key}</code>) is set once at creation and never changes, even if you rename this chassis -- it's what already-commissioned squadrons remember it by.</p>
             <button class="btn-reveal" onclick="window.saveStrikeCraftIdentity()" style="margin-top:10px; border-color:#00e1ff; color:#00e1ff;">SAVE CHANGES</button>
         </div>
@@ -205,6 +214,7 @@ window.renderStrikeCraftEditorPanel = function() {
             </div>
         </div>
     `;
+    if (typeof window.ensureModelPicker === 'function') window.ensureModelPicker('sc', t); // Phase 6c: chassis 3D model (DM only)
 };
 
 window.saveStrikeCraftIdentity = async function() {
@@ -214,11 +224,13 @@ window.saveStrikeCraftIdentity = async function() {
         label: document.getElementById('sc-edit-label').value.trim() || t.label,
         base_hp: Math.max(1, parseInt(document.getElementById('sc-edit-hp').value) || 100)
     };
+    if (typeof window.readModelPicker === 'function') Object.assign(payload, window.readModelPicker('sc') || {}); // Phase 6c
     const { error } = await db.from('strike_craft_templates').update(payload).eq('id', t.id);
     if (error) { alert("Failed to save chassis: " + error.message); return; }
     Object.assign(t, payload);
-    STRIKE_CRAFT_DB[t.key] = { label: t.label, base_hp: t.base_hp, weapons: t.weapons || [], _dbId: t.id };
+    STRIKE_CRAFT_DB[t.key] = { label: t.label, base_hp: t.base_hp, weapons: t.weapons || [], _dbId: t.id, ...chassisModelFields(t) };
     window.renderStrikeCraftEditorPanel();
+    if (typeof window.battle3dActive === 'function' && window.battle3dActive()) { try { window.renderBattleMapPanel(); } catch (e) {} }
     window.renderStrikeCraftDesignerPanel();
     window.renderSquadronTypeOptions();
     if (window.AudioEngine) window.AudioEngine.playPing();
