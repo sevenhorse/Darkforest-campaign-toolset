@@ -1739,7 +1739,10 @@ function parseCodexChartBlock(raw) {
     return { type, title, labels, values };
 }
 
-window.renderCodexMarkdown = function(rawContent) {
+window.renderCodexMarkdown = function(rawContent, idPrefix) {
+    // idPrefix (Phase 6d): the Codex reading pane uses its own canvas ids so
+    // they never clash with the fullscreen reader's when both are on the page.
+    const chartPrefix = idPrefix || 'codex-chart';
     const charts = [];
     let chartIdx = 0;
     // Extract ```chart fenced blocks BEFORE handing off to marked, so its
@@ -1749,7 +1752,7 @@ window.renderCodexMarkdown = function(rawContent) {
     // unrecognized lone line in its own <p>, which is found-and-replaced
     // with the real <canvas> markup afterward.
     const withoutCharts = (rawContent || '').replace(/```chart\s*\n([\s\S]*?)```/gi, (match, body) => {
-        const id = `codex-chart-${chartIdx++}`;
+        const id = `${chartPrefix}-${chartIdx++}`;
         charts.push({ id, ...parseCodexChartBlock(body) });
         return `\n\n%%${id}%%\n\n`;
     });
@@ -1789,6 +1792,29 @@ window.renderCodexMarkdown = function(rawContent) {
     return { html, charts };
 };
 
+// Draws the Chart.js charts renderCodexMarkdown found, after its html is in
+// the page. `store` collects the instances so the caller can destroy them.
+// (Moved out of openCodexFullscreen in Phase 6d so the reading pane can share it.)
+window.drawCodexCharts = function(charts, store) {
+    if (typeof Chart === 'undefined') return;
+    const palette = ['#00e5a3', '#00e1ff', '#ffaa00', '#ff6b6b', '#c778dd', '#7cbf3f', '#66d9ff', '#ffe066'];
+    (charts || []).forEach(c => {
+        const canvas = document.getElementById(c.id);
+        if (!canvas || c.labels.length === 0) return; // no valid Label: Number lines -- nothing to plot, leave the empty wrapper rather than crash Chart.js on empty data
+        try {
+            store.push(new Chart(canvas, {
+                type: c.type,
+                data: { labels: c.labels, datasets: [{ label: c.title || '', data: c.values, backgroundColor: palette, borderColor: '#3c4e36' }] },
+                options: {
+                    responsive: true,
+                    plugins: { title: { display: !!c.title, text: c.title, color: '#d4c5a9' }, legend: { labels: { color: '#d4c5a9' } } },
+                    scales: (c.type === 'bar' || c.type === 'line') ? { x: { ticks: { color: '#d4c5a9' }, grid: { color: '#3c4e36' } }, y: { ticks: { color: '#d4c5a9' }, grid: { color: '#3c4e36' } } } : {}
+                }
+            }));
+        } catch (err) { console.error('Codex chart render failed for', c.id, err); }
+    });
+};
+
 window.openCodexFullscreen = function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry) return;
     const modal = document.getElementById('codex-fullscreen-reader');
@@ -1815,29 +1841,12 @@ window.openCodexFullscreen = function(id) {
         : '';
     document.getElementById('reader-body-content').innerHTML = `${readerImage}<div class="codex-markdown">${rendered.html}</div>`;
 
-    if (typeof Chart !== 'undefined') {
-        const palette = ['#00e5a3', '#00e1ff', '#ffaa00', '#ff6b6b', '#c778dd', '#7cbf3f', '#66d9ff', '#ffe066'];
-        rendered.charts.forEach(c => {
-            const canvas = document.getElementById(c.id);
-            if (!canvas || c.labels.length === 0) return; // no valid Label: Number lines -- nothing to plot, leave the empty wrapper rather than crash Chart.js on empty data
-            try {
-                window.activeCodexCharts.push(new Chart(canvas, {
-                    type: c.type,
-                    data: { labels: c.labels, datasets: [{ label: c.title || '', data: c.values, backgroundColor: palette, borderColor: '#3c4e36' }] },
-                    options: {
-                        responsive: true,
-                        plugins: { title: { display: !!c.title, text: c.title, color: '#d4c5a9' }, legend: { labels: { color: '#d4c5a9' } } },
-                        scales: (c.type === 'bar' || c.type === 'line') ? { x: { ticks: { color: '#d4c5a9' }, grid: { color: '#3c4e36' } }, y: { ticks: { color: '#d4c5a9' }, grid: { color: '#3c4e36' } } } : {}
-                    }
-                }));
-            } catch (err) { console.error('Codex chart render failed for', c.id, err); }
-        });
-    }
+    window.drawCodexCharts(rendered.charts, window.activeCodexCharts);
 
     const actionBar = document.getElementById('reader-doc-action-bar');
     if (entry.doc_data && entry.doc_name) {
         actionBar.style.display = 'block';
-        actionBar.innerHTML = `<button class="btn-reveal" onclick="window.openCodexAttachment('${entry.id}')" style="width:auto; font-size:11px; padding:6px 16px;">📥 OPEN / DOWNLOAD ATTACHED DOCUMENT (${entry.doc_name})</button>`;
+        actionBar.innerHTML = `<button class="btn-reveal" onclick="window.openCodexAttachment('${entry.id}')" style="width:auto; font-size:11px; padding:6px 16px;">📥 OPEN / DOWNLOAD ATTACHED DOCUMENT (${window.escapeHtml(entry.doc_name)})</button>`;
     } else { actionBar.style.display = 'none'; }
     modal.style.display = 'block';
 };
