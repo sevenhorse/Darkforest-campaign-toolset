@@ -72,7 +72,7 @@ window.renderShipDesignerPanel = function() {
         // comment on saveNewShipTemplate (js/ship-designer.js) for what this
         // drives mechanically (Attack Capital Ships / Attack Escorts target
         // filtering). Purely a visibility badge here.
-        const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
+        const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : (typeof window.unclassifiedBadgeHtml === 'function' ? window.unclassifiedBadgeHtml(t) : '');
         const iffBadge = window.renderIffBadge(t.iff);
         const classLine = t.is_station
             ? `${t.class || 'Station'} &nbsp;·&nbsp; Stationary Platform`
@@ -640,7 +640,7 @@ window.renderSecretRepositoryPanel = function() {
         // comment on saveNewShipTemplate (js/ship-designer.js) for what this
         // drives mechanically (Attack Capital Ships / Attack Escorts target
         // filtering). Purely a visibility badge here.
-        const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
+        const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : (typeof window.unclassifiedBadgeHtml === 'function' ? window.unclassifiedBadgeHtml(t) : '');
         const iffBadge = window.renderIffBadge(t.iff);
         // DM-AI-for-NPCs build (this session): quick "is this one on?" badge
         // on the list card so the DM doesn't have to open every template
@@ -1001,7 +1001,7 @@ window.renderSecretRepoEditorPanel = function() {
     }
 
     const stationBadge = t.is_station ? '<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">🛰 STATION</span>' : '';
-    const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : '';
+    const classBadge = t.vessel_class ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 4px; margin-left:6px;">${t.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>` : (typeof window.unclassifiedBadgeHtml === 'function' ? window.unclassifiedBadgeHtml(t) : '');
     const iffBadge = window.renderIffBadge(t.iff);
     const weaponCount = t.ship_weapons.length;
     const hardpointTag = t.is_station ? `${weaponCount} hardpoints (no cap — station)` : `${weaponCount} / ${t.hardpoint_slots || 4} hardpoints used`;

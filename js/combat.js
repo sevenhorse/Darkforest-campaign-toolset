@@ -596,7 +596,7 @@ window.renderShipStanceHtml = function(vessel) {
     // Ships/Attack Escorts squadron AI target filtering).
     const classBadge = vessel.vessel_class
         ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 5px;" title="Vessel classification -- used by squadron AI Stances to tell Capital Ships apart from Escorts. Set via EDIT BASE STATS.">${vessel.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>`
-        : '';
+        : window.unclassifiedBadgeHtml(vessel);
     return `
         <div style="margin-top:10px; margin-bottom:10px; padding:6px; background:#0a1410; border:1px solid #00e5a3; border-radius:2px; display:flex; justify-content:space-between; align-items:center; gap:6px;">
             ${window.mediaThumbHtml(vessel.image_url, { size: 36, caption: vessel.name })}
@@ -1616,6 +1616,16 @@ window.resetShipStats = async function(vesselId) {
    system "does" mechanically -- the paper only named them, not their
    in-engine effects. */
 window.PERMANENT_DISABLE_ROUNDS = 9999;
+// Classification tagging pass (2026-10-03, DM): an armed ship or design with
+// no Capital/Escort tag gets an amber UNCLASSIFIED badge (DM only) so it
+// stands out -- squadron 'Attack Capital Ships'/'Attack Escorts' stances
+// never pick untagged ships. Strike craft and unarmed hulls (fleet markers
+// like 'Arbiters Fleet') are exempt.
+window.unclassifiedBadgeHtml = function(v) {
+    if (!v || v.vessel_class || v.is_strike_craft || currentUserRole !== 'dm') return '';
+    if (!(v.ship_weapons || []).length) return '';
+    return '<span style="font-size:8px; color:#ffaa00; border:1px dashed #ffaa00; border-radius:2px; padding:1px 5px; margin-left:6px;" title="No Capital/Escort tag: squadron stances that pick Capital Ships or Escorts will ignore this ship. Set it in EDIT BASE STATS or the design editor.">⚠ UNCLASSIFIED</span>';
+};
 async function applySystemLockdown(targetShip, wpn) {
     if (!wpn.system_lockdown || !targetShip) return '';
     const PERM = window.PERMANENT_DISABLE_ROUNDS;
