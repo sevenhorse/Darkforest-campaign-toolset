@@ -308,30 +308,17 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
             
             if (cargo.synth_capacity !== 10) { cargo.synth_capacity = 10; changed = true; }
             
-            if (cargo.perishables) {
-                let rationIdx = cargo.perishables.findIndex(i => (i.name || '').toLowerCase().includes('ration') || (i.name || '').toLowerCase().includes('food'));
-                // Bug fix (bug hunt, this session), two issues in the original:
-                // (1) rations were only ever deducted by a flat 1 per call, but
-                // processFleetGroupProduction/processSalvageConversion right
-                // below correctly consume `daysPassed` -- a multi-day jump
-                // (adjustTime 'months'/'years', applyManualTime, resetTimeline,
-                // all of which call processTimeAdvancement once per jump) was
-                // silently under-consuming rations for every day past the first.
-                // (2) the depleted-rations alert used to also fire for a vessel
-                // that never carried a ration item at all, just because it had
-                // OTHER perishables (e.g. medical supplies) aboard -- now gated
-                // strictly on a ration item actually existing (rationIdx >= 0).
-                if (rationIdx >= 0) {
-                    let item = cargo.perishables[rationIdx];
-                    if (item.qty > 0) {
-                        let consumed = Math.min(item.qty, daysPassed);
-                        item.qty -= consumed;
-                        changed = true; rationsLogged = true;
-                    }
-                    if (item.qty <= 0) {
-                        await db.from('chat_logs').insert({ sender_id: null, content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has depleted Standard Rations. Starvation protocols active.`, message_type: 'system' });
-                        if (window.AudioEngine) window.AudioEngine.playError();
-                    }
+            // Balance pass (2026-10-03, DM-approved): food is counted in
+            // crew-days -- every food item in perishables counts, scaled by
+            // the ship's crew (js/manufacturing.js window.consumeShipFood).
+            // Used to read only the FIRST ration/food item, so a ship with 0
+            // "Standard Rations" but tons of Nutrient Blocks starved daily.
+            if (cargo.perishables && typeof window.consumeShipFood === 'function') {
+                const fed = window.consumeShipFood(vessel, cargo, daysPassed);
+                if (fed.changed) { changed = true; rationsLogged = true; }
+                if (fed.hadFood && fed.shortCrewDays > 0) {
+                    await db.from('chat_logs').insert({ sender_id: null, content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has run out of food (${fed.shortCrewDays} crew-days short for a crew of ${window.vesselCrew(vessel)}). Starvation protocols active.`, message_type: 'system' });
+                    if (window.AudioEngine) window.AudioEngine.playError();
                 }
             }
             if (changed) { await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id); anyUpdated = true; }

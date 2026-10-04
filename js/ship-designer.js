@@ -245,6 +245,7 @@ window.deployShipTemplate = async function(id, opts) {
         max_armor_sides: t.max_armor_sides || null, armor_sides: t.max_armor_sides || null,
         integrity_hull: t.max_hull || 100, max_hull: t.max_hull || 100,
         tactical_speed: t.is_station ? 0 : (t.tactical_speed || 160),
+        crew: (t.crew === null || t.crew === undefined) ? null : t.crew, // balance pass 2026-10-03: food
         is_station: !!t.is_station,
         vessel_class: t.vessel_class || null,
         // IFF build (this session): carried from the template into the
@@ -329,6 +330,7 @@ window.deployShipTemplate = async function(id, opts) {
             </div>
             <div style="display:flex; gap:6px; align-items:flex-end;">
                 <div style="flex:1;"><label for="tmpl-edit-speed" style="font-size:9px; color:#6b826a;" title="Battle Map movement allowance, grid px/round">Tactical Speed</label><input type="number" id="tmpl-edit-speed" min="0" style="border-color:#00e1ff; text-align:center;"></div>
+                <div style="flex:1;"><label for="tmpl-edit-crew" style="font-size:9px; color:#6b826a;" title="Crew complement -- deployed ships eat this many crew-days of food a day. Blank = the default crew.">Crew</label><input type="number" id="tmpl-edit-crew" min="0" placeholder="default" style="border-color:#00e1ff; text-align:center;"></div>
                 <div style="flex:1;"><label for="tmpl-edit-station" style="font-size:10px; color:#c9962f; display:flex; align-items:center; gap:4px; cursor:pointer; margin-bottom:8px;"><input type="checkbox" id="tmpl-edit-station" onchange="window.toggleStationFields('tmpl-edit')" style="margin:0;"> 🛰 This is a Station</label></div>
             </div>
             <div>
@@ -375,6 +377,7 @@ window.deployShipTemplate = async function(id, opts) {
                 max_hull: parseInt(document.getElementById('tmpl-edit-hull').value) || 0,
                 hardpoint_slots: parseInt(document.getElementById('tmpl-edit-slots').value) || 4,
                 tactical_speed: isStation ? 0 : (parseInt(document.getElementById('tmpl-edit-speed').value) || 160),
+                crew: (v => v === '' ? null : Math.max(0, parseInt(v, 10) || 0))(document.getElementById('tmpl-edit-crew').value.trim()),
                 is_station: isStation,
                 vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null,
                 iff: document.getElementById('tmpl-edit-iff').value || null,
@@ -409,6 +412,7 @@ window.deployShipTemplate = async function(id, opts) {
         document.getElementById('tmpl-edit-hull').value = t.max_hull || 0;
         document.getElementById('tmpl-edit-slots').value = t.hardpoint_slots || 4;
         document.getElementById('tmpl-edit-speed').value = t.tactical_speed || 160;
+        document.getElementById('tmpl-edit-crew').value = (t.crew === null || t.crew === undefined) ? '' : t.crew;
         document.getElementById('tmpl-edit-vesselclass').value = t.vessel_class || '';
         document.getElementById('tmpl-edit-iff').value = t.iff || '';
         const iffWrap = document.getElementById('tmpl-edit-iff-wrap');
@@ -1069,6 +1073,7 @@ window.renderSecretRepoEditorPanel = function() {
                 </select></div>
                 <div style="display:flex; gap:10px; align-items:flex-end;">
                     <div style="flex:1;"><label for="repo-edit-speed" style="font-size:9px; color:#ffaaaa;">Tactical Speed:</label><input type="number" id="repo-edit-speed" value="${t.tactical_speed || 160}" min="0" style="border-color:#ff3333; text-align:center;"></div>
+                    <div style="flex:1;"><label for="repo-edit-crew" style="font-size:9px; color:#ffaaaa;" title="Crew complement (food). Blank = default.">Crew:</label><input type="number" id="repo-edit-crew" value="${t.crew === null || t.crew === undefined ? '' : t.crew}" min="0" placeholder="default" style="border-color:#ff3333; text-align:center;"></div>
                     <div style="flex:1;"><label for="repo-edit-slots" style="font-size:9px; color:#ffaaaa;">Hardpoint Slots:</label><input type="number" id="repo-edit-slots" value="${t.hardpoint_slots || 4}" min="0" style="border-color:#ff3333; text-align:center;"></div>
                 </div>
             </div>
@@ -1226,6 +1231,7 @@ window.saveSecretRepoIdentityStats = async function() {
         max_hull: parseInt(document.getElementById('repo-edit-hull').value) || 0,
         hardpoint_slots: parseInt(document.getElementById('repo-edit-slots').value) || 4,
         tactical_speed: isStation ? 0 : (parseInt(document.getElementById('repo-edit-speed').value) || 160),
+        crew: (el => !el ? undefined : (el.value.trim() === '' ? null : Math.max(0, parseInt(el.value, 10) || 0)))(document.getElementById('repo-edit-crew')),
         is_station: isStation,
         vessel_class: document.getElementById('repo-edit-vesselclass').value || null,
         iff: document.getElementById('repo-edit-iff').value || null,

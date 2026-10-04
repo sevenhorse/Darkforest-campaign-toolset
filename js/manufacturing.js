@@ -84,8 +84,106 @@
    exactly -- a build's duration can be sub-day).
    ========================================================================== */
 
+/* PRODUCTION LINES (balance pass, 2026-10-03, DM-approved): each
+   Manufacturing-type deck on a vessel is ONE production line; a colony with
+   a Manufacturing Facility has 1 line (2 at Infrastructure 3+), a colony
+   without one also has 1 (its builds were always time-only). An order that
+   finds every line busy is saved as status 'queued' (resources are taken
+   when it's queued, so a cancel refunds them as before) with its duration
+   already worked out; processManufacturingOrders starts the oldest queued
+   order the moment a line frees, back-to-back (started_at = the finishing
+   order's end time), so a long time jump runs a whole queue through.
+   Orders already running when this shipped keep running even if they
+   exceed the new line count. */
+/* FOOD (balance pass, 2026-10-03, DM-approved): food is counted in
+   crew-days (one person fed for one day). Each ship eats crew x days a
+   day -- crew is ship_markers.crew, blank = the default crew in
+   app_settings 'logistics_config' (100). Any food item in PERISHABLES
+   counts, eaten in this order: legacy "Standard Rations" style items whose
+   unit is "Days" (each one feeds the whole ship for a day, as before),
+   then rations, then bulk food, then treats. A cargo item can also carry
+   its own food_crew_days per unit. Water isn't eaten. */
+const FOOD_CREW_DAYS = { 'food ration': 1, 'food rations': 1, 'dehydrated nutrient blocks': 1000, 'mars bars': 0.1, 'payday candy bars': 0.1, 'butterfinger candy bars': 0.1 };
+window.FOOD_CREW_DAYS = FOOD_CREW_DAYS;
+window.defaultCrew = function () {
+    try { const row = window.appSettingsCache && window.appSettingsCache.logistics_config; const v = row && row.value ? JSON.parse(row.value) : {}; const n = parseInt(v.default_crew, 10); return n > 0 ? n : 100; } catch (e) { return 100; }
+};
+window.vesselCrew = function (v) { const n = v && v.crew != null ? parseInt(v.crew, 10) : NaN; return n >= 0 ? n : window.defaultCrew(); };
+// Crew-days one unit of this cargo item feeds; 'ship' for whole-ship-day items; 0 = not food.
+window.foodValueOf = function (item) {
+    if (!item) return 0;
+    if (item.food_crew_days > 0) return Number(item.food_crew_days);
+    const n = String(item.name || '').toLowerCase();
+    if (/^days?$/i.test(String(item.unit || '').trim()) && /ration|food/.test(n)) return 'ship';
+    if (FOOD_CREW_DAYS[n]) return FOOD_CREW_DAYS[n];
+    return 0;
+};
+// Eats `days` days of food from cargo.perishables (mutates cargo).
+// Returns { hadFood, changed, shortCrewDays, eaten: [{name, qty}] }.
+window.consumeShipFood = function (vessel, cargo, days) {
+    const crew = window.vesselCrew(vessel);
+    const list = (cargo && cargo.perishables) || [];
+    const foods = list.map(i => ({ i, v: window.foodValueOf(i) })).filter(f => f.v);
+    const out = { hadFood: foods.length > 0, changed: false, shortCrewDays: 0, eaten: [] };
+    if (!foods.length || crew <= 0 || days <= 0) return out;
+    const rank = (f) => f.v === 'ship' ? 0 : f.v <= 0.5 ? 3 : f.v >= 100 ? 2 : 1;
+    foods.sort((a, b) => rank(a) - rank(b));
+    let need = crew * days;
+    for (const f of foods) {
+        if (need <= 1e-6) break;
+        const qty = Number(f.i.qty) || 0;
+        if (qty <= 0) continue;
+        const per = f.v === 'ship' ? crew : f.v;
+        const take = Math.min(qty, need / per);
+        if (take <= 0) continue;
+        f.i.qty = Math.round((qty - take) * 10000) / 10000;
+        need -= take * per;
+        out.changed = true;
+        out.eaten.push({ name: f.i.name, qty: Math.round(take * 100) / 100 });
+    }
+    out.shortCrewDays = Math.max(0, Math.round(need));
+    return out;
+};
 let manufacturingBlueprintsList = [];
 window.globalManufacturingOrdersCache = [];
+// Production lines for an order's source (vessel or colony).
+window.manufacturingLinesFor = function (sourceType, id) {
+    if (sourceType === 'colony') {
+        const c = (typeof coloniesList !== 'undefined' ? coloniesList : []).find(x => x.id === id);
+        return c && c.has_manufacturing_facility && (c.infrastructure_level || 1) >= 3 ? 2 : 1;
+    }
+    const v = (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).find(m => m.id === id);
+    const n = v ? (v.ship_decks || []).filter(d => d.type === 'manufacturing').length : 0;
+    return Math.max(1, n);
+};
+const orderSourceKey = (o) => o.source_type === 'colony' ? 'colony:' + o.source_colony_id : 'vessel:' + o.vessel_id;
+function sourceOrders(sourceType, id, list) {
+    return (list || window.globalManufacturingOrdersCache || []).filter(o => o.source_type === sourceType && (sourceType === 'colony' ? o.source_colony_id === id : o.vessel_id === id));
+}
+// Busy lines / total lines / queued count for one source, from the local cache.
+window.manufacturingLineUsage = function (sourceType, id) {
+    const mine = sourceOrders(sourceType, id);
+    return { busy: mine.filter(o => o.status !== 'queued').length, lines: window.manufacturingLinesFor(sourceType, id), queued: mine.filter(o => o.status === 'queued').length };
+};
+// One line of status text for an order card.
+window.manufacturingOrderStatus = function (o) {
+    if (o.status === 'queued') {
+        const q = sourceOrders(o.source_type, o.source_type === 'colony' ? o.source_colony_id : o.vessel_id).filter(x => x.status === 'queued');
+        const pos = q.findIndex(x => x.id === o.id) + 1;
+        return `🕒 Queued #${pos || '?'} — takes ${(o.duration_hours || 0).toFixed(1)}h once a line frees up`;
+    }
+    const remaining = Math.max(0, (o.started_at_hours || 0) + (o.duration_hours || 0) - (window.universeTimeHours || 0));
+    return `⏳ Building — ready in ~${remaining.toFixed(1)}h`;
+};
+// Should a new order for this source queue? (true when every line is busy)
+async function sourceIsFull(sourceType, id) {
+    const col = sourceType === 'colony' ? 'source_colony_id' : 'vessel_id';
+    const { data } = await db.from('manufacturing_orders').select('id,status,source_type,vessel_id,source_colony_id').eq(col, id).eq('source_type', sourceType);
+    const rows = (data || []).filter(o => o.status === 'in_progress' || o.status === 'queued');
+    const busy = rows.filter(o => o.status === 'in_progress').length;
+    return busy >= window.manufacturingLinesFor(sourceType, id) || rows.some(o => o.status === 'queued');
+}
+window.__mfgSourceIsFull = sourceIsFull;
 
 /* Manufacturing Tabs + Search (added 2026-09-14, per the DM's own request
    -- "add tabs to the manufacturing screen where different blueprints are
@@ -125,7 +223,7 @@ async function loadManufacturingBlueprints() {
 }
 
 async function loadManufacturingOrders() {
-    const { data } = await db.from('manufacturing_orders').select('*').eq('status', 'in_progress').order('created_at', { ascending: true });
+    const { data } = await db.from('manufacturing_orders').select('*').in('status', ['in_progress', 'queued']).order('created_at', { ascending: true });
     if (data) {
         window.globalManufacturingOrdersCache = data;
         if (typeof window.renderManufacturingPanel === 'function') window.renderManufacturingPanel();
@@ -459,7 +557,7 @@ window.renderManufacturingPanel = function() {
                     <div>
                         <strong style="color:#c9962f; font-size:11px;">${o.blueprint_name || 'Unknown Blueprint'}</strong>
                         <p style="margin:2px 0 0 0; font-size:9px; color:#6b826a;">${sourceLabel}${o.discount_pct ? ` &nbsp;·&nbsp; ${o.discount_pct}% discount applied` : ''}</p>
-                        <p style="margin:2px 0 0 0; font-size:9px; color:#d4c5a9;">Ready in ~${remaining.toFixed(1)}h</p>
+                        <p style="margin:2px 0 0 0; font-size:9px; color:${o.status === 'queued' ? '#8fa7b0' : '#d4c5a9'};">${window.manufacturingOrderStatus(o)}</p>
                     </div>
                     ${canCancel ? `<button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:3px 7px; font-size:9px;" title="Cancel this build and refund any deducted resources">✕ CANCEL</button>` : ''}
                 </div>
@@ -505,8 +603,9 @@ window.renderColonyManufacturingBox = function(colony) {
         // can also cancel from here -- window.cancelManufacturingOrder now
         // refunds a colony order's snapshot back into colony storage when
         // one exists, same as a vessel order refunds into vessel cargo.
-        progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build">✕</button></div>`;
+        progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">"${o.blueprint_name}" — ${window.manufacturingOrderStatus(o).replace(/^\S+ /, '')}</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build">✕</button></div>`;
     });
+    if (inProgress.length) { const u = window.manufacturingLineUsage('colony', colony.id); progressHtml = `<p style="margin:2px 0 0 0; font-size:8px; color:#8fa7b0;">Production lines: ${u.busy}/${u.lines} busy${u.queued ? ` · ${u.queued} queued` : ''}</p>` + progressHtml; }
     const facilityNote = colony.has_manufacturing_facility
         ? '🏭 Manufacturing Facility installed — draws materials from colony storage when available, falls back to time-only otherwise:'
         : '🏭 Manufacturing (time cost only — no Facility installed, see colony edit to add one):';
@@ -996,17 +1095,20 @@ window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
 
     const durationHours = Math.max(0.1, (bp.time_cost_hours * (1 - discountPct / 100)) / deckScale);
+    const queued = await sourceIsFull('vessel', vesselId);
     const { error } = await db.from('manufacturing_orders').insert({
         blueprint_id: bp.id, blueprint_name: bp.name, output_type: bp.output_type, output_payload: bp.output_payload,
         source_type: 'vessel', vessel_id: vesselId, character_id: myProf.character.id, initiated_by: currentUserId,
-        started_at_hours: window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct,
-        resource_cost_snapshot: deductedSnapshot
+        started_at_hours: queued ? null : window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct,
+        resource_cost_snapshot: deductedSnapshot, status: queued ? 'queued' : 'in_progress'
     });
     if (error) { alert('Failed to start build: ' + error.message); return; }
 
     await db.from('chat_logs').insert({
         sender_id: null, message_type: 'system',
-        content: `🏭 [MANUFACTURING] ${vessel.name} began building "${bp.name}"${discountPct ? ` (${discountPct}% discount applied)` : ''}${deckScale < 1 ? ` (Manufacturing deck at ${Math.round(deckScale * 100)}% — build slowed)` : ''} — ready in ${durationHours.toFixed(1)}h.`
+        content: queued
+            ? `🏭 [MANUFACTURING] ${vessel.name} queued "${bp.name}" — every production line is busy; it starts automatically when one frees up (${durationHours.toFixed(1)}h build).`
+            : `🏭 [MANUFACTURING] ${vessel.name} began building "${bp.name}"${discountPct ? ` (${discountPct}% discount applied)` : ''}${deckScale < 1 ? ` (Manufacturing deck at ${Math.round(deckScale * 100)}% — build slowed)` : ''} — ready in ${durationHours.toFixed(1)}h.`
     });
     loadManufacturingOrders();
 };
@@ -1116,11 +1218,12 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
         // deductedSnapshot stays null, nothing is deducted.
     }
 
+    const queued = await sourceIsFull('colony', colonyId);
     const { error } = await db.from('manufacturing_orders').insert({
         blueprint_id: bp.id, blueprint_name: bp.name, output_type: bp.output_type, output_payload: bp.output_payload,
         source_type: 'colony', vessel_id: vesselId, source_colony_id: colonyId, character_id: myProf.character.id, initiated_by: currentUserId,
-        started_at_hours: window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct,
-        resource_cost_snapshot: deductedSnapshot
+        started_at_hours: queued ? null : window.universeTimeHours, duration_hours: durationHours, discount_pct: discountPct,
+        resource_cost_snapshot: deductedSnapshot, status: queued ? 'queued' : 'in_progress'
     });
     if (error) { alert('Failed to start build: ' + error.message); return; }
 
@@ -1132,7 +1235,9 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
     const destinationNote = isInfrastructure ? '' : ` for delivery to ${vessel.name}`;
     await db.from('chat_logs').insert({
         sender_id: null, message_type: 'system',
-        content: `🏭 [MANUFACTURING] ${colony.name} began building "${bp.name}"${destinationNote}${discountPct ? ` (${discountPct}% discount applied)` : ''} — ready in ${durationHours.toFixed(1)}h.${materialsNote}`
+        content: queued
+            ? `🏭 [MANUFACTURING] ${colony.name} queued "${bp.name}"${destinationNote} — its production line is busy; it starts automatically when it frees up (${durationHours.toFixed(1)}h build).${materialsNote}`
+            : `🏭 [MANUFACTURING] ${colony.name} began building "${bp.name}"${destinationNote}${discountPct ? ` (${discountPct}% discount applied)` : ''} — ready in ${durationHours.toFixed(1)}h.${materialsNote}`
     });
     loadManufacturingOrders();
 };
@@ -1493,86 +1598,108 @@ window.cancelManufacturingOrder = async function(orderId) {
    cache freshness.
    ========================================================================== */
 
+// Claims (deletes) one finished order and delivers it. Returns true when
+// the order is done (delivered or fizzled), false when someone else had
+// already claimed it. A failed delivery puts the row back for next tick.
+async function completeManufacturingOrder(order) {
+    const { data: claimed, error: claimErr } = await db.from('manufacturing_orders').delete().eq('id', order.id).select();
+    if (claimErr || !claimed || claimed.length === 0) return false; // already completed/cancelled elsewhere
+    try {
+        if (order.output_type === 'arsenal_weapon') {
+            const { data: charRow } = await db.from('characters').select('id, profile_id, name').eq('id', order.character_id).maybeSingle();
+            if (!charRow) return true; // crafting character no longer exists -- fizzle (order was already removed by the claim above)
+            const p = order.output_payload || {};
+            const { error: arsenalErr } = await db.from('character_arsenal').insert({
+                profile_id: charRow.profile_id, character_id: charRow.id,
+                name: p.name, dice: p.dice || '1d6', modifier: p.modifier || '+0',
+                explodes: p.explodes !== false, damage_type: p.damage_type || null,
+                ammo: p.ammo, max_ammo: p.max_ammo
+            });
+            if (arsenalErr) throw new Error('arsenal delivery failed: ' + arsenalErr.message);
+            await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.name} added to ${charRow.name || 'the crafting character'}'s Arsenal.` });
+        } else if (order.output_type === 'colony_infrastructure') {
+            // Infrastructure (2026-09-14): "delivers" to the colony that
+            // built it, not a vessel -- vessel_id is null on these
+            // orders (see window.startColonyManufacturingOrder). Never
+            // lowers the level -- if the colony already reached a higher
+            // level some other way by the time this completes, this is
+            // a no-op on the level itself (still consumes the order).
+            const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
+            if (!colony) return true; // colony no longer exists -- fizzle (order was already removed by the claim above)
+            const p = order.output_payload || {};
+            const targetLevel = Math.max(1, parseInt(p.infrastructure_level) || 1);
+            const newLevel = Math.max(colony.infrastructure_level || 1, targetLevel);
+            const { error: infraErr } = await db.from('colonies').update({ infrastructure_level: newLevel }).eq('id', colony.id);
+            if (infraErr) throw new Error('infrastructure delivery failed: ' + infraErr.message);
+            colony.infrastructure_level = newLevel;
+            await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${colony.name}'s Infrastructure reached Level ${newLevel}.` });
+            if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
+        } else {
+            const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
+            if (!vessel) return true; // target vessel no longer exists -- fizzle (order was already removed by the claim above)
+            const p = order.output_payload || {};
+            let cargo = window.sanitizeCargo(vessel.cargo_inventory);
+            // Deliver into whichever bucket the blueprint's output picked
+            // (see the CARGO CATEGORY header comment) -- an older order
+            // snapshotted before this field existed has no cargo_bucket
+            // at all, so falls back to expendables, its historical
+            // behavior.
+            const bucket = MANUFACTURING_CARGO_BUCKETS.includes(p.cargo_bucket) ? p.cargo_bucket : 'expendables';
+            let existing = (cargo[bucket] || []).find(i => (i.name || '').toLowerCase() === (p.name || '').toLowerCase());
+            if (existing) existing.qty += (p.qty || 0);
+            else cargo[bucket].push({ name: p.name, qty: p.qty || 0, unit: p.unit || 'Units' });
+            const { error: cargoErr } = await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
+            if (cargoErr) throw new Error('cargo delivery failed: ' + cargoErr.message);
+            vessel.cargo_inventory = cargo;
+            const bucketLabel = bucket === 'perishables' ? 'perishables' : (bucket === 'misc' ? 'misc cargo' : 'expendables');
+            await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.qty || 0}x ${p.name} delivered to ${vessel.name}'s ${bucketLabel} hold.` });
+        }
+        return true;
+    } catch (err) {
+        console.error(`processManufacturingOrders: failed for order ${order.id} ("${order.blueprint_name}")`, err);
+        const { error: restoreErr } = await db.from('manufacturing_orders').insert(order);
+        if (restoreErr) console.error('processManufacturingOrders: could not restore the order row after a failed delivery', restoreErr, order);
+        return false;
+    }
+}
+// Starts a queued order on a free line at `atHours` (only if it's still queued).
+async function startQueuedOrder(order, atHours) {
+    const { data, error } = await db.from('manufacturing_orders').update({ status: 'in_progress', started_at_hours: atHours }).eq('id', order.id).eq('status', 'queued').select();
+    if (error || !data || !data.length) return false;
+    Object.assign(order, { status: 'in_progress', started_at_hours: atHours });
+    try { await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `🏭 [MANUFACTURING] A production line freed up — "${order.blueprint_name}" started (${(order.duration_hours || 0).toFixed(1)}h).` }); } catch (e) {}
+    return true;
+}
+// Runs every source's lines forward to `newHours`: finishes due orders in
+// end-time order and starts the next queued order on each freed line from
+// the moment it freed, so one long time jump can run a whole queue.
 window.processManufacturingOrders = async function(newHours) {
-    const { data, error } = await db.from('manufacturing_orders').select('*').eq('status', 'in_progress');
+    const { data, error } = await db.from('manufacturing_orders').select('*').in('status', ['in_progress', 'queued']).order('created_at', { ascending: true });
     if (error || !data || data.length === 0) return;
+    const groups = new Map();
+    data.forEach(o => { const k = orderSourceKey(o); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(o); });
     let any = false;
-    for (const order of data) {
-        try {
-            if (order.started_at_hours === null || order.duration_hours === null) continue;
-            if (newHours < order.started_at_hours + order.duration_hours) continue;
-
-            // Bug-hunt pass (2026-09-24): claim the order FIRST (delete it and
-            // confirm we were the one who removed it), then deliver. Two
-            // overlapping time ticks -- or two clients -- used to both see
-            // the same finished order and BOTH deliver it before either
-            // deleted it. If delivery then throws, the order row is put back
-            // (catch block below) so it's retried next tick rather than lost.
-            const { data: claimed, error: claimErr } = await db.from('manufacturing_orders').delete().eq('id', order.id).select();
-            if (claimErr || !claimed || claimed.length === 0) continue; // already completed/cancelled elsewhere
-            order._claimed = true;
-
-            if (order.output_type === 'arsenal_weapon') {
-                const { data: charRow } = await db.from('characters').select('id, profile_id, name').eq('id', order.character_id).maybeSingle();
-                if (!charRow) continue; // crafting character no longer exists -- fizzle (order was already removed by the claim above)
-                const p = order.output_payload || {};
-                const { error: arsenalErr } = await db.from('character_arsenal').insert({
-                    profile_id: charRow.profile_id, character_id: charRow.id,
-                    name: p.name, dice: p.dice || '1d6', modifier: p.modifier || '+0',
-                    explodes: p.explodes !== false, damage_type: p.damage_type || null,
-                    ammo: p.ammo, max_ammo: p.max_ammo
-                });
-                if (arsenalErr) throw new Error('arsenal delivery failed: ' + arsenalErr.message);
-                await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.name} added to ${charRow.name || 'the crafting character'}'s Arsenal.` });
-            } else if (order.output_type === 'colony_infrastructure') {
-                // Infrastructure (2026-09-14): "delivers" to the colony that
-                // built it, not a vessel -- vessel_id is null on these
-                // orders (see window.startColonyManufacturingOrder). Never
-                // lowers the level -- if the colony already reached a higher
-                // level some other way by the time this completes, this is
-                // a no-op on the level itself (still consumes the order).
-                const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
-                if (!colony) continue; // colony no longer exists -- fizzle (order was already removed by the claim above)
-                const p = order.output_payload || {};
-                const targetLevel = Math.max(1, parseInt(p.infrastructure_level) || 1);
-                const newLevel = Math.max(colony.infrastructure_level || 1, targetLevel);
-                const { error: infraErr } = await db.from('colonies').update({ infrastructure_level: newLevel }).eq('id', colony.id);
-                if (infraErr) throw new Error('infrastructure delivery failed: ' + infraErr.message);
-                colony.infrastructure_level = newLevel;
-                await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${colony.name}'s Infrastructure reached Level ${newLevel}.` });
-                if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
-            } else {
-                const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
-                if (!vessel) continue; // target vessel no longer exists -- fizzle (order was already removed by the claim above)
-                const p = order.output_payload || {};
-                let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-                // Deliver into whichever bucket the blueprint's output picked
-                // (see the CARGO CATEGORY header comment) -- an older order
-                // snapshotted before this field existed has no cargo_bucket
-                // at all, so falls back to expendables, its historical
-                // behavior.
-                const bucket = MANUFACTURING_CARGO_BUCKETS.includes(p.cargo_bucket) ? p.cargo_bucket : 'expendables';
-                let existing = (cargo[bucket] || []).find(i => (i.name || '').toLowerCase() === (p.name || '').toLowerCase());
-                if (existing) existing.qty += (p.qty || 0);
-                else cargo[bucket].push({ name: p.name, qty: p.qty || 0, unit: p.unit || 'Units' });
-                const { error: cargoErr } = await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
-                if (cargoErr) throw new Error('cargo delivery failed: ' + cargoErr.message);
-                vessel.cargo_inventory = cargo;
-                const bucketLabel = bucket === 'perishables' ? 'perishables' : (bucket === 'misc' ? 'misc cargo' : 'expendables');
-                await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.qty || 0}x ${p.name} delivered to ${vessel.name}'s ${bucketLabel} hold.` });
-            }
-
-            // Completed orders are deleted, not kept -- same convention as
-            // battlefield_salvage (the chat log above is the audit trail,
-            // avoiding unbounded table growth). The delete itself now happens
-            // up front as the "claim" (see top of this loop).
-            any = true;
-        } catch (err) {
-            console.error(`processManufacturingOrders: failed for order ${order.id} ("${order.blueprint_name}")`, err);
-            if (order._claimed) {
-                const { _claimed, ...originalRow } = order;
-                const { error: restoreErr } = await db.from('manufacturing_orders').insert(originalRow);
-                if (restoreErr) console.error('processManufacturingOrders: could not restore the order row after a failed delivery', restoreErr, originalRow);
+    for (const list of groups.values()) {
+        const first = list[0];
+        const lines = window.manufacturingLinesFor(first.source_type, first.source_type === 'colony' ? first.source_colony_id : first.vessel_id);
+        const active = list.filter(o => o.status === 'in_progress' && o.started_at_hours !== null && o.duration_hours !== null);
+        const queue = list.filter(o => o.status === 'queued');
+        // A line already free (an order was cancelled, a deck was added): start now.
+        while (queue.length && active.length < lines) {
+            const q = queue.shift();
+            if (await startQueuedOrder(q, newHours)) { active.push(q); any = true; }
+        }
+        for (let guard = 0; guard < 500; guard++) {
+            active.sort((a, b) => (a.started_at_hours + a.duration_hours) - (b.started_at_hours + b.duration_hours));
+            const next = active[0];
+            if (!next) break;
+            const end = next.started_at_hours + next.duration_hours;
+            if (newHours < end) break;
+            active.shift();
+            if (await completeManufacturingOrder(next)) any = true;
+            if (queue.length && active.length < lines) {
+                const q = queue.shift();
+                if (await startQueuedOrder(q, end)) active.push(q);
             }
         }
     }
@@ -1581,6 +1708,17 @@ window.processManufacturingOrders = async function(newHours) {
         if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
     }
 };
+
+// A cancel frees a line (or a queue slot): start whatever is waiting right away.
+(function () {
+    const orig = window.cancelManufacturingOrder;
+    if (typeof orig !== 'function') return;
+    window.cancelManufacturingOrder = async function () {
+        const r = await orig.apply(this, arguments);
+        try { await window.processManufacturingOrders(window.universeTimeHours || 0); } catch (e) { console.error('manufacturing: queue refresh after cancel failed', e); }
+        return r;
+    };
+})();
 
 /* Manufacturing moved from a floating draggable panel to its own Command
    Terminal tab (term-panel-manufacturing) this session -- no more

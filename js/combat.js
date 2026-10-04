@@ -237,6 +237,14 @@ window.renderTerminalCargoDeck = function() {
     `;
 
     let html = synthHtml;
+    // Balance pass (2026-10-03): food supply in crew-days for this ship's crew.
+    if (typeof window.foodValueOf === 'function') {
+        const crew = window.vesselCrew(vessel);
+        let crewDays = 0, shipDays = 0;
+        (cargo.perishables || []).forEach(i => { const v = window.foodValueOf(i); if (v === 'ship') shipDays += Number(i.qty) || 0; else if (v) crewDays += (Number(i.qty) || 0) * v; });
+        const days = crew > 0 ? shipDays + crewDays / crew : Infinity;
+        html += `<div style="font-size:10px; color:${days < 7 ? '#ff6b6b' : '#8fa7b0'}; margin:0 0 8px 0;" title="Food is counted in crew-days. Crew is set in EDIT BASE STATS (blank = ${window.defaultCrew()}).">🍽 Food: ${isFinite(days) ? `${days >= 1000 ? Math.round(days).toLocaleString() : days.toFixed(1)} days` : '—'} for a crew of ${crew}${vessel.crew == null ? ' (default)' : ''}</div>`;
+    }
     
     if (currentCategoryItems.length === 0) {
         html += `<span style="font-size:11px; color:#6b826a;">No cargo items recorded in this section. Use the form on the right to store items.</span>`;
@@ -993,8 +1001,10 @@ window.renderVesselDeck = function() {
                         // window.cancelManufacturingOrder used by the Manufacturing
                         // tab's own dashboard list, just a closer, contextual copy
                         // of the same button.
-                        progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">⏳ Building "${o.blueprint_name}" — ready in ~${remaining.toFixed(1)}h</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build and refund any deducted resources">✕</button></div>`;
+                        progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">"${o.blueprint_name}" — ${typeof window.manufacturingOrderStatus === 'function' ? window.manufacturingOrderStatus(o).replace(/^\S+ /, '') : `ready in ~${remaining.toFixed(1)}h`}</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build and refund any deducted resources">✕</button></div>`;
                     });
+                    // Production lines (balance pass 2026-10-03): one per Manufacturing deck.
+                    if (typeof window.manufacturingLineUsage === 'function') { const u = window.manufacturingLineUsage('vessel', vessel.id); progressHtml = `<p style="margin:2px 0 0 0; font-size:8px; color:#8fa7b0;">Production lines: ${u.busy}/${u.lines} busy${u.queued ? ` · ${u.queued} queued` : ''} (one per Manufacturing deck)</p>` + progressHtml; }
                     // Deck-damage time note -- same display convention as Fleet
                     // Group Production's "Effective: Nx/day (Manufacturing deck
                     // Y%)" line in js/colonies.js, but for TIME instead of an
@@ -1457,6 +1467,7 @@ window.resetShipStats = async function(vesselId) {
                 <div style="flex:1;"><label for="maxstats-ablative" style="font-size:9px; color:#6b826a;">Ablative</label><input type="number" id="maxstats-ablative" min="0" style="border-color:#c9962f; text-align:center;"></div>
                 <div style="flex:1;"><label for="maxstats-hardened" style="font-size:9px; color:#6b826a;">Hardened</label><input type="number" id="maxstats-hardened" min="0" style="border-color:#c9962f; text-align:center;"></div>
             </div>
+            <div><label for="maxstats-crew" style="font-size:9px; color:#c9962f;" title="People aboard -- they eat this many crew-days of food a day. Blank = the default crew.">Crew aboard (blank = default)</label><input type="number" id="maxstats-crew" min="0" style="border-color:#c9962f; text-align:center;"></div>
             <div>
                 <label for="maxstats-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic.">Vessel Classification</label>
                 <select id="maxstats-vesselclass" style="border-color:#c9962f;">
@@ -1502,6 +1513,7 @@ window.resetShipStats = async function(vesselId) {
                 max_ablative: parseInt(document.getElementById('maxstats-ablative').value) || 0,
                 max_hardened: parseInt(document.getElementById('maxstats-hardened').value) || 0,
                 vessel_class: document.getElementById('maxstats-vesselclass').value || null,
+                crew: (v => v === '' ? null : Math.max(0, parseInt(v, 10) || 0))(document.getElementById('maxstats-crew').value.trim()), // balance pass 2026-10-03: food
                 // IFF / Fog of War build (this session): read regardless of
                 // whether the DM-only section is visible -- openEditMaxStatsModal
                 // always populates these two fields from the vessel's real
@@ -1558,6 +1570,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-hardened').value = vessel.max_hardened || 0;
         if (typeof window.ensureArmorSideInputs === 'function') { const usesSides = window.vesselUsesArmorSides(vessel); window.ensureArmorSideInputs('maxstats-hardened', 'maxstats', usesSides ? window.getArmorSides(vessel).max : null, usesSides); }
         document.getElementById('maxstats-vesselclass').value = vessel.vessel_class || '';
+        document.getElementById('maxstats-crew').value = (vessel.crew === null || vessel.crew === undefined) ? '' : vessel.crew;
         document.getElementById('maxstats-iff').value = vessel.iff || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
