@@ -204,6 +204,15 @@ window.deleteShipTemplate = async function(id) {
     return true;
 };
 
+// Playtest rebalance (2026-10-03, DM): NPC ships get AI by default. A ship
+// the DM deploys (so DM-owned) that carries any weapon starts AI-controlled;
+// a template with ai_controlled set always does. Players' deploys keep it
+// off. Still switchable per ship (EDIT BASE STATS) and per preset entry.
+window.defaultAiForDeploy = function(t) {
+    if (!t) return false;
+    if (t.ai_controlled) return true;
+    return currentUserRole === 'dm' && (t.ship_weapons || []).length > 0;
+};
 window.deployShipTemplate = async function(id, opts) {
     opts = opts || {};
     const t = findAnyTemplateById(id);
@@ -259,7 +268,7 @@ window.deployShipTemplate = async function(id, opts) {
         // pattern as vessel_class/iff just above -- also still editable
         // afterward per-deployment via the Vessel Deck's EDIT BASE STATS
         // modal (js/combat.js), independent of the source template.
-        ai_controlled: !!t.ai_controlled,
+        ai_controlled: window.defaultAiForDeploy(t), // playtest rebalance: DM-deployed armed ships default to AI
         // Phase 1 (2026-10-01): the ship's picture travels with it, same
         // carry-from-template pattern; editable per ship afterward.
         image_url: t.image_url || null,

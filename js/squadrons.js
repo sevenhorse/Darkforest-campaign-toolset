@@ -80,26 +80,26 @@ const STRIKE_CRAFT_DB = {
     raven: {
         label: "Raven Gen 2 MkIV", base_hp: 200,
         weapons: [
-            { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 280 },
-            { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat", role: "general", range: 420 },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital", range: 0, cooldown_period: 4 }
+            { name: "Dual .50 Cal Rotary", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 90 },
+            { name: "Quad Gamma Pulse", dice: "4d6", dmgType: "Heat", role: "general", range: 90 },
+            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 90 },
+            { name: "Ship Killer Missiles", dice: "2d12", dmgType: "Impact/Heat", weapon_class: "ordnance", role: "anti_capital", range: 200, cooldown_period: 4 }
         ]
     },
     hawk: {
         label: "Hawk Medium Bomber", base_hp: 350,
         weapons: [
-            { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact", role: "general", range: 420 },
-            { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital", range: 0, cooldown_period: 4 }
+            { name: "Dual 120mm Autocannons", dice: "2d10", dmgType: "Impact", role: "general", range: 90 },
+            { name: "Micro Railgun", dice: "1d12", dmgType: "Piercing", role: "anti_capital", range: 90 },
+            { name: "Capitol Killer Missiles", dice: "1d20", dmgType: "Piercing", weapon_class: "ordnance", role: "anti_capital", range: 200, cooldown_period: 4 }
         ]
     },
     messenger: {
         label: "Messenger Shuttle", base_hp: 100,
         weapons: [
-            { name: "Dual Link .50 Cal", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 280 },
-            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 600 },
-            { name: "Point Defense System", dice: "1d4", dmgType: "Impact", role: "point_defense", range: 180 }
+            { name: "Dual Link .50 Cal", dice: "2d6", dmgType: "Impact", role: "anti_fighter", range: 90 },
+            { name: "Hunter Seeker Rockets", dice: "4d10", dmgType: "Piercing", role: "anti_capital", range: 90 },
+            { name: "Point Defense System", dice: "1d4", dmgType: "Impact", role: "point_defense", range: 90 }
         ]
     }
 };
@@ -314,10 +314,12 @@ window.launchSquadron = async function(vesselId, idx, hideFromOverworld) {
         // role, so it's deliberately left manual/blank. This is a judgment
         // call, not a DM-confirmed mapping -- easy to change if it doesn't
         // match what's wanted at the table.
-        if (!sq.ai_stance) {
-            if (sq.type === 'raven') sq.ai_stance = 'attack_strike_craft';
-            else if (sq.type === 'hawk') sq.ai_stance = 'attack_capitals';
-        }
+        // Playtest rebalance (2026-10-03, DM): every chassis now launches on
+        // 'auto' (AI picks and re-picks its stance each round -- see
+        // pickSquadronAutoStance, js/battle-map.js), replacing the old
+        // raven/hawk-only defaults. An explicit choice (incl. 'manual') is kept.
+        if (!sq.ai_stance) sq.ai_stance = 'auto';
+        delete sq.ai_auto_pick; // re-evaluated fresh on the first round
         deployed.push(sq);
         await db.from('ship_markers').update({ ship_hangar: hangar, ship_deployed: deployed }).eq('id', vessel.id);
         vessel.ship_hangar = hangar;
@@ -687,6 +689,8 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     let targetShip = null;
     let combatLog = ``;
     let dmgType = window.normalizeDamageType(wpn.dmgType || 'Impact');
+    // Playtest rebalance: hidden calibration bonus (see js/combat.js).
+    if (dmgType !== 'Healing' && typeof window.hiddenDamageBonus === 'function') total += window.hiddenDamageBonus(numDice, diceFaces);
 
     if (targetId) {
         targetShip = globalShipMarkersCache.find(m => m.id === targetId);

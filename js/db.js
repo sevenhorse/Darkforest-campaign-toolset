@@ -352,7 +352,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // live) raise app_settings 'min_client_build'.value to match -- any browser
 // still running an older cached copy then shows a "reload" banner instead
 // of quietly writing data the new build can't see (2026-09-30 live bug).
-window.DARKFOREST_BUILD = '2026-10-03.04';
+window.DARKFOREST_BUILD = '2026-10-03.05';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -423,7 +423,7 @@ window.renderFeatureSwitchPanel = function() {
     const box = document.getElementById('feature-switch-list');
     if (!box || currentUserRole !== 'dm') return;
     const keys = Object.keys(window.appSettingsCache).filter(k => k !== 'min_client_build' && !/_config$/.test(k)).sort(); // *_config rows hold numbers, not switches (Phase 10)
-    if (keys.length === 0) { box.innerHTML = '<div style="font-size:9px; color:#6b826a;">No feature switches found.</div>'; return; }
+    if (keys.length === 0) { box.innerHTML = '<div style="font-size:9px; color:#6b826a;">No feature switches found.</div>' + window.combatBalancePanelHtml(); return; }
     const players = (typeof allProfiles !== 'undefined' ? allProfiles : []).filter(p => p.role !== 'dm');
     const modeLabels = { off: 'OFF', dm: 'DM ONLY', testers: 'TESTERS', everyone: 'EVERYONE' };
     box.innerHTML = keys.map(key => {
@@ -443,7 +443,29 @@ window.renderFeatureSwitchPanel = function() {
                 <select id="feature-mode-${esc(key)}" onchange="window.setFeatureMode('${esc(key)}', this.value)" style="font-size:10px; width:auto;">${opts}</select>
             </div>${testers}
         </div>`;
-    }).join('');
+    }).join('') + window.combatBalancePanelHtml();
+};
+// Playtest rebalance (2026-10-03): the hidden damage bonus knob
+// (app_settings 'combat_balance_config', read by window.combatBalanceConfig).
+window.combatBalancePanelHtml = function() {
+    if (!window.appSettingsCache || !window.appSettingsCache.combat_balance_config || typeof window.combatBalanceConfig !== 'function') return '';
+    const pct = window.combatBalanceConfig().damage_bonus_pct;
+    return `<div style="border:1px solid #2a3a2a; padding:6px; margin-bottom:6px; background:#050805;">
+        <div style="font-size:10px; color:#00e5a3; font-weight:bold;">Combat balance</div>
+        <div style="font-size:9px; color:#6b826a;">Hidden damage bonus on every ship and strike craft weapon roll, as a % of the dice average (100 = 1d10 gets +5). Players never see it. 0 turns it off.</div>
+        <label style="font-size:10px; color:#d4c5a9;">Bonus % <input id="combat-bonus-pct" type="number" min="0" max="500" step="5" value="${pct}" style="width:70px; font-size:10px;"></label>
+        <button type="button" onclick="window.saveCombatBalanceConfig()" style="font-size:9px; padding:2px 8px; width:auto;">SAVE</button>
+    </div>`;
+};
+window.saveCombatBalanceConfig = async function() {
+    if (currentUserRole !== 'dm') return;
+    const el = document.getElementById('combat-bonus-pct');
+    const pct = Math.max(0, Math.min(500, parseInt(el && el.value, 10) || 0));
+    const value = JSON.stringify({ damage_bonus_pct: pct });
+    const { error } = await db.from('app_settings').update({ value, updated_at: new Date().toISOString() }).eq('feature_key', 'combat_balance_config');
+    if (error) { alert('Failed to save combat balance: ' + error.message); return; }
+    if (window.appSettingsCache.combat_balance_config) window.appSettingsCache.combat_balance_config.value = value;
+    if (el) { el.value = pct; const b = el.parentElement && el.parentElement.nextElementSibling; if (b) b.textContent = 'SAVED'; }
 };
 
 let db = null;

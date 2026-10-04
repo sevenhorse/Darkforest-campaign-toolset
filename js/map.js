@@ -665,6 +665,7 @@ window.spawnTokenAtCenter = async function() {
             { name: "Manufacturing", hp: 100, max_hp: 100, type: "manufacturing", boarding_status: "secure" }
         ];
     }
+    payload.ai_controlled = currentUserRole === 'dm' && (payload.ship_weapons || []).length > 0; // playtest rebalance: armed NPC spawns default to AI
     await db.from('ship_markers').insert(payload); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 

@@ -1132,18 +1132,22 @@ window.renderVesselDeck = function() {
                 // (see this session's "attacks per turn" discussion). Easy
                 // to change to "manual stays available as an override" if
                 // that turns out to be wanted instead.
-                const aiStance = sq.ai_stance || '';
+                // Playtest rebalance (2026-10-03): 'auto' (the launch default)
+                // and an explicit 'manual' (kept across recall/relaunch).
+                const aiStance = (sq.ai_stance === 'manual') ? '' : (sq.ai_stance || '');
                 const AI_STANCE_LABELS = {
                     '': 'Manual (player-controlled)',
+                    'auto': '🤖 Auto (AI picks stance)',
                     'attack_strike_craft': '🤖 Attack Strike Craft',
                     'intercept_munitions': '🤖 Intercept Munitions',
                     'attack_capitals': '🤖 Attack Capital Ships',
                     'attack_escorts': '🤖 Attack Escorts'
                 };
-                const stanceOptions = Object.keys(AI_STANCE_LABELS).map(k => `<option value="${k}" ${aiStance === k ? 'selected' : ''}>${AI_STANCE_LABELS[k]}</option>`).join('');
+                const stanceOptions = Object.keys(AI_STANCE_LABELS).map(k => `<option value="${k || 'manual'}" ${aiStance === k ? 'selected' : ''}>${AI_STANCE_LABELS[k]}</option>`).join('');
+                const autoNow = aiStance === 'auto' && sq.ai_auto_pick ? ` — currently ${(AI_STANCE_LABELS[sq.ai_auto_pick] || sq.ai_auto_pick).replace('🤖 ', '')}` : '';
                 const manualControlsOrStatus = aiStance
                     ? `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; font-size:9px; color:#6b826a;">
-                           🤖 AI-controlled (${AI_STANCE_LABELS[aiStance].replace('🤖 ', '')}) — picks its own target (nearest eligible) and weapon, resolves automatically on Advance Round. Manual fire is disabled while a stance is set — switch back to Manual above to fire it yourself.
+                           🤖 AI-controlled (${(AI_STANCE_LABELS[aiStance] || aiStance).replace('🤖 ', '')}${autoNow}) — picks its own target (nearest eligible) and weapon, resolves automatically on Advance Round. Manual fire is disabled while a stance is set — switch back to Manual above to fire it yourself.
                        </div>`
                     : (() => {
                         // Squadron Ordnance build (this session): the FIRE/LAUNCH
@@ -1626,6 +1630,32 @@ window.unclassifiedBadgeHtml = function(v) {
     if (!(v.ship_weapons || []).length) return '';
     return '<span style="font-size:8px; color:#ffaa00; border:1px dashed #ffaa00; border-radius:2px; padding:1px 5px; margin-left:6px;" title="No Capital/Escort tag: squadron stances that pick Capital Ships or Escorts will ignore this ship. Set it in EDIT BASE STATS or the design editor.">⚠ UNCLASSIFIED</span>';
 };
+/* Playtest rebalance (2026-10-03, DM): time-to-kill was too long. Every ship
+   and strike craft weapon roll (direct fire, ordnance impact, PD and
+   squadron intercepts) gets a HIDDEN flat bonus of damage_bonus_pct % of
+   the dice's average (1d10 avg 5.5 -> +5 at 100%). It is computed from the
+   dice string at roll time, so weapons made later get it automatically, and
+   it stacks on top of the visible modifier box. Never shown in breakdowns.
+   Not applied to personal (character) weapons or Healing.
+   Tuned in app_settings 'combat_balance_config' {damage_bonus_pct} (DM Tools
+   -> MAINT -> Feature Switches, "Combat balance" box). Missing row = 100. */
+window.combatBalanceConfig = function() {
+    try {
+        const row = window.appSettingsCache && window.appSettingsCache.combat_balance_config;
+        const v = row && row.value ? JSON.parse(row.value) : {};
+        const pct = Number(v.damage_bonus_pct);
+        return { damage_bonus_pct: Number.isFinite(pct) && pct >= 0 ? pct : 100 };
+    } catch (e) { return { damage_bonus_pct: 100 }; }
+};
+window.hiddenDamageBonus = function(numDice, faces) {
+    const n = parseInt(numDice, 10) || 0, f = parseInt(faces, 10) || 0;
+    if (n <= 0 || f <= 0) return 0;
+    return Math.floor(n * (f + 1) / 2 * window.combatBalanceConfig().damage_bonus_pct / 100);
+};
+window.hiddenDamageBonusForDice = function(diceStr) {
+    const m = String(diceStr || '').trim().match(/^(\d*)d(\d+)$/i);
+    return m ? window.hiddenDamageBonus(parseInt(m[1], 10) || 1, m[2]) : 0;
+};
 async function applySystemLockdown(targetShip, wpn) {
     if (!wpn.system_lockdown || !targetShip) return '';
     const PERM = window.PERMANENT_DISABLE_ROUNDS;
@@ -1848,7 +1878,10 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     }
 
     total += modVal;
-    
+    // Playtest rebalance (2026-10-03): hidden calibration bonus, on top of
+    // the visible modifier. Deliberately NOT in the breakdown (DM decision).
+    if (window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name)) !== 'Healing') total +=window.hiddenDamageBonus(numDice, diceFaces);
+
     let stance = vessel.ship_stance || 'Balanced';
     if (stance === 'Aggressive') { total = Math.floor(total * 1.25); breakdown.push(`[Aggressive: +25%]`); } 
     else if (stance === 'Defensive') { total = Math.floor(total * 0.75); breakdown.push(`[Defensive: -25%]`); }
@@ -3831,7 +3864,7 @@ window.resolveRoundTick = async function() {
                 if (w.fired_this_round) {
                     if (w.fired_prev_round) {
                         const dmgSpec = w.self_damage_on_consecutive_fire;
-                        const selfRoll = rollDamageDice(dmgSpec.dice || '1d4', '+0', false);
+                        const selfRoll = rollDamageDice(dmgSpec.dice || '1d4', '+0', false, true);
                         let curHull = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
                         vessel.integrity_hull = Math.max(0, curHull - selfRoll.total);
                         hullChanged = true;

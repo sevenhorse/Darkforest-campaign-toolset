@@ -76,7 +76,7 @@ function describeEntity(e) {
     if (e.source.kind === 'template') {
         const t = templateById(e.source.template_id);
         return { name: t ? t.name : '(deleted template)', missing: !t, iff: (e.overrides && e.overrides.iff !== undefined) ? e.overrides.iff : (t ? t.iff : null),
-                 hidden: !!(e.overrides && e.overrides.is_hidden), ai: (e.overrides && e.overrides.ai_controlled !== undefined) ? !!e.overrides.ai_controlled : !!(t && t.ai_controlled), kind: 'template' };
+                 hidden: !!(e.overrides && e.overrides.is_hidden), ai: (e.overrides && e.overrides.ai_controlled !== undefined) ? !!e.overrides.ai_controlled : (typeof window.defaultAiForDeploy === 'function' ? window.defaultAiForDeploy(t) : !!(t && t.ai_controlled)), kind: 'template' };
     }
     const v = globalShipMarkersCache.find(m => m.id === e.source.ship_marker_id);
     return { name: v ? v.name : '(ship no longer exists)', missing: !v, iff: v ? v.iff : null, hidden: !!(e.overrides && e.overrides.is_hidden), ai: !!(v && v.ai_controlled), kind: 'ship' };

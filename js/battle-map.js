@@ -148,6 +148,11 @@ const BATTLE_GRID_SCALE = 1.5;
    these tiers (strike-craft-vs-capital short-range requirement, and the
    Messenger squadron's target-uplink exception to it). */
 window.BATTLE_RANGE_TIERS = { LONG: 400, MEDIUM: 200, SHORT: 100 };
+// Playtest rebalance (2026-10-03, DM): strike craft reach. See getEffectiveWeaponRange.
+window.STRIKE_CRAFT_RANGES = { GUN: 90, ORDNANCE: 200 };
+window.strikeCraftRangeCap = function(wpn) {
+    return (wpn && wpn.weapon_class === 'ordnance') ? window.STRIKE_CRAFT_RANGES.ORDNANCE : window.STRIKE_CRAFT_RANGES.GUN;
+};
 
 /* Squadron Target Uplink build (this session, DM-described mechanic, exact
    trigger/scope/duration NOT explicitly spec'd beyond "gets close enough" --
@@ -220,8 +225,14 @@ function getEffectiveWeaponRange(wpn, firerVessel, targetVessel) {
         if (uplinked.has(targetVessel.id)) return 0; // unlimited this round
     }
 
-    if (firerVessel && firerVessel.is_strike_craft && targetVessel && !targetVessel.is_strike_craft) {
-        return baseRange > 0 ? Math.min(baseRange, tiers.SHORT) : tiers.SHORT;
+    // Playtest rebalance (2026-10-03, DM): every strike craft weapon is
+    // capped -- guns/rockets/PD at just under SHORT (90), ordnance (missiles,
+    // bombs) at MEDIUM (200) -- against ANY target, whatever range the
+    // chassis lists (so a newly designed chassis gets it too). This replaces
+    // the old "SHORT vs non-strike-craft" cap, which it's stricter than.
+    if (firerVessel && firerVessel.is_strike_craft) {
+        const cap = window.strikeCraftRangeCap(wpn);
+        return baseRange > 0 ? Math.min(baseRange, cap) : cap;
     }
 
     return baseRange;
@@ -575,9 +586,73 @@ window.endBattleEncounter = async function() {
    array. It updates the local cache immediately, then writes ONLY the
    differences to battle_tokens (see the PER-ROW TOKEN STORAGE comment near
    the top of this file). Returns once every write has settled. */
+/* Playtest rebalance (2026-10-03, DM): ships and strike craft stacked on
+   top of / inside each other (AI moves ended exactly on their target's
+   position; launches scattered randomly round the carrier). Every token
+   that is new or moved in a save is now nudged to the nearest free spot:
+   footprints are circles sized from the 3D hull lengths (craft 12, escort
+   23, capital 31, station 22, x model_scale). A moved token first backs off
+   along its own path; a new one spirals outward. Hidden (fog) ships aren't
+   obstacles for players, so a nudge never gives one away. */
+const TOKEN_FOOTPRINT = { craft: 12, escort: 23, capital: 31, station: 22 };
+window.tokenFootprintRadius = function(v) {
+    let r = !v ? 17 : v.is_strike_craft ? TOKEN_FOOTPRINT.craft : v.is_station ? TOKEN_FOOTPRINT.station : v.vessel_class === 'Escort' ? TOKEN_FOOTPRINT.escort : TOKEN_FOOTPRINT.capital;
+    const sc = v && Number(v.model_scale) > 0 ? Math.max(0.5, Math.min(2, Number(v.model_scale))) : 1;
+    return r * sc;
+};
+function sepTokenCenter(t, v) {
+    const size = (v && v.is_strike_craft) ? BATTLE_STRIKE_CRAFT_TOKEN_SIZE : BATTLE_TOKEN_SIZE;
+    return { x: (t.x || 0) + size / 2, y: (t.y || 0) + size / 2, z: t.z || 0 };
+}
+window.findFreeTokenSpot = function(tok, pos, tokens, fromPos) {
+    const byId = (id) => globalShipMarkersCache.find(m => m.id === id);
+    const me = byId(tok.ship_marker_id), rMe = window.tokenFootprintRadius(me);
+    if (!me || window.BATTLE_TOKEN_SEPARATION === false) return pos; // stale token with no ship / separation switched off (test harness)
+    const others = (tokens || []).filter(o => o && o.token_id !== tok.token_id && o.ship_marker_id !== tok.ship_marker_id).map(o => {
+        const v = byId(o.ship_marker_id);
+        if (!v || (v.is_hidden && currentUserRole !== 'dm')) return null;
+        return { c: sepTokenCenter(o, v), r: window.tokenFootprintRadius(v) };
+    }).filter(Boolean);
+    const free = (p) => {
+        const c = sepTokenCenter({ x: p.x, y: p.y, z: tok.z }, me);
+        return others.every(o => Math.hypot(o.c.x - c.x, o.c.y - c.y, o.c.z - c.z) >= o.r + rMe - 0.5);
+    };
+    if (free(pos)) return pos;
+    if (fromPos) {
+        const dx = fromPos.x - pos.x, dy = fromPos.y - pos.y, len = Math.hypot(dx, dy);
+        for (let d = 4; d < len; d += 4) {
+            const p = { x: pos.x + dx * d / len, y: pos.y + dy * d / len };
+            if (free(p)) return p;
+        }
+    }
+    for (let ring = 6; ring <= 360; ring += 6) {
+        const steps = Math.max(8, Math.round(ring / 4));
+        for (let i = 0; i < steps; i++) {
+            const a = (i / steps) * Math.PI * 2;
+            const p = clampToGrid(pos.x + Math.cos(a) * ring, pos.y + Math.sin(a) * ring);
+            if (free(p)) return p;
+        }
+    }
+    return fromPos && free(fromPos) ? fromPos : pos; // nowhere free -- leave it
+};
+function separateBattleTokens(tokens) {
+    const out = (tokens || []).slice();
+    for (let i = 0; i < out.length; i++) {
+        const t = out[i];
+        if (!t || !t.token_id) continue;
+        const prev = battleTokenSnapshot[t.token_id];
+        const moved = !prev || prev.x !== (t.x || 0) || prev.y !== (t.y || 0) || (prev.z || 0) !== (t.z || 0);
+        if (!moved) continue;
+        const p = window.findFreeTokenSpot(t, { x: t.x || 0, y: t.y || 0 }, out, prev ? { x: prev.x, y: prev.y } : null);
+        if (p.x !== t.x || p.y !== t.y) out[i] = { ...t, x: p.x, y: p.y };
+    }
+    return out;
+}
+window.separateBattleTokens = separateBattleTokens;
 async function saveBattleTokens(tokens) {
     const enc = window.globalBattleEncounterCache;
     if (!enc) return;
+    if (battleTokenSnapshotEncounterId === enc.id) { try { tokens = separateBattleTokens(tokens); } catch (e) { console.error('separateBattleTokens failed', e); } }
     enc.tokens = tokens;
     await persistBattleTokenDiff(enc, tokens);
 }
@@ -664,6 +739,8 @@ function moveTokenToward(shipMarkerId, targetPos, maxDist) {
         newPos = walk.pos;
         window.terrainQueueDebris(shipMarkerId, walk.debrisLen);
     }
+    // Playtest rebalance: never end a move inside another ship (see separateBattleTokens).
+    if (typeof window.findFreeTokenSpot === 'function') newPos = window.findFreeTokenSpot(cur, newPos, currentTokens, { x: cur.x, y: cur.y });
     currentTokens[idx] = { ...cur, x: newPos.x, y: newPos.y };
     return currentTokens;
 }
@@ -1197,7 +1274,11 @@ window.checkBattleTokenDestroyed = async function(vessel) {
 // logic already duplicated between rollShipWeapon and rollSquadronWeapon in
 // js/combat.js, factored out here rather than duplicated a third time since
 // both PD counter-fire and ordnance impact need it.
-function rollDamageDice(diceStr, modifierStr, explodes) {
+// Playtest rebalance (2026-10-03): adds the hidden calibration bonus
+// (window.hiddenDamageBonus, js/combat.js) unless noBonus -- it is not shown
+// in breakdownText. Every caller here is a ship/strike-craft weapon roll;
+// only Spinal EMP self-damage passes noBonus.
+function rollDamageDice(diceStr, modifierStr, explodes, noBonus) {
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = (diceStr || '1d10').trim().match(diceRegex);
     if (!match) return { total: 0, breakdownText: '(invalid dice)' };
@@ -1218,6 +1299,7 @@ function rollDamageDice(diceStr, modifierStr, explodes) {
         breakdown.push(`(d${diceFaces}: ${subRolls.join('💥')})`);
     }
     total += modVal;
+    if (!noBonus && typeof window.hiddenDamageBonus === 'function') total += window.hiddenDamageBonus(numDice, diceFaces);
     return { total, breakdownText: breakdown.join(' + ') + (modVal !== 0 ? ` [Mod: ${modVal >= 0 ? '+' : ''}${modVal}]` : '') };
 }
 
@@ -1265,6 +1347,85 @@ function rollDamageDice(diceStr, modifierStr, explodes) {
    and the 3 offensive stances (Attack Strike Craft / Attack Capital Ships /
    Attack Escorts, nearest-target auto-fire). See the dedicated comment
    blocks further down this function for each. */
+/* Playtest rebalance (2026-10-03, DM): AI ships pick their own stance each
+   round. Hull under 25% -> Evasive (also breaks off: moves away from its
+   target), under 50% -> Defensive, otherwise Aggressive when it's in better
+   shape than its target (hull %), else Balanced. A stance the DM sets by
+   hand on an AI ship is overridden next round -- take the ship off AI to
+   hold a stance. Thresholds are first-pass numbers. */
+window.AI_SHIP_STANCE_THRESHOLDS = { EVASIVE: 0.25, DEFENSIVE: 0.50 };
+window.pickAiShipStance = function(v, target) {
+    const pct = (m) => (m && m.max_hull > 0) ? (m.integrity_hull || 0) / m.max_hull : 1;
+    const own = pct(v), th = window.AI_SHIP_STANCE_THRESHOLDS;
+    if (own < th.EVASIVE) return 'Evasive';
+    if (own < th.DEFENSIVE) return 'Defensive';
+    if (target && own > pct(target)) return 'Aggressive';
+    return 'Balanced';
+};
+
+/* Playtest rebalance (2026-10-03, DM): squadron "Auto" stance. Launched
+   squadrons default to ai_stance 'auto'; each Advance Round this picks the
+   concrete stance (stored as sq.ai_auto_pick, shown in the deck) that every
+   existing stance rule then runs with. Role-weighted (DM decision):
+     - PD-carrying chassis (Messenger): enemy ordnance inbound on a friendly
+       -> intercept munitions; enemy fighters within reach -> attack strike
+       craft; an enemy ship within MEDIUM -> attack it (rockets); otherwise
+       hold as an interceptor screen. As a screen it moves to cover the
+       friendly ship enemy ordnance is inbound on, else its carrier.
+     - Anti-fighter chassis (Raven): enemy fighters within reach -> attack
+       strike craft; otherwise the nearest enemy ship's class.
+     - Everything else (Hawk, bombers): capitals first, then escorts, then
+       strike craft.
+   "Within reach" = SQUADRON_AUTO_REACH px. The existing below-30%-HP
+   break-off still applies to the offensive picks. In Auto, Attack Capital
+   Ships also takes untagged (UNCLASSIFIED) non-strike-craft ships -- a
+   judgment call so auto fighters don't idle against untagged NPCs. */
+window.SQUADRON_AUTO_REACH = 600;
+window.squadronEffectiveStance = function(sq) {
+    if (!sq) return '';
+    return sq.ai_stance === 'auto' ? (sq.ai_auto_pick || 'attack_capitals') : (sq.ai_stance || '');
+};
+window.pickSquadronAutoStance = function(sq, sqShip, ctx) {
+    const db0 = (typeof STRIKE_CRAFT_DB !== 'undefined' && STRIKE_CRAFT_DB[sq.type]) || { weapons: [] };
+    const roles = (db0.weapons || []).map(w => w.role);
+    const hasPD = roles.includes('point_defense'), hasAF = roles.includes('anti_fighter');
+    const tokens = ctx.tokens || [];
+    const myIds = window.vesselOwnerIds(sqShip);
+    const selfPos = window.getBattleTokenPosition(sqShip.id);
+    if (!selfPos) return sq.ai_auto_pick || 'attack_capitals';
+    const enemies = [];
+    tokens.forEach(t => {
+        const m = globalShipMarkersCache.find(x => x.id === t.ship_marker_id);
+        if (!m || m.id === sqShip.id || window.ownerIdsShareOwner(window.vesselOwnerIds(m), myIds)) return;
+        enemies.push({ m, d: Math.hypot(t.x - selfPos.x, t.y - selfPos.y) });
+    });
+    const reach = window.SQUADRON_AUTO_REACH;
+    const fightersNear = enemies.some(e => e.m.is_strike_craft && e.d <= reach);
+    const ships = enemies.filter(e => !e.m.is_strike_craft).sort((a, b) => a.d - b.d);
+    const classPick = (e) => (e && e.m.vessel_class === 'Escort') ? 'attack_escorts' : 'attack_capitals';
+    if (hasPD) {
+        const threat = (ctx.ordnance || []).some(o => {
+            const tgt = globalShipMarkersCache.find(x => x.id === o.target_vessel_id);
+            const src = globalShipMarkersCache.find(x => x.id === o.source_vessel_id);
+            return tgt && window.ownerIdsShareOwner(window.vesselOwnerIds(tgt), myIds) && !(src && window.ownerIdsShareOwner(window.vesselOwnerIds(src), myIds));
+        });
+        if (threat) return 'intercept_munitions';
+        if (fightersNear) return 'attack_strike_craft';
+        const tiers = window.BATTLE_RANGE_TIERS || { MEDIUM: 200 };
+        if (ships.length && ships[0].d <= tiers.MEDIUM) return classPick(ships[0]);
+        return 'intercept_munitions';
+    }
+    if (hasAF) {
+        if (fightersNear) return 'attack_strike_craft';
+        if (ships.length) return classPick(ships[0]);
+        return enemies.length ? 'attack_strike_craft' : (sq.ai_auto_pick || 'attack_capitals');
+    }
+    if (ships.some(e => e.m.vessel_class !== 'Escort')) return 'attack_capitals';
+    if (ships.length) return 'attack_escorts';
+    if (enemies.length) return 'attack_strike_craft';
+    return sq.ai_auto_pick || 'attack_capitals';
+};
+
 window.processBattleRoundAutomations = async function() {
     if (!window.globalBattleEncounterCache) return;
     const battle = window.globalBattleEncounterCache;
@@ -1288,6 +1449,45 @@ window.processBattleRoundAutomations = async function() {
     // weapon object the way it does for ship_weapons).
     function squadronWeaponCooldown(sq, wpnIdx) {
         return (sq.weapon_cooldowns && sq.weapon_cooldowns[wpnIdx]) || 0;
+    }
+
+    // Playtest rebalance: resolve every Auto squadron's stance for this round
+    // BEFORE the intercept pool / offensive passes below read it.
+    for (const v of globalShipMarkersCache.slice()) {
+        for (const sq of (v.ship_deployed || [])) {
+          try {
+            if (!sq || sq.ai_stance !== 'auto' || (sq.count || 0) <= 0) continue;
+            const sqShip = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
+            if (!sqShip || !window.getBattleTokenPosition(sqShip.id)) continue;
+            const pick = window.pickSquadronAutoStance(sq, sqShip, { tokens: battle.tokens || [], ordnance: battle.in_flight_ordnance || [] });
+            if (pick !== sq.ai_auto_pick) {
+                chatLines.push(`🤖 [AI AUTO] ${sq.name} switches to ${pick.replace(/_/g, ' ')}.`);
+                sq.ai_auto_pick = pick;
+                touchedCarrierIds.add(v.id);
+            }
+            // An interceptor screen moves to cover: the friendly ship enemy
+            // ordnance is inbound on (nearest one), else its own carrier --
+            // close enough that its PD (90 px reach) covers it.
+            if (pick === 'intercept_munitions') {
+                const sPos = window.getBattleTokenPosition(sqShip.id);
+                const myIds = window.vesselOwnerIds(sqShip);
+                let guard = null, guardD = Infinity;
+                (battle.in_flight_ordnance || []).forEach(o => {
+                    const tgt = globalShipMarkersCache.find(x => x.id === o.target_vessel_id);
+                    const src = globalShipMarkersCache.find(x => x.id === o.source_vessel_id);
+                    if (!tgt || !window.ownerIdsShareOwner(window.vesselOwnerIds(tgt), myIds) || (src && window.ownerIdsShareOwner(window.vesselOwnerIds(src), myIds))) return;
+                    const p = window.getBattleTokenPosition(tgt.id);
+                    if (p && sPos && Math.hypot(p.x - sPos.x, p.y - sPos.y) < guardD) { guardD = Math.hypot(p.x - sPos.x, p.y - sPos.y); guard = p; }
+                });
+                if (!guard) guard = window.getBattleTokenPosition(v.id);
+                const keep = window.STRIKE_CRAFT_RANGES.GUN * 0.75;
+                if (guard && sPos && Math.hypot(guard.x - sPos.x, guard.y - sPos.y) > keep) {
+                    const moved = moveTokenToward(sqShip.id, guard, sqShip.tactical_speed || SQUADRON_TACTICAL_SPEED);
+                    if (moved) await saveBattleTokens(moved);
+                }
+            }
+          } catch (err) { console.error('processBattleRoundAutomations: auto stance pick failed', err); }
+        }
     }
 
     // Shared per-round pool of available PD weapons: { vesselId, weaponIdx, position, ownerId }
@@ -1398,7 +1598,7 @@ window.processBattleRoundAutomations = async function() {
     let squadronInterceptPool = [];
     globalShipMarkersCache.forEach(v => {
         (v.ship_deployed || []).forEach((sq, sqIdx) => {
-            if (sq.ai_stance !== 'intercept_munitions' || (sq.count || 0) <= 0) return;
+            if (window.squadronEffectiveStance(sq) !== 'intercept_munitions' || (sq.count || 0) <= 0) return;
             const sqShip = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
             if (!sqShip) return;
             // System Lockdown build (this session): a Sensors-disabled
@@ -1428,7 +1628,8 @@ window.processBattleRoundAutomations = async function() {
             const entry = squadronInterceptPool[i];
             if (!window.ownerIdsShareOwner(entry.ownerIds, ownerIds)) continue;
             const dist = Math.hypot(entry.position.x - targetPos.x, entry.position.y - targetPos.y);
-            if (!entry.wpn.range || dist <= entry.wpn.range) return i;
+            const cap = window.strikeCraftRangeCap(entry.wpn); // playtest rebalance: SC reach cap
+            if (dist <= (entry.wpn.range ? Math.min(entry.wpn.range, cap) : cap)) return i;
         }
         return -1;
     }
@@ -1768,7 +1969,8 @@ window.processBattleRoundAutomations = async function() {
           try {
             const sq = v.ship_deployed[sqIdx];
             if (!sq || (sq.count || 0) <= 0) continue;
-            if (sq.ai_stance !== 'attack_strike_craft' && sq.ai_stance !== 'attack_capitals' && sq.ai_stance !== 'attack_escorts') continue;
+            const stance = window.squadronEffectiveStance(sq); // playtest rebalance: 'auto' resolves to its pick
+            if (stance !== 'attack_strike_craft' && stance !== 'attack_capitals' && stance !== 'attack_escorts') continue;
             const sqShip = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
             // Squadron Movement Diagnostics build (this session): the two
             // checks below (!sqShip and !selfPos) used to fail completely
@@ -1809,10 +2011,11 @@ window.processBattleRoundAutomations = async function() {
                 .filter(Boolean)
                 .filter(m => m.id !== sqShip.id && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(sqShip)));
 
-            if (sq.ai_stance === 'attack_strike_craft') {
+            if (stance === 'attack_strike_craft') {
                 candidates = candidates.filter(m => m.is_strike_craft);
-            } else if (sq.ai_stance === 'attack_capitals') {
-                candidates = candidates.filter(m => !m.is_strike_craft && m.vessel_class === 'Capital');
+            } else if (stance === 'attack_capitals') {
+                // Auto: untagged non-strike-craft ships count as capitals too (see pickSquadronAutoStance).
+                candidates = candidates.filter(m => !m.is_strike_craft && (m.vessel_class === 'Capital' || (sq.ai_stance === 'auto' && m.vessel_class !== 'Escort')));
             } else {
                 candidates = candidates.filter(m => !m.is_strike_craft && m.vessel_class === 'Escort');
             }
@@ -1825,7 +2028,7 @@ window.processBattleRoundAutomations = async function() {
             // NPC-side ships that both have no owner_id assigned look like
             // the same "side" to this check.
             if (candidates.length === 0) {
-                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) has no eligible enemy target on the grid this round -- holds position.`);
+                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${stance.replace(/_/g, ' ')}) has no eligible enemy target on the grid this round -- holds position.`);
                 continue; // nothing eligible this round -- same as a manual player choosing not to fire
             }
 
@@ -1846,7 +2049,7 @@ window.processBattleRoundAutomations = async function() {
 
             const dbStats = STRIKE_CRAFT_DB[sq.type];
             if (!dbStats) continue;
-            const desiredRole = sq.ai_stance === 'attack_strike_craft' ? 'anti_fighter' : 'anti_capital';
+            const desiredRole = stance === 'attack_strike_craft' ? 'anti_fighter' : 'anti_capital';
             // Squadron Ordnance build (this session, confirmed design: "also
             // wire AI stances to auto-launch it"): for the two anti-capital
             // stances, an available ordnance-classified weapon of the
@@ -1879,7 +2082,7 @@ window.processBattleRoundAutomations = async function() {
             if (wpnIdx < 0) wpnIdx = dbStats.weapons.findIndex((w, i) => w.role === desiredRole && squadronWeaponCooldown(sq, i) === 0);
             if (wpnIdx < 0) wpnIdx = dbStats.weapons.findIndex((w, i) => squadronWeaponCooldown(sq, i) === 0);
             if (wpnIdx < 0) {
-                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) has every weapon on cooldown -- holds fire.`);
+                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${stance.replace(/_/g, ' ')}) has every weapon on cooldown -- holds fire.`);
                 continue;
             }
             const wpn = dbStats.weapons[wpnIdx];
@@ -1898,7 +2101,7 @@ window.processBattleRoundAutomations = async function() {
             // above), same rule the manual FIRE path enforces.
             const effRangeForFire = getEffectiveWeaponRange(wpn, sqShip, bestTarget);
             if (wpn && effRangeForFire && postMoveDist > effRangeForFire) {
-                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) closes on ${bestTarget.name} but is still out of ${wpn.name}'s range (${wpn.range}) -- holds fire.`);
+                chatLines.push(`🤖 [AI STANCE] ${sq.name} (${stance.replace(/_/g, ' ')}) closes on ${bestTarget.name} but is still out of ${wpn.name}'s range (${effRangeForFire}) -- holds fire.`);
                 continue;
             }
 
@@ -1910,7 +2113,7 @@ window.processBattleRoundAutomations = async function() {
             const sqTerrain = typeof window.terrainFireCheck === 'function' ? window.terrainFireCheck(sqShip.id, bestTarget.id) : '';
             if (sqTerrain) { chatLines.push(`🤖 [AI STANCE] ${sq.name} can't engage ${bestTarget.name}: ${sqTerrain} -- holds fire.`); continue; }
             const uplinkNote = (wpn.range > 0 && effRangeForFire === 0) ? ' (target uplinked!)' : '';
-            chatLines.push(`🤖 [AI STANCE] ${sq.name} (${sq.ai_stance.replace(/_/g, ' ')}) engages ${bestTarget.name}${uplinkNote}.`);
+            chatLines.push(`🤖 [AI STANCE] ${sq.name} (${stance.replace(/_/g, ' ')}) engages ${bestTarget.name}${uplinkNote}.`);
             // Squadron Ordnance build (this session): an ordnance-classified
             // pick (see the weapon-selection comment above) routes through
             // the tracked multi-turn launch instead of an instant-resolve
@@ -1986,7 +2189,9 @@ window.processBattleRoundAutomations = async function() {
         if ((v.integrity_hull || 0) <= 0) continue; // destroyed earlier this same pass -- don't act
 
         const selfPos = { x: tok.x, y: tok.y };
-        const moveDist = v.tactical_speed || 160;
+        // Playtest rebalance: stations / speed-0 hulls hold position (they
+        // used to fall back to 160 here because 0 is falsy).
+        const moveDist = (v.is_station || v.tactical_speed === 0) ? 0 : (v.tactical_speed || 160);
 
         const candidates = tokens
             .map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id))
@@ -2024,8 +2229,21 @@ window.processBattleRoundAutomations = async function() {
             } // attacker no longer a valid/present candidate (destroyed, withdrawn, or same side now) -- falls back to nearest silently
         }
 
-        // --- Move up to tactical_speed px toward the target's current position ---
-        const movedTokens = moveTokenToward(v.id, targetPos, moveDist);
+        // --- Playtest rebalance (2026-10-03, DM): automatic stance ---
+        const newStance = window.pickAiShipStance(v, target);
+        if (newStance !== (v.ship_stance || 'Balanced')) {
+            chatLines.push(`🤖 [AI CONTROLLED] ${v.name} shifts to ${newStance} stance.`);
+            v.ship_stance = newStance;
+        }
+
+        // --- Move up to tactical_speed px toward the target's current position
+        // (Evasive: away from it instead -- breaking off, still firing what reaches) ---
+        let moveGoal = targetPos;
+        if (v.ship_stance === 'Evasive') {
+            const dx = selfPos.x - targetPos.x, dy = selfPos.y - targetPos.y, len = Math.hypot(dx, dy) || 1;
+            moveGoal = clampToGrid(selfPos.x + dx / len * moveDist, selfPos.y + dy / len * moveDist);
+        }
+        const movedTokens = moveDist > 0 ? moveTokenToward(v.id, moveGoal, moveDist) : null;
         if (movedTokens) { await saveBattleTokens(movedTokens); if (typeof window.terrainFlushDebris === 'function') await window.terrainFlushDebris(); }
         const movedSelfTok = movedTokens ? movedTokens.find(t => t.ship_marker_id === v.id) : null;
         const newSelfPos = movedSelfTok ? { x: movedSelfTok.x, y: movedSelfTok.y } : selfPos;
@@ -2057,11 +2275,11 @@ window.processBattleRoundAutomations = async function() {
             firedAny = true;
         }
         chatLines.push(firedAny
-            ? `🤖 [AI CONTROLLED] ${v.name} engages ${target.name}.`
-            : `🤖 [AI CONTROLLED] ${v.name} closes on ${target.name} but has no weapon in range or arc -- holds fire.`);
+            ? `🤖 [AI CONTROLLED] ${v.name} ${v.ship_stance === 'Evasive' ? 'breaks off, firing on' : 'engages'} ${target.name}.`
+            : `🤖 [AI CONTROLLED] ${v.name} ${v.ship_stance === 'Evasive' ? 'breaks off from' : 'closes on'} ${target.name} but has no weapon in range or arc -- holds fire.`);
 
         // --- Persist target lock (informational) + reset this round's hit tracking ---
-        await db.from('ship_markers').update({ ai_current_target_id: target.id, round_biggest_hit_amount: 0, round_biggest_hit_by: null }).eq('id', v.id);
+        await db.from('ship_markers').update({ ai_current_target_id: target.id, round_biggest_hit_amount: 0, round_biggest_hit_by: null, ship_stance: v.ship_stance || 'Balanced' }).eq('id', v.id);
         Object.assign(v, { ai_current_target_id: target.id, round_biggest_hit_amount: 0, round_biggest_hit_by: null });
       } catch (err) {
         console.error('processBattleRoundAutomations: AI-controlled ship resolution failed, skipping this ship this round', err);
