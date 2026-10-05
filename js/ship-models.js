@@ -187,6 +187,35 @@ window.handleModelPickerUpload = async function (prefix, k, input) {
         if (status) status.textContent = '⚠ ' + err.message;
     } finally { input.value = ''; }
 };
+/* Model follow-through (2026-10-04, DM): a ship gets its design's model
+   copied at deploy, so a model added to a design later never reached ships
+   already deployed from it. Ships now remember their design
+   (ship_markers.template_id, set by deployShipTemplate; older ships were
+   back-filled by name). After a design's model changes, this offers to copy
+   it to those ships -- skipping any ship that carries its OWN different model
+   (a per-ship override set in EDIT BASE STATS). `before` = the design's
+   model fields before the save. Returns how many ships were updated. */
+const MODEL_KEYS = ['model_url', 'model_lite_url', 'model_yaw_offset', 'model_scale'];
+const modelSig = (o) => o ? JSON.stringify([o.model_url || null, o.model_lite_url || null, Number(o.model_yaw_offset) || 0, Number(o.model_scale) || 1]) : '';
+window.offerModelToDeployedShips = async function (template, before, after) {
+    if (!template || !after || currentUserRole !== 'dm') return 0;
+    if (modelSig(before) === modelSig(after)) return 0;
+    const ships = (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).filter(m =>
+        m.template_id === template.id && !m.is_strike_craft &&
+        ((!m.model_url && !m.model_lite_url) || modelSig(m) === modelSig(before)));
+    if (ships.length === 0) return 0;
+    const n = ships.length;
+    const ask = `Apply this 3D model to the ${n} ship${n === 1 ? '' : 's'} already deployed from "${template.name}"? (Ships with their own different model are left alone.)`;
+    const ok = typeof window.showConfirmModal === 'function' ? await window.showConfirmModal(ask) : window.confirm(ask);
+    if (!ok) return 0;
+    const fields = {};
+    MODEL_KEYS.forEach(k => { fields[k] = after[k] === undefined ? null : after[k]; });
+    const { error } = await db.from('ship_markers').update(fields).in('id', ships.map(m => m.id));
+    if (error) { alert('Failed to update the deployed ships: ' + error.message); return 0; }
+    ships.forEach(m => Object.assign(m, fields));
+    if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
+    return n;
+};
 window.readModelPicker = function (prefix) {
     if (!document.getElementById(`${prefix}-model`)) return undefined;
     const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };

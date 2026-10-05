@@ -274,6 +274,7 @@ window.deployShipTemplate = async function(id, opts) {
         image_url: t.image_url || null,
         // Phase 6c (2026-10-03): the 3D model travels the same way (DM
         // decision: model on the template, per-ship override in EDIT BASE STATS).
+        template_id: t.id, // 2026-10-04: lets a later model change on the design reach this ship
         model_url: t.model_url || null,
         model_lite_url: t.model_lite_url || null,
         model_yaw_offset: t.model_yaw_offset || 0,
@@ -398,9 +399,13 @@ window.deployShipTemplate = async function(id, opts) {
             if (tmplSides) { updates.max_armor_sides = tmplSides; updates.max_hardened = window.sumArmorSides(tmplSides); }
             // Phase 6c: 3D model (DM only -- undefined when the picker isn't shown).
             if (typeof window.readModelPicker === 'function') Object.assign(updates, window.readModelPicker('tmpl') || {});
+            const tmplBefore = findAnyTemplateById(currentId);
+            const modelBefore = tmplBefore ? { model_url: tmplBefore.model_url, model_lite_url: tmplBefore.model_lite_url, model_yaw_offset: tmplBefore.model_yaw_offset, model_scale: tmplBefore.model_scale } : null;
             const { error } = await db.from('ship_templates').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
             overlay.style.display = 'none';
+            // 2026-10-04: offer the new model to ships already deployed from this design.
+            if (tmplBefore && 'model_url' in updates && typeof window.offerModelToDeployedShips === 'function') await window.offerModelToDeployedShips(tmplBefore, modelBefore, updates);
             if (typeof loadShipTemplates === 'function') loadShipTemplates();
             if (typeof loadSecretShipTemplates === 'function') loadSecretShipTemplates();
         });
@@ -1251,9 +1256,12 @@ window.saveSecretRepoIdentityStats = async function() {
     const repoSides = typeof window.readArmorSideInputs === 'function' ? window.readArmorSideInputs('repo-edit') : undefined;
     if (repoSides) { payload.max_armor_sides = repoSides; payload.max_hardened = window.sumArmorSides(repoSides); }
     if (typeof window.readModelPicker === 'function') Object.assign(payload, window.readModelPicker('repo') || {}); // Phase 6c
+    const repoModelBefore = { model_url: t.model_url, model_lite_url: t.model_lite_url, model_yaw_offset: t.model_yaw_offset, model_scale: t.model_scale };
     const { error } = await db.from('ship_templates').update(payload).eq('id', editingRepoTemplateId);
     if (error) { alert("Failed to save template: " + error.message); return; }
     Object.assign(t, payload);
+    // 2026-10-04: offer the new model to ships already deployed from this design.
+    if ('model_url' in payload && typeof window.offerModelToDeployedShips === 'function') await window.offerModelToDeployedShips(t, repoModelBefore, payload);
     window.renderSecretRepoEditorPanel();
     if (typeof window.renderSecretRepositoryPanel === 'function') window.renderSecretRepositoryPanel();
     if (window.AudioEngine) window.AudioEngine.playPing();
