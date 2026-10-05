@@ -196,13 +196,16 @@ window.handleModelPickerUpload = async function (prefix, k, input) {
    (a per-ship override set in EDIT BASE STATS). `before` = the design's
    model fields before the save. Returns how many ships were updated. */
 const MODEL_KEYS = ['model_url', 'model_lite_url', 'model_yaw_offset', 'model_scale'];
+// A ship counts as "using the design's model" when it has the same FILES
+// (turn / size may differ -- fixing those is what this is usually for).
+const fileSig = (o) => o ? JSON.stringify([o.model_url || null, o.model_lite_url || null]) : '';
 const modelSig = (o) => o ? JSON.stringify([o.model_url || null, o.model_lite_url || null, Number(o.model_yaw_offset) || 0, Number(o.model_scale) || 1]) : '';
 window.offerModelToDeployedShips = async function (template, before, after) {
     if (!template || !after || currentUserRole !== 'dm') return 0;
     if (modelSig(before) === modelSig(after)) return 0;
     const ships = (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).filter(m =>
         m.template_id === template.id && !m.is_strike_craft &&
-        ((!m.model_url && !m.model_lite_url) || modelSig(m) === modelSig(before)));
+        ((!m.model_url && !m.model_lite_url) || fileSig(m) === fileSig(before)));
     if (ships.length === 0) return 0;
     const n = ships.length;
     const ask = `Apply this 3D model to the ${n} ship${n === 1 ? '' : 's'} already deployed from "${template.name}"? (Ships with their own different model are left alone.)`;
