@@ -217,12 +217,5 @@ function sync() {
 window.battleTutorialSync = sync;
 window.__battleTutorialState = state; // tests
 
-const orig = window.renderBattleMapPanel;
-if (typeof orig === 'function') {
-    window.renderBattleMapPanel = function () {
-        const r = orig.apply(this, arguments);
-        try { sync(); } catch (e) { console.error('battle tutorial:', e); }
-        return r;
-    };
-}
+window.onBattleMapRender('battle-tutorial', sync, 100);
 })();

@@ -150,13 +150,6 @@ function sync() {
 }
 window.battleChromeSync = sync;
 
-const orig = window.renderBattleMapPanel;
-if (typeof orig === 'function') {
-    window.renderBattleMapPanel = function () {
-        const r = orig.apply(this, arguments);
-        try { sync(); } catch (e) { console.error('battle chrome:', e); }
-        return r;
-    };
-}
+window.onBattleMapRender('battle-chrome', sync, 50);
 document.addEventListener('darkforest:features-changed', () => { try { sync(); } catch (e) {} });
 })();

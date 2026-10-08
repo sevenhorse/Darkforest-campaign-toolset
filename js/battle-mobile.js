@@ -109,14 +109,7 @@ function sync() {
 window.battleMobileSync = sync;
 
 // Run after every Battle Map render (battle-chrome may rebuild the bar).
-const orig = window.renderBattleMapPanel;
-if (typeof orig === 'function') {
-    window.renderBattleMapPanel = function () {
-        const r = orig.apply(this, arguments);
-        try { sync(); } catch (e) { console.error('battle mobile:', e); }
-        return r;
-    };
-}
+window.onBattleMapRender('battle-mobile', sync, 90);
 ['setGridTool', 'clearGridTools'].forEach(name => {
     const o = window[name];
     if (typeof o !== 'function' || o.__bmm) return;

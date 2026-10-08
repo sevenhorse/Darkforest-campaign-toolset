@@ -511,14 +511,7 @@ function wireCanvas() {
 window.__bme = { state: E, down: onDown, move: onMove, up: onUp, finishPoly, render: renderEditor };
 
 /* --- Hooks --- */
-const orig = window.renderBattleMapPanel;
-if (typeof orig === 'function') {
-    window.renderBattleMapPanel = function () {
-        const r = orig.apply(this, arguments);
-        try { window.syncBattleTerrain(); ensureDmControls(); } catch (e) { console.error('battle maps:', e); }
-        return r;
-    };
-}
+window.onBattleMapRender('battle-maps', () => { window.syncBattleTerrain(); ensureDmControls(); }, 60);
 document.addEventListener('darkforest:features-changed', async () => {
     try { if (window.battleMapsAllowed() && !(window.battleMapsList || []).length) await window.loadBattleMaps(); ensureDmControls(); } catch (e) {}
 });

@@ -3484,7 +3484,30 @@ window.DomBattleRenderer = DomBattleRenderer;
 window.battleRenderer = DomBattleRenderer;
 
 let lastAnnouncedTurnKey = null;
+/* Battle Map render hooks (consolidation pass, 2026-10-08). Other files used
+   to wrap window.renderBattleMapPanel one inside another, so what ran when
+   depended on script order. Now they register here instead:
+     window.onBattleMapRender(name, fn, order)
+   Every hook runs after each render, lowest `order` first; a hook that
+   throws is logged and the rest still run. Registering the same name again
+   replaces it. */
+const battleRenderHooks = [];
+window.onBattleMapRender = function(name, fn, order) {
+    if (typeof fn !== 'function') return;
+    const i = battleRenderHooks.findIndex(h => h.name === name);
+    if (i >= 0) battleRenderHooks.splice(i, 1);
+    battleRenderHooks.push({ name, fn, order: Number.isFinite(order) ? order : 500 });
+    battleRenderHooks.sort((a, b) => a.order - b.order);
+};
+window.battleMapRenderHookNames = () => battleRenderHooks.map(h => h.name); // tests
 window.renderBattleMapPanel = function() {
+    const r = renderBattleMapPanelCore.apply(this, arguments);
+    for (const h of battleRenderHooks) {
+        try { h.fn(); } catch (err) { console.error(`Battle Map render hook "${h.name}" failed`, err); }
+    }
+    return r;
+};
+const renderBattleMapPanelCore = function() {
     const dmControls = document.getElementById('battle-map-dm-controls');
     const inactiveMsg = document.getElementById('battle-map-inactive-msg');
     const activeContainer = document.getElementById('battle-map-active-container');

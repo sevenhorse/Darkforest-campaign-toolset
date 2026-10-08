@@ -1560,18 +1560,7 @@ function applyMiniSheet() {
     }
 }
 window.battle3dApplyMiniSheet = applyMiniSheet;
-(function hookRender() {
-    const orig = window.renderBattleMapPanel;
-    if (typeof orig !== 'function' || orig.__b3dHooked) return;
-    const hooked = function (...args) {
-        const r = orig.apply(this, args);
-        try { syncView(); applyMiniSheet(); } catch (err) { console.error('3D view: render failed', err); }
-        return r;
-    };
-    hooked.__b3dHooked = true;
-    hooked.__tv2Hooked = orig.__tv2Hooked;
-    window.renderBattleMapPanel = hooked;
-})();
+window.onBattleMapRender('battle-3d', () => { syncView(); applyMiniSheet(); }, 40);
 (function hookSelect() {
     const orig = window.tv2Select;
     if (typeof orig !== 'function' || orig.__b3d) return;

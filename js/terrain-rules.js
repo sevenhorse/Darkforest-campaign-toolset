@@ -323,15 +323,6 @@ function ensureUi() {
     if (wrap) wrap.style.display = window.terrainRulesAllowed() && !e ? 'flex' : 'none';
 }
 window.terrainRulesUi = ensureUi;
-const origRender = window.renderBattleMapPanel;
-if (typeof origRender === 'function') {
-    const wrapped = function () {
-        const r = origRender.apply(this, arguments);
-        try { ensureUi(); } catch (err) { console.error('terrain rules ui', err); }
-        return r;
-    };
-    Object.keys(origRender).forEach(k => { if (!(k in wrapped)) wrapped[k] = origRender[k]; });
-    window.renderBattleMapPanel = wrapped;
-}
+window.onBattleMapRender('terrain-rules', ensureUi, 70);
 document.addEventListener('darkforest:features-changed', () => { try { ensureUi(); } catch (e) {} });
 })();

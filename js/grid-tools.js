@@ -408,22 +408,10 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 /* --- Keep everything in step with Battle Map renders and switch changes --- */
-(function hookRender() {
-    const orig = window.renderBattleMapPanel;
-    if (typeof orig !== 'function' || orig.__gridToolsHooked) return;
-    const hooked = function(...args) {
-        const r = orig.apply(this, args);
-        try {
-            if (!gtOn() || !window.globalBattleEncounterCache) {
-                if (GT.tool || GT.selected.size || GT.tape) { GT.tool = null; GT.tape = null; GT.selected.clear(); }
-            } else { wireGrid(); pruneSelection(); }
-            updateGridToolbar(); drawGridTools(); applySelectionClasses();
-        } catch (err) { console.error('grid tools: render hook failed', err); }
-        return r;
-    };
-    hooked.__gridToolsHooked = true;
-    // keep other hooks' markers (encounter-presets wraps this too)
-    Object.keys(orig).forEach(k => { if (!(k in hooked)) hooked[k] = orig[k]; });
-    window.renderBattleMapPanel = hooked;
-})();
+window.onBattleMapRender('grid-tools', () => {
+    if (!gtOn() || !window.globalBattleEncounterCache) {
+        if (GT.tool || GT.selected.size || GT.tape) { GT.tool = null; GT.tape = null; GT.selected.clear(); }
+    } else { wireGrid(); pruneSelection(); }
+    updateGridToolbar(); drawGridTools(); applySelectionClasses();
+}, 20);
 document.addEventListener('darkforest:features-changed', () => { updateGridToolbar(); drawGridTools(); });

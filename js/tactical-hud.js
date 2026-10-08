@@ -410,16 +410,5 @@ function renderTv2() {
 }
 window.tv2Render = renderTv2;
 
-(function hookRender() {
-    const orig = window.renderBattleMapPanel;
-    if (typeof orig !== 'function' || orig.__tv2Hooked) return;
-    const hooked = function(...args) {
-        const r = orig.apply(this, args);
-        try { renderTv2(); } catch (err) { console.error('tactical HUD: render failed', err); }
-        return r;
-    };
-    Object.keys(orig).forEach(k => { hooked[k] = orig[k]; });
-    hooked.__tv2Hooked = true;
-    window.renderBattleMapPanel = hooked;
-})();
+window.onBattleMapRender('tactical-hud', renderTv2, 30);
 // (switch changes: battle-map.js already re-renders the Battle Map on darkforest:features-changed)

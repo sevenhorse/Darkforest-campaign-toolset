@@ -639,19 +639,11 @@ function openWavesPopup() {
 function closeWavesPopup() { const b = document.getElementById('battle-waves-popup'); if (b) b.remove(); }
 
 // Keep the buttons in step with every Battle Map render and with switch changes.
-(function hookBattleMapRender() {
-    const orig = window.renderBattleMapPanel;
-    if (typeof orig !== 'function' || orig.__presetsHooked) return;
-    const hooked = function(...args) {
-        const r = orig.apply(this, args);
-        const enc = window.globalBattleEncounterCache;
-        if (currentUserRole === 'dm' && enc && pendingReinforcementsEncounterId !== enc.id) window.refreshPendingReinforcements(false);
-        else updatePresetButtons();
-        return r;
-    };
-    hooked.__presetsHooked = true;
-    window.renderBattleMapPanel = hooked;
-})();
+window.onBattleMapRender('encounter-presets', () => {
+    const enc = window.globalBattleEncounterCache;
+    if (currentUserRole === 'dm' && enc && pendingReinforcementsEncounterId !== enc.id) window.refreshPendingReinforcements(false);
+    else updatePresetButtons();
+}, 10);
 document.addEventListener('darkforest:features-changed', updatePresetButtons);
 
 // Full undo (Phase 4a): a manually deployed wave is one undoable step

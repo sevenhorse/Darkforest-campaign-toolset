@@ -1115,14 +1115,7 @@ function ensureBattleButtons() {
     }
     if (b) b.style.display = ok && window.globalBattleEncounterCache ? 'inline-block' : 'none';
 }
-const origBattle = window.renderBattleMapPanel;
-if (typeof origBattle === 'function') {
-    window.renderBattleMapPanel = function () {
-        const r = origBattle.apply(this, arguments);
-        try { ensureBattleButtons(); } catch (e) {}
-        return r;
-    };
-}
+window.onBattleMapRender('deck-plans', ensureBattleButtons, 80);
 const origTracker = window.renderCombatTracker;
 if (typeof origTracker === 'function') {
     window.renderCombatTracker = function () {
