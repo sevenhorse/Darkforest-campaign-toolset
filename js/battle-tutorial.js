@@ -144,7 +144,7 @@ const BATTLE_TUTORIAL_STEPS = [
         title: 'Tactical stance',
         target: '#tv2-hud',
         before: () => setSheet(false),
-        body: 'Each ship has a stance, set in <b>FULL SHEET</b>. <b>Aggressive</b>: deals 25% more damage but takes 25% more. <b>Defensive</b>: deals and takes 25% less. <b>Evasive</b>: takes half damage. <b>Balanced</b> is the default.'
+        body: 'Each ship has a stance, set in <b>FULL SHEET</b>. <b>Aggressive</b>: deals 25% more damage but takes 25% more. <b>Defensive</b>: deals and takes 25% less. <b>Evasive</b>: deals and takes half damage. <b>Balanced</b> is the default.'
     },
     {
         title: '2D and 3D views',

@@ -605,7 +605,7 @@ window.renderShipStanceHtml = function(vessel) {
                 <option value="Balanced" ${currentStance === 'Balanced' ? 'selected' : ''}>Balanced (Standard)</option>
                 <option value="Aggressive" ${currentStance === 'Aggressive' ? 'selected' : ''}>Aggressive (+Dmg, -Def)</option>
                 <option value="Defensive" ${currentStance === 'Defensive' ? 'selected' : ''}>Defensive (+Def, -Dmg)</option>
-                <option value="Evasive" ${currentStance === 'Evasive' ? 'selected' : ''}>Evasive (Dodge Focus)</option>
+                <option value="Evasive" ${currentStance === 'Evasive' ? 'selected' : ''}>Evasive (½ Dmg dealt &amp; taken)</option>
             </select>
             ${classBadge}
         </div>
@@ -1885,6 +1885,7 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     let stance = vessel.ship_stance || 'Balanced';
     if (stance === 'Aggressive') { total = Math.floor(total * 1.25); breakdown.push(`[Aggressive: +25%]`); } 
     else if (stance === 'Defensive') { total = Math.floor(total * 0.75); breakdown.push(`[Defensive: -25%]`); }
+    else if (stance === 'Evasive') { total = Math.floor(total * 0.50); breakdown.push(`[Evasive: -50%]`); } // 2026-10-08 (DM): Evasive halves damage dealt as well as taken
 
     if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
     const breakdownText = breakdown.join(' + ');
@@ -2604,6 +2605,7 @@ window.applyManualDamage = async function() {
     let stance = vessel.ship_stance || 'Balanced';
     if (stance === 'Aggressive') { total = Math.floor(total * 1.25); }
     else if (stance === 'Defensive') { total = Math.floor(total * 0.75); }
+    else if (stance === 'Evasive') { total = Math.floor(total * 0.50); }
 
     let tStance = targetShip.ship_stance || 'Balanced';
     if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
