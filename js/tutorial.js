@@ -154,8 +154,8 @@ const TUTORIAL_STEPS = [
         title: 'Combat and the Battle Map',
         target: () => tutorialFindButton('#bottom-toggle-bar', 'BATTLE MAP'),
         before: () => tutorialHidePanel('comms-array-panel'),
-        body: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then click the grid to put it there. <b>Drag</b> your token to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: each action costs 1 <b>AP</b> (Action Point), and <b>END TURN</b> passes to the next unit. <b>COMBAT</b> opens the initiative tracker for personal fights.',
-        mobileBody: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then tap the grid to put it there. <b>Drag</b> your token with a finger to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: each action costs 1 <b>AP</b> (Action Point), and <b>END TURN</b> passes to the next unit. <b>COMBAT</b> opens the initiative tracker for personal fights.'
+        body: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then click the grid to put it there. <b>Drag</b> your token to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: each action costs 1 <b>AP</b> (Action Point), and <b>END TURN</b> passes to the next unit. <b>COMBAT</b> opens the initiative tracker for personal fights. The Battle Map has its own tour: <b>? TUTORIAL</b> in its header while a battle is running.',
+        mobileBody: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then tap the grid to put it there. <b>Drag</b> your token with a finger to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: each action costs 1 <b>AP</b> (Action Point), and <b>END TURN</b> passes to the next unit. <b>COMBAT</b> opens the initiative tracker for personal fights. The Battle Map has its own tour: <b>? TUTORIAL</b> in its header while a battle is running.'
     },
     {
         title: 'Salvage',
@@ -197,7 +197,10 @@ function tutorialHidePanel(id) {
 }
 
 // ---- tour machinery ----
-const tutorialState = { active: false, index: 0, opened: new Set(), els: null, prevTermTab: null };
+// Several tours share this machinery (2026-10-08: the Battle Map tour, js/battle-tutorial.js).
+// startTutorial({ steps, seenKey, onEnd }) runs one; no argument = the main tour.
+// A step may carry only: 'mobile' | 'desktop' to show on one kind of screen.
+const tutorialState = { active: false, index: 0, opened: new Set(), els: null, prevTermTab: null, steps: TUTORIAL_STEPS, seenKey: TUTORIAL_SEEN_KEY, onEnd: null };
 
 function tutorialEnsureEls() {
     if (tutorialState.els) return tutorialState.els;
@@ -225,7 +228,7 @@ function tutorialEnsureEls() {
     card.querySelector('#tutorial-skip-btn').addEventListener('click', () => window.endTutorial());
     card.querySelector('#tutorial-back-btn').addEventListener('click', () => tutorialGo(tutorialState.index - 1));
     card.querySelector('#tutorial-next-btn').addEventListener('click', () => {
-        if (tutorialState.index >= TUTORIAL_STEPS.length - 1) window.endTutorial();
+        if (tutorialState.index >= tutorialState.steps.length - 1) window.endTutorial();
         else tutorialGo(tutorialState.index + 1);
     });
     // The blocker swallows clicks so nothing underneath fires mid-tour.
@@ -247,7 +250,7 @@ function tutorialResolveTarget(step) {
 function tutorialPlace() {
     if (!tutorialState.active) return;
     const { spot, card } = tutorialEnsureEls();
-    const step = TUTORIAL_STEPS[tutorialState.index];
+    const step = tutorialState.steps[tutorialState.index];
     const el = tutorialResolveTarget(step);
     const vw = window.innerWidth, vh = window.innerHeight;
     const mobile = tutorialIsMobile();
@@ -287,9 +290,9 @@ function tutorialPlace() {
 }
 
 function tutorialGo(i) {
-    if (i < 0 || i >= TUTORIAL_STEPS.length) return;
+    if (i < 0 || i >= tutorialState.steps.length) return;
     tutorialState.index = i;
-    const step = TUTORIAL_STEPS[i];
+    const step = tutorialState.steps[i];
     try { if (step.before) step.before(); } catch (e) { console.error('Tutorial step setup failed (continuing):', e); }
 
     // Phones: things in the top/bottom bars and the telemetry panel live in
@@ -312,11 +315,11 @@ function tutorialGo(i) {
     } catch (e) {}
 
     const { card } = tutorialEnsureEls();
-    card.querySelector('#tutorial-card-count').textContent = `STEP ${i + 1} / ${TUTORIAL_STEPS.length}`;
+    card.querySelector('#tutorial-card-count').textContent = `STEP ${i + 1} / ${tutorialState.steps.length}`;
     card.querySelector('#tutorial-card-title').textContent = step.title;
     card.querySelector('#tutorial-card-body').innerHTML = (tutorialIsMobile() && step.mobileBody) ? step.mobileBody : step.body;
     card.querySelector('#tutorial-back-btn').disabled = i === 0;
-    card.querySelector('#tutorial-next-btn').textContent = i === TUTORIAL_STEPS.length - 1 ? 'FINISH ✓' : 'NEXT ▶';
+    card.querySelector('#tutorial-next-btn').textContent = i === tutorialState.steps.length - 1 ? 'FINISH ✓' : 'NEXT ▶';
     // Let any panel/tab the step just opened lay out (and the drawer slide in) before measuring.
     tutorialPlace();
     setTimeout(tutorialPlace, 60);
@@ -326,13 +329,18 @@ function tutorialGo(i) {
 function tutorialOnKey(e) {
     if (!tutorialState.active) return;
     if (e.key === 'Escape') { e.preventDefault(); window.endTutorial(); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); if (tutorialState.index < TUTORIAL_STEPS.length - 1) tutorialGo(tutorialState.index + 1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); if (tutorialState.index < tutorialState.steps.length - 1) tutorialGo(tutorialState.index + 1); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); tutorialGo(tutorialState.index - 1); }
 }
 function tutorialOnResize() { if (tutorialState.active) tutorialPlace(); }
 
-window.startTutorial = function() {
+window.startTutorial = function(opts) {
     if (tutorialState.active) return;
+    opts = (opts && Array.isArray(opts.steps)) ? opts : {};
+    const mobile = tutorialIsMobile();
+    tutorialState.steps = (opts.steps || TUTORIAL_STEPS).filter(st => !st.only || (st.only === 'mobile') === mobile);
+    tutorialState.seenKey = opts.seenKey || TUTORIAL_SEEN_KEY;
+    tutorialState.onEnd = typeof opts.onEnd === 'function' ? opts.onEnd : null;
     const els = tutorialEnsureEls();
     const activeTab = document.querySelector('.term-tab-btn-vert.active');
     tutorialState.prevTermTab = activeTab ? activeTab.id.replace('term-tab-btn-', '') : null;
@@ -348,7 +356,7 @@ window.startTutorial = function() {
 window.endTutorial = function() {
     if (!tutorialState.active) return;
     tutorialState.active = false;
-    try { localStorage.setItem(TUTORIAL_SEEN_KEY, 'true'); } catch (e) {}
+    try { localStorage.setItem(tutorialState.seenKey, 'true'); } catch (e) {}
     const { blocker, spot, card } = tutorialEnsureEls();
     blocker.style.display = 'none'; spot.style.display = 'none'; card.style.display = 'none';
     document.removeEventListener('keydown', tutorialOnKey);
@@ -362,7 +370,10 @@ window.endTutorial = function() {
     tutorialState.opened.forEach(id => { if (id !== 'terminal' && id !== 'drawer') { const p = document.getElementById(id); if (p) p.style.display = 'none'; } });
     if (tutorialState.opened.has('drawer') && typeof window.toggleMobileNav === 'function') window.toggleMobileNav(false);
     tutorialState.opened = new Set();
+    const onEnd = tutorialState.onEnd; tutorialState.onEnd = null;
+    if (onEnd) { try { onEnd(); } catch (e) { console.error('tutorial onEnd failed', e); } }
 };
+window.tutorialActive = function() { return tutorialState.active; };
 
 // Called from js/db.js once login finishes. Players only, once per device.
 window.maybeAutoStartTutorial = function() {

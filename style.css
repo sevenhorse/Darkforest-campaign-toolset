@@ -1787,6 +1787,6 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 #battle-map-panel.bmm:not(.bmm-more-open) #battle-map-log-btn, #battle-map-panel.bmm:not(.bmm-more-open) #battle-map-maps-btn,
 #battle-map-panel.bmm:not(.bmm-more-open) #battle-map-presets-btn, #battle-map-panel.bmm:not(.bmm-more-open) #battle-terrain-chip,
 #battle-map-panel.bmm:not(.bmm-more-open) #battle-terrain-gear, #battle-map-panel.bmm:not(.bmm-more-open) #deck-plans-btn,
-#battle-map-panel.bmm:not(.bmm-more-open) #battle-map-end-btn { display: none !important; }
+#battle-map-panel.bmm:not(.bmm-more-open) #battle-map-end-btn, #battle-map-panel.bmm:not(.bmm-more-open) #btut-btn { display: none !important; }
 #battle-map-panel.bmm.bmm-more-open .bmm-more { background: rgba(0, 225, 255, 0.16) !important; }
 #battle-map-panel.bmm .b3d-toolbar { right: 34px; }   /* keep the 3D buttons clear of the scroll strip */
