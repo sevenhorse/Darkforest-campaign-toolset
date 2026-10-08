@@ -1743,3 +1743,50 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .tr-row input { width: 110px; flex-shrink: 0; margin: 0; background: #050b0e; border: 1px solid rgba(0, 225, 255, 0.3); color: #d4e4ea; font-family: inherit; padding: 5px 8px; text-align: right; }
 .tr-kinds { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 10px; color: #b8cbd2; }
 .tr-kinds input { width: auto; margin: 0 4px 0 0; accent-color: #00e1ff; }
+
+/* ===== Phones: Battle Map scrolling (js/battle-mobile.js, 2026-10-08) =====
+   One scroller (the panel itself) instead of three nested ones, a compact
+   header, the map first and sized to the screen, a scroll strip and the map
+   lock. Class .bmm is only set at <= 768 px wide. */
+.bmm-lock, .bmm-strip, .bmm-more { display: none; }
+#battle-map-panel.bmm { overflow-y: auto !important; overflow-x: hidden !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#battle-map-panel.bmm #battle-map-active-container, #battle-map-panel.bmm .battle-map-layout, #battle-map-panel.bmm .battle-map-left-col {
+    overflow: visible !important; max-height: none !important; height: auto !important; }
+#battle-map-panel.bmm .battle-map-left-col { order: -1; }   /* map above DEPLOY / COMMS */
+/* fit to screen */
+#battle-map-panel.bmm .b3d-view { height: var(--bmm-map-h, 50vh) !important; }
+#battle-map-panel.bmm #battle-map-grid-wrap { height: var(--bmm-map-h, 50vh) !important; }
+#battle-map-panel.bmm #battle-map-stage { position: relative; }
+/* map lock: one-finger swipes scroll the page */
+#battle-map-panel.bmm.bmm-locked .b3d-view { touch-action: pan-y pinch-zoom; }
+#battle-map-panel.bmm.bmm-locked #battle-map-grid-wrap { overflow: hidden !important; touch-action: pan-y; }
+#battle-map-panel.bmm .bmm-lock { display: block; position: absolute; left: 6px; top: 46px; z-index: 40; width: auto; height: 34px; margin: 0; padding: 0 10px;
+    font-family: inherit; font-size: 10px; letter-spacing: 0.12em; border-radius: 0; background: rgba(3, 10, 14, 0.88); border: 1px solid #ffd24a; color: #ffd24a; }
+#battle-map-panel.bmm:not(.bmm-locked) .bmm-lock { border-color: #00e5a3; color: #00e5a3; }
+/* scroll strip down the right edge of the map */
+#battle-map-panel.bmm .bmm-strip { display: block; position: absolute; top: 0; right: 0; bottom: 0; width: 30px; z-index: 39; touch-action: pan-y;
+    background: repeating-linear-gradient(180deg, rgba(0, 225, 255, 0.10) 0 2px, transparent 2px 14px), rgba(3, 10, 14, 0.55);
+    border-left: 1px dashed rgba(0, 225, 255, 0.35); }
+#battle-map-panel.bmm .bmm-strip::after { content: '⇕'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: rgba(0, 225, 255, 0.7); font-size: 16px; }
+/* compact header: name + ⋯ + close, the turn bar, then ONE swipeable row of buttons */
+#battle-map-panel.bmm .bmx-bar { gap: 6px; padding: 6px 8px; margin-bottom: 8px; }
+#battle-map-panel.bmm .bmx-id { order: 0; flex: 1 1 0; min-width: 0; }
+#battle-map-panel.bmm #battle-map-encounter-name { font-size: 14px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+#battle-map-panel.bmm .bmm-more { display: block; order: 1; font-size: 18px !important; letter-spacing: 0 !important; min-width: 40px; }
+#battle-map-panel.bmm .bmx-bar button.bmx-close { order: 2; font-size: 0 !important; min-width: 40px; margin-right: 42px !important; } /* clear of the app's ☰ button */
+#battle-map-panel.bmm .bmx-bar button.bmx-close::before { content: '✕'; font-size: 16px; }
+#battle-map-panel.bmm .bmx-chip, #battle-map-panel.bmm #bmx-turn-slot { order: 3; }
+#battle-map-panel.bmm #bmx-turn-slot { flex: 1 1 100%; }
+#battle-map-panel.bmm .bmx-grow { display: none; }
+#battle-map-panel.bmm #bmx-btn-slot { order: 4; flex: 1 1 100%; min-width: 0; }
+#battle-map-panel.bmm #bmx-btn-slot .bmx-btns { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
+#battle-map-panel.bmm #bmx-btn-slot .bmx-btns::-webkit-scrollbar { display: none; }
+#battle-map-panel.bmm #bmx-btn-slot .bmx-btns > * { flex: 0 0 auto; }
+#battle-map-panel.bmm.bmm-more-open #bmx-btn-slot .bmx-btns { flex-wrap: wrap; overflow-x: visible; }
+#battle-map-panel.bmm .bmx-bar button, #battle-map-panel.bmm #battle-tools-bar button { height: 36px !important; white-space: nowrap; }
+#battle-map-panel.bmm:not(.bmm-more-open) #battle-map-log-btn, #battle-map-panel.bmm:not(.bmm-more-open) #battle-map-maps-btn,
+#battle-map-panel.bmm:not(.bmm-more-open) #battle-map-presets-btn, #battle-map-panel.bmm:not(.bmm-more-open) #battle-terrain-chip,
+#battle-map-panel.bmm:not(.bmm-more-open) #battle-terrain-gear, #battle-map-panel.bmm:not(.bmm-more-open) #deck-plans-btn,
+#battle-map-panel.bmm:not(.bmm-more-open) #battle-map-end-btn { display: none !important; }
+#battle-map-panel.bmm.bmm-more-open .bmm-more { background: rgba(0, 225, 255, 0.16) !important; }
+#battle-map-panel.bmm .b3d-toolbar { right: 34px; }   /* keep the 3D buttons clear of the scroll strip */

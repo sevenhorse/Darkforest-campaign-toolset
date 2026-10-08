@@ -1297,6 +1297,8 @@ function onDown(e) {
     }
     if (ps.length > 2) return;
     const base = { sx: e.clientX, sy: e.clientY, moved: false, button: e.button || 0 };
+    // Phones (js/battle-mobile.js): while the map is LOCKED a one-finger drag scrolls the page (touch-action pan-y); taps still work.
+    base.locked = e.pointerType === 'touch' && typeof window.battleMapTouchLocked === 'function' && window.battleMapTouchLocked();
     const tool = tool3d();
     if (tool === 'tape' && base.button === 0 && !e.shiftKey) {
         const pk = window.battle3dPickToken(e.clientX, e.clientY);
@@ -1355,7 +1357,7 @@ function onMove(e) {
     }
     const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
     if (Math.abs(dx) > 5 || Math.abs(dy) > 5) d.moved = true;
-    if (!d.moved) return;
+    if (!d.moved || d.locked) return;
     if (d.kind === 'orbit') {
         B3.cam.yaw = d.yaw0 - dx * 0.35;
         B3.cam.pitch = Math.max(12, Math.min(89.5, d.pitch0 + dy * 0.3));
@@ -1453,6 +1455,7 @@ function onUp(e) {
     B3.drag = null;
     clearGroup(B3.groups.preview);
     B3.previewLabels = [];
+    if (d.locked && d.moved) { syncScene(); return; } // a page-scroll swipe on a locked map: not a tap, not a move
     if (d.kind === 'ship') {
         if (!d.moved) {
             B3.selectedLocal = d.vesselId;

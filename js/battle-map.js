@@ -2992,6 +2992,7 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     let isDragging = false, moved = false, startX, startY, initialLeft, initialTop;
     let dragMode = 'tap', blockReason = '', moveRule = null;
     let lastTouchX = 0, lastTouchY = 0, lastTouchEndAt = 0;
+    let pressIsTouch = false; // phones: a touch press on a LOCKED map is tap-only (js/battle-mobile.js)
     // Phase 6a: the move rules now live in shared functions (battleMoveRule /
     // battleConstrainMove / battleCommitMove / battleTokenTapped, just below
     // this function) so the 3D Command view applies exactly the same rules.
@@ -3004,6 +3005,7 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         initialTop = moveRule.y0 !== null ? moveRule.y0 : (parseFloat(tokenEl.style.top) || 0);
         moveRule.x0 = initialLeft; moveRule.y0 = initialTop;
         dragMode = moveRule.mode; blockReason = moveRule.blockReason;
+        if (pressIsTouch && typeof window.battleMapTouchLocked === 'function' && window.battleMapTouchLocked()) { dragMode = 'tap'; blockReason = ''; }
         // Suspend the CSS position transition (see .battle-token-el in
         // style.css) for the duration of this drag -- otherwise every move
         // write would animate TOWARD the new value instead of tracking the
@@ -3043,6 +3045,7 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     tokenEl.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         if (Date.now() - lastTouchEndAt < 800) return; // browser's synthetic mouse event after a touch -- already handled
+        pressIsTouch = false;
         beginDrag(e.clientX, e.clientY);
         const onMove = (moveEvt) => moveDrag(moveEvt.clientX, moveEvt.clientY);
         const onUp = (upEvt) => {
@@ -3056,6 +3059,7 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         e.stopPropagation();
         const t = e.touches[0];
         lastTouchX = t.clientX; lastTouchY = t.clientY;
+        pressIsTouch = true;
         beginDrag(t.clientX, t.clientY);
     }, { passive: true });
     tokenEl.addEventListener('touchmove', (e) => {

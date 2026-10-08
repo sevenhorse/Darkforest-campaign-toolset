@@ -372,6 +372,7 @@ function onGridPress(e, isTouch) {
         });
         return;
     }
+    if (isTouch && typeof window.battleMapTouchLocked === 'function' && window.battleMapTouchLocked()) return; // phones: locked map, swipes scroll the page
     if (tok && !onKnob && GT.selected.has(tok.token_id) && GT.selected.size > 1) {
         stop();
         let dx = 0, dy = 0;
