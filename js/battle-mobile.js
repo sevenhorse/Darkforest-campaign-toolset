@@ -1,9 +1,8 @@
 /* ==========================================================================
-   js/battle-mobile.js - Battle Map on phones (2026-10-08)
+   js/battle-mobile.js - Battle Map on phones
    ==========================================================================
-   DM report: on a phone the page was hard to scroll in a battle -- the header
-   buttons took ~70% of the first screen and both maps swallowed every swipe
-   (3D orbits, 2D pans the grid). DM picked all four fixes:
+   Keeps the page scrollable during a battle on a phone (the maps otherwise
+   swallow every swipe). Four parts, all DM-chosen:
    1. Compact header: the command-bar buttons become ONE swipeable row; the
       rarely used ones (LOG, MAPS, terrain chip + gear, DECK PLANS, END
       BATTLE) fold behind a "⋯" button. The map also moves above the
@@ -13,13 +12,13 @@
    3. Map lock (🔒 button on the map, starts LOCKED on phones, remembered
       per device): while locked, one-finger swipes on the map scroll the page;
       taps still select / target ships and two fingers still zoom the 3D map.
-      Unlocked = the old behaviour (drag ships, orbit, pan). MEASURE and
+      Unlocked = normal map behaviour (drag ships, orbit, pan). MEASURE and
       SELECT need drags, so the lock is ignored while one of them is on.
    4. Fit to screen: the map's height is the screen height minus the ship
       card at the bottom, instead of a fixed 600 px / 50vh.
    Phones = viewport ≤ 768 px wide (the app's existing breakpoint). Nothing
-   changes on desktop. Hooks: js/battle-3d.js onDown/onMove, js/battle-map.js
-   token touchstart, js/grid-tools.js group drag all ask
+   changes on desktop. Hooks: js/battle-3d.js onDown/onMove,
+   js/battle-movement.js token touchstart, js/grid-tools.js group drag all ask
    window.battleMapTouchLocked(). */
 (function () {
 const LOCK_KEY = 'darkforest_battle_lock';

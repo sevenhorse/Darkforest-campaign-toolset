@@ -1,50 +1,25 @@
 /* ==========================================================================
    js/battle-cards.js - Battle Map ship-status cards (classic look) and the comms dock toggle.
-   Split out of js/battle-map.js (consolidation pass 2, 2026-10-08), code
-   unchanged. Classic script sharing the global scope: loads right after
-   battle-map.js (see index.html for the order).
+   Classic script sharing the global scope: loads right after battle-map.js
+   (see index.html for the order).
    ========================================================================== */
-/* --- SHIP-STATUS CARDS (full-screen build; collapse/expand added later
-   this session per tester feedback) ---
-   Confirmed permission rule: the DM sees full weapon+health detail on every
-   token, no exceptions. A player sees full detail (stance, interactive
-   weapons, editable health bars) on any PLAYER-owned vessel — their own
-   AND allies' (every NPC in this app is owned by the DM's account, so
-   "player-owned" == "owner's profile role !== 'dm'" cleanly separates the
-   two, same heuristic this project already uses for combat_tracker
-   PC-vs-NPC detection). A DM/NPC-owned vessel viewed by a player shows
-   health only — all 5 defensive bars, read-only, no stance selector, no
-   weapons at all. This is a DISPLAY-level rule only, same honor-system
-   trust model as the rest of this app — nothing here changes RLS or adds
-   real access control, it just controls what gets rendered into the DOM.
-
-   Every card now starts COLLAPSED (name + HULL/SHIELDS % only) regardless
-   of the permission tier above, and expands to that same tier's full detail
-   on click — a display-density toggle layered on top of the existing
-   permission split, not a replacement for it. See renderCompactHealthLine /
-   battleMapExpandedCards / window.toggleBattleShipCardExpanded below. */
-// Per-vessel card expand/collapse state, keyed by token_id. Pure
-// client-side UI convenience -- not persisted, not synced between players,
-// resets on page reload -- same "each browser keeps its own not-quite-
-// permanent UI state" spirit as other collapsible bits of this app.
-// Collapsed by default per tester feedback: showing full stance + all 5
-// health bars + the complete weapons list for EVERY engaged vessel at once
-// was "overwhelming" -- see darkforest-architecture-reference.md's Battle
-// Map layout addendum for the full reasoning.
+/* --- SHIP-STATUS CARDS ---
+   Permission rule (DM decision): the DM sees full detail on every token. A
+   player sees full detail (stance, interactive weapons, editable health
+   bars) on any player-owned vessel, their own and allies' ("player-owned" =
+   an owner whose profile role !== 'dm'; NPCs are owned by the DM). An NPC
+   vessel viewed by a player shows the 5 health bars only, read-only.
+   This is display-only: it does not change RLS or add access control.
+   Every card starts collapsed (name + HULL/SHIELDS %) and expands on click
+   to its permission tier's full detail. */
+// Expanded cards, keyed by token_id. Per-browser UI state only: not saved,
+// not synced, resets on reload.
 let battleMapExpandedCards = new Set();
 
-/* Comms & Dice dock (live-session feature request, 2026-09-13: "dice roller
-   chat integrated into the battle map"). Collapsed by default -- same
-   "don't eat vertical space nobody asked to see yet" reasoning as the ship
-   cards' own collapse-by-default above -- and, once opened, forces a fresh
-   renderChatFeed() so the feed's scrollTop-pin recalculates against the
-   dock's REAL now-visible height (its innerHTML was already kept in sync
-   the whole time via renderChatFeed/renderCommsTabBar's mirrored-render
-   approach in js/ui.js even while display:none, but scrollTop math against
-   a hidden 0-height element wouldn't have pinned it to the bottom). See
-   index.html for the dock markup and js/ui.js for the shared
-   render/send functions this reuses (unmodified in spirit, just now
-   rendering into two targets instead of one). */
+/* Comms & Dice dock on the Battle Map (markup in index.html; chat
+   render/send shared with js/ui.js). Collapsed by default. Opening it calls
+   renderChatFeed() again: the feed is kept in sync while hidden, but its
+   scroll-to-bottom can't work on a 0-height element. */
 window.toggleBattleMapCommsDock = function() {
     const body = document.getElementById('bm-comms-dock-body');
     const caret = document.getElementById('bm-comms-dock-caret');
@@ -61,9 +36,8 @@ window.toggleBattleShipCardExpanded = function(tokenId) {
     window.renderBattleShipCards((window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || []);
 };
 
-// One-line HULL/SHIELDS % summary for a collapsed card -- deliberately just
-// these two (not all 5 defensive layers renderShipHealthBarsHtml shows) as
-// the "glance" version; the full breakdown is one click away via expand.
+// One-line HULL/SHIELDS % summary for a collapsed card (the full 5 bars
+// show when expanded).
 function renderCompactHealthLine(vessel) {
     const h_max = vessel.max_hull || 300;
     const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : h_max;
@@ -78,24 +52,15 @@ function renderCompactHealthLine(vessel) {
     </div>`;
 }
 
-// Vessel roster tabs build (live-session feature request, 2026-09-13): see
-// the HTML comment above #battle-map-vessel-tabs in index.html for why this
-// exists and why strike craft need a separate, simpler card type. Tracks
-// which of the 5 tabs is currently showing; persists only for the session
-// (not saved anywhere), same lifetime as battleMapExpandedCards below.
+// Active vessel roster tab (one of 5; see the comment above
+// #battle-map-vessel-tabs in index.html). Not saved; resets on reload.
 window.battleMapVesselTab = window.battleMapVesselTab || 'friendly';
 
-// Buckets a CAPITAL ship into Friendly/Neutral/Hostile. The DM's explicit
-// iff tag (the dropdown built into this card's header, further down) always
-// wins when set -- that control exists specifically so a boarded/captured/
-// revealed vessel can be reclassified mid-fight, and this tab would silently
-// fight that if it used its own separate rule. When iff is unset (the
-// common case -- a player's own ship never needed one before this build),
-// falls back to ownership: player-owned defaults to Friendly, anything else
-// (DM/NPC, still unset) defaults to Neutral rather than assuming Hostile
-// with no DM confirmation. Strike craft use a simpler ownership-only rule
-// (see the sc_friendly/sc_hostile bucketing below) since squadron tokens
-// don't carry an iff value at all.
+// Buckets a capital ship into Friendly/Neutral/Hostile. The DM's iff tag
+// always wins when set (so a captured or revealed vessel can be reclassified
+// mid-fight). Unset: player-owned -> Friendly, otherwise Neutral (never
+// Hostile without the DM saying so). Strike craft have no iff and are
+// bucketed by ownership only (see renderBattleShipCards).
 window.getVesselTabBucket = function(vessel, ownedByPlayer) {
     if (vessel.iff === 'friendly' || vessel.iff === 'neutral' || vessel.iff === 'hostile') return vessel.iff;
     return ownedByPlayer ? 'friendly' : 'neutral';
@@ -110,13 +75,9 @@ window.switchBattleMapVesselTab = function(tab) {
     window.renderBattleShipCards((window.globalBattleEncounterCache && window.globalBattleEncounterCache.tokens) || []);
 };
 
-// New lightweight card for the sc_friendly/sc_hostile tabs (live-session
-// feature request, 2026-09-13). Strike craft were deliberately excluded
-// from the capital-ship card below (see that function's own header comment)
-// because their weapons/stats live entirely in the Hangar Bay panel on
-// their carrier's card, not on a ship_weapons row -- this card is read-only
-// status (name/owner/HP/move/withdraw) for exactly that reason, it doesn't
-// try to grow a weapons section to match.
+// Read-only status card (name/owner/HP/move/withdraw) for the strike-craft
+// tabs. Strike craft have no ship_weapons; they fire from the Hangar Bay
+// panel on their carrier's card.
 function renderStrikeCraftCard(tok, isDm, profiles) {
     const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
     if (!vessel) {
@@ -149,7 +110,7 @@ function renderStrikeCraftCard(tok, isDm, profiles) {
 window.renderBattleShipCards = function(tokens) {
     const container = document.getElementById('battle-map-ship-cards');
     if (!container) return;
-    // Phase 4c: the Vessel HUD replaces these cards (and must be the only
+    // When active, the Vessel HUD replaces these cards (and must be the only
     // place the bm-wpn-* controls exist, or FIRE would read the wrong copy).
     if (typeof window.tv2Active === 'function' && window.tv2Active()) { container.innerHTML = ''; return; }
     const isDm = currentUserRole === 'dm';
@@ -159,20 +120,18 @@ window.renderBattleShipCards = function(tokens) {
 
     tokens = (tokens || []).filter(tok => {
         const v = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
-        // Fog of War build (this session): same visibility rule as the grid
-        // token rendering above -- a hidden vessel gets no status card
-        // either, except for the DM and its own player-owner.
+        // Fog of War: same visibility rule as the grid tokens. A hidden vessel
+        // gets no card except for the DM and its own player-owner.
         if (v && typeof window.isVesselVisibleToMe === 'function' && !window.isVesselVisibleToMe(v)) return false;
         return true;
     });
 
-    // Vessel roster tabs build: bucket every visible token into all 5 tabs
-    // up front (not just the active one) so the tab button counts are
-    // always right, then only render the active bucket's cards below.
+    // Bucket every visible token into all 5 tabs so the tab counts are
+    // right, then render only the active bucket.
     const buckets = { friendly: [], neutral: [], hostile: [], sc_friendly: [], sc_hostile: [] };
     tokens.forEach(tok => {
         const v = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
-        if (!v) { buckets.neutral.push(tok); return; } // missing record -- surfaced under Neutral rather than silently dropped, see the "(vessel record missing...)" card below
+        if (!v) { buckets.neutral.push(tok); return; } // missing record: shown under Neutral as a "(vessel record missing...)" card
         if (v.is_strike_craft) {
             const ownedByPlayer = window.vesselOwnerIds(v).map(id => profiles.find(p => p.id === id)).filter(Boolean).some(p => p.role !== 'dm');
             buckets[ownedByPlayer ? 'sc_friendly' : 'sc_hostile'].push(tok);
@@ -200,10 +159,8 @@ window.renderBattleShipCards = function(tokens) {
         return;
     }
 
-    // Bug-hunt pass (2026-09-24): wrapped in preserveFormState (js/db.js) --
-    // this re-renders on every realtime ship/battle update during combat,
-    // which used to reset the weapon target dropdowns and volley counts a
-    // player was in the middle of setting.
+    // preserveFormState (js/db.js) keeps weapon target dropdowns and volley
+    // counts a player is setting across the realtime re-renders.
     window.preserveFormState(container, () => { container.innerHTML = activeTokens.map(tok => {
         const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
         if (!vessel) {
@@ -219,27 +176,19 @@ window.renderBattleShipCards = function(tokens) {
         const accentColor = fullDetail ? '#00e5a3' : '#ff3333';
         const ownerTag = ownerProfs.length ? ownerProfs.map(p => p.username || 'Commander').join('/') : (isDm ? 'Unowned' : 'Unknown');
         const expanded = battleMapExpandedCards.has(tok.token_id);
-        // Station Designer build: stations are immobile, so the move-
-        // remaining readout is dropped entirely rather than showing a
-        // meaningless "Move 0/0" — matches the Battle Map grid's own
-        // stationary-platform tooltip.
+        // Stations never move, so show STATIONARY instead of a move readout.
         const moveLine = vessel.is_station
             ? `<span style="font-size:9px; color:#6b826a;" title="Stationary platform — no Battle Map movement">🛰 STATIONARY</span>`
             : `<span style="font-size:9px; color:${moveColor};" title="Movement remaining this round (informational — not enforced)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>`;
 
-        // Mid-battle IFF change (live-session feature request, 2026-09-13): DM
-        // asked to be able to flip a ship's Friendly/Hostile/Neutral tag mid-
-        // fight (e.g. a boarded/captured vessel, a reveal). Reuses the exact
-        // same dropdown markup/behavior as the Galaxy Map HUD's own DM-only
-        // IFF box (js/map.js, selected-target 'ship' panel) for consistency —
-        // same window.IFF_COLORS palette, same "-- Unset --" option, same
-        // window.updateShipIff(shipId, newIff) call — just laid out compactly
-        // for this card's header instead of the HUD's full-width panel.
+        // DM-only IFF dropdown for changing a ship's tag mid-battle. Mirrors
+        // the Galaxy Map HUD's IFF box (js/map.js): same IFF_COLORS, options
+        // and window.updateShipIff call, laid out compactly.
         const iffVal = vessel.iff || null;
         const iffColor = iffVal ? ((window.IFF_COLORS && window.IFF_COLORS[iffVal]) || '#00e1ff') : '#6b826a';
         const dmIffBox = isDm ? `<select onchange="window.updateShipIff('${vessel.id}', this.value)" onclick="event.stopPropagation();" style="font-size:8px; padding:2px; background:#0a1410; color:${iffColor}; border:1px solid ${iffColor};" title="DM: change this vessel's IFF tag mid-battle"><option value="" ${!iffVal ? 'selected' : ''} style="color:#6b826a;">-- Unset --</option><option value="friendly" ${iffVal === 'friendly' ? 'selected' : ''} style="color:#00e5a3;">✓ Friendly</option><option value="neutral" ${iffVal === 'neutral' ? 'selected' : ''} style="color:#c9962f;">◌ Neutral</option><option value="hostile" ${iffVal === 'hostile' ? 'selected' : ''} style="color:#ff3333;">⚠ Hostile</option></select>` : '';
 
-        // Firing arcs (Phase 3): heading readout + turn buttons on their own row (empty while the switch is off).
+        // Firing arcs: heading readout + turn buttons on their own row (empty while the feature is off).
         const headingCtl = typeof window.renderHeadingControlsHtml === 'function' ? window.renderHeadingControlsHtml(tok, vessel) : '';
         const headingRow = headingCtl ? `<div style="display:flex; justify-content:flex-end; margin:-2px 0 6px 0;">${headingCtl}</div>` : '';
         const header = `

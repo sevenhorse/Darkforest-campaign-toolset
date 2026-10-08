@@ -1,108 +1,34 @@
 /* ==========================================================================
    js/manufacturing.js - Manufacturing Blueprints & Orders
    ==========================================================================
-   New this session. Gives the Quartermaster/Master Engineer perks'
-   previously-unfulfilled "reduce time and resource cost to manufacture by
-   25%" flavor text a real backing mechanic (both perks were pure flavor
-   text with zero mechanical effect before this build -- see
-   darkforest-architecture-reference.md for the full confirmed design and
-   the perk-data verification that surfaced this before any code was
-   written).
-
-   Shape: a catalog (manufacturing_blueprints) of buildable items, each
-   costing a resource list + a time cost. A player starts a build order
-   from EITHER:
-     - one of their own VESSELS (must have a Manufacturing-type deck --
-       a real, confirmed hard requirement, unlike Fleet Group Production /
-       Salvage Processing which treat a missing deck as "full rate, not a
-       block"). Resources are deducted from that vessel's cargo
-       expendables immediately.
-     - one of their own COLONIES (no deck concept exists for colonies at
-       all -- confirmed exempt from both the deck requirement AND the
-       resource-cost check; a colony order costs time only). Output is
-       delivered to a DM/owner-picked vessel's cargo, reusing the exact
-       vessel-picker the pre-existing "DELIVER TO EXPENDABLES" colony
-       button already uses.
-   Both paths apply the crafting character's own Quartermaster/Master
-   Engineer discount (25%, non-stacking -- takes the MAX across held
-   perks, not a sum, per Master Engineer's own "does not stack" text) to
-   both the resource cost (vessel orders only) and the time cost (both).
-
-   Vessel orders also apply a damage-based time penalty from the
-   Manufacturing deck itself: a damaged deck (below 100% HP) slows the
-   build down, floored at 10% efficiency (worst case, a 10x time
-   penalty) rather than letting duration approach infinity as HP nears
-   zero. This is separate from the discount above and stacks with it
-   (discount shrinks the base time, deck damage then divides the result).
-   Colony orders have no deck at all and are exempt, per the existing
-   colony design.
-   The discount is read via a new perk_definitions.manufacturing_discount_pct
-   dedicated field (matching the existing shield_max_bonus/dr_bonus
-   convention) rather than hardcoding the two perk names in this file.
-
-   MULTI-TIER CRAFTING (added later this session, per the DM's own lore --
-   "the Intrepid Horizon's Manufacturing deck is capable of producing
-   another Jupiter-class vessel if need be, given enough time and
-   resources"): a recipe's resource_cost can now reference ANY other
-   blueprint's cargo output, not just a base-tier raw feedstock. A
-   blueprint's "tier" is derived at display time, never stored: Tier 1 =
-   no resource cost (raw feedstock); Tier N = 1 + the deepest tier among
-   its own inputs. The DM's own "5 layers" guideline is a SOFT warning
-   only (shown in the editor, not enforced) -- consistent with every other
-   Manufacturing action already being DM-trusted rather than code-blocked.
-   Actually spawning a whole new vessel as an output (the literal
-   end-of-chain lore example) is explicitly OUT of scope for this pass --
-   confirmed with the DM as a separate, bigger future feature; today's
-   ceiling for an output is still a cargo item or an Arsenal weapon, same
-   as before. See darkforest-architecture-reference.md for the full
-   confirmed design.
-
-   CARGO CATEGORY (added in the pre-deploy bug-hunt follow-up): a
-   cargo_item output's payload now carries an optional cargo_bucket
-   ('expendables' | 'perishables' | 'misc'), defaulting to 'expendables'
-   when absent so every pre-existing blueprint keeps behaving exactly as
-   before. This exists because the daily rations/starvation check in
-   js/ui.js only ever reads cargo.perishables -- before this, a
-   manufactured food/water blueprint could never reach the bucket that
-   check looks at. Both the delivery step (processManufacturingOrders)
-   and the resource-cost consumption step (startVesselManufacturingOrder)
-   now look across all three buckets by name, not just expendables --
-   necessary so a Tier 2+ recipe can still consume an input that some
-   other blueprint delivers into perishables or misc, not just
-   expendables.
-
-   Orders live in manufacturing_orders as a discrete in-progress row with
-   its own started_at_hours/duration_hours timer -- same shape as
-   battlefield_salvage's gather timer, for the same reason (a one-shot
-   lifecycle, not a recurring rate). A blueprint's output/name/cost are
-   snapshotted onto the order at start time (NOT a live reference), same
-   precedent as launchOrdnance's in-flight-ordnance snapshot, so an edited
-   or deleted blueprint can't corrupt an order already in flight.
-   Completion is fully automatic on time-advance (js/ui.js
-   processTimeAdvancement calls window.processManufacturingOrders on
-   EVERY tick, not just daily ones, mirroring processSalvageGatherCompletion
-   exactly -- a build's duration can be sub-day).
+   A catalog (manufacturing_blueprints) of buildable items, each with a
+   resource cost and a time cost. A build starts from:
+     - a VESSEL: needs a Manufacturing-type deck (hard requirement). Costs
+       come out of the vessel's cargo at once. A damaged deck slows the build.
+     - a COLONY: no deck. Uses colony storage only with a Manufacturing
+       Facility and enough stock, else time-only. Output goes to a picked vessel.
+   Quartermaster/Master Engineer perks discount cost and time via
+   perk_definitions.manufacturing_discount_pct (max across perks, not summed).
+   Outputs: a cargo item (optional cargo_bucket, default 'expendables'; the
+   rations check in js/ui.js reads perishables), an Arsenal weapon, or colony
+   infrastructure. Orders snapshot the blueprint's name/output/cost at start,
+   so editing or deleting a blueprint can't affect an order in flight.
+   js/ui.js processTimeAdvancement calls processManufacturingOrders on every
+   tick, since builds can be sub-day.
    ========================================================================== */
 
-/* PRODUCTION LINES (balance pass, 2026-10-03, DM-approved): each
-   Manufacturing-type deck on a vessel is ONE production line; a colony with
-   a Manufacturing Facility has 1 line (2 at Infrastructure 3+), a colony
-   without one also has 1 (its builds were always time-only). An order that
-   finds every line busy is saved as status 'queued' (resources are taken
-   when it's queued, so a cancel refunds them as before) with its duration
-   already worked out; processManufacturingOrders starts the oldest queued
-   order the moment a line frees, back-to-back (started_at = the finishing
-   order's end time), so a long time jump runs a whole queue through.
-   Orders already running when this shipped keep running even if they
-   exceed the new line count. */
-/* FOOD (balance pass, 2026-10-03, DM-approved): food is counted in
-   crew-days (one person fed for one day). Each ship eats crew x days a
-   day -- crew is ship_markers.crew, blank = the default crew in
-   app_settings 'logistics_config' (100). Any food item in PERISHABLES
-   counts, eaten in this order: legacy "Standard Rations" style items whose
-   unit is "Days" (each one feeds the whole ship for a day, as before),
-   then rations, then bulk food, then treats. A cargo item can also carry
-   its own food_crew_days per unit. Water isn't eaten. */
+/* Production lines (DM rule): each Manufacturing-type deck on a vessel is one
+   line (minimum 1). A colony has 1 line, 2 with a Manufacturing Facility at
+   Infrastructure 3+. An order that finds every line busy is saved as 'queued'
+   (resources are taken at queue time; cancel refunds them).
+   processManufacturingOrders starts the oldest queued order when a line frees,
+   back-to-back from the finishing order's end time. Orders already running
+   are never stopped, even if the source now has fewer lines. */
+/* Food (DM rule): counted in crew-days. A ship eats crew x days; crew is
+   ship_markers.crew, blank = app_settings 'logistics_config' default_crew (100).
+   Food in PERISHABLES is eaten in order: "Days"-unit rations (each feeds the
+   whole ship for a day), then rations, then bulk food, then treats. An item
+   can set its own food_crew_days per unit. Water isn't eaten. */
 const FOOD_CREW_DAYS = { 'food ration': 1, 'food rations': 1, 'dehydrated nutrient blocks': 1000, 'mars bars': 0.1, 'payday candy bars': 0.1, 'butterfinger candy bars': 0.1 };
 window.FOOD_CREW_DAYS = FOOD_CREW_DAYS;
 window.defaultCrew = function () {
@@ -185,20 +111,9 @@ async function sourceIsFull(sourceType, id) {
 }
 window.__mfgSourceIsFull = sourceIsFull;
 
-/* Manufacturing Tabs + Search (added 2026-09-14, per the DM's own request
-   -- "add tabs to the manufacturing screen where different blueprints are
-   grouped into various tabs as well as adding in a search function").
-   Groups the Blueprint Catalog by each blueprint's existing output_type
-   field rather than a new category/tag field (confirmed design -- no such
-   field exists, and output_type is the only thing that meaningfully
-   buckets a blueprint today: Cargo Items / Arsenal Weapons / Colony
-   Infrastructure, plus an "All" tab). Search matches name OR description,
-   case-insensitively. Both are local UI-only state -- not persisted, not
-   synced across clients -- same scope as e.g. js/colonies.js's own
-   colonies/fleets subtab selection. Reuses the existing .cargo-subtabs /
-   .cargo-subtab-btn CSS pattern (style.css) already shared by the cargo
-   bucket tabs, vessel deck tabs, and colonies/fleets tabs, for visual
-   consistency. */
+/* Catalog tabs + search. Tabs group by output_type (no category field
+   exists). Search matches name or description, case-insensitive. Local UI
+   state only: not persisted or synced. */
 let activeManufacturingTab = 'all';
 let manufacturingSearchQuery = '';
 
@@ -254,54 +169,23 @@ window.initManufacturingBlueprintsRealtimeChannel = initManufacturingBlueprintsR
 window.initManufacturingOrdersRealtimeChannel = initManufacturingOrdersRealtimeChannel;
 
 /* ==========================================================================
-   APPROVAL WORKFLOW (added on request -- "copy the approval system from
-   the perk designer... it will save me some work overhead"): copied
-   structurally from js/perk-designer.js's own draft/approved flow on
-   perk_definitions, applied here to manufacturing_blueprints via a new
-   status column (migration manufacturing_blueprints_add_approval_status,
-   default 'approved' so all 47 pre-existing seeded blueprints stayed
-   immediately buildable -- nothing got swept into a pending bucket by
-   adding the column).
-
-   Anyone can now propose a new blueprint (same fields a DM would fill in
-   -- resource cost, time, output -- no field-level restriction, matching
-   perks exactly); a DM-authored blueprint still goes straight to
-   'approved' with zero extra clicks (same as a DM-authored perk). A
-   'draft' blueprint is NOT buildable and NOT selectable as another
-   blueprint's resource-cost input until a DM approves it -- the DM's
-   actual "work overhead" savings is that they now only have to review
-   and click ✓ APPROVE instead of hand-entering every blueprint
-   themselves.
-
-   Two divergences from copying perks 1:1, both deliberate:
-   1. canManageBlueprint(bp) below double-checks permission INSIDE
-      openEditBlueprintModal/deleteManufacturingBlueprint (perks' own
-      openEditPerkModal has no such internal check at all, trusting the
-      edit button's own visibility as the only gate) -- a small, free
-      hardening, not a functional difference for any legitimate caller.
-   2. The Manufacturing tab's sidebar badge already meant something before
-      this change (count of in-progress BUILD ORDERS, added last session)
-      -- rather than overwriting that with a "pending PROPOSALS" count
-      the way perk's own badge works, it now shows "N pending" only when
-      a proposal is actually awaiting review, falling back to the
-      in-progress-orders count otherwise. Keeps both signals instead of
-      losing one to match perks exactly.
+   APPROVAL WORKFLOW (mirrors js/perk-designer.js): anyone can propose a
+   blueprint. A DM's goes straight to 'approved'; others start as 'draft'.
+   A draft is not buildable and can't be another blueprint's input until a
+   DM approves it. The status column defaults to 'approved'.
+   Differences from perks: canManageBlueprint is also checked inside the
+   edit/delete functions, and the sidebar badge shows "N pending" when
+   proposals await review, otherwise the order count.
    ========================================================================== */
 
 function canManageBlueprint(bp) {
-    // DM always. A non-DM can additionally manage (edit/delete) ONLY their
-    // own still-pending ('draft') proposal -- exactly canManagePerk's own
-    // rule. Once approved, a blueprint reverts to DM-only, same as a perk.
+    // DM always. A non-DM can edit/delete only their own still-pending draft.
     if (currentUserRole === 'dm') return true;
     return !!(bp && bp.status === 'draft' && bp.created_by === currentUserId);
 }
 
-// Non-stacking: takes the MAX manufacturing_discount_pct across every perk
-// the character holds, not a sum -- matches Master Engineer's own "Does
-// not stack with Quartermster" text. A character could theoretically hold
-// both (different sections -- Quartermaster is Section 1 self-pick,
-// Master Engineer is Section 2 DM-awarded, and Section 1 is uncapped this
-// project) without ending up with a 50% discount.
+// Non-stacking: the MAX manufacturing_discount_pct across the character's
+// perks, not a sum (Master Engineer "does not stack" with Quartermaster).
 window.getManufacturingDiscountPct = function(charPerksList) {
     let maxPct = 0;
     (charPerksList || []).forEach(cp => {
@@ -312,39 +196,20 @@ window.getManufacturingDiscountPct = function(charPerksList) {
 };
 
 /* ==========================================================================
-   MULTI-TIER CRAFTING: a blueprint's "tier" is derived, not stored. Tier 1
-   is a raw feedstock (empty resource_cost, time-only). Tier N (N>1) is
-   1 + the deepest tier among its own resource-cost inputs, each resolved
-   by matching the stored cost-row name against another blueprint's cargo
-   output name (case-insensitive) -- the exact same name-matching
-   convention startVesselManufacturingOrder already uses against a
-   vessel's cargo. An unresolvable input name (no blueprint currently
-   produces it -- e.g. legacy data, or a feedstock later deleted) is
-   treated as Tier 1: a "raw" input with no known recipe of its own,
-   rather than an error.
-
-   A genuine circular dependency (A costs B costs ... costs A) is guarded
-   with a visiting-set DFS and reported as Infinity ("circular") rather
-   than recursing forever. The blueprint editor's own dropdown already
-   excludes a blueprint from referencing itself directly, so this mainly
-   protects against a multi-hop cycle introduced by editing an EARLIER
-   blueprint in an existing chain.
-
-   Per the DM's own confirmed choice, the "shouldn't exceed 5 layers"
-   guideline is a SOFT warning shown in the editor, not a hard save-block
-   -- matches every other Manufacturing action already being DM-trusted,
-   not code-enforced.
+   MULTI-TIER CRAFTING: tier is derived, never stored. Tier 1 = no resource
+   cost (raw feedstock). Tier N = 1 + the deepest tier among its inputs.
+   An input resolves by case-insensitive match of the cost-row name against
+   an approved blueprint's cargo output name; an unresolved name is Tier 1.
+   Cycles (A -> B -> ... -> A) are caught with a visiting set and reported as
+   Infinity ("circular"). DM rule: the 5-layer cap is a soft editor warning,
+   not enforced.
    ========================================================================== */
 
 function findBlueprintByOutputName(name) {
     if (!name) return null;
     const lower = name.toLowerCase();
-    // Only resolves against an APPROVED blueprint's output -- a still-draft
-    // proposal isn't "real" yet, so it can't participate in a tier chain as
-    // if it were. An unresolvable name (including one that only matches a
-    // pending draft) falls through to computeBlueprintTier's existing
-    // "unresolved input -- treat as Tier 1, raw feedstock" handling, same
-    // as a renamed/deleted blueprint already does.
+    // Approved blueprints only: a name that only matches a draft is treated
+    // as unresolved (Tier 1).
     return (manufacturingBlueprintsList || []).find(b => b.output_type === 'cargo_item' && b.status !== 'draft' && ((b.output_payload && b.output_payload.name) || '').toLowerCase() === lower);
 }
 
@@ -364,10 +229,7 @@ function computeBlueprintTier(bp, visiting) {
     return maxInputTier === Infinity ? Infinity : maxInputTier + 1;
 }
 
-// Used by the editor to preview the tier of a not-yet-saved cost list
-// (workingCosts) -- same logic as computeBlueprintTier but starting from a
-// plain array instead of an already-saved blueprint, since a new/in-edit
-// blueprint has no id/row of its own yet to run the visiting-set guard on.
+// Tier preview for an unsaved cost list (the editor's workingCosts).
 function computeTierFromCostRows(costRows) {
     if (!costRows || costRows.length === 0) return 1;
     let maxInputTier = 0;
@@ -379,7 +241,7 @@ function computeTierFromCostRows(costRows) {
     return maxInputTier + 1;
 }
 
-const MANUFACTURING_TIER_CAP = 5; // soft guideline only, see header comment above -- never enforced
+const MANUFACTURING_TIER_CAP = 5; // soft guideline only, never enforced
 
 function formatBlueprintTier(tier) {
     if (tier === Infinity) return '⚠ circular';
@@ -387,29 +249,11 @@ function formatBlueprintTier(tier) {
 }
 
 /* ==========================================================================
-   SCREEN: blueprint catalog (now propose-and-approve, see the APPROVAL
-   WORKFLOW header comment above) + a live "in-progress builds" list,
-   everyone can see both (same visibility split as Battlefield Salvage's
-   own panel -- the catalog/order data itself isn't secret; editing an
-   APPROVED blueprint is DM-only, but anyone can propose a new one, and a
-   proposer can edit/delete their own still-pending draft).
-
-   Originally a floating draggable panel; moved to its own Command Terminal
-   tab (term-panel-manufacturing) alongside Ship Designer/Perk Designer --
-   this screen is a catalog/dashboard only (per the DM's own confirmed
-   choice), NOT where a build is started. The actual "start a build"
-   controls stay put on their existing source-specific screens (the
-   Manufacturing Bay box on a vessel's own Vessel Deck tab, and the box on
-   a colony's own card in Colonies & Fleets) since those need that
-   vessel's/colony's own context (cargo, deck, delivery-vessel picker) that
-   this dashboard doesn't have. renderManufacturingPanel below is unchanged
-   by the move -- it only ever targeted element IDs, not the floating
-   panel's own container, so re-parenting those same IDs into the new tab's
-   markup required no logic changes here at all. loadManufacturingBlueprints/
-   loadManufacturingOrders already run unconditionally at app startup (see
-   js/db.js's init wiring), so there's no more "load lazily when the panel
-   opens" step to replace -- switchTermTab('manufacturing') just shows
-   already-loaded data, same as every other tab.
+   SCREEN: blueprint catalog + in-progress builds, in the Manufacturing
+   Command Terminal tab (term-panel-manufacturing). Everyone sees both.
+   Dashboard only: builds start from the vessel Manufacturing Bay box
+   (js/combat.js) and the colony card, which have the cargo/deck/delivery
+   context. Data loads at app startup (js/db.js).
    ========================================================================== */
 
 function describeBlueprintOutput(bp) {
@@ -434,13 +278,8 @@ window.renderManufacturingPanel = function() {
     const bpContainer = document.getElementById('manufacturing-blueprints-container');
     const ordContainer = document.getElementById('manufacturing-orders-container');
     const tabsContainer = document.getElementById('manufacturing-tabs-container');
-    // The "+ PROPOSE BLUEPRINT" button is always visible now -- anyone can
-    // propose, same as "+ PROPOSE PERK" has no visibility gate.
 
-    // Tab bar -- counts always come from the FULL catalog (drafts
-    // included), never the search-filtered view, so a tab's own count
-    // means the same thing regardless of what's currently typed in the
-    // search box.
+    // Tab counts use the full catalog (drafts included), not the search results.
     const MANUFACTURING_TABS = [
         { key: 'all', label: 'All' },
         { key: 'cargo_item', label: '📦 Cargo Items' },
@@ -454,10 +293,7 @@ window.renderManufacturingPanel = function() {
         }).join('');
     }
 
-    // Badge below (further down this function) always reflects the TRUE
-    // total pending count across the whole catalog, never the tab/search-
-    // filtered view -- a DM shouldn't lose track of a proposal awaiting
-    // review just because a different tab happens to be active.
+    // The badge's pending count also uses the full catalog.
     let pendingCount = manufacturingBlueprintsList.filter(bp => bp.status === 'draft').length;
     if (bpContainer) {
         const byTab = activeManufacturingTab === 'all'
@@ -468,10 +304,7 @@ window.renderManufacturingPanel = function() {
             ? byTab.filter(bp => (bp.name || '').toLowerCase().includes(q) || (bp.description || '').toLowerCase().includes(q))
             : byTab;
 
-        // Pending Review / Approved Blueprints split -- direct mirror of
-        // js/perk-designer.js's own renderPerkDesignerPanel. Now split from
-        // the tab/search-filtered `visible` list rather than the full
-        // catalog, so a tab or search query narrows both sections at once.
+    // Pending/Approved split of the tab/search-filtered list.
         const pending = visible.filter(bp => bp.status === 'draft');
         const approved = visible.filter(bp => bp.status !== 'draft');
 
@@ -480,13 +313,8 @@ window.renderManufacturingPanel = function() {
             const tier = computeBlueprintTier(bp);
             const tierWarn = (tier !== Infinity && tier > MANUFACTURING_TIER_CAP) ? ' <span style="color:#ff9b6b;">(exceeds 5-layer guideline)</span>' : '';
             const tierColor = tier === Infinity ? '#ff6b6b' : '#6b826a';
-            // Infrastructure (2026-09-14): a colony must already be at
-            // Infrastructure Level >= this blueprint's own derived tier to
-            // build it there (1:1, confirmed design) -- EXCEPT a
-            // colony_infrastructure blueprint itself, which is exempt (it's
-            // how a colony reaches that level in the first place). Shown
-            // here so the requirement is visible without opening the colony
-            // card and trying a build.
+            // DM rule: a colony needs Infrastructure Level >= this tier to build
+            // it. colony_infrastructure blueprints are exempt.
             const infraNote = (bp.output_type !== 'colony_infrastructure' && tier !== Infinity && tier > 1)
                 ? ` <span style="color:#6b826a;">(needs Colony Infrastructure Lvl ${tier} to build at a colony)</span>` : '';
             const proposer = (bp.status === 'draft' && typeof allProfiles !== 'undefined') ? allProfiles.find(a => a.id === bp.created_by) : null;
@@ -537,10 +365,8 @@ window.renderManufacturingPanel = function() {
             const readyAt = (o.started_at_hours || 0) + (o.duration_hours || 0);
             const remaining = Math.max(0, readyAt - (window.universeTimeHours || 0));
             const vessel = (typeof globalShipMarkersCache !== 'undefined') ? globalShipMarkersCache.find(m => m.id === o.vessel_id) : null;
-            // Cancel permission mirrors window.cancelManufacturingOrder's own
-            // check exactly -- DM, or the owner of whichever vessel/colony
-            // actually initiated the build (not the delivery vessel for a
-            // colony order).
+            // Same rule as cancelManufacturingOrder: DM, or owner of the source
+            // vessel/colony (not a colony order's delivery vessel).
             let canCancel = currentUserRole === 'dm';
             let sourceLabel;
             if (o.source_type === 'colony') {
@@ -548,7 +374,7 @@ window.renderManufacturingPanel = function() {
                 if (colony && colony.owner_id === currentUserId) canCancel = true;
                 sourceLabel = `🏛 ${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}`;
             } else {
-                if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true; // Bug-hunt pass (2026-09-24): ships moved to multi-owner `owner_ids` long ago; this still read the legacy single `owner_id` column (stale on 2 of 8 ships, blank on the rest), so non-DM owners were silently refused.
+                if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true;
                 sourceLabel = `🚀 ${vessel ? vessel.name : 'Vessel'}`;
             }
             html += `
@@ -566,54 +392,33 @@ window.renderManufacturingPanel = function() {
         ordContainer.innerHTML = html;
     }
 
-    // Badge prioritizes "N pending" (a blueprint proposal awaiting DM
-    // review -- same priority perk-designer's own badge gives its pending
-    // count), falling back to the in-progress-build-order count otherwise
-    // (that count is what this badge showed before the approval workflow
-    // was added, and is still worth surfacing when nothing needs review).
+    // Badge: "N pending" when proposals await review, else the order count.
     const badge = document.getElementById('badge-manufacturing');
     if (badge) badge.innerText = pendingCount > 0 ? `${pendingCount} pending` : (window.globalManufacturingOrdersCache || []).length;
 };
 
-/* Rendered by js/colonies.js's renderColoniesPanel, inside each editable
-   colony's card -- reuses that same card's colony-deliver-vessel-<id>
-   select as the Manufacturing order's delivery target for the FINISHED
-   product (a build still always ships out to a vessel, that part hasn't
-   changed), same reasoning as before: the crafted output isn't "stored
-   items" in the new colony-storage sense, it's a one-shot delivery like a
-   vessel build's output always was.
-
-   Colony Manufacturing Facility (2026-09-14): a colony with
-   has_manufacturing_facility now CAN draw real materials out of its own
-   cargo_inventory (see the header comment on window.startColonyManufacturingOrder
-   below) instead of every colony build being unconditionally time-only.
-   Whether this particular build actually used materials or fell back to
-   time-only is reported in the chat log after BUILD is clicked -- no live
-   pre-build cost/sufficiency preview here (deferred; a judgment call to
-   keep this pass's scope to the storage + gating mechanic itself). */
+/* Rendered by js/colonies.js's renderColoniesPanel inside each editable
+   colony's card. Finished output (except Infrastructure) goes to the vessel
+   picked in that card's colony-deliver-vessel-<id> select. With a
+   Manufacturing Facility, materials come from colony storage when available
+   (see startColonyManufacturingOrder). */
 window.renderColonyManufacturingBox = function(colony) {
-    // Approved-only -- a still-pending proposal isn't buildable yet.
+    // Approved blueprints only; drafts aren't buildable.
     const blueprints = (manufacturingBlueprintsList || []).filter(b => b.status !== 'draft');
     const inProgress = (window.globalManufacturingOrdersCache || []).filter(o => o.source_type === 'colony' && o.source_colony_id === colony.id);
     let progressHtml = '';
     inProgress.forEach(o => {
         const remaining = Math.max(0, (o.started_at_hours || 0) + (o.duration_hours || 0) - (window.universeTimeHours || 0));
-        // This box only renders for an editable (DM/owner) colony already
-        // (see js/colonies.js's renderColoniesPanel), so anyone seeing it
-        // can also cancel from here -- window.cancelManufacturingOrder now
-        // refunds a colony order's snapshot back into colony storage when
-        // one exists, same as a vessel order refunds into vessel cargo.
+        // This box only renders for DM/owner, so cancel is offered here.
+        // Cancel refunds a colony order's snapshot into colony storage.
         progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">"${o.blueprint_name}" — ${window.manufacturingOrderStatus(o).replace(/^\S+ /, '')}</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build">✕</button></div>`;
     });
     if (inProgress.length) { const u = window.manufacturingLineUsage('colony', colony.id); progressHtml = `<p style="margin:2px 0 0 0; font-size:8px; color:#8fa7b0;">Production lines: ${u.busy}/${u.lines} busy${u.queued ? ` · ${u.queued} queued` : ''}</p>` + progressHtml; }
     const facilityNote = colony.has_manufacturing_facility
         ? '🏭 Manufacturing Facility installed — draws materials from colony storage when available, falls back to time-only otherwise:'
         : '🏭 Manufacturing (time cost only — no Facility installed, see colony edit to add one):';
-    // Build Popup (Tabs/Search/Build-Popup pass, 2026-09-14): same
-    // replacement as the vessel Manufacturing Bay box (js/combat.js) -- the
-    // old inline <select> + BUILD button is now a single button opening a
-    // modal with full details and a live afford-check per blueprint. See
-    // openColonyBuildModal / computeManufacturingPreview below.
+    // One button opens the build popup (openColonyBuildModal), which shows
+    // details and a live afford-check per blueprint.
     return `
     <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:6px;">
         <label style="font-size: 9px; color: #c9962f;">${facilityNote}</label>
@@ -683,26 +488,13 @@ window.approveBlueprint = async function(id) {
 
     window.removeBpCostRow = function(idx) { workingCosts.splice(idx, 1); renderCostList(); };
 
-    // Cost-input dropdown: sourced live from manufacturingBlueprintsList
-    // rather than a fixed enum, so adding a new feedstock (or a new
-    // intermediate manufactured good) is just "create a new blueprint" --
-    // no separate registry table, no code change, ever needed. Unlike the
-    // prior single-session version of this dropdown, this now lists EVERY
-    // cargo-item-producing blueprint, not just Tier-1 raw feedstocks -- a
-    // recipe can cost another manufactured good, enabling multi-tier
-    // chains (per the DM's own confirmed design). The blueprint currently
-    // being edited is excluded from its own dropdown to block the one
-    // cycle this UI can prevent outright (direct self-reference); deeper
-    // multi-hop cycles are instead caught by computeBlueprintTier's
-    // visiting-set guard and surfaced as a warning, not blocked. Existing
-    // stored resource_cost rows are plain {name,qty,unit} data and keep
-    // displaying/working even if the blueprint they reference is later
-    // renamed or deleted -- only ADDING a new cost row requires picking
-    // from this list.
+    // Cost-input options come live from the catalog: every approved blueprint
+    // with a cargo-item output (matches findBlueprintByOutputName), so a new
+    // input is just a new blueprint. The blueprint being edited is excluded to
+    // block direct self-reference; longer cycles show as a tier warning.
+    // Existing cost rows are plain {name,qty,unit} and keep working if the
+    // referenced blueprint is renamed or deleted.
     function getKnownManufacturableBlueprints(excludeId) {
-        // Approved-only -- a pending proposal isn't real yet, so it can't be
-        // picked as another (possibly also-pending) blueprint's resource
-        // input. Matches findBlueprintByOutputName's own approved-only rule.
         return (manufacturingBlueprintsList || []).filter(b => b.output_type === 'cargo_item' && b.id !== excludeId && b.status !== 'draft');
     }
 
@@ -746,11 +538,6 @@ window.approveBlueprint = async function(id) {
     window.addBpCostRow = function() {
         const sel = document.getElementById('bp-cost-name');
         const name = sel ? sel.value : '';
-        // Bug fix (bug hunt, this session): the `qty <= 0` validation below
-        // was dead code -- qty was already floored to a minimum of 1 above
-        // BEFORE the check ran, so a blank/zero/negative input silently
-        // became qty 1 instead of triggering the intended alert. Validate
-        // the raw parsed value first, then apply the floor.
         const rawQty = parseInt(document.getElementById('bp-cost-qty').value);
         const unit = document.getElementById('bp-cost-unit').value.trim() || 'Units';
         if (!name || !(rawQty > 0)) { alert('Select an input and enter a positive quantity.'); return; }
@@ -889,17 +676,13 @@ window.approveBlueprint = async function(id) {
             };
 
             if (currentId) {
-                // Never touch status on an update -- an approved blueprint
-                // being edited by the DM stays approved, and a draft being
-                // edited by its own proposer stays draft until a DM
-                // approves it. Same as perk_definitions' own update path.
+                // Updates never change status: approved stays approved, a
+                // draft stays draft until a DM approves it.
                 const { error } = await db.from('manufacturing_blueprints').update(payload).eq('id', currentId);
                 if (error) { alert('Failed to save blueprint: ' + error.message); return; }
             } else {
                 payload.created_by = currentUserId;
-                // DM-authored blueprints go straight in as approved; anyone
-                // else's proposal starts as a draft pending DM review --
-                // exact mirror of perk_definitions' own insert-status rule.
+                // DM-authored blueprints are approved at once; others start as drafts.
                 payload.status = currentUserRole === 'dm' ? 'approved' : 'draft';
                 const { error } = await db.from('manufacturing_blueprints').insert(payload);
                 if (error) { alert('Failed to create blueprint: ' + error.message); return; }
@@ -910,10 +693,7 @@ window.approveBlueprint = async function(id) {
     }
 
     window.openNewBlueprintModal = function() {
-        // No permission gate -- anyone can propose a new blueprint now (same
-        // as openNewPerkModal has none). A DM's own submission still saves
-        // straight to 'approved'; anyone else's starts as a 'draft' pending
-        // review -- see the save handler above.
+        // No permission gate: anyone can propose. Status is set on save.
         ensureModal();
         currentId = null;
         workingCosts = [];
@@ -941,10 +721,7 @@ window.approveBlueprint = async function(id) {
     window.openEditBlueprintModal = function(id) {
         const bp = manufacturingBlueprintsList.find(b => b.id === id);
         if (!bp) return;
-        // Belt-and-suspenders check (the edit button itself is already only
-        // ever rendered for someone canManageBlueprint(bp) already allows --
-        // see renderManufacturingPanel below) -- unlike openEditPerkModal,
-        // which trusts the button's own visibility as its only gate.
+        // Checked here too, not just by hiding the edit button.
         if (!canManageBlueprint(bp)) return;
         ensureModal();
         currentId = id;
@@ -974,20 +751,16 @@ window.approveBlueprint = async function(id) {
 })();
 
 /* ==========================================================================
-   STARTING AN ORDER -- vessel path (must have a Manufacturing-type deck;
-   discount applies to both resource cost and time; resources deducted
-   from the vessel's own cargo expendables immediately).
+   STARTING AN ORDER -- vessel path. Needs a Manufacturing-type deck. The
+   perk discount applies to resource cost and time. Resources are deducted
+   from the vessel's cargo immediately.
    ========================================================================== */
 
 const MANUFACTURING_CARGO_BUCKETS = ['expendables', 'perishables', 'misc'];
 
-// A manufactured cargo output can now land in any of the three cargo
-// buckets (see the CARGO CATEGORY header comment at the top of this file),
-// so a resource-cost input has to be searched for across all three, not
-// just expendables -- otherwise a Tier 2+ recipe could never consume an
-// input another blueprint delivers into perishables or misc. Returns
-// {item, bucket} for the first bucket (checked in a fixed order) that has
-// a case-insensitive name match, or null if none does.
+// Outputs can land in any cargo bucket, so inputs are searched in all three.
+// Returns {item, bucket} for the first case-insensitive name match (buckets
+// checked in fixed order), or null.
 function findCargoItemAcrossBuckets(cargo, name) {
     const lower = (name || '').toLowerCase();
     for (const bucket of MANUFACTURING_CARGO_BUCKETS) {
@@ -1000,67 +773,34 @@ function findCargoItemAcrossBuckets(cargo, name) {
 window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
-    // Bug-hunt pass (2026-09-24): ships moved to multi-owner `owner_ids` long ago; this still read the legacy single `owner_id` column (stale on 2 of 8 ships, blank on the rest), so non-DM owners were silently refused.
     if (!(currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId))) { alert("Only this vessel's owners (or the DM) can start a build here."); return; }
 
     const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
     if (!mfgDeck) { alert('This vessel has no Manufacturing-type deck installed -- building requires one.'); return; }
 
-    // Blueprint id now comes from the Build modal (Tabs/Search/Build-Popup
-    // pass, 2026-09-14 -- js/manufacturing.js's openVesselBuildModal) rather
-    // than an inline <select> that used to live in the Manufacturing Bay
-    // box (js/combat.js). No other caller of this function exists.
+    // blueprintId comes from the build popup (openVesselBuildModal).
     if (!blueprintId) { alert('Select a blueprint to build first.'); return; }
     const bp = manufacturingBlueprintsList.find(b => b.id === blueprintId);
     if (!bp) return;
-    // Infrastructure (2026-09-14): colony_infrastructure output raises a
-    // COLONY's Infrastructure Level -- vessels have no such concept, so this
-    // is rejected here as defense in depth even though the vessel Manufacturing
-    // Bay's own blueprint dropdown already filters these out (js/combat.js).
+    // Infrastructure raises a colony's level, so vessels can't build it.
+    // The build popup already filters these out; this is a backstop.
     if (bp.output_type === 'colony_infrastructure') { alert('Infrastructure blueprints can only be built at a colony.'); return; }
 
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert('Please save your Dossier & Stats once first before starting a build.'); return; }
     const discountPct = window.getManufacturingDiscountPct(myProf.perks);
 
-    // Damaged Manufacturing deck slows a build down rather than blocking it
-    // outright (the existence check above is the hard gate; this is a soft
-    // penalty on top of it). Same ratio Fleet Group Production already uses
-    // for its own Manufacturing-deck scaling (js/colonies.js:
-    // mfgDeck.hp / mfgDeck.max_hp), but applied inversely here since deck
-    // damage is meant to lengthen TIME, not shrink an output quantity --
-    // there is no output quantity to shrink on a build order. Floored at
-    // 10% efficiency (never worse than a 10x time penalty) rather than
-    // scaling all the way to 0 the way Production's OUTPUT does, since a
-    // 0%-HP deck there just means "produces nothing" while a 0%-HP deck
-    // here would otherwise mean "this build order can never complete" --
-    // a judgment call, tune the floor here if that's not the intent.
+    // A damaged Manufacturing deck lengthens build time (divided by hp/max_hp),
+    // floored at 10% efficiency (at most 10x) so a 0-HP deck can still finish.
+    // Applied after the perk discount.
     const deckScale = mfgDeck.max_hp > 0 ? Math.max(0.1, mfgDeck.hp / mfgDeck.max_hp) : 1;
 
-    // Check every requirement BEFORE deducting anything, so a shortfall on
-    // the second resource in the list never leaves the first one already
-    // spent.
+    // Check every requirement before deducting anything.
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-    // Aggregate by name (case-insensitive) BEFORE checking sufficiency AND
-    // before applying the discount. A blueprint can end up with more than
-    // one cost row naming the same input (the multi-tier dropdown makes
-    // picking the same entry twice an easy mistake, and nothing in the
-    // editor stops it) -- checking each row independently against the SAME
-    // un-decremented cargo snapshot would let a build pass the check even
-    // when the rows' combined total exceeds what's actually in the hold,
-    // driving that cargo item negative once every row's deduction lands.
-    // Summing up front closes that gap; found during this session's
-    // pre-deploy bug hunt.
-    //
-    // Bug fix (bug hunt, this session): the discount's `Math.max(1, ...)`
-    // floor used to be applied to each RAW row individually, before this
-    // aggregation step -- so two rows of qty 1 each (2 total) at a 50%
-    // discount became `max(1, round(0.5))=1` PER ROW, summing to 2 (no
-    // discount at all), while the same 2-total entered as a single row
-    // would correctly floor to 1. Aggregate the undiscounted raw
-    // quantities first, THEN apply the discount/floor once to each summed
-    // total, so a recipe's discount is consistent regardless of how many
-    // rows the author happened to split it across.
+    // Sum cost rows by name (case-insensitive) first, so duplicate rows can't
+    // each pass against the same un-decremented cargo. The discount and its
+    // minimum of 1 apply once per summed total, so splitting a cost across
+    // rows doesn't change the result.
     const rawTotalsByName = new Map();
     (bp.resource_cost || []).forEach(c => {
         const key = c.name.toLowerCase();
@@ -1079,11 +819,8 @@ window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
             return;
         }
     }
-    // Snapshot exactly what's deducted -- name/unit/qty AND which bucket it
-    // came from -- onto the order itself as resource_cost_snapshot. Needed
-    // so a later cancel can refund precisely what was taken, into the same
-    // bucket, rather than guessing from the blueprint's current (possibly
-    // since-edited) resource_cost. See window.cancelManufacturingOrder.
+    // Record what was taken (and from which bucket) as resource_cost_snapshot
+    // so a cancel refunds exactly that.
     const deductedSnapshot = requirements.map(req => {
         const found = findCargoItemAcrossBuckets(cargo, req.name);
         found.item.qty -= req.qty;
@@ -1114,44 +851,23 @@ window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
 };
 
 /* --- STARTING AN ORDER -- colony path.
-
-   Manufacturing Facility (2026-09-14): a colony with has_manufacturing_facility
-   now attempts the SAME aggregate-then-check-then-deduct sequence
-   window.startVesselManufacturingOrder uses, drawing from the colony's own
-   cargo_inventory (see js/colonies.js's window.sanitizeColonyCargo) instead
-   of a vessel's. Per the confirmed design, this is a SOFT attempt, not a
-   hard gate the way a vessel build is: no facility, no resource_cost on the
-   blueprint, or insufficient stock all fall back to today's original
-   time-only behavior rather than blocking the build outright -- colonies
-   never refuse a build the way a vessel does. Which path actually happened
-   is reported in the completion chat log below.
-
-   Finished output delivers to a picked vessel, reusing the same
-   vessel-select the colony's Storage pickup box uses -- EXCEPT a
-   colony_infrastructure build (Infrastructure, 2026-09-14), which has
-   nothing to deliver anywhere (its "output" is the colony's own
-   infrastructure_level going up) and so needs no vessel selected at all.
-
-   Infrastructure GATE (2026-09-14, confirmed design: Level N unlocks Tier
-   N, 1:1): unlike the soft materials fallback above, this one IS a hard
-   block -- a colony below the blueprint's own derived tier cannot attempt
-   the build at all, full stop, no time-only fallback. The one deliberate
-   exception is a colony_infrastructure blueprint itself: its own tier is
-   exempt from this check, since otherwise a colony could never reach a
-   higher level in the first place (reaching Level 3 would require an
-   infrastructure blueprint whose own resource chain is Tier 3, which would
-   require already being at Level 3 -- a contradiction). --- */
+   With a Manufacturing Facility, runs the same sum-check-deduct sequence as
+   the vessel path against colony storage. This is a soft attempt: no
+   facility, no resource cost, or not enough stock means a time-only build,
+   never a refusal. The chat log says which happened. No deck penalty.
+   Output goes to the picked delivery vessel, except colony_infrastructure,
+   which raises the colony's own level and needs no vessel.
+   Infrastructure gate (DM rule, hard block): Level N is needed for a Tier N
+   blueprint. colony_infrastructure blueprints are exempt, or a colony could
+   never level up. --- */
 
 window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
     const colony = coloniesList.find(c => c.id === colonyId);
     if (!colony) return;
     if (!(currentUserRole === 'dm' || colony.owner_id === currentUserId)) return;
 
-    // Blueprint id now comes from the Build modal (Tabs/Search/Build-Popup
-    // pass, 2026-09-14 -- js/manufacturing.js's openColonyBuildModal) rather
-    // than an inline <select> that used to live in this box. The delivery
-    // vessel picker below is untouched -- it's a separate element on the
-    // colony card itself (shared with the Storage pickup dropdown).
+    // blueprintId comes from the build popup (openColonyBuildModal). The
+    // delivery vessel select is on the colony card (shared with Storage pickup).
     if (!blueprintId) { alert('Select a blueprint to build first.'); return; }
     const bp = manufacturingBlueprintsList.find(b => b.id === blueprintId);
     if (!bp) return;
@@ -1173,7 +889,7 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
         if (!vesselId) { alert('Select a vessel to receive the finished build first (same dropdown used for storage pickups).'); return; }
         vessel = globalShipMarkersCache.find(m => m.id === vesselId);
         if (!vessel) return;
-        if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) { alert("🔒 You don't have access to that delivery vessel."); return; } // 2026-09-24: same rule as Vessel/Cargo Deck
+        if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) { alert("🔒 You don't have access to that delivery vessel."); return; } // same rule as Vessel/Cargo Deck
     }
 
     const myProf = allProfiles.find(p => p.id === currentUserId);
@@ -1185,9 +901,7 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
     let usedMaterials = false;
     if (colony.has_manufacturing_facility && (bp.resource_cost || []).length > 0) {
         let cargo = window.sanitizeColonyCargo(colony.cargo_inventory);
-        // Same aggregate-by-name-then-discount sequence as the vessel path,
-        // and for the same reason -- a blueprint can list the same input
-        // across more than one cost row.
+        // Same sum-by-name-then-discount sequence as the vessel path.
         const rawTotalsByName = new Map();
         bp.resource_cost.forEach(c => {
             const key = c.name.toLowerCase();
@@ -1214,8 +928,7 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
             usedMaterials = true;
             if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
         }
-        // else: not enough in storage -- fall through to time-only below,
-        // deductedSnapshot stays null, nothing is deducted.
+        // else: not enough in storage -- time-only, nothing deducted.
     }
 
     const queued = await sourceIsFull('colony', colonyId);
@@ -1243,29 +956,14 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
 };
 
 /* ==========================================================================
-   BUILD PREVIEW (shared core) + BUILD POPUP MODAL -- added 2026-09-14 per
-   the DM's request for "a pop up function similar to how notes pop up...
-   so it is more clear what a user's options are", replacing the old blind
-   <select>+BUILD button at both the vessel Manufacturing Bay box
-   (js/combat.js) and the colony Manufacturing box (renderColonyManufacturingBox
-   above).
-
-   computeManufacturingPreview(bp, opts) is a DOM-independent "core"
-   function (opts = {vessel} or {colony}) -- the same core/wrapper shape
-   used elsewhere in this codebase (e.g. resolveShipWeaponFire), so it can
-   be called equally from this popup's render loop or, in principle, from
-   anywhere else that needs a live afford-check without touching the DOM.
-
-   Judgment call / known limitation (flagging per project convention rather
-   than implying full parity): this function MIRRORS the requirement/
-   sufficiency logic inside startVesselManufacturingOrder and
-   startColonyManufacturingOrder rather than sharing a single code path
-   with them -- extracting a true shared core would mean touching the two
-   already-working, already-tested order-start functions themselves, which
-   felt like more risk than this pass warranted. If either start function's
-   gating/discount/deck-scale logic changes later, this preview needs the
-   same change made here or it will silently drift out of sync and show a
-   "can build" preview that the actual BUILD click then contradicts. */
+   BUILD PREVIEW + BUILD POPUP, used by the vessel Manufacturing Bay box
+   (js/combat.js) and the colony box.
+   computeManufacturingPreview(bp, opts) is DOM-independent (opts = {vessel}
+   or {colony}).
+   Known limitation: it duplicates the gating/discount/deck-scale logic of
+   startVesselManufacturingOrder and startColonyManufacturingOrder instead of
+   sharing code. Change all three together, or the preview will disagree with
+   what BUILD actually does. */
 function computeManufacturingPreview(bp, opts) {
     const myProf = (typeof allProfiles !== 'undefined' && typeof currentUserId !== 'undefined') ? allProfiles.find(p => p.id === currentUserId) : null;
     const discountPct = (myProf && typeof window.getManufacturingDiscountPct === 'function') ? window.getManufacturingDiscountPct(myProf.perks) : 0;
@@ -1273,9 +971,7 @@ function computeManufacturingPreview(bp, opts) {
     const isInfrastructure = bp.output_type === 'colony_infrastructure';
     const result = { tier, discountPct, isInfrastructure, blocking: [], notes: [], costRows: [], timeHours: null, needsVessel: false, canBuild: true };
 
-    // Same aggregate-by-name-then-discount sequence the two start functions
-    // use, for the same reason -- a blueprint can list the same input
-    // across more than one cost row.
+    // Same sum-by-name-then-discount sequence as the start functions.
     const rawTotalsByName = new Map();
     (bp.resource_cost || []).forEach(c => {
         const key = c.name.toLowerCase();
@@ -1342,11 +1038,8 @@ function computeManufacturingPreview(bp, opts) {
 }
 window.computeManufacturingPreview = computeManufacturingPreview;
 
-/* Self-contained IIFE-wrapped popup modal -- same convention as the
-   Blueprint editor modal above (overlay div injected into the body once,
-   toggled via display:flex/none, closes on backdrop click). One shared
-   overlay reused for both the vessel and colony contexts (buildModalContext
-   tracks which). */
+/* Build popup: one overlay (created once, closes on backdrop click) shared
+   by vessel and colony contexts; buildModalContext tracks which. */
 (function() {
     let overlay, buildModalContext = null; // { type: 'vessel'|'colony', id }
 
@@ -1379,7 +1072,6 @@ window.computeManufacturingPreview = computeManufacturingPreview;
             const vessel = globalShipMarkersCache.find(m => m.id === buildModalContext.id);
             if (!vessel) { overlay.style.display = 'none'; return; }
             opts = { vessel };
-            // Same exclusion as the Manufacturing Bay box's own filter --
             // colony_infrastructure is colony-build-only.
             blueprints = manufacturingBlueprintsList.filter(b => b.status !== 'draft' && b.output_type !== 'colony_infrastructure');
             document.getElementById('mfg-build-modal-title').innerText = `Build at ${vessel.name}`;
@@ -1402,11 +1094,8 @@ window.computeManufacturingPreview = computeManufacturingPreview;
             return;
         }
 
-        // Whether a delivery vessel is picked is DOM state (the shared
-        // colony-deliver-vessel-<id> select), not something the DOM-
-        // independent computeManufacturingPreview core can see -- checked
-        // here instead and folded into this row's own blocking list so the
-        // reason shows up next to the button, not just in the subtitle.
+        // The delivery-vessel select is DOM state the preview core can't see,
+        // so it's checked here and added to each row's blocking reasons.
         const missingDeliveryVessel = buildModalContext.type === 'colony' && !document.getElementById(`colony-deliver-vessel-${buildModalContext.id}`)?.value;
 
         listEl.innerHTML = blueprints.map(bp => {
@@ -1458,12 +1147,8 @@ window.computeManufacturingPreview = computeManufacturingPreview;
         overlay.style.display = 'flex';
     };
 
-    // Fired by a BUILD button inside the modal. Deliberately does NOT close
-    // the modal -- it re-renders in place instead, so the user immediately
-    // sees the effect of the build (materials drawn, in-progress row
-    // appended elsewhere, another blueprint's afford-check possibly now
-    // failing) without losing their place. Backdrop-click or the CLOSE
-    // button dismiss it, same as the Blueprint editor modal above.
+    // BUILD button in the popup. Keeps the popup open and re-renders it so
+    // the afford-checks update.
     window.executeManufacturingBuildFromModal = async function(blueprintId) {
         if (!buildModalContext) return;
         if (buildModalContext.type === 'vessel') {
@@ -1476,28 +1161,15 @@ window.computeManufacturingPreview = computeManufacturingPreview;
 })();
 
 /* ==========================================================================
-   CANCELLING AN IN-PROGRESS ORDER -- refunds the exact resources deducted
-   at start time (via resource_cost_snapshot, see startVesselManufacturingOrder)
-   back into whichever cargo bucket they came from. Permission mirrors the
-   START permission exactly: DM, or the owner of whichever vessel/colony
-   actually initiated the build (NOT the delivery vessel for a colony
-   order -- the colony is what "paid" the time cost and is what a player
-   would expect "my build" to mean there).
-
-   A vessel order started before this column existed has
-   resource_cost_snapshot === null -- there is no record of what was
-   deducted (the blueprint's CURRENT resource_cost might not even match
-   what the order actually cost if it's been edited since), so those
-   cancel with a clear "could not auto-refund" notice instead of guessing.
-   A colony order never deducted anything to begin with (time cost only),
-   so its cancel is refund-free by design, not a gap.
+   CANCELLING AN ORDER -- refunds resource_cost_snapshot into the bucket each
+   item came from (colony storage or vessel cargo). Allowed for the DM or the
+   owner of the source vessel/colony (not a colony order's delivery vessel).
+   A legacy vessel order with no snapshot is cancelled without refund rather
+   than guessing from the current blueprint.
    ========================================================================== */
 
 window.cancelManufacturingOrder = async function(orderId) {
-    // Re-fetch fresh rather than trusting the local cache -- the order may
-    // have already completed (processManufacturingOrders deletes it) or
-    // been cancelled by someone else in the moment between this button
-    // rendering and being clicked.
+    // Re-fetch: the order may have completed or been cancelled since render.
     const { data: order } = await db.from('manufacturing_orders').select('*').eq('id', orderId).maybeSingle();
     if (!order) { alert('This build order no longer exists -- it may have already completed or been cancelled.'); loadManufacturingOrders(); return; }
 
@@ -1508,7 +1180,7 @@ window.cancelManufacturingOrder = async function(orderId) {
         if (colony) { ownerOk = colony.owner_id === currentUserId; sourceName = colony.name; }
     } else if (!ownerOk && order.source_type === 'vessel') {
         const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
-        if (vessel) { ownerOk = window.vesselHasOwner(vessel, currentUserId); sourceName = vessel.name; } // Bug-hunt pass (2026-09-24): ships moved to multi-owner `owner_ids` long ago; this still read the legacy single `owner_id` column (stale on 2 of 8 ships, blank on the rest), so non-DM owners were silently refused.
+        if (vessel) { ownerOk = window.vesselHasOwner(vessel, currentUserId); sourceName = vessel.name; }
     } else if (order.source_type === 'colony') {
         sourceName = ((typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null)?.name || sourceName;
     } else {
@@ -1516,23 +1188,9 @@ window.cancelManufacturingOrder = async function(orderId) {
     }
     if (!ownerOk) { alert('Only the DM or the build\'s own source vessel/colony owner can cancel it.'); return; }
 
-    // Bug fix (bug hunt, this session): `hasRefund` used to conflate two
-    // different states -- (a) a legacy order with no resource_cost_snapshot
-    // column value at all (started before refund tracking existed), and
-    // (b) a perfectly normal, current-schema vessel order whose blueprint
-    // simply has an empty resource_cost (a supported, deliberate "time-only
-    // build" case, same as colony builds). Both produced an empty/absent
-    // snapshot array, so both got the misleading "started before refund
-    // tracking existed" message even when nothing is actually wrong. Check
-    // "does a snapshot record exist at all" separately from "does it have
-    // anything to refund."
-    //
-    // Manufacturing Facility (2026-09-14): a colony order can now ALSO carry
-    // a real resource_cost_snapshot (when it drew materials from colony
-    // storage -- see window.startColonyManufacturingOrder), so the snapshot
-    // check is no longer vessel-only; a colony order with no snapshot (the
-    // time-only fallback path, still the common case) reads exactly like
-    // before.
+    // "No snapshot record" (legacy order, no refund possible) differs from
+    // "empty snapshot" (a normal time-only build). Colony orders have a
+    // snapshot only when they drew materials from storage.
     const hasSnapshotRecord = Array.isArray(order.resource_cost_snapshot);
     const hasRefund = hasSnapshotRecord && order.resource_cost_snapshot.length > 0;
     const refundLine = hasRefund
@@ -1572,30 +1230,21 @@ window.cancelManufacturingOrder = async function(orderId) {
         }
     }
 
-    // Delete rather than a status='cancelled' row -- same "no unbounded
-    // table growth, chat log is the audit trail" convention completion
-    // already uses just below.
+    // Delete instead of marking cancelled; the chat log is the audit trail.
     await db.from('manufacturing_orders').delete().eq('id', order.id);
 
     await db.from('chat_logs').insert({
         sender_id: null, message_type: 'system',
         content: `🚫 [MANUFACTURING] "${order.blueprint_name}" build at ${sourceName} was cancelled.${hasRefund ? ` Refunded: ${order.resource_cost_snapshot.map(r => `${r.qty}x ${r.name}`).join(', ')}.` : (order.source_type === 'vessel' ? ' No refund on record for this build.' : '')}`
     });
-    // loadManufacturingOrders already re-renders the Manufacturing tab, the
-    // Vessel Deck's Manufacturing Bay box, and the Colonies & Fleets boxes
-    // (see its own definition near the top of this file) -- no separate
-    // re-render calls needed here.
+    // loadManufacturingOrders re-renders every manufacturing view.
     loadManufacturingOrders();
 };
 
 /* ==========================================================================
-   COMPLETION -- runs on EVERY time advancement (js/ui.js
-   processTimeAdvancement), not just daily ticks, mirroring
-   processSalvageGatherCompletion exactly (a build's duration can be
-   sub-day). Queries the DB directly rather than the local cache, for the
-   same reason battlefield_salvage does -- whichever client advances time
-   should resolve every completed order regardless of that client's own
-   cache freshness.
+   COMPLETION -- runs on every time advancement (js/ui.js
+   processTimeAdvancement), since builds can be sub-day. Reads the DB, not
+   the local cache, so whichever client advances time resolves every order.
    ========================================================================== */
 
 // Claims (deletes) one finished order and delivers it. Returns true when
@@ -1618,12 +1267,8 @@ async function completeManufacturingOrder(order) {
             if (arsenalErr) throw new Error('arsenal delivery failed: ' + arsenalErr.message);
             await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.name} added to ${charRow.name || 'the crafting character'}'s Arsenal.` });
         } else if (order.output_type === 'colony_infrastructure') {
-            // Infrastructure (2026-09-14): "delivers" to the colony that
-            // built it, not a vessel -- vessel_id is null on these
-            // orders (see window.startColonyManufacturingOrder). Never
-            // lowers the level -- if the colony already reached a higher
-            // level some other way by the time this completes, this is
-            // a no-op on the level itself (still consumes the order).
+            // Raises the building colony's level (vessel_id is null on these
+            // orders). Never lowers it; the order is consumed either way.
             const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
             if (!colony) return true; // colony no longer exists -- fizzle (order was already removed by the claim above)
             const p = order.output_payload || {};
@@ -1639,11 +1284,7 @@ async function completeManufacturingOrder(order) {
             if (!vessel) return true; // target vessel no longer exists -- fizzle (order was already removed by the claim above)
             const p = order.output_payload || {};
             let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-            // Deliver into whichever bucket the blueprint's output picked
-            // (see the CARGO CATEGORY header comment) -- an older order
-            // snapshotted before this field existed has no cargo_bucket
-            // at all, so falls back to expendables, its historical
-            // behavior.
+            // Deliver into the output's cargo_bucket; missing = expendables.
             const bucket = MANUFACTURING_CARGO_BUCKETS.includes(p.cargo_bucket) ? p.cargo_bucket : 'expendables';
             let existing = (cargo[bucket] || []).find(i => (i.name || '').toLowerCase() === (p.name || '').toLowerCase());
             if (existing) existing.qty += (p.qty || 0);
@@ -1719,8 +1360,3 @@ window.processManufacturingOrders = async function(newHours) {
         return r;
     };
 })();
-
-/* Manufacturing moved from a floating draggable panel to its own Command
-   Terminal tab (term-panel-manufacturing) this session -- no more
-   makePanelDraggable registration needed here; the tab shows/hides via
-   switchTermTab like every other tab, not a drag-positioned overlay. */

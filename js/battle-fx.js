@@ -1,29 +1,17 @@
 /* ==========================================================================
    js/battle-fx.js - Battle Map visual effects: ordnance flight overlay, weapon fire / impact / destruction effects, range ring, target highlight, click-enemy-to-target-all.
-   Split out of js/battle-map.js (consolidation pass 2, 2026-10-08), code
-   unchanged. Classic script sharing the global scope: loads right after
-   battle-map.js (see index.html for the order).
+   Classic script sharing the global scope: loads right after battle-map.js
+   (see index.html for the order).
    ========================================================================== */
-/* --- ORDNANCE FLIGHT VISUALIZATION (Animation Engine build, this session) ---
-   Rides the EXISTING battle_encounters realtime sync for free -- every
-   connected client already re-fetches the row and calls
-   window.renderBattleMapPanel whenever in_flight_ordnance changes (launch,
-   round-advance resolution, impact), so this animates real synced state for
-   everyone watching, not just the client that caused the change. One marker
-   div per individual payload entry (salvo_id) -- pre-split that's 1 marker,
-   post-split it's 6. turns_remaining (3 -> 2 -> 1 -> resolved/removed at 0)
-   drives a coarse per-ROUND progress fraction along the source->target line;
-   this is NOT a real-time countdown between rounds, consistent with this
-   app's turn-based, DM-driven pacing (nothing here ticks on its own). A
-   salvo_id present last render but missing now has resolved one way or
-   another -- impacted, was shot down by Point Defense, or fizzled (target
-   destroyed/withdrawn mid-flight, see processBattleRoundAutomations). That
-   distinction isn't exposed through this data diff, so every disappearance
-   gets the same generic impact-flash treatment -- a deliberate
-   simplification flagged in the checkpoint notes, not a missed case: a real
-   hit-vs-intercept distinction would need processBattleRoundAutomations to
-   pass along an explicit outcome per resolved payload, which it doesn't
-   today. */
+/* --- ORDNANCE FLIGHT VISUALIZATION ---
+   Driven by the battle_encounters realtime sync: every client re-renders when
+   in_flight_ordnance changes, so all viewers see the same synced state.
+   One marker per payload entry (salvo_id): 1 before a split, 6 after.
+   turns_remaining (3 -> 2 -> 1 -> resolved) sets a per-round progress
+   fraction along the source->target line; nothing animates between rounds.
+   A salvo_id that disappears has impacted, been shot down by Point Defense,
+   or fizzled. The data doesn't say which, so every disappearance gets the
+   same impact flash. */
 function renderOrdnanceOverlay(grid, tokens, inFlight) {
     const currentIds = new Set();
     inFlight.forEach(entry => {
@@ -31,12 +19,9 @@ function renderOrdnanceOverlay(grid, tokens, inFlight) {
         currentIds.add(salvoId);
         const sourceTok = tokens.find(t => t.ship_marker_id === entry.source_vessel_id);
         const targetTok = tokens.find(t => t.ship_marker_id === entry.target_vessel_id);
-        // Source or target is no longer a token on THIS grid (withdrawn,
-        // destroyed, or this client just doesn't have one placed) -- nothing
-        // sane to draw a line between. The marker (if one already exists
-        // from an earlier render) is simply left where it last was; it gets
-        // cleaned up by the removal pass below once the entry itself
-        // resolves out of in_flight_ordnance.
+        // Source or target isn't a token on this grid: leave any existing
+        // marker where it was; the removal pass cleans it up once the entry
+        // resolves.
         if (!sourceTok || !targetTok) return;
 
         const progress = Math.max(0, Math.min(1, (3 - (entry.turns_remaining !== undefined ? entry.turns_remaining : 3)) / 3));
@@ -46,10 +31,8 @@ function renderOrdnanceOverlay(grid, tokens, inFlight) {
         let px = sx + (tx - sx) * progress;
         let py = sy + (ty - sy) * progress;
 
-        // Split payloads (shared parent_salvo_id) fan out around the flight
-        // line instead of stacking exactly on top of each other -- a small
-        // deterministic perpendicular offset keyed off each payload's
-        // position within its own group.
+        // Split payloads (shared parent_salvo_id) fan out perpendicular to
+        // the flight line so they don't stack on top of each other.
         if (entry.split) {
             const groupKey = entry.parent_salvo_id || entry.salvo_id;
             const siblings = inFlight.filter(e => (e.parent_salvo_id || e.salvo_id) === groupKey);
@@ -65,13 +48,8 @@ function renderOrdnanceOverlay(grid, tokens, inFlight) {
         if (!el) {
             el = document.createElement('div');
             el.className = 'battle-ordnance-marker';
-            // Animation Suite build (this session): color the marker by the
-            // salvo's actual damage_type instead of the previous hardcoded
-            // purple. normalizeDamageType covers legacy/blank values the
-            // same way every other damage-type read in this codebase does.
-            // Computed once at marker creation (a salvo's damage type never
-            // changes mid-flight) and stashed on the element so the removal
-            // pass below can color-match the impact flash to it too.
+            // Colored by the salvo's damage type, computed once at creation.
+            // Stashed on the element so the impact flash can match it.
             const dmgType = (typeof window.normalizeDamageType === 'function') ? window.normalizeDamageType(entry.damage_type || 'Impact') : 'Impact';
             const dmgColor = (window.DAMAGE_TYPES && window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#c778dd';
             el.style.background = dmgColor;
@@ -96,19 +74,15 @@ function renderOrdnanceOverlay(grid, tokens, inFlight) {
     battleMapPrevOrdnanceIds = currentIds;
 }
 
-// Converts a 6-digit hex color plus a 0-1 alpha into an 8-digit #RRGGBBAA
-// string, used throughout the Animation Suite effects below to build
-// colored radial-gradient flashes from a single damage-type hex color
-// instead of hand-writing an rgba() per effect. Falls back to white if
-// handed something that isn't a hex string.
+// Converts a 6-digit hex color plus a 0-1 alpha into #RRGGBBAA, for building
+// radial-gradient flashes. Falls back to white for non-hex input.
 function hexWithAlpha(hex, alpha) {
     const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0');
     return (hex && hex[0] === '#' ? hex : '#ffffff') + a;
 }
 
-// colorHex is optional -- callers that don't have a damage-type color handy
-// (e.g. legacy call sites) get the original hardcoded orange/red via the
-// existing .battle-impact-flash CSS default background.
+// colorHex is optional; without it the .battle-impact-flash CSS default
+// (orange/red) is used.
 function spawnImpactFlash(grid, x, y, colorHex) {
     const flash = document.createElement('div');
     flash.className = 'battle-impact-flash';
@@ -121,43 +95,23 @@ function spawnImpactFlash(grid, x, y, colorHex) {
     setTimeout(() => flash.remove(), 650);
 }
 
-/* --- DIRECT-FIRE WEAPON SHOT VISUAL (Animation Engine build; effect
-   families added in the Animation Suite build, this session) ---
-   Called from js/combat.js's rollShipWeapon/rollSquadronWeapon right after
-   a hit resolves. Originally a single beam style for every weapon; now
-   dispatches by the shot's damage type (via window.DAMAGE_TYPE_FAMILY,
-   js/combat.js) into one of 4 effect families -- Beam (steady line, the
-   original look), Tracer (a traveling streak), Burst (a shell-burst at the
-   target, no line from source), or a Restorative pulse for Healing (also
-   target-only, no attack-style effect). See spawnBeamEffect/
-   spawnTracerEffect/spawnBurstEffect/spawnHealPulseEffect below for the
-   family-specific rendering. [UPDATE 2026-09-30: no longer local-only --
-   every call is now also sent over the battle broadcast channel, see
-   BATTLE BROADCAST CHANNEL near the top of this file. The note below is
-   the original rationale, kept for history.] LOCAL to this client only -- unlike
-   the ordnance visualization above, a direct-fire shot has no persisted
-   in-flight row to piggyback sync off of, and this app has no ephemeral
-   broadcast channel (every existing realtime channel here is a real DB
-   table's postgres_changes stream). Building one just for this felt like
-   real new plumbing for a cosmetic effect, not something to add silently —
-   flagged as a known limitation in the checkpoint notes, not a bug: another
-   player watching the same battle on their own screen will see the
-   resulting health-bar change (real live sync now, via js/db.js's
-   ship_markers_stream channel — see the Battle Map Health Sync checkpoint)
-   but not the beam itself, and not the destruction/explosion effect either
-   (same local-only limitation, see spawnDestructionEffect above).
-   Silently no-ops if the Battle Map isn't open, there's no active battle,
-   or either vessel isn't currently a token in it — safe to call
-   unconditionally after every resolved shot regardless of context. */
+/* --- DIRECT-FIRE WEAPON SHOT VISUAL ---
+   Called from js/combat.js (rollShipWeapon / rollSquadronWeapon) after a hit
+   resolves. The shot's damage type maps to an effect family via
+   window.DAMAGE_TYPE_FAMILY: beam, tracer, burst or pulse (healing); the
+   renderer's fireEffect picks the spawn*Effect function below.
+   Also sent over the battle broadcast channel so other open Battle Maps play
+   it; fromRemote marks a received effect, which is never re-sent.
+   Silently no-ops if there's no active battle, either vessel isn't a token,
+   or the grid isn't open, so it is safe to call after every shot. */
 window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex, dmgType, fromRemote) {
     if (!window.globalBattleEncounterCache) return;
     const tokens = window.globalBattleEncounterCache.tokens || [];
     const sourceTok = tokens.find(t => t.ship_marker_id === sourceVesselId);
     const targetTok = tokens.find(t => t.ship_marker_id === targetVesselId);
     if (!sourceTok || !targetTok) return;
-    // Battle broadcast (Phase 0, 2026-09-30): tell every other open Battle
-    // Map to play the same effect -- sent even if THIS client's map isn't
-    // open (e.g. firing from the Vessel Deck). Never re-sent by a receiver.
+    // Broadcast even if this client's map isn't open (e.g. firing from the
+    // Vessel Deck).
     if (!fromRemote && typeof window.sendBattleBroadcast === 'function') {
         window.sendBattleBroadcast('fx', { k: 'fire', src: sourceVesselId, dst: targetVesselId, col: colorHex || null, dmg: dmgType || null });
     }
@@ -169,21 +123,16 @@ window.playWeaponFireEffect = function(sourceVesselId, targetVesselId, colorHex,
     const tx = targetTok.x + half, ty = targetTok.y + half;
     const color = colorHex || '#ff3333';
 
-    // Animation Suite build (this session): dispatch to one of 4 visual
-    // "effect families" instead of every weapon playing the same beam, per
-    // window.DAMAGE_TYPE_FAMILY (js/combat.js). dmgType is optional and new
-    // as of this build -- any caller that doesn't pass one (there
-    // shouldn't be any left in this codebase, but this keeps old/unknown
-    // call sites from breaking) falls back to the original beam look.
+    // Unknown or missing dmgType falls back to the beam family.
     const family = (dmgType && window.DAMAGE_TYPE_FAMILY && window.DAMAGE_TYPE_FAMILY[dmgType]) || 'beam';
     window.battleRenderer.fireEffect(sx, sy, tx, ty, color, family);
     if (family !== 'pulse') playBattleImpactSound(targetVesselId);
 };
 
-/* Impact sound (Phase 1, 2026-10-01): a moment after a shot lands, a shield
-   shimmer if the target still has shields up, otherwise a hull thud. This
-   runs after the damage was applied, so "shields still up" is the right
-   read. Throttled so an AI volley of many guns doesn't stack into noise. */
+/* Impact sound shortly after a shot lands: shield shimmer if the target still
+   has shields up, otherwise a hull thud. Runs after damage is applied, so the
+   shield read is current. Throttled (150 ms) so a large volley doesn't stack
+   into noise. */
 let lastBattleImpactSoundAt = 0;
 function playBattleImpactSound(targetVesselId) {
     const ae = window.AudioEngine;
@@ -196,12 +145,9 @@ function playBattleImpactSound(targetVesselId) {
     setTimeout(() => { try { shieldsUp ? ae.playShieldHit() : ae.playHullHit(); } catch (e) {} }, 180);
 }
 
-// Beam family (Energy, Ion, Exotic, Antimatter, Heat -- see
-// window.DAMAGE_TYPE_FAMILY) -- the original/default fire effect from the
-// Animation Engine build: a steady glowing line snapped instantly between
-// firer and target, fading out. Unchanged behavior, just factored out of
-// window.playWeaponFireEffect so it's one of 4 dispatch targets instead of
-// the only effect.
+// Beam family (Energy, Ion, Exotic, Antimatter, Heat; see
+// window.DAMAGE_TYPE_FAMILY) and the default: a steady glowing line from
+// firer to target that fades out.
 function spawnBeamEffect(grid, sx, sy, tx, ty, colorHex) {
     const dx = tx - sx, dy = ty - sy;
     const length = Math.hypot(dx, dy);
@@ -219,16 +165,11 @@ function spawnBeamEffect(grid, sx, sy, tx, ty, colorHex) {
     setTimeout(() => beam.remove(), 400);
 }
 
-// Tracer family (Impact, Piercing, Cold) -- Animation Suite build. Unlike
-// Beam, this actually travels: a small glowing dot spawned at the source
-// token, then immediately re-positioned to the target token so the
-// existing `transition: left/top` on .battle-fire-tracer animates the
-// move (same lerp-via-CSS-transition trick already used for
-// .battle-token-el and .battle-ordnance-marker elsewhere in this file).
+// Tracer family (Impact, Piercing, Cold): a glowing dot that travels from
+// source to target via the CSS left/top transition on .battle-fire-tracer,
+// then leaves a color-matched impact flash.
 // `void tracer.offsetWidth` forces a layout flush between the two position
-// writes -- without it the browser can coalesce them and the dot just pops
-// straight to the target with no visible travel. Leaves an impact flash
-// (color-matched) at the target on arrival, same as ordnance impacts.
+// writes; without it the browser may coalesce them and skip the travel.
 function spawnTracerEffect(grid, sx, sy, tx, ty, colorHex) {
     const tracer = document.createElement('div');
     tracer.className = 'battle-fire-tracer';
@@ -246,15 +187,10 @@ function spawnTracerEffect(grid, sx, sy, tx, ty, colorHex) {
     }, 300);
 }
 
-// Burst family (Explosive, Flak, Corrosive) -- Animation Suite build. Per
-// the confirmed design this is deliberately NOT a line from source to
-// target at all -- a shell-burst/spread effect that appears only at the
-// target, representing an area-detonation weapon rather than a directed
-// shot. A colored flash plus a small ring of shrapnel "shards" flying
-// outward at evenly-spaced angles (with a little per-shard jitter so it
-// doesn't look too mechanically uniform), each an independently animated
-// element using a --shard-angle CSS custom property consumed by the
-// battleBurstShard keyframe in style.css.
+// Burst family (Explosive, Flak, Corrosive): an area detonation at the target
+// only, with no line from the source. A colored flash plus shrapnel shards
+// at evenly spaced, slightly jittered angles (--shard-angle, consumed by the
+// battleBurstShard keyframe in style.css).
 function spawnBurstEffect(grid, x, y, colorHex) {
     const flash = document.createElement('div');
     flash.className = 'battle-fire-burst-flash';
@@ -277,11 +213,8 @@ function spawnBurstEffect(grid, x, y, colorHex) {
     }
 }
 
-// Restorative pulse (Healing only) -- Animation Suite build. Per the
-// confirmed design, healing deliberately gets no attack-style beam/tracer/
-// burst at all (it isn't an attack) -- just a soft outward glow-and-ring
-// wave centered on the target, slower and gentler than the Burst family's
-// sharp shrapnel-flash treatment.
+// Restorative pulse (Healing only): healing isn't an attack, so no
+// beam/tracer/burst; just a soft glow and ring centered on the target.
 function spawnHealPulseEffect(grid, x, y, colorHex) {
     const glow = document.createElement('div');
     glow.className = 'battle-heal-glow';
@@ -300,15 +233,11 @@ function spawnHealPulseEffect(grid, x, y, colorHex) {
     setTimeout(() => ring.remove(), 800);
 }
 
-/* --- DESTRUCTION EFFECT (Visual Polish build, this session) ---
-   A token vanishing from the grid with zero visual event was the most
-   jarring remaining gap now that movement, ordnance flight, impacts, and
-   weapon fire all animate. Bigger/more dramatic than spawnImpactFlash
-   (ordnance non-impact removal still uses that smaller flash) — a hot
-   flash plus an expanding shockwave ring. Called only from the render
-   loop's removal pass, consuming a battleMapPendingExplosions entry staged
-   by window.checkBattleTokenDestroyed — see that function and the removal
-   pass for why a manual withdraw/recall never triggers this. */
+/* --- DESTRUCTION EFFECT ---
+   A hot flash plus an expanding shockwave ring, larger than spawnImpactFlash.
+   Called only from the render loop's removal pass, for a
+   battleMapPendingExplosions entry staged by window.checkBattleTokenDestroyed.
+   A manual withdraw/recall never triggers it (see that function). */
 function spawnDestructionEffect(grid, x, y) {
     const cx = x + BATTLE_TOKEN_SIZE / 2, cy = y + BATTLE_TOKEN_SIZE / 2;
 
@@ -327,20 +256,13 @@ function spawnDestructionEffect(grid, x, y) {
     setTimeout(() => ring.remove(), 900);
 }
 
-/* --- WEAPON RANGE RING (Visual Polish build, this session) ---
-   Range has been a real targeting restriction since the Range/Ordnance
-   build (out-of-range candidates are already filtered from the target
-   dropdown), but nothing showed it visually. Wired to a weapon's target
-   <select> in js/combat.js's renderShipWeaponsHtml (both the Vessel Deck
-   and Battle Map cards share that one function) via onfocus/onmouseenter
-   and onblur/onmouseleave. A single reusable element rather than one per
-   weapon row -- only one ring is ever relevant at a time (whichever weapon
-   row the player's mouse/focus is currently on), and living outside the
-   per-token diff loop means it needs no cleanup bookkeeping there; it just
-   gets wiped along with everything else on a hard grid reset and lazily
-   recreated the next time it's shown. No-op (silently) if the firing
-   vessel isn't currently a token, the weapon's range is 0 (this app's
-   "unlimited" convention), or the Battle Map grid isn't in the DOM. */
+/* --- WEAPON RANGE RING ---
+   Shown while a weapon's target <select> has focus/hover (wired in
+   js/combat.js renderShipWeaponsHtml, shared by Vessel Deck and Battle Map
+   cards). One reusable element: only one ring is relevant at a time. It is
+   wiped on a hard grid reset and lazily recreated.
+   No-op if the vessel isn't a token, range is 0 ("unlimited"), or the grid
+   isn't in the DOM. */
 window.showWeaponRangeRing = function(vesselId, range) {
     if (!range || !window.globalBattleEncounterCache) return;
     const grid = document.getElementById('battle-map-grid');
@@ -367,40 +289,14 @@ window.hideWeaponRangeRing = function() {
     if (ring) ring.style.display = 'none';
 };
 
-/* --- TARGET-SELECT HIGHLIGHT (live-session feature request, 2026-09-13:
-   "when selecting a target highlight the actual token") --- Wired to the
-   onchange of each weapon's target <select> in js/combat.js's
-   renderShipWeaponsHtml (the one function both the Vessel Deck and Battle
-   Map cards share). Same single-reusable-element-over-the-grid pattern as
-   the range ring just above, but this is a brief pulse rather than a
-   persistent overlay -- it's feedback for "you just picked this," not an
-   ongoing selection indicator (nothing here tracks per-weapon-row target
-   state), so it auto-hides itself after ~1.6s. Re-selecting (same or a
-   different target, from the same or a different weapon row) restarts the
-   timer rather than stacking one, so only the most recent pick is ever
-   showing. No-op (silently) if the target isn't currently a token in the
-   active battle -- covers the "-- No Target --" option and any stale
-   selection -- or the grid isn't in the DOM. */
-/* --- CLICK-ENEMY-TO-TARGET-ALL (live-session feature request, 2026-09-13):
-   "clicking an enemy ship auto applies targeting information for all owned
-   ship weapons." Judgment call, not re-confirmed with the DM at the
-   mechanics level (flagged in the architecture doc, easy to revisit):
-   - Only fires for a HOSTILE-tagged token (vessel.iff === 'hostile') that
-     the clicking user doesn't own -- a friendly/neutral/untagged token
-     click keeps the pre-existing "open vessel terminal" behavior unchanged
-     (see the branch in wireTokenDrag below).
-   - Sets every weapon-target <select> on the CLICKING user's own vessels
-     that are currently placed on THIS battle grid (Battle Map ship cards
-     only -- id prefix 'bm-', not the Vessel Deck's separate copies of the
-     same weapon rows) to this target, skipping any weapon whose dropdown
-     doesn't actually list the target as an option (out of range / not
-     visible -- see getBattleScopedTargets) rather than forcing an invalid
-     value in.
-   - Deliberately does NOT also open the vessel terminal for this click --
-     the point is one click to get every gun pointed at the target, and a
-     modal popping up over the same cards the FIRE buttons live on would
-     fight that. Flashes the existing target highlight ring afterward so
-     the lock-on is visually obvious. */
+/* --- CLICK-ENEMY-TO-TARGET-ALL ---
+   Clicking a hostile token (vessel.iff === 'hostile') the user doesn't own
+   calls this (see wireTokenDrag); other token clicks open the vessel terminal.
+   Points every weapon on the user's own vessels placed on this grid (Battle
+   Map cards only, id prefix 'bm-') at the target, skipping weapons whose
+   dropdown doesn't offer it as an enabled option (out of range, not visible,
+   or out of arc). Does not open the vessel terminal. Flashes the target
+   highlight if anything was applied. */
 window.autoTargetAllMyWeapons = function(targetVesselId) {
     if (!window.globalBattleEncounterCache) return;
     const myTokens = (window.globalBattleEncounterCache.tokens || []).filter(t => {
@@ -414,7 +310,7 @@ window.autoTargetAllMyWeapons = function(targetVesselId) {
         weapons.forEach((w, idx) => {
             const sel = document.getElementById(`bm-wpn-target-${vessel.id}-${idx}`);
             if (!sel) return;
-            const hasOption = Array.from(sel.options).some(o => o.value === targetVesselId && !o.disabled); // disabled = out of arc (Phase 3)
+            const hasOption = Array.from(sel.options).some(o => o.value === targetVesselId && !o.disabled); // disabled = out of arc
             if (!hasOption) return;
             sel.value = targetVesselId;
             appliedAny = true;
@@ -423,10 +319,16 @@ window.autoTargetAllMyWeapons = function(targetVesselId) {
     if (appliedAny && typeof window.flashBattleTargetHighlight === 'function') window.flashBattleTargetHighlight(targetVesselId);
 };
 
+/* --- TARGET-SELECT HIGHLIGHT ---
+   Brief pulse on the chosen target token, wired to each weapon target
+   <select>'s onchange (js/combat.js renderShipWeaponsHtml). One reusable
+   element; auto-hides after ~1.6 s, and a new pick restarts the timer.
+   No-op if the target isn't a token in the active battle (covers
+   "-- No Target --") or the grid isn't in the DOM. */
 let battleMapTargetHighlightTimeout = null;
 window.flashBattleTargetHighlight = function(vesselId) {
     if (!vesselId || !window.globalBattleEncounterCache) return;
-    if (window.AudioEngine && window.AudioEngine.playTargetLock) window.AudioEngine.playTargetLock(); // target-lock beep (2026-10-01)
+    if (window.AudioEngine && window.AudioEngine.playTargetLock) window.AudioEngine.playTargetLock(); // target-lock beep
     const grid = document.getElementById('battle-map-grid');
     if (!grid) return;
     const pos = window.getBattleTokenPosition ? window.getBattleTokenPosition(vesselId) : null;
@@ -444,10 +346,8 @@ window.flashBattleTargetHighlight = function(vesselId) {
     hl.style.width = BATTLE_TOKEN_SIZE + 'px';
     hl.style.height = BATTLE_TOKEN_SIZE + 'px';
     hl.style.display = 'block';
-    // Restart the CSS pulse animation on every call, including re-picking
-    // the same target twice in a row -- removing the class, forcing a
-    // reflow, then re-adding it is the standard trick to make a browser
-    // replay an animation it thinks hasn't changed.
+    // Remove class, force reflow, re-add: replays the CSS pulse even when
+    // the same target is picked twice.
     hl.classList.remove('battle-target-highlight-fade');
     void hl.offsetWidth;
     hl.classList.add('battle-target-highlight-fade');

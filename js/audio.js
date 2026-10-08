@@ -1,15 +1,10 @@
 /* ==========================================================================
    js/audio.js - Web Audio API Synthesizer + Music Beds
    ==========================================================================
-   SFX are all pure oscillator synthesis (no sample files) -- unchanged
-   approach from before this session's audio-polish pass, just more of them.
-
-   Music (ambient + battle) is the one part of this file that is NOT
-   synthesized: it plays real Battlestar Galactica soundtrack tracks (Bear
-   McCreary) the DM supplied as local files in a "music tracks/" folder
-   alongside this project -- see the block comment above MUSIC_DIR below
-   for the full rationale, the personal-use note, and what changed from
-   the earlier CC0/CC-BY OpenGameArt hotlinks this replaced.
+   SFX are pure oscillator synthesis (no sample files), routed through one
+   SFX gain node. Music (ambient + battle beds) is NOT synthesized: it streams
+   real soundtrack tracks from a private Supabase Storage bucket -- see the
+   MUSIC BEDS block below.
    ========================================================================== */
 window.AudioEngine = (function() {
     let audioCtx = null;
@@ -23,10 +18,9 @@ window.AudioEngine = (function() {
         }
     }
 
-    // Sound-effects volume + mute (2026-10-01). Until now "Mute Music" only
-    // covered the music beds -- every synthesized effect went straight to the
-    // speakers with no way to turn it down. All effects now route through one
-    // gain node controlled from the 🔊 AUDIO menu (per device, localStorage).
+    // Sound-effects volume + mute, separate from music. All effects route
+    // through one gain node controlled from the AUDIO menu (per device,
+    // localStorage).
     let sfxVolume = (function() {
         try { const v = parseFloat(localStorage.getItem('darkforest_sfx_volume')); return isNaN(v) ? 1 : Math.max(0, Math.min(1, v)); } catch (e) { return 1; }
     })();
@@ -52,7 +46,8 @@ window.AudioEngine = (function() {
         try { localStorage.setItem('darkforest_sfx_muted', sfxMuted ? 'true' : 'false'); } catch (e) {}
         if (sfxGainNode) sfxGainNode.gain.value = sfxMuted ? 0 : sfxVolume;
     }
-    // Small helpers for the new effects below.
+    // Small synth helpers: a pitch-swept tone and a filtered noise burst.
+    // t0/dur are seconds from now.
     function tone(type, f0, f1, t0, dur, vol) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -84,56 +79,26 @@ window.AudioEngine = (function() {
     }
 
     /* ----------------------------------------------------------------------
-       MUSIC BEDS -- real Battlestar Galactica soundtrack (Bear McCreary),
-       served from a PRIVATE Supabase Storage bucket, not a public file
+       MUSIC BEDS -- Battlestar Galactica soundtrack (Bear McCreary)
        ----------------------------------------------------------------------
-       Earlier this session these tracks were referenced as local files in
-       a "music tracks/" folder, which worked fine locally but turned out
-       to be a real problem the moment this app got deployed to a public
-       GitHub Pages site: a static host has zero access control, so any
-       file sitting in that repo is a plain public URL anyone (or any
-       crawler) can fetch, logged in or not -- not something that should
-       be true of full copyrighted commercial recordings. See the "Private
-       Supabase Storage for music" checkpoint in
-       darkforest-architecture-reference.md for the full discussion.
+       The m4a files live in the PRIVATE Storage bucket 'music-tracks', not
+       the git repo (the site is a public static host). Each track start
+       requests a short-lived signed URL, which only works for a logged-in
+       session (RLS: music_tracks_authenticated_read). Uploads are DM-only
+       (RLS: music_tracks_dm_write), done via the Supabase dashboard -- there
+       is no in-app uploader. A logged-in player can still save a played
+       track; this narrows exposure, it does not eliminate it.
 
-       Fix: the 8 real audio files (m4a) now live in a PRIVATE Storage
-       bucket ('music-tracks', public:false, migration
-       music_tracks_private_storage) instead of the git repo. This file
-       never references a raw file URL -- it asks Supabase for a
-       short-lived SIGNED url (createSignedUrl, MUSIC_SIGNED_URL_TTL_SEC
-       below) each time a track starts, which only succeeds for an
-       authenticated session (RLS: music_tracks_authenticated_read).
-       Uploading/replacing files in the bucket is DM-only (RLS:
-       music_tracks_dm_write, same profiles.role='dm' pattern as the
-       pre-existing saved_fleets_dm_only policy) -- done via the Supabase
-       dashboard's Storage UI directly, not through this app's own UI (a
-       deliberate scope call for a one-time 8-file task, not built as an
-       in-app uploader this round).
+       These are copyrighted commercial recordings, meant for the DM's
+       private table only -- not for a public release of this tool.
 
-       This meaningfully narrows exposure (no public crawlable URL, no
-       search-engine indexing, access requires an actual login to this
-       campaign) but does NOT eliminate it -- nothing stops an
-       authenticated player from saving a track once it's played in their
-       own browser and re-sharing it themselves. That's a real, standing
-       limit, not something this fixes outright.
-
-       PERSONAL-USE NOTE (carried over, still true): these are real,
-       commercially-released, copyrighted recordings, not royalty-free
-       assets. This setup is meant for the DM's own table's private
-       sessions -- not a general public release of this tool.
-
-       Ambient bed rotates through 6 tracks (shuffled, reshuffled on
-       exhaustion): Pegasus, Dark Unions, Something Dark Is Coming, Worthy
-       of Survival, Martial Law, Standing In the Mud.
-       Battle bed rotates through 3 tracks the same way, auto-starting/
-       stopping with battle_encounters.is_active (js/battle-map.js's
-       loadBattleEncounters(), unchanged wiring from before): Prelude to
-       War, Worthy of Survival, Scar. "Worthy of Survival" deliberately
-       appears in BOTH rotations -- the DM's own choice, not a mistake.
+       Each bed is a shuffled rotation, reshuffled when exhausted. The battle
+       bed starts/stops with battle_encounters.is_active (battle-map.js
+       loadBattleEncounters()). "Worthy of Survival" is in BOTH rotations on
+       purpose (DM decision).
     */
     const MUSIC_BUCKET = 'music-tracks';
-    const MUSIC_SIGNED_URL_TTL_SEC = 6 * 60 * 60; // 6h -- comfortably covers one session; a fresh URL is fetched per track anyway, not cached across the whole session
+    const MUSIC_SIGNED_URL_TTL_SEC = 6 * 60 * 60; // 6h; a fresh URL is fetched per track anyway
     const AMBIENT_TRACKS = [
         '08 Pegasus.m4a',
         '15 Dark Unions.m4a',
@@ -148,13 +113,8 @@ window.AudioEngine = (function() {
         '11 Scar.m4a'
     ];
 
-    // Bug fix (bug hunt, this session): unguarded localStorage access here
-    // ran as part of this whole IIFE's top-level evaluation -- in any
-    // environment where localStorage throws (locked-down browser settings,
-    // certain extensions, storage-disabled contexts), this would throw
-    // before the `return {...}` at the bottom of the IIFE is ever reached,
-    // leaving window.AudioEngine undefined and breaking every SFX call
-    // app-wide (AudioEngine.playPing()/playError()/etc.), not just music.
+    // localStorage reads are guarded: a throw here (storage disabled) would
+    // abort the whole IIFE and leave window.AudioEngine undefined app-wide.
     let musicVolume = (function() {
         try {
             const v = parseFloat(localStorage.getItem('odyssey_audio_volume'));
@@ -169,14 +129,10 @@ window.AudioEngine = (function() {
     let battleAudio = null;
     let ambientDesired = false; // "should ambient be playing when nothing overrides it"
     let battleActive = false;
-    // Consecutive-failure guards -- without these, if the WHOLE bucket/bed
-    // is unreachable (RLS misconfigured, bucket empty, logged out), the old
-    // "on error, just try the next track" logic would spin forever, firing
-    // a fresh failed network request every few ms (this is exactly what
-    // happened with the old local-file 404s before this fix -- a genuine
-    // bug, not just a symptom of the wrong URL). Once a full rotation's
-    // worth of consecutive failures happens, stop retrying until
-    // startAmbient()/startBattleMusic() is explicitly called again.
+    // Consecutive-failure guards: if the whole bed is unreachable (logged
+    // out, RLS or bucket problem), "try the next track" would loop forever.
+    // After a full rotation of consecutive failures, retries stop until
+    // startAmbient()/startBattleMusic() is called again.
     let ambientFailStreak = 0;
     let battleFailStreak = 0;
 
@@ -193,23 +149,13 @@ window.AudioEngine = (function() {
 
     function applyLiveVolume() {
         const v = effectiveVolume();
-        // Bug fix (bug hunt, this session): fadeTo's setInterval captures a
-        // fixed targetVol when a fade starts and unconditionally forces
-        // el.volume = targetVol on its last tick. If setMusicVolume/setMuted
-        // ran while a fade-in was still in flight (e.g. muting while a track
-        // is fading in), the fade's own ticks -- and its final forced
-        // assignment -- would keep overwriting the volume this function just
-        // set, eventually re-asserting the stale pre-mute/pre-change target
-        // once the fade completed. Cancel any in-flight fade on an element
-        // before authoritatively setting its volume here, so a live mute/
-        // volume change always wins and can't be silently undone later by an
-        // already-running fade.
+        // Cancel any in-flight fade first: fadeTo forces its own fixed target
+        // volume on its last tick, which would undo a live mute/volume change.
         if (ambientAudio) { if (ambientAudio._fadeInterval) { clearInterval(ambientAudio._fadeInterval); ambientAudio._fadeInterval = null; } if (!ambientAudio.paused) ambientAudio.volume = v; }
         if (battleAudio) { if (battleAudio._fadeInterval) { clearInterval(battleAudio._fadeInterval); battleAudio._fadeInterval = null; } if (!battleAudio.paused) battleAudio.volume = v; }
     }
 
-    // Simple volume ramp over plain <audio> elements (no Web Audio graph
-    // needed for these -- .volume is enough for a fade).
+    // Volume ramp on a plain <audio> element (50 ms steps via .volume).
     function fadeTo(el, targetVol, durationMs, onDone) {
         if (!el) { if (onDone) onDone(); return; }
         if (el._fadeInterval) clearInterval(el._fadeInterval);
@@ -228,11 +174,9 @@ window.AudioEngine = (function() {
         }, 50);
     }
 
-    // Shared rotating-playlist factory -- ambient and battle both need
-    // identical shuffle/reshuffle-on-exhaustion behavior, so this is one
-    // implementation instead of two that could drift apart. Returns the
-    // bucket-relative object path (filename), not a URL -- signed URLs are
-    // fetched per-track in playNextTrack below.
+    // Shuffled rotating playlist, reshuffled on exhaustion. next() returns
+    // the bucket-relative path (filename), not a URL -- signed URLs are
+    // fetched per track in playTrackAttempt.
     function makeRotatingPlaylist(filenames) {
         let order = shuffleIndices(filenames.length);
         let cursor = -1;
@@ -261,29 +205,15 @@ window.AudioEngine = (function() {
     }
 
     // Extra attempts on the SAME track (fresh signed URL each time) before
-    // giving up on it and moving to a different track in the rotation.
-    // Added after a real report of "10 Something Dark Is Coming.m4a"
-    // repeatedly hitting net::ERR_QUIC_PROTOCOL_ERROR in Chrome -- that's a
-    // browser/network-layer QUIC connection failure talking to Supabase
-    // Storage's CDN, not something this app's code can prevent outright.
-    // Checked file sizes directly in Storage afterward: that track (18.4MB)
-    // and "17 Prelude to War.m4a" (18.1MB) are both roughly 2.5-4x every
-    // other track (4.3-7.8MB) -- a longer-lived streaming connection simply
-    // gets more chances to hit a transient QUIC error mid-playback, which
-    // is almost certainly why this specific (large, frequently-rotated
-    // ambient) track was the one actually reported. QUIC errors are usually
-    // transient, so retrying the SAME track a couple of times first (before
-    // this code's existing "move to the next track" fallback kicks in)
-    // gives it a real chance to succeed instead of just skipping a track
-    // that would likely have played fine a moment later.
+    // moving on in the rotation. Playback errors such as Chrome's transient
+    // net::ERR_QUIC_PROTOCOL_ERROR hit the large tracks (~18 MB) most; a
+    // retry usually succeeds.
     const MUSIC_TRACK_RETRY_LIMIT = 2;
     const MUSIC_TRACK_RETRY_DELAY_MS = 1200;
 
     async function playTrackAttempt(kind, path, attempt) {
         const isAmbient = kind === 'ambient';
-        // Re-check on every attempt, not just the first -- state can change
-        // during a retry's delay (e.g. the user stopped ambient, or battle
-        // ended, while this track was still trying to recover).
+        // Re-checked on every attempt: state can change during a retry delay.
         if (isAmbient) { if (!ambientDesired || battleActive) return; }
         else { if (!battleActive) return; }
 
@@ -295,18 +225,11 @@ window.AudioEngine = (function() {
         } catch (err) {
             console.warn('[AudioEngine] could not get a signed URL (check you are logged in and this file exists in the "music-tracks" Storage bucket):', path, err);
             if (recordFailureAndCheckGiveUp(isAmbient)) return;
-            return playNextTrack(kind); // signed-URL step failing isn't a per-track streaming glitch -- move to a different track, not a retry of this one
+            return playNextTrack(kind); // a signed-URL failure isn't a streaming glitch -- move on, don't retry
         }
 
-        // Bug fix (bug hunt, this session): the ambientDesired/battleActive
-        // check above only ran BEFORE this await -- createSignedUrl can take
-        // hundreds of ms, and nothing re-validated state after it resolved.
-        // A battle ending mid-fetch (stopBattleMusic, which starts the
-        // ambient bed if desired) could let this now-stale battle-track
-        // fetch land anyway, overwriting battleAudio and playing a track for
-        // a battle that already ended -- defeating the "battle bed takes
-        // priority" invariant. Re-check the same way the top-of-function
-        // guard does before committing to this track.
+        // Re-check after the await: state may have changed while the signed
+        // URL was fetched (e.g. the battle ended), so a stale track must not play.
         if (isAmbient) { if (!ambientDesired || battleActive) return; }
         else { if (!battleActive) return; }
 
@@ -327,12 +250,8 @@ window.AudioEngine = (function() {
         fadeTo(el, effectiveVolume(), isAmbient ? 2000 : 1000);
     }
 
-    // kind: 'ambient' | 'battle' -- picks the next track in that bed's own
-    // rotation and plays it (fading in), retrying that SAME track a couple
-    // of times first on failure (see playTrackAttempt above) before this
-    // bed's own rotation moves on to a different track. Used both for
-    // normal track-ended advancement and for a manual skip (see skipTrack
-    // below).
+    // kind: 'ambient' | 'battle'. Plays (fading in) the next track in that
+    // bed's rotation. Used for track-ended advancement and manual skips.
     function playNextTrack(kind) {
         const isAmbient = kind === 'ambient';
         if (isAmbient) { if (!ambientDesired || battleActive) return; }
@@ -368,14 +287,12 @@ window.AudioEngine = (function() {
         if (!battleActive) return;
         battleActive = false;
         if (battleAudio) { const el = battleAudio; fadeTo(el, 0, 1500, () => { el.pause(); el.currentTime = 0; }); }
-        if (ambientDesired) playNextTrack('ambient'); // resumes on the NEXT track, not mid-song where it left off -- simplification, flagged here rather than silently done
+        if (ambientDesired) playNextTrack('ambient'); // resumes on the NEXT track, not mid-song
     }
 
-    // Manual "skip to next track" -- hard-stops whatever's currently
-    // audible (no fade-out; a deliberate skip should feel instant, not
-    // linger) and immediately fades in the next track of WHICHEVER bed is
-    // currently active (battle takes priority, same as everywhere else).
-    // No-ops if neither bed is supposed to be playing.
+    // Manual skip: hard-stops the current track (no fade-out) and fades in
+    // the next track of the active bed (battle takes priority). No-op if
+    // neither bed should be playing.
     function skipTrack() {
         if (battleActive) {
             if (battleAudio) { if (battleAudio._fadeInterval) clearInterval(battleAudio._fadeInterval); battleAudio.pause(); }
@@ -410,15 +327,9 @@ window.AudioEngine = (function() {
     }
     document.addEventListener('DOMContentLoaded', syncControlsUI);
 
-    // #audio-controls-dropdown lives inside #top-bar, which has
-    // overflow-y:hidden (for the button row's horizontal-scroll safety net)
-    // -- an absolutely-positioned dropdown there gets silently clipped to
-    // invisible the moment it extends past the bar's own 50px height. Same
-    // bug class as #search-results-dropdown / #hazard-system-search-dropdown
-    // elsewhere in this app, and the same fix: switch to position:fixed
-    // (escapes ancestor overflow-clipping since nothing here sets a
-    // transform/filter) and compute the on-screen position from the
-    // button's own getBoundingClientRect() each time it opens.
+    // The dropdown lives inside #top-bar (overflow-y:hidden), which would
+    // clip an absolutely-positioned dropdown. Use position:fixed, placed
+    // from the button's rect on each open.
     window.toggleAudioControls = function() {
         const dd = document.getElementById('audio-controls-dropdown');
         const btn = document.getElementById('audio-controls-toggle-btn');
@@ -440,21 +351,17 @@ window.AudioEngine = (function() {
         dd.style.display = 'none';
     });
 
-    // Browsers require a user interaction to unlock audio playback. This
-    // resumes the oscillator SFX context (original behavior, unchanged).
-    // NOTE: starting the ambient bed itself now happens from db.js's
-    // fetchUserProfile() right after a real login succeeds -- the signed-URL
-    // fetch requires an authenticated session, so calling startAmbient() from
-    // a pre-login click (e.g. clicking the email field) would just fail and
-    // burn this one-time listener for nothing. We still try it here too, in
-    // case this fires on a click that happens to land after login.
+    // Browsers need a user gesture to unlock audio: the first click resumes
+    // the SFX context. The ambient bed normally starts from db.js
+    // fetchUserProfile() after login (signed URLs need a session); it is
+    // only tried here if this first click lands after login.
     document.addEventListener('click', () => {
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
         if (!muted && typeof currentUserId !== 'undefined' && currentUserId) startAmbient();
     }, { once: true });
 
     return {
-        // --- Existing SFX (unchanged) ---
+        // --- SFX ---
         // High-pitched sonar blip for tactical map pings
         playPing: function() {
             init();
@@ -541,8 +448,6 @@ window.AudioEngine = (function() {
             osc.stop(audioCtx.currentTime + 1.5);
         },
 
-        // --- New SFX (2026-08 audio polish) ---
-
         // Low mechanical clunk for docking/undocking a vessel to/from a master
         playDock: function() {
             init();
@@ -577,9 +482,7 @@ window.AudioEngine = (function() {
             });
         },
 
-        // Very short, quiet UI tick -- available for button click feedback.
-        // Not wired to any button yet (see darkforest-architecture-reference.md
-        // for why -- deliberately deferred, not silently skipped).
+        // Very short, quiet UI tick. Not wired to any button yet.
         playClick: function() {
             init();
             const osc = audioCtx.createOscillator();
@@ -614,12 +517,9 @@ window.AudioEngine = (function() {
             });
         },
 
-        // Descending "cancel/abort" tone -- distinct from playError()'s
-        // buzz. Not wired anywhere yet: there's no dedicated "Cancel Jump"
-        // button in the current UI to hang it on (only an internal cleanup
-        // path that also fires after a SUCCESSFUL jump, which would misfire
-        // this sound if hooked there). Available for whenever that UI gets
-        // added.
+        // Descending "cancel/abort" tone, distinct from playError(). Not
+        // wired yet: there is no "Cancel Jump" button, and the jump cleanup
+        // path also runs after a successful jump, so don't hook it there.
         playCancel: function() {
             init();
             const osc = audioCtx.createOscillator();
@@ -635,11 +535,8 @@ window.AudioEngine = (function() {
             osc.stop(audioCtx.currentTime + 0.25);
         },
 
-        // Pleasant ascending three-note chime -- daily logistics cycle
-        // complete (wired). Also usable for salvage/gather completion,
-        // which is NOT wired yet -- couldn't confidently locate a single
-        // "gather complete" trigger point in this pass, so left as a
-        // deferred hookup rather than guessing at the wrong function.
+        // Ascending three-note chime: daily logistics cycle complete.
+        // Not yet wired for salvage/gather completion.
         playChime: function() {
             init();
             const freqs = [523.25, 659.25, 783.99]; // C5, E5, G5
@@ -657,7 +554,7 @@ window.AudioEngine = (function() {
             });
         },
 
-        // --- Battle sounds (Phase 1, 2026-10-01) ---
+        // --- Battle sounds ---
         // Two quick rising beeps: a weapon has a target.
         playTargetLock: function() {
             init();
@@ -689,7 +586,7 @@ window.AudioEngine = (function() {
         isSfxMuted: function() { return sfxMuted; },
         getSfxVolume: function() { return sfxVolume; },
 
-        // --- Music beds (2026-08 audio polish) ---
+        // --- Music beds ---
         startAmbient: startAmbient,
         stopAmbient: stopAmbient,
         startBattleMusic: startBattleMusic,

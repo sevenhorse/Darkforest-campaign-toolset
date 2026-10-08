@@ -3,29 +3,20 @@
    ========================================================================== */
 
 
-// STRIKE_CRAFT_DB catalog + SQUADRON_TACTICAL_SPEED moved to js/squadrons.js
-// on 2026-08-27 (Priority 2 split). See that file for the catalog and its
-// design-rationale comments.
+// STRIKE_CRAFT_DB and SQUADRON_TACTICAL_SPEED live in js/squadrons.js.
 
 
 /* --- PERKS & SPECIALIZATIONS ---
-   The perk catalog and lookup logic moved to js/perk-designer.js — perks are
-   now a real DB-backed catalog (perk_definitions table) instead of a
-   hardcoded object here, so DM and players can design/propose new ones
-   instead of being limited to whatever's written into this file. See that
-   file for window.PERKS_DATA's replacement (perkDefinitionsList) and
-   window.getPerkBonusFor's new DB-driven implementation. */
+   Perks are a DB-backed catalog (perk_definitions); see js/perk-designer.js
+   for perkDefinitionsList and window.getPerkBonusFor. */
 
 
 /* --- CARGO ITEM CATALOG ---
-   DB-backed catalog (cargo_item_catalog table) of named cargo items, built
-   this session from the U.N.S. Intrepid Horizon / Task Force Black supply
-   manifest (51 seeded items). Lets the "Add Cargo Entry" form here and the
-   Secret Repository's cargo editor (js/ship-designer.js) offer a pick-list
-   instead of only free text, while still allowing custom one-off items.
-   Same "catalog/definition" RLS convention as perk_definitions etc. --
-   anyone can read/pick; only the DM sees the add/remove editor (gated in
-   js/db.js's handleLogin, same as every other DM-only element on screen). */
+   DB-backed catalog (cargo_item_catalog) of named cargo items. Feeds the
+   pick-lists in the Cargo Deck form here and the Secret Repository cargo
+   editor (js/ship-designer.js); custom free-text items are still allowed.
+   Anyone can read; only the DM sees the add/remove editor (gated in
+   js/db.js handleLogin). */
 let cargoItemCatalogList = [];
 
 window.loadCargoItemCatalog = async function() {
@@ -36,10 +27,9 @@ window.loadCargoItemCatalog = async function() {
     if (typeof window.renderCargoCatalogDmList === 'function') window.renderCargoCatalogDmList();
 };
 
-// Shared <optgroup>-by-manifest-section option list, used both by the main
-// Cargo Deck's static picker (populated on load via renderCargoCatalogPickers)
-// and by the Secret Repository cargo editor's picker (which is rebuilt fresh
-// every render, so it just calls this directly at template-build time).
+// <optgroup>-by-manifest-section option list. Used by the Cargo Deck's static
+// picker (renderCargoCatalogPickers) and by the Secret Repository cargo editor,
+// which rebuilds its picker inline every render.
 window.renderCargoCatalogOptionsHtml = function() {
     const bySection = {};
     cargoItemCatalogList.forEach(item => {
@@ -53,17 +43,15 @@ window.renderCargoCatalogOptionsHtml = function() {
     }).join('');
 };
 
-// Repopulates the static (not re-rendered-per-frame) pickers -- currently
-// just the main Cargo Deck's #new-cargo-catalog-pick. The Secret Repository
-// picker rebuilds itself inline each render instead (see ship-designer.js).
+// Repopulates the static pickers (currently just #new-cargo-catalog-pick).
+// The Secret Repository picker rebuilds itself each render (ship-designer.js).
 window.renderCargoCatalogPickers = function() {
     const sel = document.getElementById('new-cargo-catalog-pick');
     if (sel) sel.innerHTML = '<option value="">-- Custom / Free-Text Item --</option>' + window.renderCargoCatalogOptionsHtml();
 };
 
-// idPrefix is 'new' (main Cargo Deck form, #new-cargo-*) or 'repo' (Secret
-// Repository cargo form, #repo-cargo-*) -- both forms happen to already use
-// that exact id-suffix convention, so one function serves both.
+// idPrefix is 'new' (Cargo Deck form, #new-cargo-*) or 'repo' (Secret
+// Repository form, #repo-cargo-*).
 window.applyCargoCatalogPick = function(idPrefix, catalogId) {
     if (!catalogId) return;
     const item = cargoItemCatalogList.find(c => c.id === catalogId);
@@ -131,12 +119,9 @@ window.sanitizeCargo = function(inv) {
             ]
         };
     }
-    // Guarantee all three arrays exist even on a non-empty-but-partial
-    // object (e.g. hand-edited or legacy cargo missing one field) — every
-    // caller of this function (deliverColonyResources, the fleet-group
-    // production tick, the cargo UI) reads/pushes into these directly
-    // without its own null-guard, so a missing array here would throw a
-    // few call sites downstream instead of failing safely right here.
+    // Guarantee all three arrays exist even on a partial object (hand-edited or
+    // legacy cargo). Callers (deliverColonyResources, fleet-group production tick,
+    // cargo UI) push into these without their own null-guard.
     if (!Array.isArray(inv.perishables)) inv.perishables = [];
     if (!Array.isArray(inv.expendables)) inv.expendables = [];
     if (!Array.isArray(inv.misc)) inv.misc = [];
@@ -144,16 +129,11 @@ window.sanitizeCargo = function(inv) {
     return inv;
 };
 
-// Cargo Deck Access Control (2026-09-24, DM-confirmed: "Cargo Deck should
-// follow the same rules as the vessel deck"). The list used to include EVERY
-// ship_markers row, so any player could view and edit any vessel's cargo --
-// NPCs, hidden vessels, other factions. It now uses the exact Vessel Deck
-// rule, window.canAccessVesselDeck (DM sees everything; a player sees their
-// own ships, IFF-friendly ships and other players' ships, never hidden ones).
-// Every cargo mutation below re-checks it too (canEditCargo), since a stale
-// dropdown or a hand-typed onclick could otherwise bypass the list filter.
-// Also now keeps the currently selected vessel when the list is rebuilt
-// (it used to snap back to the first vessel every time).
+// Cargo Deck access uses the Vessel Deck rule, window.canAccessVesselDeck (DM
+// sees everything; a player sees own, IFF-friendly and other players' ships,
+// never hidden ones). Every cargo mutation re-checks it (canEditCargo) because a
+// stale dropdown or hand-typed onclick could bypass the list filter.
+// Keeps the current selection when the list is rebuilt.
 function canEditCargo(vessel) {
     if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(vessel)) {
         if (window.AudioEngine) window.AudioEngine.playError();
@@ -237,7 +217,7 @@ window.renderTerminalCargoDeck = function() {
     `;
 
     let html = synthHtml;
-    // Balance pass (2026-10-03): food supply in crew-days for this ship's crew.
+    // Food supply in crew-days for this ship's crew.
     if (typeof window.foodValueOf === 'function') {
         const crew = window.vesselCrew(vessel);
         let crewDays = 0, shipDays = 0;
@@ -250,10 +230,8 @@ window.renderTerminalCargoDeck = function() {
         html += `<span style="font-size:11px; color:#6b826a;">No cargo items recorded in this section. Use the form on the right to store items.</span>`;
     } else {
         currentCategoryItems.forEach((item, index) => {
-            // Cargo items are a plain JSONB array with no stable per-item id
-            // (unlike Arsenal/Colonies/etc), so reordering here directly
-            // swaps array entries and saves — the array order already IS
-            // the persisted data, there's nothing separate to key by.
+            // Cargo items have no stable id, so reordering swaps array entries and
+            // saves; the array order is the persisted data.
             const upDisabled = index === 0 ? 'disabled' : '';
             const downDisabled = index === currentCategoryItems.length - 1 ? 'disabled' : '';
             html += `
@@ -381,9 +359,8 @@ window.removeCargoItem = async function(vesselId, itemIndex) {
     }
 };
 
-// Cargo items have no stable id (see renderTerminalCargoDeck) — reorder is
-// a direct array-index swap, saved straight to the DB like every other
-// cargo mutation here, not the personal localStorage helper used elsewhere.
+// Cargo items have no stable id: reorder is a direct array-index swap saved
+// to the DB, not the localStorage reorder helper used elsewhere.
 window.moveCargoItem = async function(vesselId, index, direction) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -446,17 +423,9 @@ window.broadcastTerminalCargoManifest = async function() {
 };
 
 /* --- VESSEL DECK LOGIC --- */
-// Vessel Deck Access Control build (this session): the dropdown previously
-// listed EVERY ship_markers row in the galaxy with no filtering at all --
-// any player could select and then fully view/edit any other player's ship,
-// any DM/NPC vessel, or any enemy the DM had deployed, since renderVesselDeck
-// itself had no ownership check either. Confirmed design: a non-DM player
-// can only select a vessel that's "friendly" (see window.canAccessVesselDeck
-// below) and not fog-of-war Hidden from them -- everything else is simply
-// absent from this list, not just read-only, so a player can't even tell a
-// hidden/hostile vessel exists via this dropdown. DM sees and can select
-// everything, unfiltered, same "DM bypasses all restrictions" convention as
-// the rest of this app.
+// Non-DM players only see vessels that pass window.canAccessVesselDeck.
+// Others are absent from the list (not just read-only), so a player can't
+// tell they exist. DM sees everything.
 window.populateVesselDeckSelect = function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select) return;
@@ -468,39 +437,17 @@ window.populateVesselDeckSelect = function() {
     select.innerHTML = html || '<option value="">No accessible vessels found</option>';
 };
 
-// IFF build (this session): "friendly" for Vessel Deck purposes mirrors the
-// Battle Map ship-status cards' existing rule (window.renderBattleShipCards,
-// js/battle-map.js: any player gets full detail on ANY other player's ship,
-// only a health-bar readout on a DM/NPC-owned one) and additionally honors
-// the new `iff` field, so the DM can mark a specific DM-owned NPC (e.g. an
-// allied escort) Friendly and have it show up for players too. DM always
-// bypasses this entirely, same convention as everywhere else in this app.
-// Fog of War (is_hidden) is checked first and separately -- a vessel hidden
-// from this viewer is inaccessible here regardless of how friendly its IFF
-// or ownership would otherwise make it, EXCEPT for the vessel's own
-// player-owner, who always sees their own ship regardless of its hidden flag
-// (matches window.isVesselVisibleToMe's own confirmed exception).
-/* Polish pass (this session): the single shared IFF->color mapping. Before
-   this, the quick-spawn form (js/map.js) had this exact ternary inlined for
-   ships created there, but window.deployShipTemplate (js/ship-designer.js) --
-   the actual "spawn a ship" path used by templates/Secret Repository NPCs --
-   never derived color from IFF at all, always falling back to a hardcoded
-   cyan. That's the real cause of the DM-reported "spawned ship tokens
-   appear as cyan even when tagged hostile": templates have no `color` field
-   of their own today, so every deployed template hit that hardcoded
-   fallback regardless of its IFF. Fixed at the deploy path only (see
-   deployShipTemplate) -- deliberately NOT also applied when a live vessel's
-   IFF is edited later via Edit Base Stats, to avoid silently overwriting a
-   color someone set on purpose via this same quick-spawn form. */
-/* IFF unification (this session): now delegates to window.IFF_COLORS
-   (js/ship-designer.js, loads before this file) instead of its own
-   slightly-different ternary -- that one had hostile matching but neutral
-   was '#ffaa00' amber vs the canonical badge's '#c9962f' gold, and
-   "friendly" wasn't a real case at all (default '#00e1ff' cyan stood in for
-   it everywhere). Null/unset still falls back to that same cyan default,
-   matching every spawn path's existing "untagged ship reads as friendly-ish"
-   convention -- only the three real, non-null tags now match the Vessel
-   Deck badge exactly. */
+// window.canAccessVesselDeck (below getIffColor): "friendly" mirrors the
+// Battle Map ship cards (js/battle-map.js) - any player-owned ship counts, plus
+// DM/NPC ships with iff 'friendly'. DM bypasses all of it.
+// Fog of War is checked first: a vessel hidden from this viewer is
+// inaccessible whatever its IFF, except to its own player-owner (same
+// exception as window.isVesselVisibleToMe).
+/* Shared IFF -> token color. Delegates to window.IFF_COLORS
+   (js/ship-designer.js, loads before this file); null/unset falls back to
+   cyan '#00e1ff'. Templates get their color from this on deploy; editing a
+   live vessel's IFF later does not recolor it, so a deliberately chosen
+   color is not overwritten. */
 window.getIffColor = function(iff) {
     return (window.IFF_COLORS && window.IFF_COLORS[iff]) || '#00e1ff';
 };
@@ -515,16 +462,11 @@ window.canAccessVesselDeck = function(vessel) {
     return ownerProfs.some(p => p.role !== 'dm');
 };
 
-// Fog of War build (this session): the single shared visibility check used
-// everywhere a vessel could otherwise leak its presence to a non-DM client
-// -- the Battle Map grid/ship-status cards and getBattleScopedTargets
-// (js/battle-map.js), the manual weapon/squadron target dropdown fallbacks
-// and window.canAccessVesselDeck above (js/combat.js). Confirmed design:
-// hidden means invisible to EVERYONE except the DM and the vessel's own
-// player-owner (if it has one) -- not scoped to friend/foe or to one
-// specific battle, and not weakened by a vessel otherwise being "friendly."
-// Fails open (never hides) if the vessel record itself is missing, same
-// "don't hide over a data gap" convention as every other check in this app.
+// Shared Fog of War visibility check, used wherever a vessel could leak to a
+// non-DM client (Battle Map grid/cards, getBattleScopedTargets, target
+// dropdown fallbacks, canAccessVesselDeck). Hidden means invisible to everyone
+// except the DM and the vessel's own player-owner, regardless of IFF or battle.
+// Fails open (visible) if the vessel record is missing.
 window.isVesselVisibleToMe = function(vessel) {
     if (!vessel) return true;
     if (!vessel.is_hidden) return true;
@@ -532,15 +474,10 @@ window.isVesselVisibleToMe = function(vessel) {
     return window.vesselHasOwner(vessel, currentUserId);
 };
 
-// Fog of War build (this session, confirmed design): a hidden vessel
-// automatically un-hides the instant it fires ANY weapon -- manual fire,
-// ordnance launch, squadron fire (manual or AI-stance), and ship/squadron
-// Point Defense all count as "firing." Called best-effort from each of
-// those resolution paths; failures here should never block the shot itself
-// (see the try/catch at each call site), matching this codebase's existing
-// "a damage roll should never be lost to an unrelated side-effect failing"
-// convention (e.g. the ordnance-resolution try/catch in
-// processBattleRoundAutomations, js/battle-map.js).
+// A hidden vessel un-hides as soon as it fires anything: manual fire, ordnance,
+// squadron fire (manual or AI stance), ship/squadron Point Defense. Called
+// best-effort from each path; call sites wrap it in try/catch so a failure
+// here never loses the shot.
 window.revealVesselIfHidden = async function(vessel) {
     if (!vessel || !vessel.is_hidden) return;
     vessel.is_hidden = false;
@@ -574,26 +511,15 @@ window.updateShipStance = async function(shipId, stance) {
 };
 
 /* --- SHARED SHIP STATUS RENDERERS ---
-   Extracted this session so the Vessel Deck (js/combat.js) and the Battle
-   Map's full-screen ship-status cards (js/battle-map.js) show identical
-   stance/health markup from ONE implementation, not two independently
-   maintained copies. No id-lookup dependencies (stance's onchange and the
-   health bars' onclick handlers all pass values directly as arguments), so
-   these two are safe to reuse verbatim with no prefixing needed — unlike
-   the weapon-row renderer below, which DOES need per-caller unique element
-   ids since two callers can legitimately render the same weapon's
-   target/volley controls into the DOM at once. */
+   Used by both the Vessel Deck and the Battle Map ship-status cards
+   (js/battle-map.js). Stance and health markup pass values straight to their
+   handlers, so no id prefixing is needed - unlike the weapon-row renderer
+   below, where two callers can render the same weapon at once. */
 window.renderShipStanceHtml = function(vessel) {
     let currentStance = vessel.ship_stance || 'Balanced';
-    // Squadron AI Stances build (this session): a read-only badge for
-    // vessel_class ('Capital'/'Escort'/unset) -- the field itself is edited
-    // via the Vessel Deck's "EDIT BASE STATS" modal (a static/setup fact
-    // about the ship, same treatment as drive_type), not from here. Shown
-    // only when actually set, since most existing ships predate this field
-    // and are legitimately unclassified rather than wrongly defaulted to
-    // one side. See window.processBattleRoundAutomations (js/battle-map.js)
-    // for the only place this field is actually READ (Attack Capital
-    // Ships/Attack Escorts squadron AI target filtering).
+    // Read-only vessel_class badge ('Capital'/'Escort'), shown only when set.
+    // Edited via EDIT BASE STATS; read only by squadron AI target filtering
+    // (Attack Capital Ships / Attack Escorts) in processBattleRoundAutomations.
     const classBadge = vessel.vessel_class
         ? `<span style="font-size:8px; color:#c9962f; border:1px solid #c9962f; border-radius:2px; padding:1px 5px;" title="Vessel classification -- used by squadron AI Stances to tell Capital Ships apart from Escorts. Set via EDIT BASE STATS.">${vessel.vessel_class === 'Capital' ? '⬢ CAPITAL' : '◆ ESCORT'}</span>`
         : window.unclassifiedBadgeHtml(vessel);
@@ -612,17 +538,10 @@ window.renderShipStanceHtml = function(vessel) {
     `;
 };
 
-// editable=false renders the same 5 bars with no +/-/-10/+10 buttons — used
-// for an enemy/NPC vessel's card on the Battle Map, where a player can see
-// health but shouldn't be able to adjust it themselves.
+// editable=false omits the +/- buttons (enemy/NPC cards on the Battle Map).
 window.renderShipHealthBarsHtml = function(vessel, editable) {
-    // Bug fix (bug hunt, this session): `|| default` treats an explicit 0
-    // (e.g. a DM-configured derelict with no shield generator/reactive armor)
-    // as "missing" and silently substitutes the default max, the same falsy-
-    // zero defect max_hardened was already fixed for elsewhere (see the
-    // `!== undefined` comment on modifyShipHealth above) — generalized here
-    // to the other three stats so a real 0 max displays as "0 / 0", not
-    // "0 / 400".
+    // Use `!== undefined`, not `|| default`: an explicit 0 max (e.g. a derelict
+    // with no shields) must display as "0 / 0", not the default max.
     const s_int = vessel.integrity_shields !== undefined ? vessel.integrity_shields : 400;
     const s_max = vessel.max_shields !== undefined ? vessel.max_shields : 400;
     const h_int = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
@@ -652,18 +571,15 @@ window.renderShipHealthBarsHtml = function(vessel, editable) {
         </div>
     `;
 
-    // Directional armor (Phase 5): four side bars replace the single Hardened bar while the switch is on.
+    // Directional armor: four side bars replace the Hardened bar while the switch is on.
     const sideBars = typeof window.renderArmorSideBarsHtml === 'function' ? window.renderArmorSideBarsHtml(vessel, editable) : null;
     return makeBar('DEFLECTOR SHIELDS', s_int, s_max, '#00e1ff', 'shields') + makeBar('REACTIVE ARMOR (IMPACT/EXPLOSIVE)', r_int, r_max, '#ffaa00', 'reactive') + makeBar('ABLATIVE ARMOR (HEAT/ENERGY)', a_int, a_max, '#ffaa00', 'ablative') + (sideBars || makeBar('HARDENED ARMOR', hd_int, Math.max(1, hd_max), '#c9962f', 'hardened')) + makeBar('HULL INTEGRITY', h_int, h_max, '#ff3333', 'hull');
 };
 
-// idPrefix distinguishes this weapon row's target/volley element ids from
-// another simultaneous render of the SAME weapon elsewhere in the DOM (the
-// Vessel Deck uses '' — unchanged from before this session; the Battle Map
-// cards use 'bm-'). showManageButtons hides the ✎ edit / ✕ delete weapon
-// buttons — those are weapon-DESIGN actions, out of place on an in-combat
-// HUD, so the Battle Map cards render with showManageButtons:false while
-// the Vessel Deck (the one place weapons should be edited) keeps them.
+// idPrefix keeps target/volley element ids unique when the same weapon is
+// rendered twice (Vessel Deck uses '', Battle Map cards 'bm-').
+// showManageButtons:false hides the edit/delete weapon buttons (Battle Map
+// cards); weapons are only edited from the Vessel Deck.
 window.renderShipWeaponsHtml = function(vessel, opts) {
     opts = opts || {};
     const idPrefix = opts.idPrefix || '';
@@ -673,15 +589,11 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
     let wHtml = '';
     weapons.forEach((w, idx) => {
         const battleScoped = (typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(vessel.id, w.range, { firerVessel: vessel, wpn: w, includeOutOfArc: true }) : null;
-        // Fog of War build (this session): the battle-scoped path already
-        // filters hidden vessels (see getBattleScopedTargets, js/battle-map.js)
-        // -- this fallback (no active battle / no token) needs the same
-        // filter applied directly, or a hidden vessel would leak into the
-        // target list whenever there's no battle grid to scope against.
+        // Fallback when there's no battle/token: getBattleScopedTargets already
+        // filters hidden vessels, so apply the same filter here.
         const targetCandidates = battleScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
         let targetOptions = '<option value="">-- No Target --</option>';
-        // Out-of-arc targets (Phase 3) stay listed but greyed + unselectable.
-        // Phase 10: terrain-blocked targets the same way, with a short reason.
+        // Out-of-arc and terrain-blocked targets stay listed but greyed + unselectable.
         targetCandidates.forEach(m => { targetOptions += (m.out_of_arc || m.terrain_block)
             ? `<option value="${m.id}" disabled style="color:#5a5a5a;">${m.is_strike_craft ? '🛩️ ' : ''}${m.name} (${m.out_of_arc ? 'out of arc' : (/nebula/i.test(m.terrain_block) ? 'in nebula' : 'blocked')})</option>`
             : `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
@@ -693,20 +605,13 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         let pdBadge = w.is_point_defense ? `<span style="font-size:8px; color:#66d9ff; border:1px solid #66d9ff; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Point Defense — auto-fires at inbound ordnance and engaged strike craft on Advance Round">🛡 PD</span>` : '';
         let rangeBadge = w.range ? `<span style="font-size:8px; color:#6b826a; border:1px solid #3c4e36; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Battle Map targeting range">📏 ${w.range}</span>` : '';
         let cooldownPeriodBadge = w.cooldown_period ? `<span style="font-size:8px; color:#ff9d4d; border:1px solid #ff9d4d; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Firing auto-sets Cooldown to this many turns">⏱ ${w.cooldown_period}</span>` : '';
-        // Single Warhead Ordnance build (this session): opt-in per-weapon
-        // alternative to the default multi-hit (6-payload split) ordnance
-        // pattern -- see window.scaleOrdnanceDice/SINGLE_WARHEAD_DICE_MULT
-        // (js/battle-map.js) and the split-skip check in
-        // processBattleRoundAutomations for the actual mechanic. Badge only
-        // shown for ordnance-classed weapons that opted in; every existing
-        // weapon defaults to undefined/'multi' with zero visual change.
+        // Badge for ordnance that opted into a single warhead instead of the default
+        // 6-payload split (mechanic: scaleOrdnanceDice / SINGLE_WARHEAD_DICE_MULT and
+        // processBattleRoundAutomations in js/battle-map.js).
         let singlePatternBadge = (wClass === 'ordnance' && w.ordnance_pattern === 'single') ? `<span style="font-size:8px; color:#ff3333; border:1px solid #ff3333; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Single Warhead — does not split into 6 payloads; heavier per-hit damage, no redundancy against interception">⊕ SINGLE</span>` : '';
 
-        // Station Designer build: a weapon optionally assigned to a deck is
-        // disabled once that deck's HP hits 0 -- see genDeckId/ensureDeckIds
-        // above. Fails open (no badge, weapon fires normally) if the
-        // assigned deck was since deleted, same "don't corrupt on a stale
-        // reference" precedent as this project's other jsonb override links.
+        // A weapon assigned to a deck is disabled once that deck's HP hits 0.
+        // Fails open (no badge, fires normally) if the assigned deck was deleted.
         let assignedDeck = w.assigned_deck_id ? (vessel.ship_decks || []).find(d => d.id === w.assigned_deck_id) : null;
         let deckDestroyed = !!(assignedDeck && assignedDeck.hp <= 0);
         let deckBadge = assignedDeck ? `<span style="font-size:8px; color:${deckDestroyed ? '#ff3333' : '#6b826a'}; border:1px solid ${deckDestroyed ? '#ff3333' : '#3c4e36'}; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Tied to the ${assignedDeck.name} deck — a destroyed deck can't fire its assigned weapons">🔧 ${assignedDeck.name}${deckDestroyed ? ' DESTROYED' : ''}</span>` : '';
@@ -768,7 +673,7 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
 };
 
 window.renderVesselDeck = function() {
-    // Firing arcs (Phase 3): Arc dropdown in the "Mount New Weapon System" form (kept across re-renders).
+    // Firing arcs: Arc dropdown in the "Mount New Weapon System" form (kept across re-renders).
     if (typeof window.ensureArcSelect === 'function') { const cur = document.getElementById('new-ship-wpn-arc'); window.ensureArcSelect('new-ship-wpn-loc', 'new-ship-wpn-arc', cur ? cur.value : ''); }
     const select = document.getElementById('vessel-deck-select');
     if (!select || !select.value) return;
@@ -777,18 +682,9 @@ window.renderVesselDeck = function() {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
 
-    // Vessel Deck Access Control build (this session): defense-in-depth --
-    // populateVesselDeckSelect already excludes non-friendly/hidden vessels
-    // from the dropdown's own <option> list, but that list is only rebuilt
-    // on specific triggers (switching to the Vessel tab). renderVesselDeck
-    // itself re-runs far more often -- e.g. on every ship_markers realtime
-    // update (js/db.js) -- so if a DM flips a vessel's IFF to non-friendly
-    // or toggles it Hidden WHILE a player already has it selected, the old
-    // <option> (and the player's current selection) can still be sitting in
-    // the DOM until the next tab-switch rebuild. Re-checking here on every
-    // render, not just at selection time, closes that gap. Blanks every
-    // panel with a lock message and bails out before any further reads/
-    // writes rather than trusting the dropdown alone.
+    // Defense in depth: the dropdown is only rebuilt on tab switch, but this
+    // re-renders on every ship_markers realtime update. If the DM makes the
+    // selected vessel non-friendly or Hidden, lock every panel and bail out here.
     if (!window.canAccessVesselDeck(vessel)) {
         const lockMsg = '<span style="font-size:10px; color:#ff3333;">🔒 DM ONLY — this vessel is not accessible from your Vessel Deck.</span>';
         ['vessel-health-container', 'vessel-decks-container', 'vessel-weapons-container', 'vessel-ownership-container', 'vessel-salvage-container', 'vessel-manufacturing-container', 'vessel-embarked-container', 'vessel-deployed-container'].forEach(id => {
@@ -798,10 +694,8 @@ window.renderVesselDeck = function() {
         return;
     }
 
-    // Station Designer build: self-heal any legacy decks (created before
-    // weapon-deck-gating existed) that lack a stable id — see genDeckId/
-    // ensureDeckIds above. Persists once, silently, the first time this
-    // vessel's decks are rendered after the fix ships.
+    // Self-heal legacy decks that lack a stable id (see genDeckId/ensureDeckIds).
+    // Persists once, silently.
     vessel.ship_decks = vessel.ship_decks || [];
     if (window.ensureDeckIds(vessel.ship_decks)) {
         db.from('ship_markers').update({ ship_decks: vessel.ship_decks }).eq('id', vessel.id);
@@ -811,17 +705,14 @@ window.renderVesselDeck = function() {
     const decksContainer = document.getElementById('vessel-decks-container');
     const weaponsContainer = document.getElementById('vessel-weapons-container');
 
-    // One-time populate of the static "new weapon" damage-type select — it
-    // has no options in index.html's markup since DAMAGE_TYPES lives here in
-    // JS, not duplicated into static HTML (same reasoning as the edit modal).
+    // One-time populate of the "new weapon" damage-type select; options come
+    // from DAMAGE_TYPES in JS, not index.html.
     const newWpnDmgTypeSelect = document.getElementById('new-ship-wpn-dmgtype');
     if (newWpnDmgTypeSelect && newWpnDmgTypeSelect.options.length === 0) {
         newWpnDmgTypeSelect.innerHTML = window.buildDamageTypeOptionsHtml('Impact');
     }
 
-    // Re-populated every render (not one-time like the damage-type select
-    // above) since which decks exist can change vessel to vessel and render
-    // to render — unlike DAMAGE_TYPES, which is static.
+    // Re-populated every render, since the set of decks varies by vessel.
     const newWpnDeckSelect = document.getElementById('new-ship-wpn-deck');
     if (newWpnDeckSelect) {
         const decks = vessel.ship_decks || [];
@@ -831,11 +722,9 @@ window.renderVesselDeck = function() {
     if (healthContainer) {
         let resetBtn = `<div style="display:flex; gap:6px; margin-bottom:10px;"><button class="btn-reveal" onclick="window.resetShipStats('${vessel.id}')" style="flex:1; font-size:10px; margin:0; border-color:#00e5a3;">↺ RESET COMBAT STATS</button><button class="layer-edit" onclick="window.openEditMaxStatsModal('${vessel.id}')" style="flex:1; font-size:10px; margin:0; border-color:#c9962f; color:#c9962f;">✎ EDIT BASE STATS</button></div>`;
 
-        // Stance selector + health bars are shared with the Battle Map's
-        // full-screen ship-status cards (see window.renderShipStanceHtml /
-        // window.renderShipHealthBarsHtml below) — one implementation, two
-        // call sites, so they can't drift apart. Reset/Edit Base Stats stay
-        // Vessel-Deck-only (an admin/setup action, not a combat one).
+        // Stance selector and health bars are shared with the Battle Map cards
+        // (renderShipStanceHtml / renderShipHealthBarsHtml). Reset/Edit Base Stats are
+        // Vessel Deck only.
         healthContainer.innerHTML = window.renderShipStanceHtml(vessel) + resetBtn + window.renderShipHealthBarsHtml(vessel, true);
     }
 
@@ -846,24 +735,14 @@ window.renderVesselDeck = function() {
         else {
             const DECK_TYPE_LABELS = { bridge: 'BRIDGE / CIC', engineering: 'ENGINEERING', manufacturing: 'MANUFACTURING', life_support: 'LIFE SUPPORT', hangar: 'HANGAR', weapons: 'WEAPONS', medical: 'MEDICAL', quarters: 'QUARTERS', cargo: 'CARGO', other: 'UNCLASSIFIED' };
             decks.forEach((d, idx) => {
-                // Ship decks are a plain JSONB array with no stable per-item
-                // id, same situation as cargo — reorder swaps array entries
-                // directly and saves, rather than going through the
-                // localStorage helper used for id-backed lists.
+                // Decks have no stable per-item id (like cargo), so reorder swaps array
+                // entries and saves instead of using the localStorage reorder helper.
                 const upDisabled = idx === 0 ? 'disabled' : '';
                 const downDisabled = idx === decks.length - 1 ? 'disabled' : '';
                 const deckType = d.type || 'other';
-                // Pending-list follow-up (this session): edit-in-place for
-                // an existing deck's type — previously only fixable by
-                // scrapping the deck and rebuilding it (losing its current
-                // HP, boarding_status, and any weapon's assigned_deck_id
-                // link, since deckIdx changes on delete). Same permission
-                // model as addShipDeck/deleteShipDeck/modifyShipDeckHealth
-                // right below (no separate role check here — access is
-                // gated by reaching this vessel's Diagnostics panel at all,
-                // same as every other deck-management action on this card).
-                // No confirm modal, matching those same siblings' lack of
-                // one — this only changes metadata, nothing is destroyed.
+                // Edit a deck's type in place (keeps its HP, boarding_status and any
+                // weapon's assigned_deck_id). Same permissions as the other deck actions here
+                // (anyone who can reach this panel); no confirm since nothing is destroyed.
                 const typeOptionsHtml = Object.keys(DECK_TYPE_LABELS).map(k => `<option value="${k}" ${deckType === k ? 'selected' : ''}>${DECK_TYPE_LABELS[k]}</option>`).join('');
                 const typeLabel = `<select onchange="window.updateShipDeckType('${vessel.id}', ${idx}, this.value)" title="Deck type (mechanical) — Manufacturing-type decks are what Manufacturing Bay/Salvage Processing HP-scaling look for" style="font-size:8px; padding:1px 2px; margin:0; background:#030403; color:#6b826a; border:1px solid #3c4e36; vertical-align:middle;">${typeOptionsHtml}</select>`;
                 const bStatus = d.boarding_status || 'secure';
@@ -905,12 +784,9 @@ window.renderVesselDeck = function() {
         const ownershipContainer = document.getElementById('vessel-ownership-container');
         if (ownershipContainer) {
             if (currentUserRole === 'dm') {
-                // Multi-owner ship tokens build (this session, DM-confirmed
-                // via AskUserQuestion): checkboxes add/remove individual
-                // co-owners without touching anyone else's ownership.
-                // Boarding Capture's single-select + TRANSFER stays below,
-                // unchanged in shape, as the deliberate "wipe everyone, set
-                // one new owner" shortcut for an actual capture scenario.
+                // Checkboxes add/remove individual co-owners without touching other owners.
+                // Boarding Capture below (single-select + TRANSFER) replaces all owners with
+                // one, for an actual capture.
                 const currentOwnerIds = window.vesselOwnerIds(vessel);
                 let ownerCheckboxesHtml = '';
                 allProfiles.forEach(p => {
@@ -941,11 +817,9 @@ window.renderVesselDeck = function() {
             }
         }
 
-        // Battlefield Salvage — Manufacturing-deck post-processing config.
-        // Mirrors the fleet_groups production fields exactly (nullable
-        // output / zero rate = "not configured", same convention), just
-        // scoped to this ship instead of a fleet group. DM or the vessel's
-        // own owner can set it; everyone else sees nothing here.
+        // Battlefield Salvage: Manufacturing-deck post-processing config. Same fields
+        // and convention as fleet_groups production (null output / zero rate = not
+        // configured), scoped to this ship. DM or the vessel's owner only.
         const salvageContainer = document.getElementById('vessel-salvage-container');
         if (salvageContainer) {
             if (currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId)) {
@@ -966,12 +840,9 @@ window.renderVesselDeck = function() {
             }
         }
 
-        // Manufacturing Bay — start a build order from this vessel's own
-        // cargo. Unlike Salvage Processing/Fleet Group Production, a
-        // Manufacturing-type deck is a hard requirement here (confirmed
-        // design), not just an output-scaling factor — no deck, no builds
-        // from this vessel at all. DM or the vessel's own owner only, same
-        // permission shape as Salvage Processing. See js/manufacturing.js.
+        // Manufacturing Bay: build orders from this vessel's own cargo. A
+        // Manufacturing-type deck is required (no deck, no builds). DM or the
+        // vessel's owner only. See js/manufacturing.js.
         const mfgContainer = document.getElementById('vessel-manufacturing-container');
         if (mfgContainer) {
             if (currentUserRole === 'dm' || window.vesselHasOwner(vessel, currentUserId)) {
@@ -983,43 +854,28 @@ window.renderVesselDeck = function() {
                 } else {
                     const myProf = (typeof allProfiles !== 'undefined') ? allProfiles.find(p => p.id === currentUserId) : null;
                     const discountPct = (myProf && typeof window.getManufacturingDiscountPct === 'function') ? window.getManufacturingDiscountPct(myProf.perks) : 0;
-                    // Approved-only -- a still-pending proposal (see the
-                    // manufacturing_blueprints approval workflow in
-                    // js/manufacturing.js) isn't buildable yet. Also excludes
-                    // colony_infrastructure output blueprints (Infrastructure,
-                    // 2026-09-14) -- a vessel has no Infrastructure Level
-                    // concept, so those are colony-build-only (see
-                    // window.startVesselManufacturingOrder's own belt-and-
-                    // suspenders rejection of the same case).
+                    // Approved blueprints only (pending proposals aren't buildable). Excludes
+                    // colony_infrastructure blueprints: vessels have no Infrastructure Level
+                    // (startVesselManufacturingOrder also rejects them).
                     const blueprints = (typeof manufacturingBlueprintsList !== 'undefined') ? manufacturingBlueprintsList.filter(b => b.status !== 'draft' && b.output_type !== 'colony_infrastructure') : [];
                     const inProgress = (window.globalManufacturingOrdersCache || []).filter(o => o.source_type === 'vessel' && o.vessel_id === vessel.id);
                     let progressHtml = '';
                     inProgress.forEach(o => {
                         const remaining = Math.max(0, (o.started_at_hours || 0) + (o.duration_hours || 0) - (window.universeTimeHours || 0));
-                        // This box is already gated to the DM/vessel-owner above, so
-                        // anyone seeing it can also cancel from here -- same
-                        // window.cancelManufacturingOrder used by the Manufacturing
-                        // tab's own dashboard list, just a closer, contextual copy
-                        // of the same button.
+                        // Box is already gated to DM/vessel owner, so anyone seeing it may cancel
+                        // (same window.cancelManufacturingOrder as the Manufacturing tab).
                         progressHtml += `<div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;"><p style="margin:0; font-size:8px; color:#6b826a;">"${o.blueprint_name}" — ${typeof window.manufacturingOrderStatus === 'function' ? window.manufacturingOrderStatus(o).replace(/^\S+ /, '') : `ready in ~${remaining.toFixed(1)}h`}</p><button class="layer-del" onclick="window.cancelManufacturingOrder('${o.id}')" style="flex:0 0 auto; padding:1px 5px; font-size:8px; margin-left:6px;" title="Cancel this build and refund any deducted resources">✕</button></div>`;
                     });
-                    // Production lines (balance pass 2026-10-03): one per Manufacturing deck.
+                    // Production lines: one per Manufacturing deck.
                     if (typeof window.manufacturingLineUsage === 'function') { const u = window.manufacturingLineUsage('vessel', vessel.id); progressHtml = `<p style="margin:2px 0 0 0; font-size:8px; color:#8fa7b0;">Production lines: ${u.busy}/${u.lines} busy${u.queued ? ` · ${u.queued} queued` : ''} (one per Manufacturing deck)</p>` + progressHtml; }
-                    // Deck-damage time note -- same display convention as Fleet
-                    // Group Production's "Effective: Nx/day (Manufacturing deck
-                    // Y%)" line in js/colonies.js, but for TIME instead of an
-                    // output rate. Floored at 10% efficiency to match the actual
-                    // scaling window.startVesselManufacturingOrder applies.
+                    // Deck-damage time note, same display convention as Fleet Group Production
+                    // in js/colonies.js. Floored at 10% efficiency to match the scaling
+                    // window.startVesselManufacturingOrder applies.
                     const deckScale = mfgDeck.max_hp > 0 ? Math.max(0.1, mfgDeck.hp / mfgDeck.max_hp) : 1;
                     const deckNote = deckScale < 1 ? ` — <span style="color:#ff9b6b;">Manufacturing deck at ${Math.round(deckScale * 100)}% (builds take ${(1 / deckScale).toFixed(1)}x longer)</span>` : '';
-                    // Build Popup (Tabs/Search/Build-Popup pass, 2026-09-14):
-                    // the old inline <select> + BUILD button here (pick blind,
-                    // then hope) is replaced by a single button that opens a
-                    // modal listing every buildable blueprint with its full
-                    // cost/time/tier breakdown AND a live "can this actually
-                    // succeed right now" check against this vessel's own
-                    // cargo and deck state -- see js/manufacturing.js's
-                    // openVesselBuildModal / computeManufacturingPreview.
+                    // Opens a modal listing every buildable blueprint with cost/time/tier and a
+                    // live check against this vessel's cargo and decks (openVesselBuildModal /
+                    // computeManufacturingPreview in js/manufacturing.js).
                     mfgContainer.innerHTML = `
                     <div style="background:#030403; padding:8px; border:1px solid #c9962f; border-radius:2px; margin-top:10px;">
                         <label style="font-size: 9px; color: #c9962f;">🏭 Manufacturing Bay (Manufacturing deck installed)${discountPct ? ` — ${discountPct}% perk discount applies` : ''}${deckNote}:</label>
@@ -1038,14 +894,10 @@ window.renderVesselDeck = function() {
     }
 
     if (weaponsContainer) {
-        // Shared with the Battle Map's ship-status cards -- see
-        // window.renderShipWeaponsHtml above renderVesselDeck. Vessel Deck
-        // keeps its plain (unprefixed) element ids and the manage buttons,
-        // unchanged from before this session.
-        // Bug-hunt pass (2026-09-24): this re-renders on every realtime
-        // ship update (any player firing, moving, etc.), which used to reset
-        // the target dropdown and volley count you were in the middle of
-        // choosing. preserveFormState (js/db.js) restores those picks.
+        // Shared with the Battle Map cards (renderShipWeaponsHtml); the Vessel Deck
+        // uses unprefixed ids and shows the manage buttons. This re-renders on every
+        // realtime ship update, so preserveFormState (js/db.js) keeps in-progress
+        // target/volley picks.
         window.preserveFormState(weaponsContainer, () => {
             weaponsContainer.innerHTML = window.renderShipWeaponsHtml(vessel, { idPrefix: '', showManageButtons: true });
         }, 'select[id^="wpn-target-"], input[id^="wpn-volley-"]');
@@ -1060,7 +912,7 @@ window.renderVesselDeck = function() {
         if (hangar.length === 0) eHtml = '<span style="font-size:10px; color:#6b826a;">No squadrons currently embarked.</span>';
         else {
             hangar.forEach((sq, idx) => {
-                let dbStats = window.getStrikeCraftStats(sq.type); // bug-hunt pass: was a raw STRIKE_CRAFT_DB lookup -- a deleted chassis crashed the whole Vessel Deck
+                let dbStats = window.getStrikeCraftStats(sq.type); // guarded lookup: a deleted chassis must not crash the Vessel Deck
                 eHtml += `
                 <div class="note-card" style="padding:6px; margin-bottom:4px; background:#030403; border-color:#00e1ff; display:flex; justify-content:space-between; align-items:center;">
                     <div>
@@ -1091,49 +943,27 @@ window.renderVesselDeck = function() {
         if (deployed.length === 0) dHtml = '<span style="font-size:10px; color:#6b826a;">No active flights in sector.</span>';
         else {
             deployed.forEach((sq, idx) => {
-                let dbStats = window.getStrikeCraftStats(sq.type); // bug-hunt pass: see hangar loop above
+                let dbStats = window.getStrikeCraftStats(sq.type); // see hangar loop above
                 let wpnOptions = '';
                 dbStats.weapons.forEach((w, wIdx) => { wpnOptions += `<option value="${wIdx}">${w.weapon_class === 'ordnance' ? '☠ ' : ''}${w.name} (${w.dice})${w.range ? ` [📏${w.range}]` : ''}${w.cooldown_period ? ` [⏱${w.cooldown_period}]` : ''}</option>`; });
 
-                // Strike-Craft Weapon Range build: distance is measured from
-                // the SQUADRON'S OWN battle-map token (sqShipSelf, same
-                // lookup resolveSquadronWeaponFire below uses for the beam
-                // effect), NOT the carrier vessel's token -- since Strike
-                // Craft Grid Position gave squadrons their own independent
-                // token separate from whatever ship they launched from.
-                // The weapon and target selects here are also separate
-                // SIBLING elements (unlike renderShipWeaponsHtml's
-                // per-weapon-row layout, where each weapon's own dropdown
-                // naturally scopes to its own range) -- so the target list
-                // is scoped to whichever weapon is CURRENTLY selected
-                // (defaulting to weapon index 0 on first render), and
-                // window.updateSquadronTargetOptions (below) re-scopes it
-                // live via the weapon select's onchange.
+                // Range is measured from the squadron's own battle-map token (sqShipSelf),
+                // not the carrier's. The weapon and target selects are siblings, so the
+                // target list is scoped to the currently selected weapon (index 0 on first
+                // render) and window.updateSquadronTargetOptions re-scopes it on change.
                 const sqShipSelfForRange = globalShipMarkersCache.find(m => m.squadron_id === sq.id && m.is_strike_craft);
                 const firstWpn = dbStats.weapons[0];
                 const initialScoped = (sqShipSelfForRange && typeof window.getBattleScopedTargets === 'function') ? window.getBattleScopedTargets(sqShipSelfForRange.id, firstWpn ? firstWpn.range : 0, { firerVessel: sqShipSelfForRange, wpn: firstWpn }) : null;
-                // Fog of War build (this session): same fallback-path filter
-                // as renderShipWeaponsHtml above -- getBattleScopedTargets
-                // already excludes hidden vessels when it has a grid to
-                // scope against; this covers the no-battle-token fallback.
+                // Same no-battle fallback filter for hidden vessels as renderShipWeaponsHtml.
                 const initialCandidates = initialScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
                 let targetOptions = '<option value="">-- Target --</option>';
                 initialCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
 
-                // Squadron AI Stances build (this session): an AI stance
-                // set on this squadron takes over its weapon fire entirely
-                // -- the manual weapon/target/FIRE row is replaced with a
-                // status readout below, rather than shown alongside it.
-                // Deliberate default, not explicitly confirmed with the DM:
-                // this avoids the ambiguity of a squadron potentially firing
-                // TWICE in one round (once from a manual click, once from
-                // automated resolution on Advance Round) given this app has
-                // no other action-economy enforcement anywhere to lean on
-                // (see this session's "attacks per turn" discussion). Easy
-                // to change to "manual stays available as an override" if
-                // that turns out to be wanted instead.
-                // Playtest rebalance (2026-10-03): 'auto' (the launch default)
-                // and an explicit 'manual' (kept across recall/relaunch).
+                // An AI stance takes over this squadron's fire entirely: the manual
+                // weapon/target/FIRE row is replaced by a status readout, so a squadron
+                // can't fire twice in one round (manual + automated on Advance Round).
+                // 'auto' is the launch default; an explicit 'manual' persists across
+                // recall/relaunch.
                 const aiStance = (sq.ai_stance === 'manual') ? '' : (sq.ai_stance || '');
                 const AI_STANCE_LABELS = {
                     '': 'Manual (player-controlled)',
@@ -1150,23 +980,13 @@ window.renderVesselDeck = function() {
                            🤖 AI-controlled (${(AI_STANCE_LABELS[aiStance] || aiStance).replace('🤖 ', '')}${autoNow}) — picks its own target (nearest eligible) and weapon, resolves automatically on Advance Round. Manual fire is disabled while a stance is set — switch back to Manual above to fire it yourself.
                        </div>`
                     : (() => {
-                        // Squadron Ordnance build (this session): the FIRE/LAUNCH
-                        // button here is one shared control for whichever weapon
-                        // is currently picked in the sibling dropdown (unlike
-                        // renderShipWeaponsHtml's per-row static button, which can
-                        // bake FIRE-vs-LAUNCH in once at render time). Both buttons
-                        // are rendered; window.updateSquadronTargetOptions (already
-                        // the onchange hook for weapon-select changes) toggles
-                        // which is visible, so no separate re-render is needed when
-                        // the player just switches weapons.
+                        // One FIRE/LAUNCH control for whichever weapon is selected. Both buttons are
+                        // rendered; window.updateSquadronTargetOptions (the weapon select's onchange)
+                        // toggles which is visible, so no re-render is needed.
                         const isOrdnanceInit = firstWpn && firstWpn.weapon_class === 'ordnance';
-                        // Weapon Cooldowns build (this session): small badge
-                        // next to the dropdown showing the CURRENTLY selected
-                        // weapon's remaining cooldown for THIS squadron
-                        // instance (sq.weapon_cooldowns, not the shared
-                        // catalog). window.updateSquadronTargetOptions
-                        // (already the weapon-select's onchange hook) keeps
-                        // this live when the player switches weapons.
+                        // Remaining cooldown of the selected weapon for THIS squadron
+                        // (sq.weapon_cooldowns, not the catalog). Kept live by
+                        // window.updateSquadronTargetOptions.
                         const initCd = (sq.weapon_cooldowns && sq.weapon_cooldowns[0]) || 0;
                         return `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed #3c4e36; display:flex; gap:6px; align-items:center;">
                            <label for="sq-wpn-select-${vessel.id}-${idx}" style="display:none;">Weapon</label>
@@ -1205,16 +1025,12 @@ window.renderVesselDeck = function() {
                 </div>`;
             });
         }
-        window.preserveFormState(deployedContainer, () => { deployedContainer.innerHTML = dHtml; }, 'select[id^="sq-wpn-select-"], select[id^="sq-target-"]'); // bug-hunt pass: keep squadron weapon/target picks across realtime re-renders
+        window.preserveFormState(deployedContainer, () => { deployedContainer.innerHTML = dHtml; }, 'select[id^="sq-wpn-select-"], select[id^="sq-target-"]'); // keep squadron weapon/target picks across realtime re-renders
     }
 
-    // Keep the Battle Map's full-screen ship-status cards in sync with
-    // anything that just changed here (health, weapons, stance, ammo,
-    // cooldown...) — renderVesselDeck is already the "something about a
-    // vessel changed" signal every mutating function in this file calls, so
-    // hooking in here covers all of them in one place instead of touching
-    // ~20 call sites individually. No-ops if the Battle Map isn't open or
-    // there's no active encounter (renderBattleMapPanel bails out early).
+    // Keep the Battle Map ship-status cards in sync: every mutating function in
+    // this file calls renderVesselDeck, so hooking here covers them all.
+    // No-op if the Battle Map isn't open or there's no active encounter.
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
 
@@ -1225,20 +1041,12 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
     let dbKey = 'integrity_' + key;
     let maxKey = 'max_' + key;
     let current = vessel[dbKey] !== undefined ? vessel[dbKey] : 100;
-    // Was `vessel[maxKey] || 100` — but max_hardened is legitimately 0 for most
-    // ships (no hardened plating installed by default), and 0 is falsy, so that
-    // fallback silently let Hardened Armor climb to 100 via the +/- buttons
-    // regardless of the ship's actual (often zero) capacity.
+    // Not `|| 100`: max_hardened is legitimately 0 for most ships.
     let max = vessel[maxKey] !== undefined ? vessel[maxKey] : 100;
 
-    // ECONOMY: Titanium Hull Plate constraint for healing
-    // Bug fix (bug hunt, this session): cost/log used to be computed from
-    // the raw requested `delta` (e.g. the "+10" button), but the actual
-    // amount restored below is clamped to `max` -- a ship healing from
-    // 295/300 to 300/300 was being charged a full 10-worth of plates (1
-    // plate) for only 5 Hull actually restored. Clamp the amount BEFORE
-    // pricing/logging it so the DM/player is only ever charged for what
-    // actually gets restored.
+    // ECONOMY: Hull repair consumes Titanium Hull Plates (1 per 10 Hull, rounded
+    // up). The amount is clamped to max before pricing, so you only pay for what
+    // is actually restored.
     if (key === 'hull' && delta > 0) {
         let actualDelta = Math.max(0, Math.min(delta, max - current));
         if (actualDelta > 0) {
@@ -1278,10 +1086,7 @@ window.modifyShipHealth = async function(vesselId, key, delta) {
 };
 
 
-// Squadron commission/launch/recall/deploy functions (spawnSquadronToken,
-// despawnSquadronToken, syncSquadronHpToParent, commissionSquadron,
-// launchSquadron, recallSquadron, deleteSquadron, modifySquadronLoiter)
-// moved to js/squadrons.js on 2026-08-27 (Priority 2 split).
+// Squadron commission/launch/recall/deploy functions live in js/squadrons.js.
 
 
 window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
@@ -1290,18 +1095,12 @@ window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
     let wpn = vessel.ship_weapons[idx];
     
     if (statKey === 'ammo' && wpn.ammo >= 0) wpn.ammo = Math.max(0, Math.min(wpn.max_ammo, wpn.ammo + delta));
-    // Bug fix (bug hunt, this session): legacy weapons predating these two
-    // fields can have cooldown/overheat === undefined; undefined + delta is
-    // NaN, and Math.max/min never recover from NaN once written to the DB
-    // (every future +/- click stays NaN forever, while `wpn.cooldown || 0`
-    // display sites silently show "0" and hide the corruption). Guard with
-    // `|| 0` the same way the ammo branch already guards its own inputs.
+    // Legacy weapons may lack cooldown/overheat; `|| 0` prevents NaN being
+    // written to the DB.
     if (statKey === 'cooldown') wpn.cooldown = Math.max(0, (wpn.cooldown || 0) + delta);
     if (statKey === 'overheat') wpn.overheat = Math.max(0, Math.min(10, (wpn.overheat || 0) + delta));
-    // Tiered Ammo build (this session): manual DM override for the Standby
-    // reserve, same "a button pair exists for every tracked stat regardless
-    // of its 'real' in-fiction mechanism" convention as ammo/cooldown/overheat
-    // above. Only meaningful once a weapon has opted in via max_standby_ammo.
+    // Manual override for the Standby reserve. Only meaningful once a weapon
+    // has opted in via max_standby_ammo.
     if (statKey === 'standby') wpn.standby_ammo = Math.max(0, Math.min(wpn.max_standby_ammo || 0, (wpn.standby_ammo || 0) + delta));
 
     const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vesselId);
@@ -1309,27 +1108,17 @@ window.modifyShipWeaponStat = async function(vesselId, idx, statKey, delta) {
     window.renderVesselDeck();
 };
 
-/* Tiered Ammo build (this session, confirmed design): Ready (existing
-   ammo/max_ammo, unchanged) -> Standby (new, per-weapon spare mag) -> Deep
-   Reserves (ship-wide cargo, not per-weapon). Two separate actions, mirroring
-   the Hull Plate-consumes-cargo-to-repair convention already established in
-   window.modifyShipHealth above:
-     - RESUPPLY (this function): Standby <- Deep Reserves. Instant, NOT
-       round-gated (same "anytime, as long as the resource is there" rule
-       Hull Plate repair already uses) -- transfers 1:1 from a named cargo
-       expendable (wpn.ammo_type, default "Kinetic Rounds" -- the exact
-       cargo item every vessel's default loadout already includes but no
-       weapon-firing code has ever consumed until now) into Standby, capped
-       at max_standby_ammo. FLAGGED FIRST-PASS PLACEHOLDER ratio (1:1),
-       DM-tunable, same as every other first-pass balance number in this app.
-     - RELOAD (window.reloadShipWeaponReady, below): Ready <- Standby. The
-       "manual action that costs a round" (confirmed design) -- reuses
-       wpn.cooldown, the exact field firing already uses, rather than
-       inventing a separate turn-economy concept.
-   Neither RESUPPLY nor RELOAD is available for an infinite-ammo weapon
-   (wpn.ammo < 0) or a weapon that hasn't opted into Standby at all
-   (max_standby_ammo <= 0) -- renderShipWeaponsHtml already hides both
-   buttons in that case, this is the defense-in-depth backstop. */
+/* Tiered ammo: Ready (ammo/max_ammo) -> Standby (per-weapon spare mag) ->
+   Deep Reserves (ship cargo, not per-weapon).
+     - RESUPPLY (this function): Standby <- Deep Reserves. Instant, not
+       round-gated. Transfers 1:1 from the cargo expendable named by
+       wpn.ammo_type (default "Kinetic Rounds"), capped at max_standby_ammo.
+       The 1:1 ratio is a placeholder, DM-tunable.
+     - RELOAD (window.reloadShipWeaponReady, below): Ready <- Standby. Costs a
+       round by setting wpn.cooldown.
+   Neither applies to infinite-ammo weapons (wpn.ammo < 0) or weapons without
+   Standby (max_standby_ammo <= 0). The UI hides both buttons then; this is
+   the backstop. */
 window.resupplyShipWeaponStandby = async function(vesselId, idx) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel || !vessel.ship_weapons || !vessel.ship_weapons[idx]) return;
@@ -1391,8 +1180,7 @@ window.reloadShipWeaponReady = async function(vesselId, idx) {
     let transferQty = Math.min(deficit, wpn.standby_ammo);
     wpn.ammo += transferQty;
     wpn.standby_ammo -= transferQty;
-    // REPLACES rather than stacks, same convention firing's own cooldown_period
-    // auto-set uses -- reloading again before this clears just restarts it.
+    // Replaces rather than stacks, like firing's cooldown_period auto-set.
     wpn.cooldown = wpn.reload_cooldown_period > 0 ? wpn.reload_cooldown_period : 1;
 
     const { error } = await db.from('ship_markers').update({ ship_weapons: vessel.ship_weapons }).eq('id', vessel.id);
@@ -1411,18 +1199,14 @@ window.resetShipStats = async function(vesselId) {
     if (!vessel) return;
     if (!(await window.showConfirmModal("Restore maximum health profiles and resupply all ammunition banks for this vessel?"))) return;
     
-    // Bug fix (bug hunt, this session): same falsy-zero defect as
-    // renderShipHealthBarsHtml above -- `|| default` would silently reset a
-    // vessel with a genuine max_shields/max_hull/max_reactive/max_ablative
-    // of 0 up to the default max instead of back to 0, persisting a
-    // current > max state to the DB.
+    // `!== undefined`, not `|| default`: a genuine 0 max must reset to 0.
     let payload = {
         integrity_shields: vessel.max_shields !== undefined ? vessel.max_shields : 400,
         integrity_hull: vessel.max_hull !== undefined ? vessel.max_hull : 300,
         integrity_reactive: vessel.max_reactive !== undefined ? vessel.max_reactive : 10,
         integrity_ablative: vessel.max_ablative !== undefined ? vessel.max_ablative : 10,
         integrity_hardened: vessel.max_hardened || 0,
-        ...(typeof window.fullArmorSidesPayload === 'function' ? window.fullArmorSidesPayload(vessel) : {}) // Phase 5: every side back to max
+        ...(typeof window.fullArmorSidesPayload === 'function' ? window.fullArmorSidesPayload(vessel) : {}) // every armor side back to max
     };
     Object.assign(vessel, payload);
     
@@ -1431,10 +1215,8 @@ window.resetShipStats = async function(vesselId) {
             if(w.ammo >= 0) w.ammo = w.max_ammo;
             w.cooldown = 0;
             w.overheat = 0;
-            // Tiered Ammo build (this session): "resupply all ammunition banks"
-            // now covers Standby too, not just Ready -- Deep Reserves (ship
-            // cargo) is intentionally NOT touched by this reset, same as Hull
-            // Plate cargo isn't refilled by a stats reset either.
+            // Also refills Standby. Deep Reserves (ship cargo) are not touched, just as
+            // Hull Plate cargo isn't.
             if (w.max_standby_ammo > 0) w.standby_ammo = w.max_standby_ammo;
         });
         payload.ship_weapons = vessel.ship_weapons;
@@ -1447,11 +1229,8 @@ window.resetShipStats = async function(vesselId) {
 };
 
 /* --- EDIT VESSEL BASE STATS ---
-   There was no way to set a deployed ship's MAX stats at all — only current
-   values via the +/- buttons, which are clamped TO the max but never let you
-   change what that max actually is. Every ship not spawned from the Jupiter
-   preset or a Ship Designer template had max_hardened stuck at 0 with no way
-   to give it real Hardened Armor capacity post-deployment. */
+   Sets a deployed ship's MAX stats (the +/- buttons only change current
+   values, clamped to max), e.g. to give a ship Hardened Armor capacity. */
 (function() {
     let overlay, currentId;
     function ensureModal() {
@@ -1518,16 +1297,12 @@ window.resetShipStats = async function(vesselId) {
                 max_hardened: parseInt(document.getElementById('maxstats-hardened').value) || 0,
                 vessel_class: document.getElementById('maxstats-vesselclass').value || null,
                 crew: (v => v === '' ? null : Math.max(0, parseInt(v, 10) || 0))(document.getElementById('maxstats-crew').value.trim()), // balance pass 2026-10-03: food
-                // IFF / Fog of War build (this session): read regardless of
-                // whether the DM-only section is visible -- openEditMaxStatsModal
-                // always populates these two fields from the vessel's real
-                // current values first, so a non-DM saving the rest of this
-                // form just writes those same values back unchanged rather
-                // than silently resetting them.
+                // Read regardless of DM-only visibility: openEditMaxStatsModal pre-fills
+                // these from the vessel, so a non-DM save writes them back unchanged.
                 iff: document.getElementById('maxstats-iff').value || null,
                 is_hidden: document.getElementById('maxstats-hidden').checked,
                 ai_controlled: document.getElementById('maxstats-ai-controlled').checked,
-                // 2026-10-01: same read-back-unchanged rule as the fields above.
+                // Same read-back-unchanged rule as the fields above.
                 hide_from_galaxy_map: !document.getElementById('maxstats-galaxy-visible').checked,
                 image_url: window.getMediaPickerValue('maxstats')
             };
@@ -1538,16 +1313,16 @@ window.resetShipStats = async function(vesselId) {
                 integrity_ablative: Math.min(vessel.integrity_ablative !== undefined ? vessel.integrity_ablative : newMax.max_ablative, newMax.max_ablative),
                 integrity_hardened: Math.min(vessel.integrity_hardened !== undefined ? vessel.integrity_hardened : newMax.max_hardened, newMax.max_hardened)
             };
-            // Directional armor (Phase 5): per-side max from the four side
-            // inputs (undefined when the switch is off -> sides untouched).
+            // Directional armor: per-side max from the four side inputs (undefined when
+            // the switch is off -> sides untouched).
             const sideMax = typeof window.readArmorSideInputs === 'function' ? window.readArmorSideInputs('maxstats') : undefined;
-            // Phase 6c: per-ship 3D model override (DM only; undefined = untouched).
+            // Per-ship 3D model override (DM only; undefined = untouched).
             if (typeof window.readModelPicker === 'function') Object.assign(newMax, window.readModelPicker('maxstats') || {});
             if (sideMax) {
                 const before = window.getArmorSides(vessel);
                 const cur = {};
                 window.ARMOR_SIDES.forEach(k => {
-                    // same rule as every other stat on this sheet: current is clamped to the new max
+                    // current is clamped to the new max, same as every stat on this sheet
                     cur[k] = Math.max(0, Math.min(sideMax[k], before.cur[k]));
                 });
                 newMax.max_hardened = window.sumArmorSides(sideMax);
@@ -1580,7 +1355,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
         document.getElementById('maxstats-galaxy-visible').checked = !vessel.hide_from_galaxy_map;
         window.setMediaPickerValue('maxstats', vessel.image_url || '');
-        if (typeof window.ensureModelPicker === 'function') window.ensureModelPicker('maxstats', vessel); // Phase 6c
+        if (typeof window.ensureModelPicker === 'function') window.ensureModelPicker('maxstats', vessel);
         const dmWrap = document.getElementById('maxstats-dm-wrap');
         if (dmWrap) dmWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         overlay.style.display = 'flex';
@@ -1588,57 +1363,38 @@ window.resetShipStats = async function(vesselId) {
 })();
 
 
-// Squadron target-scoping/AI-stance/weapon-fire/ordnance functions
-// (updateSquadronTargetOptions, setSquadronAIStance, resolveSquadronWeaponFire,
-// rollSquadronWeapon, launchSquadronOrdnance, launchSquadronOrdnanceFromUI)
-// moved to js/squadrons.js on 2026-08-27 (Priority 2 split).
+// Squadron target-scoping/AI-stance/weapon-fire/ordnance functions live in js/squadrons.js.
 
 
-/* System Lockdown build (this session): opt-in per-weapon effect (only the
-   Jupiter-class Spinal EMP Cannon has `wpn.system_lockdown = {checkDC: 16}`
-   set, in js/map.js) triggered whenever that weapon successfully damages a
-   target -- this app has no separate to-hit roll for direct-fire ship
-   weapons, so "a successful hit" just means "the weapon fired at a valid
-   target." Confirmed design (AskUserQuestion, this session):
-   - Strike craft or Escort-class targets (the app's stand-in for the
-     paper's "destroyer class," confirmed rather than adding a real third
-     vessel_class tier) are PERMANENTLY disabled, no check at all.
-   - Any other target (Capital-class, or unclassified) rolls a flat d20 vs
-     the weapon's checkDC (no stat bonus -- ships have no INT/Tough stat of
-     their own, and linking one to a commanding character was confirmed out
-     of scope). On a fail, ONE of Weapons/Sensors/Engines is disabled at
-     random for 1d4 rounds.
-   "Disabled" reuses three new per-vessel duration fields
-   (disabled_weapons_until/disabled_sensors_until/disabled_engines_until,
-   in rounds remaining) rather than a separate dead-but-not-destroyed status
-   enum -- "permanent" is PERMANENT_DISABLE_ROUNDS, a value advanceCombatRound
-   deliberately never decrements (see that function). Weapons gates firing
-   (rollShipWeapon/launchOrdnance and the squadron fire paths all check it);
-   Sensors drops the vessel out of the automated Point Defense/intercept
-   pools (js/battle-map.js); Engines zeroes move_remaining on the next
-   movement reset. All three are first-pass judgment calls on what each
-   system "does" mechanically -- the paper only named them, not their
-   in-engine effects. */
+/* System Lockdown: opt-in per-weapon effect (`wpn.system_lockdown =
+   {checkDC: N}`, e.g. the Jupiter-class Spinal EMP Cannon in js/map.js),
+   triggered whenever that weapon damages a target (no to-hit roll exists
+   for direct-fire ship weapons). DM rules:
+   - Strike craft and Escort-class targets are PERMANENTLY disabled, no check.
+   - Other targets roll a flat d20 vs checkDC (no stat bonus). On a fail, one
+     of Weapons/Sensors/Engines is disabled at random for 1d4 rounds.
+   Stored as disabled_{weapons,sensors,engines}_until (rounds remaining);
+   PERMANENT_DISABLE_ROUNDS is never decremented by advanceCombatRound.
+   Weapons blocks firing (ship and squadron paths); Sensors removes the
+   vessel from automated PD/intercept pools (js/battle-map.js); Engines zeroes
+   move_remaining on the next movement reset. */
 window.PERMANENT_DISABLE_ROUNDS = 9999;
-// Classification tagging pass (2026-10-03, DM): an armed ship or design with
-// no Capital/Escort tag gets an amber UNCLASSIFIED badge (DM only) so it
-// stands out -- squadron 'Attack Capital Ships'/'Attack Escorts' stances
-// never pick untagged ships. Strike craft and unarmed hulls (fleet markers
-// like 'Arbiters Fleet') are exempt.
+// DM rule: an armed ship or design with no Capital/Escort tag gets an amber
+// UNCLASSIFIED badge (DM only), because the squadron 'Attack Capital Ships' /
+// 'Attack Escorts' stances never pick untagged ships. Strike craft and
+// unarmed hulls (fleet markers) are exempt.
 window.unclassifiedBadgeHtml = function(v) {
     if (!v || v.vessel_class || v.is_strike_craft || currentUserRole !== 'dm') return '';
     if (!(v.ship_weapons || []).length) return '';
     return '<span style="font-size:8px; color:#ffaa00; border:1px dashed #ffaa00; border-radius:2px; padding:1px 5px; margin-left:6px;" title="No Capital/Escort tag: squadron stances that pick Capital Ships or Escorts will ignore this ship. Set it in EDIT BASE STATS or the design editor.">⚠ UNCLASSIFIED</span>';
 };
-/* Playtest rebalance (2026-10-03, DM): time-to-kill was too long. Every ship
-   and strike craft weapon roll (direct fire, ordnance impact, PD and
-   squadron intercepts) gets a HIDDEN flat bonus of damage_bonus_pct % of
-   the dice's average (1d10 avg 5.5 -> +5 at 100%). It is computed from the
-   dice string at roll time, so weapons made later get it automatically, and
-   it stacks on top of the visible modifier box. Never shown in breakdowns.
-   Not applied to personal (character) weapons or Healing.
-   Tuned in app_settings 'combat_balance_config' {damage_bonus_pct} (DM Tools
-   -> MAINT -> Feature Switches, "Combat balance" box). Missing row = 100. */
+/* DM rule: every ship and strike craft weapon roll (direct fire, ordnance
+   impact, PD and squadron intercepts) gets a HIDDEN flat bonus of
+   damage_bonus_pct % of the dice average (1d10 avg 5.5 -> +5 at 100%).
+   Computed from the dice string at roll time; stacks with the visible
+   modifier; never shown in breakdowns. Not applied to personal (character)
+   weapons or Healing. Tuned in app_settings 'combat_balance_config'
+   {damage_bonus_pct} (DM Tools -> MAINT -> Feature Switches); missing row = 100. */
 window.combatBalanceConfig = function() {
     try {
         const row = window.appSettingsCache && window.appSettingsCache.combat_balance_config;
@@ -1689,10 +1445,8 @@ async function applySystemLockdown(targetShip, wpn) {
     return log;
 }
 
-// Thin DOM-reading wrapper — unchanged call signature/behavior for the
-// manual FIRE button, delegating to window.resolveShipWeaponFire below (same
-// core/wrapper split this app already uses for squadrons — see
-// window.rollSquadronWeapon/resolveSquadronWeaponFire, js/squadrons.js).
+// Thin DOM-reading wrapper for the manual FIRE button; the logic is in
+// window.resolveShipWeaponFire (same split as the squadron fire functions).
 window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     idPrefix = idPrefix || '';
     let volleyInput = document.getElementById(`${idPrefix}wpn-volley-${vesselId}-${idx}`);
@@ -1702,17 +1456,11 @@ window.rollShipWeapon = async function(vesselId, idx, idPrefix) {
     return window.resolveShipWeaponFire(vesselId, idx, targetId, volleys, {});
 };
 
-/* DM-AI-for-NPCs build (this session): DOM-independent core extracted from
-   window.rollShipWeapon so the new AI ship auto-fire loop
-   (window.processBattleRoundAutomations, js/battle-map.js) can call it
-   directly with an explicit targetId/volleys instead of reading hidden DOM
-   inputs — exact same split as window.resolveSquadronWeaponFire
-   (js/squadrons.js), "one implementation, not two". opts.auto (set by the
-   AI loop) hard-skips every gate that would otherwise alert()/confirm() a
-   human player — same silent-fail convention resolveSquadronWeaponFire's
-   own opts.auto already uses — rather than guessing at what an AI should do
-   when e.g. its weapon is on cooldown (it just doesn't fire that weapon
-   this round, exactly like a squadron with every weapon on cooldown). */
+/* DOM-independent core of rollShipWeapon, also called by the AI ship
+   auto-fire loop (processBattleRoundAutomations, js/battle-map.js) with an
+   explicit targetId/volleys. opts.auto skips every alert()/confirm() gate
+   and silently doesn't fire instead (e.g. weapon on cooldown), same as
+   resolveSquadronWeaponFire. */
 window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, opts) {
     opts = opts || {};
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
@@ -1721,30 +1469,17 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     let wpn = (vessel.ship_weapons || [])[idx];
     if (!wpn) return;
 
-    // Initiative + Action Economy build (this session): a manual shot spends
-    // 1 AP from the firer's OWN turn slot, same "opts.auto skips every
-    // human-only gate" convention every other check in this function already
-    // uses -- an AI-controlled ship's automated fire (opts.auto) is exempt,
-    // since AI-controlled ships never get an individual turn slot at all
-    // (they still fire together in one batch at the round boundary).
-    // window.spendTokenAp itself fails open (returns true) whenever no
-    // initiative has been rolled for the active battle, so this is a no-op
-    // until a DM actually starts using the turn-order system.
-    // Bug-hunt pass (2026-09-24): the AP spend used to happen right here,
-    // BEFORE every refusal gate below -- so a shot refused for being
-    // disabled/empty/over the mount limit, or cancelled at the cooldown
-    // confirm, still cost the AP. It now happens after all of them (see
-    // "AP spend" below). Dice format is also validated up front now: a bad
-    // dice string (e.g. "-") used to burn ammo and set cooldown in memory
-    // before failing, and popped a blocking alert() mid-Advance-Round when
-    // an AI-controlled ship tried to fire it.
+    // A manual shot spends 1 AP from the firer's own turn slot; AI fire
+    // (opts.auto) is exempt, since AI ships fire as one batch at the round
+    // boundary. window.spendTokenAp fails open when no initiative is rolled.
+    // The spend happens after all refusal gates (see "AP spend" below), so a
+    // refused or cancelled shot costs nothing. Dice format is validated up front
+    // so a bad dice string can't burn ammo or alert() mid-Advance-Round.
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = (wpn.dice || '').trim().match(diceRegex);
     if (!match) { if (!opts.auto) alert(`Invalid dice format on ${wpn.name} ("${wpn.dice || ''}") -- edit the weapon to fix it.`); return; }
 
-    // System Lockdown build (this session): Weapons-disabled gate, same
-    // style/placement as the deck-destroyed check right below. Checked on
-    // the FIRER, not the target -- a disabled vessel can't shoot, full stop.
+    // Weapons-disabled gate, checked on the FIRER: a disabled vessel can't shoot.
     if (vessel.disabled_weapons_until > 0) {
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
@@ -1752,12 +1487,9 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
         return;
     }
 
-    // Station Designer build: a weapon tied to a deck can't fire once that
-    // deck's HP hits 0. The badge in renderShipWeaponsHtml is purely visual
-    // (and disables the button) — this is the authoritative check, since the
-    // button-disable can be bypassed by a stale render. Fails open if the
-    // assigned deck no longer exists (same "don't corrupt on a stale
-    // reference" precedent as elsewhere in this app).
+    // A weapon tied to a deck can't fire once that deck's HP hits 0. The badge
+    // and disabled button are visual only (a stale render can bypass them); this
+    // is the authoritative check. Fails open if the assigned deck no longer exists.
     if (wpn.assigned_deck_id) {
         const assignedDeck = (vessel.ship_decks || []).find(d => d.id === wpn.assigned_deck_id);
         if (assignedDeck && assignedDeck.hp <= 0) {
@@ -1794,8 +1526,8 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
         }
     }
 
-    // Firing arcs (Phase 3, 2026-10-02): authoritative check (the dropdown
-    // greys out-of-arc targets, but a stale render could still submit one).
+    // Firing arcs: authoritative check (the dropdown greys out-of-arc targets,
+    // but a stale render could still submit one).
     if (targetId && typeof window.isTargetInArc === 'function' && !window.isTargetInArc(vesselId, targetId, wpn)) {
         if (opts.auto) return;
         if (window.AudioEngine) window.AudioEngine.playError();
@@ -1803,8 +1535,8 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
         alert(`[OUT OF ARC] ${tgt ? tgt.name : 'That target'} is outside ${wpn.name}'s firing arc — turn the ship first.`);
         return;
     }
-    // Phase 10: terrain rules (js/terrain-rules.js) -- planet/station in the
-    // line of fire, or the target hidden in a nebula past lock range.
+    // Terrain rules (js/terrain-rules.js): planet/station in the line of fire,
+    // or the target hidden in a nebula past lock range.
     const terrainBlock = (targetId && typeof window.terrainFireCheck === 'function') ? window.terrainFireCheck(vesselId, targetId) : '';
     if (terrainBlock) {
         if (opts.auto) return;
@@ -1816,41 +1548,29 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
 
     let overridingCooldown = false;
     if (wpn.cooldown > 0) {
-        if (opts.auto) return; // hard-skip -- no one to confirm an override mid-tick, same rule squadron AI-stance fire already follows
+        if (opts.auto) return; // hard-skip: no one to confirm an override mid-tick (same as squadron AI fire)
         if (!(await window.showConfirmModal(`[WARNING] ${wpn.name} is on cooldown! Firing will OVERRIDE and generate OVERHEAT. Proceed?`))) return;
         overridingCooldown = true;
     }
 
-    // AP spend (Initiative + Action Economy): every refusal gate has passed
-    // and the player has confirmed any override, so the shot is happening.
+    // AP spend: every refusal gate has passed and any override is confirmed.
     if (!opts.auto && typeof window.spendTokenAp === 'function' && !window.spendTokenAp(vesselId, 1)) return;
 
     if (overridingCooldown) wpn.overheat = Math.min(10, (wpn.overheat || 0) + 1);
     if (wpn.ammo > 0) wpn.ammo -= volleys;
 
-    // Weapon Cooldowns build (this session): the shot is now committed
-    // (every refusal gate above this point has already passed), so start
-    // this weapon's reload clock if it has one -- cooldown_period
-    // undefined/0 (every weapon that doesn't opt in) is a no-op, same
-    // convention as ammo's -1 = infinite. This REPLACES the old cooldown
-    // value rather than adding to it, even on an overridden shot fired
-    // while already on cooldown -- firing again restarts the reload timer,
-    // it doesn't stack.
+    // Shot is committed: start this weapon's reload clock. cooldown_period
+    // undefined/0 is a no-op. Replaces the current cooldown rather than adding to
+    // it, even on an overridden shot fired while already cooling down.
     if (wpn.cooldown_period > 0) wpn.cooldown = wpn.cooldown_period;
 
-    // System Lockdown build (this session): opt-in per-weapon
-    // self-damage-on-consecutive-fire (only the Spinal EMP Cannon has
-    // `self_damage_on_consecutive_fire` set). Just marks "fired this round"
-    // here -- the actual two-rounds-in-a-row detection and damage
-    // application happens on the Advance Round tick (window.advanceCombatRound),
-    // since "consecutive" is a round-boundary concept, not a fire-time one.
+    // Self-damage on consecutive fire (opt-in, e.g. Spinal EMP Cannon via
+    // `self_damage_on_consecutive_fire`): only marks "fired this round" here;
+    // detection and damage happen in window.advanceCombatRound.
     if (wpn.self_damage_on_consecutive_fire) wpn.fired_this_round = true;
 
-    // Fog of War build (this session, confirmed design): every gate above
-    // this point (deck-destroyed, mount limit, ammo) could still refuse the
-    // shot, so this is the first point the shot is actually committed --
-    // right place to reveal. Best-effort: a failure here should never lose
-    // an already-committed shot.
+    // First point where the shot is committed, so reveal here. Best-effort: a
+    // failure must never lose the shot.
     try { if (typeof window.revealVesselIfHidden === 'function') await window.revealVesselIfHidden(vessel); } catch (err) { console.error('rollShipWeapon: reveal-on-fire failed', err); }
 
     let baseNumDice = parseInt(match[1]) || 1;
@@ -1878,14 +1598,14 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     }
 
     total += modVal;
-    // Playtest rebalance (2026-10-03): hidden calibration bonus, on top of
-    // the visible modifier. Deliberately NOT in the breakdown (DM decision).
+    // Hidden calibration bonus on top of the visible modifier. DM decision: not
+    // shown in the breakdown.
     if (window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name)) !== 'Healing') total +=window.hiddenDamageBonus(numDice, diceFaces);
 
     let stance = vessel.ship_stance || 'Balanced';
     if (stance === 'Aggressive') { total = Math.floor(total * 1.25); breakdown.push(`[Aggressive: +25%]`); } 
     else if (stance === 'Defensive') { total = Math.floor(total * 0.75); breakdown.push(`[Defensive: -25%]`); }
-    else if (stance === 'Evasive') { total = Math.floor(total * 0.50); breakdown.push(`[Evasive: -50%]`); } // 2026-10-08 (DM): Evasive halves damage dealt as well as taken
+    else if (stance === 'Evasive') { total = Math.floor(total * 0.50); breakdown.push(`[Evasive: -50%]`); } // DM rule: Evasive halves damage dealt as well as taken
 
     if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
     const breakdownText = breakdown.join(' + ');
@@ -1901,7 +1621,7 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
             if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
             if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
             if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
-            // Phase 10: asteroid cover (direct fire only).
+            // Asteroid cover (direct fire only).
             const cover = (dmgType !== 'Healing' && typeof window.terrainCover === 'function') ? window.terrainCover(targetId) : null;
             if (cover) { total = Math.floor(total * cover.mult); combatLog += cover.label; }
 
@@ -1921,17 +1641,11 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
             combatLog += result.log;
             const sideFields = typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(result) : {};
 
-            // DM-AI-for-NPCs build (this session): "biggest single hit this
-            // round" threat tracking (confirmed design: NOT a cumulative
-            // per-attacker total, just the hardest single hit and who dealt
-            // it). Every damage-dealing path in this app writes into this
-            // same pair of fields on the TARGET's own row -- see also
-            // resolveSquadronWeaponFire (js/squadrons.js) and the ordnance
-            // impact / touchedVessels persist loop in
-            // window.processBattleRoundAutomations (js/battle-map.js) -- so
-            // the AI ship resolution loop can read it back at the top of the
-            // next Advance Round regardless of which client's browser fired
-            // the shot that set it.
+            // Threat tracking: the biggest single hit this round and who dealt it (not a
+            // cumulative total), stored on the TARGET's row. Every damage path writes
+            // these fields (also resolveSquadronWeaponFire and the ordnance impact loop in
+            // processBattleRoundAutomations) so the AI ship loop can read them next Advance
+            // Round, whichever client fired.
             const newRoundBiggestHit = total > (targetShip.round_biggest_hit_amount || 0);
             const roundBiggestHitAmount = newRoundBiggestHit ? total : (targetShip.round_biggest_hit_amount || 0);
             const roundBiggestHitBy = newRoundBiggestHit ? vesselId : (targetShip.round_biggest_hit_by || null);
@@ -1955,22 +1669,14 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
             // touch this ship_markers row itself). No-op outside a battle.
             if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
 
-            // System Lockdown build (this session): opt-in per-weapon effect,
-            // only set on the Jupiter-class Spinal EMP Cannon. No-op for
-            // every other weapon (wpn.system_lockdown undefined). Runs even
-            // if the hit above just destroyed the target -- applySystemLockdown
-            // itself doesn't check hull, but a destroyed vessel's disabled
-            // state is moot in practice, harmless to still set it.
+            // System Lockdown (opt-in per weapon; no-op when wpn.system_lockdown is
+            // undefined). Runs even if this hit destroyed the target; harmless.
             combatLog += await applySystemLockdown(targetShip, wpn);
 
-            // Animation Engine build (this session): a brief beam flash on
-            // the Battle Map grid between firer and target, colored by this
-            // shot's damage type. window.playWeaponFireEffect no-ops
-            // silently if the Battle Map isn't open or either vessel isn't
-            // currently a token in an active battle, so this is safe to
-            // call unconditionally. Local-only — see the checkpoint notes
-            // for why this doesn't sync to other connected viewers the way
-            // the in-flight-ordnance animation does.
+            // Brief beam flash on the Battle Map between firer and target, colored by
+            // damage type. playWeaponFireEffect no-ops if the Battle Map isn't open or
+            // either vessel isn't a battle token. Local only: not synced to other viewers
+            // (unlike the in-flight ordnance animation).
             if (typeof window.playWeaponFireEffect === 'function') {
                 const beamColor = (window.DAMAGE_TYPES[dmgType] && window.DAMAGE_TYPES[dmgType].color) || '#ff3333';
                 window.playWeaponFireEffect(vesselId, targetShip.id, beamColor, dmgType);
@@ -1998,21 +1704,14 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     }
 };
 
-/* Station Designer build (this session): weapons can optionally be tied to a
-   specific deck (assigned_deck_id on the ship_weapons entry), so a destroyed
-   deck disables its assigned weapons -- the lightweight "independently-
-   destroyable section" mechanic confirmed for stations, reusing the existing
-   ship_decks HP tracking rather than a new sub-entity model. Needs a STABLE
-   id per deck (array index isn't safe -- moveShipDeckOrder already reorders
-   entries, which would silently reassign a weapon to a different deck).
-   ship_decks predates this and has no id field, so genDeckId/ensureDeckIds
-   self-heal legacy decks the same way this project already handles legacy
-   hyperlane nodes: an id is added the first time a deck is touched (any
-   render pass here or in ship-designer.js's loadout modal) and persisted,
-   rather than requiring every existing deck to be manually re-created. */
-// Phase 10: debris damage (js/terrain-rules.js) -- straight to hull, same
-// persist + strike-craft sync + destroyed check as a weapon hit. Called
-// inside the move's undo step, so UNDO puts the hull back with the move.
+/* Weapons can be tied to a deck (assigned_deck_id on the ship_weapons entry);
+   a destroyed deck (HP 0) disables its weapons. This needs a STABLE id per
+   deck, since array index changes when moveShipDeckOrder reorders entries.
+   genDeckId/ensureDeckIds add an id to legacy decks the first time they are
+   touched (render here or ship-designer.js's loadout modal) and persist it. */
+// Debris damage (js/terrain-rules.js): straight to hull, with the same
+// persist + strike-craft sync + destroyed check as a weapon hit. Called inside
+// the move's undo step, so UNDO restores the hull along with the move.
 window.applyTerrainHullDamage = async function(vessel, amount) {
     if (!vessel || !(amount > 0)) return;
     const hull = Math.max(0, (vessel.integrity_hull || 0) - amount);
@@ -2072,12 +1771,9 @@ window.modifyShipDeckHealth = async function(vesselId, idx, delta) {
     }
 };
 
-// Pending-list follow-up (this session): edit-in-place for an existing
-// deck's type — see the render-side comment above where the <select> that
-// calls this lives. Same shape as modifyShipDeckHealth/moveShipDeckOrder
-// right around it: mutate the array entry, persist, update the local
-// cache, re-render. Doesn't touch hp/max_hp/boarding_status/id, so an
-// existing weapon's assigned_deck_id link survives a retype untouched.
+// Edit a deck's type in place: mutate, persist, update cache, re-render.
+// Leaves hp/max_hp/boarding_status/id alone, so weapon assigned_deck_id links
+// survive a retype.
 window.updateShipDeckType = async function(vesselId, idx, newType) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -2154,12 +1850,9 @@ window.reassignVesselOwnership = async function(vesselId) {
 
     const newOwnerName = allProfiles.find(p => p.id === newOwnerId)?.username || 'Commander';
 
-    // Multi-owner ship tokens build (this session, DM-confirmed): TRANSFER
-    // is deliberately still a full wipe-and-replace -- it sets the owner
-    // list to exactly [newOwnerId], removing every existing co-owner, same
-    // "completed boarding capture" semantics as before this build. Adding
-    // or removing individual owners without wiping the rest is the
-    // checkbox list above instead (window.toggleVesselOwner).
+    // TRANSFER is a full wipe-and-replace: the owner list becomes exactly
+    // [newOwnerId] (completed boarding capture). Use the checkbox list
+    // (window.toggleVesselOwner) to add/remove individual owners.
     if (!(await window.showConfirmModal(`Transfer sole ownership of "${vessel.name}" to ${newOwnerName}? This replaces ALL current owners and represents a completed boarding capture.`))) return;
 
     await db.from('ship_markers').update({ owner_ids: [newOwnerId] }).eq('id', vesselId);
@@ -2177,9 +1870,8 @@ window.reassignVesselOwnership = async function(vesselId) {
     if (typeof window.showToast === 'function') window.showToast(`Ownership of ${vessel.name} transferred.`);
 };
 
-// Multi-owner ship tokens build (this session): adds/removes ONE co-owner
-// without disturbing anyone else already on the list -- the checkbox-list
-// counterpart to reassignVesselOwnership's full wipe-and-replace above.
+// Adds/removes ONE co-owner without disturbing the others (counterpart to
+// reassignVesselOwnership's wipe-and-replace).
 window.toggleVesselOwner = async function(vesselId, profileId, checked) {
     if (currentUserRole !== 'dm') return;
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);
@@ -2196,11 +1888,9 @@ window.toggleVesselOwner = async function(vesselId, profileId, checked) {
     window.renderVesselDeck();
 };
 
-/* Inject Ammo / Gun Count / Damage Type fields into the "Mount New Weapon System"
-   form. These fields didn't exist in the HTML at all (the ammo field was being
-   looked up by addShipWeapon() but never rendered), and there was no way to set
-   damage type or gun count when installing a weapon. Anchored off the exploding-dice
-   checkbox, which is guaranteed to exist, so this works without touching index.html. */
+/* Inject Ammo / Gun Count / Damage Type fields into the "Mount New Weapon
+   System" form (they are not in index.html). Anchored off the exploding-dice
+   checkbox, which always exists. */
 
 /* --- 12-TIER DAMAGE TYPE MATRIX ---
    Single source of truth for every damage-type dropdown, tooltip, and the
@@ -2240,20 +1930,12 @@ window.DAMAGE_TYPES = {
         desc: 'Repair-drone swarms, nanite weaves, or damage-control beams — restores rather than harms.', shreds: 'Nothing — restores Shields first, then Hull', mitigatedBy: 'N/A' }
 };
 
-/* --- DAMAGE TYPE -> VISUAL EFFECT FAMILY (Animation Suite build, this
-   session) --- Groups the 12 damage types into 4 distinct battle-map fire
-   effects instead of every weapon using the same beam. Confirmed with the
-   user via AskUserQuestion: Beam / Tracer / Burst / Restorative-pulse.
-   JUDGMENT CALL FLAGGED: the user's approved grouping named 11 of the 12
-   types explicitly (Beam: Energy/Ion/Exotic/Antimatter, Tracer:
-   Impact/Piercing/Cold, Burst: Explosive/Flak/Corrosive, Pulse: Healing) —
-   'Heat' wasn't assigned to a family in that conversation. Placed it in
-   Beam here on a judgment call: its own flavor text calls it "thermal
-   lances" (a directed, sustained weapon like the other Beam types), unlike
-   Tracer's projectile/kinetic framing or Burst's area-detonation framing.
-   Flagging this plainly rather than letting it pass as fully spec'd — easy
-   to move to another family on request. Consumed by js/battle-map.js's
-   window.playWeaponFireEffect to pick which effect to play. */
+/* --- DAMAGE TYPE -> VISUAL EFFECT FAMILY ---
+   Groups the 12 damage types into 4 battle-map fire effects: Beam
+   (Energy/Ion/Exotic/Antimatter/Heat), Tracer (Impact/Piercing/Cold), Burst
+   (Explosive/Flak/Corrosive), Pulse (Healing). Heat's placement in Beam is a
+   judgment call ("thermal lances"), not part of the approved grouping; easy
+   to move. Used by window.playWeaponFireEffect (js/battle-map.js). */
 window.DAMAGE_TYPE_FAMILY = {
     'Energy': 'beam', 'Ion': 'beam', 'Exotic': 'beam', 'Antimatter': 'beam', 'Heat': 'beam',
     'Impact': 'tracer', 'Piercing': 'tracer', 'Cold': 'tracer',
@@ -2265,19 +1947,11 @@ window.buildDamageTypeOptionsHtml = function(selected) {
     return Object.keys(window.DAMAGE_TYPES).map(k => `<option value="${k}" ${k === selected ? 'selected' : ''}>${k}</option>`).join('');
 };
 
-/* --- WEAPON CLASSIFICATION (Ordnance groundwork) ---
-   ship_weapons entries previously had no structured category at all — a
-   "missile" was indistinguishable from a turret except by its free-text
-   name. weapon_class is new: 'direct_fire' (default/legacy, resolves same
-   turn as today) vs 'ordnance' (missiles/torpedoes — conceptually a
-   multi-turn flight subject to point-defense counter-fire). is_point_defense
-   flags a weapon (PDC/PDL/PDG-style) as a valid counter-fire system.
-   IMPORTANT: this is schema + UI groundwork only. Neither field is read by
-   any resolution logic yet — the actual multi-turn flight/counter-fire loop
-   is deferred to the Tactical Battle Map Phase 2 build, once battle
-   encounters exist for that loop to operate against. Legacy weapons with no
-   weapon_class fall back to 'direct_fire' everywhere, same convention as
-   ship_decks' type fallback. */
+/* --- WEAPON CLASSIFICATION ---
+   weapon_class: 'direct_fire' (default/legacy, resolves the same turn) or
+   'ordnance' (missiles/torpedoes: multi-turn flight that Point Defense can
+   counter-fire). is_point_defense flags a weapon (PDC/PDL/PDG-style) as a
+   counter-fire system. Missing weapon_class falls back to 'direct_fire'. */
 window.WEAPON_CLASS_LABELS = { direct_fire: 'Direct Fire', ordnance: 'Ordnance' };
 
 // Native title tooltips (reliable, no extra markup) built from the shared table.
@@ -2288,11 +1962,8 @@ window.getDamageTypeTooltip = function(dmgType, context) {
         return `${dmgType || 'Unknown'}\nNo tactical data on file for this damage type.`;
     }
     if (context === 'arsenal') {
-        // Personal Arsenal weapons don't interact with the ship armor cascade
-        // (Shields/Reactive/Ablative/Hardened/Hull) — that's a ship-to-ship
-        // mechanic. Showing the full "shreds/mitigated by" breakdown here
-        // would imply a mechanical effect that doesn't actually apply to
-        // personal combat, so this stays flavor-only.
+        // Personal Arsenal weapons don't use the ship armor cascade, so the tooltip
+        // stays flavor-only (no "shreds/mitigated by" breakdown).
         return `${dmgType}\n${info.desc}`;
     }
     return `${dmgType}\n${info.desc}\n\nSHREDS: ${info.shreds}\nMITIGATED BY: ${info.mitigatedBy}`;
@@ -2326,11 +1997,9 @@ function injectArsenalDamageTypeOptions() {
 }
 injectArsenalDamageTypeOptions();
 
-/* Legacy weapons installed before damage_type existed as an explicit field had
-   their damage type guessed from keywords in the weapon's name, or used the
-   old combined "Impact/Ion" label before the 12-type matrix split those into
-   separate types. Keep both fallbacks so old installed weapons keep behaving
-   the same, but new/edited weapons always use the explicit field. */
+/* Legacy weapons may lack damage_type: guess it from keywords in the name, and
+   map the old combined "Impact/Ion" label. New/edited weapons always use the
+   explicit field. */
 window.inferLegacyDamageType = function(name) {
     let n = (name || '').toLowerCase();
     if (n.includes('pierce') || n.includes('piercing') || n.includes('rail') || n.includes('gauss')) return 'Piercing';
@@ -2345,14 +2014,11 @@ window.normalizeDamageType = function(dmgType) {
 
 /* --- CASCADE DEFENSE RESOLUTION ---
    Shields -> Reactive Armor -> Ablative Armor -> Hardened Armor -> Hull.
-   Each damage type's interaction with that cascade is fully data-driven
-   from DAMAGE_TYPES above — this function is the single place that logic
-   actually executes, so NPC/template ships (Overseer repository) and player
-   ships resolve identically once deployment wiring exists. */
-// opts.side (Phase 5 directional armor, 2026-10-02): 'front'|'starboard'|
-// 'rear'|'port' -- when the directional_armor switch is on and the target
-// isn't a strike craft, only that side's Hardened pool is used, and the
-// result also carries armor_sides (+ integrity_hardened = their sum).
+   Each damage type's behaviour is data-driven from DAMAGE_TYPES; this is the
+   single place it executes, so NPC and player ships resolve identically. */
+// opts.side: 'front'|'starboard'|'rear'|'port'. When directional_armor is on
+// and the target isn't a strike craft, only that side's Hardened pool is used,
+// and the result also carries armor_sides (+ integrity_hardened = their sum).
 // Callers get opts from window.damageSideOpts (js/directional-armor.js).
 window.resolveShipDamage = function(targetShip, dmgType, totalDamage, opts) {
     let s = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
@@ -2372,10 +2038,7 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage, opts) {
     };
 
     if (dmgType === 'Healing') {
-        // Bug fix (bug hunt, this session): same falsy-zero max defect as
-        // renderShipHealthBarsHtml/resetShipStats -- a genuine max_shields/
-        // max_hull of 0 would otherwise let Healing top a ship up to the
-        // default max instead of respecting its real (zero) capacity.
+        // `!== undefined`, not `|| default`: Healing must respect a genuine 0 max.
         let sMax = targetShip.max_shields !== undefined ? targetShip.max_shields : 400; let hMax = targetShip.max_hull !== undefined ? targetShip.max_hull : 300;
         let toShields = Math.min(totalDamage, Math.max(0, sMax - s)); s += toShields;
         let toHull = Math.min(totalDamage - toShields, Math.max(0, hMax - h)); h += toHull;
@@ -2395,10 +2058,8 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage, opts) {
     } else if (info.shieldMode === 'ion') {
         let ionShieldDmg = Math.min(s, remainingDmg * 2);
         s -= ionShieldDmg;
-        // Fix (2026-09-26, DM-confirmed): this used to ALSO multiply by 0.25
-        // here, and then DAMAGE_TYPES.Ion.hullMult (0.25) applied again at the
-        // Hull step -- Hull took ~1/16 instead of the intended 1/4. The Hull
-        // step's hullMult is now the only place Ion's hull reduction happens.
+        // No hull reduction here: DAMAGE_TYPES.Ion.hullMult (0.25) is applied once at
+        // the Hull step (doing it here too would give 1/16).
         remainingDmg = Math.max(0, remainingDmg - Math.ceil(ionShieldDmg / 2));
         log += `[ION SURGE] Shield capacitors overloaded (-${ionShieldDmg}). Physical armor bypassed entirely. `;
     } else {
@@ -2440,41 +2101,21 @@ window.resolveShipDamage = function(targetShip, dmgType, totalDamage, opts) {
     return finish();
 };
 
-/* --- MANUAL DAMAGE APPLICATION (DM Tools, this session) ---
-   DM request: some players use their own physical dice instead of this
-   app's own roller, and there was no way to get that damage INTO the app's
-   own shield/armor/hull cascade -- the DM could only hand-edit health bars
-   directly, losing the whole DAMAGE_TYPES cascade (shreds/mitigated-by,
-   strike-craft category multipliers, etc.) in the process.
-
-   Confirmed via AskUserQuestion (three real mechanics/UX decisions):
-   1. Stance/category multipliers (attacker Aggressive/Defensive, target
-      Defensive/Evasive/Aggressive, strike-craft/Flak effectiveness) still
-      auto-apply on top of the manually-typed total -- only the dice-ROLLING
-      step is manual, everything downstream is identical to a normal shot.
-   2. Selecting a weapon acts like a REAL shot: consumes ammo, starts its
-      cooldown, respects weapons-disabled/deck-destroyed gates, and still
-      triggers that weapon's own special effects (System Lockdown EMP, the
-      beam-flash animation). Picking "-- Unlisted / no specific weapon --"
-      skips all of that (nothing to consume) and just applies the cascade.
-   3. Lives in the DM Tools panel as its own subtab (new "MANUAL DMG" button
-      next to SPAWN/MAP TOOLS/MAINT), not on every ship's Battle Map card.
-
-   SCOPE, flagged and deliberate: this first pass only supports a regular
-   ship/station (a `ship_markers` row with a real `ship_weapons` array) as
-   the FIRER -- the dropdown deliberately excludes strike craft tokens
-   (`is_strike_craft`), since a squadron's weapons live in STRIKE_CRAFT_DB
-   (js/squadrons.js), not in a per-token `ship_weapons` array, and would
-   need a separate ammo-less/cooldown-on-the-squadron-instance code path
-   (see window.resolveSquadronWeaponFire) mirrored here to support "real
-   shot" semantics correctly. NOT silently dropped -- just not built yet.
-   Any ship OR strike craft token deployed to the active battle can still be
-   the TARGET (window.resolveShipDamage works identically either way, same
-   as a normal shot already does).
-
-   Reuses -- doesn't duplicate -- the exact same gates/effects/multiplier
-   math as window.rollShipWeapon just above, with the dice-rolling step
-   replaced by the DM's typed total. */
+/* --- MANUAL DAMAGE APPLICATION (DM Tools -> MANUAL DMG subtab) ---
+   Lets the DM push a physically rolled damage total through the normal
+   shield/armor/hull cascade. DM rules:
+   1. Stance/category multipliers (attacker and target stance, strike-craft /
+      Flak effectiveness) still apply on top of the typed total; only the dice
+      roll is manual.
+   2. Selecting a weapon makes it a REAL shot: consumes ammo, starts cooldown,
+      respects weapons-disabled/deck-destroyed gates, triggers special effects
+      (System Lockdown, beam flash). "-- Unlisted / no specific weapon --"
+      skips all of that and just applies the cascade.
+   Limitation: the FIRER must be a regular ship/station with a ship_weapons
+   array; strike craft are excluded (their weapons live in STRIKE_CRAFT_DB
+   and would need a squadron-instance path like resolveSquadronWeaponFire).
+   Any ship or strike craft in the active battle can be the TARGET.
+   Reuses rollShipWeapon's gates, effects and multiplier math. */
 
 window.renderManualDamagePanel = function() {
     const firerSel = document.getElementById('dm-manualdmg-firer');
@@ -2517,10 +2158,8 @@ window.populateManualDamageWeapons = function() {
     window.onManualDamageWeaponChange();
 };
 
-// Pre-fills the Damage Type dropdown from the selected weapon (per the DM's
-// own "select the damage type (if necessary)" framing -- set automatically,
-// but always left editable in case of a combo weapon like "Impact/Heat" or
-// a deliberate override).
+// Pre-fills Damage Type from the selected weapon; always left editable for
+// combo weapons (e.g. "Impact/Heat") or overrides.
 window.onManualDamageWeaponChange = function() {
     const firerSel = document.getElementById('dm-manualdmg-firer');
     const wpnSel = document.getElementById('dm-manualdmg-weapon');
@@ -2551,18 +2190,13 @@ window.applyManualDamage = async function() {
     let targetShip = globalShipMarkersCache.find(m => m.id === targetId);
     if (!vessel || !targetShip) { alert("Firing ship or target could not be found -- try re-opening this panel."); return; }
 
-    // Initiative + Action Economy build (this session): Manual Damage is
-    // explicitly documented as acting like a REAL shot from the firer (see
-    // this feature's own header comment) -- spends 1 AP from the firer's
-    // turn slot exactly like a normal FIRE, same fail-open-if-no-initiative
-    // behavior as every other spendTokenAp call site.
-    // (Bug-hunt pass 2026-09-24: the 1-AP spend moved below the refusal
-    // gates and cooldown confirm, same fix as resolveShipWeaponFire.)
+    // A manual-damage shot spends 1 AP from the firer's turn slot like a normal
+    // FIRE (fails open with no initiative). The spend happens after the refusal
+    // gates and cooldown confirm.
     const wpnIdx = wpnIdxRaw !== '' ? parseInt(wpnIdxRaw) : null;
     let wpn = (wpnIdx !== null) ? (vessel.ship_weapons || [])[wpnIdx] : null;
 
-    // Same gates as window.rollShipWeapon above, minus the dice-rolling --
-    // "real shot" behavior confirmed with the DM (see header comment).
+    // Same gates as window.rollShipWeapon, minus the dice roll.
     if (vessel.disabled_weapons_until > 0) {
         if (window.AudioEngine) window.AudioEngine.playError();
         alert(`[WEAPONS DISABLED] ${vessel.name}'s weapons are offline for ${vessel.disabled_weapons_until} more round(s).`);
@@ -2600,8 +2234,7 @@ window.applyManualDamage = async function() {
 
     let combatLog = '';
 
-    // Auto-apply stance/category multipliers on top of the manual total --
-    // confirmed design, see header comment. Identical math to rollShipWeapon.
+    // Stance/category multipliers on top of the manual total; same math as rollShipWeapon.
     let stance = vessel.ship_stance || 'Balanced';
     if (stance === 'Aggressive') { total = Math.floor(total * 1.25); }
     else if (stance === 'Defensive') { total = Math.floor(total * 0.75); }
@@ -2624,7 +2257,7 @@ window.applyManualDamage = async function() {
     }
     total = Math.ceil(total * categoryMult);
 
-    // Directional armor (Phase 5): side from the DM's picker (Auto = facing the firing ship).
+    // Directional armor: side from the DM's picker (Auto = facing the firing ship).
     const manualSideOpts = (typeof window.damageSideOpts === 'function' && typeof window.manualDamageSideSource === 'function') ? window.damageSideOpts(targetShip, window.manualDamageSideSource(vessel.id)) : undefined;
     const result = window.resolveShipDamage(targetShip, dmgType, total, manualSideOpts);
     combatLog += result.log;
@@ -2695,34 +2328,27 @@ window.addShipWeapon = async function() {
     let pdCheckbox = document.getElementById('new-ship-wpn-pd');
     let isPointDefense = pdCheckbox ? pdCheckbox.checked : false;
     let rangeInput = document.getElementById('new-ship-wpn-range');
-    // 0 = unlimited (no Battle Map targeting restriction) — the default for
-    // every new weapon and for every legacy weapon that predates this field.
+    // 0 = unlimited (no Battle Map targeting restriction); the default for new
+    // and legacy weapons.
     let weaponRange = rangeInput ? Math.max(0, parseInt(rangeInput.value) || 0) : 0;
-    // Weapon Cooldowns build (this session): 0/blank = no auto-cooldown,
-    // same "opt-in per weapon" default as range's 0 = unlimited.
+    // 0/blank = no auto-cooldown (opt-in per weapon, like range 0 = unlimited).
     let cooldownInput = document.getElementById('new-ship-wpn-cooldown');
     let weaponCooldownPeriod = cooldownInput ? Math.max(0, parseInt(cooldownInput.value) || 0) : 0;
     let deckSelect = document.getElementById('new-ship-wpn-deck');
     let assignedDeckId = (deckSelect && deckSelect.value) ? deckSelect.value : null;
 
-    // Tiered Ammo build (this session, confirmed design): Standby is an
-    // opt-in per-weapon spare-mag tier, independent of Ready (the existing
-    // ammo/max_ammo fields, unchanged) -- 0/blank = weapon not using the
-    // tiered system at all (RESUPPLY/RELOAD stay hidden), same "opt-in,
-    // zero effect on existing data" convention as cooldown_period/range.
+    // Standby: opt-in per-weapon spare-mag tier, independent of Ready
+    // (ammo/max_ammo). 0/blank = not using tiered ammo (RESUPPLY/RELOAD hidden).
     let standbyMaxInput = document.getElementById('new-ship-wpn-standby-max');
     let standbyMax = (standbyMaxInput && parseInt(standbyMaxInput.value) > 0) ? parseInt(standbyMaxInput.value) : 0;
     let ammoTypeInput = document.getElementById('new-ship-wpn-ammotype');
     let ammoType = (ammoTypeInput && ammoTypeInput.value.trim()) ? ammoTypeInput.value.trim() : 'Kinetic Rounds';
-    // RELOAD (Standby -> Ready) "costs a round" by setting this weapon's own
-    // cooldown field, same mechanism firing already uses -- FLAGGED
-    // FIRST-PASS PLACEHOLDER default of 1 round, DM-tunable.
+    // RELOAD (Standby -> Ready) costs a round by setting the weapon's cooldown.
+    // Default 1 round is a placeholder, DM-tunable.
     let reloadCdInput = document.getElementById('new-ship-wpn-reloadcd');
     let reloadCooldownPeriod = reloadCdInput && reloadCdInput.value.trim() !== '' ? Math.max(0, parseInt(reloadCdInput.value) || 0) : 1;
-    // Single Warhead Ordnance build (this session): only meaningful for
-    // weapon_class:'ordnance' weapons -- see window.scaleOrdnanceDice
-    // (js/battle-map.js). Defaults to 'multi', the existing 6-payload-split
-    // behavior, for every weapon that doesn't explicitly opt into 'single'.
+    // Only meaningful for weapon_class 'ordnance' (see window.scaleOrdnanceDice,
+    // js/battle-map.js). Default 'multi' = 6-payload split.
     let ordPatternSelect = document.getElementById('new-ship-wpn-ordpattern');
     let ordnancePattern = (ordPatternSelect && ordPatternSelect.value === 'single') ? 'single' : 'multi';
 
@@ -2783,9 +2409,8 @@ window.deleteShipWeapon = async function(vesselId, idx) {
 };
 
 /* --- WEAPON EDIT MODAL ---
-   Previously the only way to change an installed weapon's stats was to delete
-   it and re-add it from scratch, losing any accumulated ammo/cooldown/overheat
-   state in the process. This lets a DM edit any field in place. */
+   Edit any field of an installed weapon in place, keeping its
+   ammo/cooldown/overheat state. */
 (function() {
     let overlay, currentVesselId, currentIdx;
     function ensureEditModal() {
@@ -2888,9 +2513,8 @@ window.deleteShipWeapon = async function(vesselId, idx) {
                 wpn.max_ammo = Math.max(wpn.ammo, maxAmmo);
             }
 
-            // Tiered Ammo build (this session): Standby Max clamps Standby
-            // (current) down if it would otherwise exceed the new max, same
-            // clamp-down-on-edit convention as Edit Vessel Base Stats above.
+            // Clamp current Standby down to a lowered Standby Max (same as Edit Vessel
+            // Base Stats).
             wpn.max_standby_ammo = Math.max(0, parseInt(document.getElementById('wpn-edit-standbymax').value) || 0);
             wpn.standby_ammo = Math.max(0, Math.min(wpn.max_standby_ammo, parseInt(document.getElementById('wpn-edit-standby').value) || 0));
             wpn.ammo_type = document.getElementById('wpn-edit-ammotype').value.trim() || 'Kinetic Rounds';
@@ -2930,9 +2554,8 @@ window.deleteShipWeapon = async function(vesselId, idx) {
         document.getElementById('wpn-edit-reloadcd').value = (wpn.reload_cooldown_period !== undefined && wpn.reload_cooldown_period !== null) ? wpn.reload_cooldown_period : 1;
         document.getElementById('wpn-edit-ordpattern').value = wpn.ordnance_pattern === 'single' ? 'single' : 'multi';
 
-        // Deck dropdown re-populated fresh every open (decks can change
-        // between edits) — self-heals missing deck ids the same way
-        // renderVesselDeck does, so an old deck with no id still shows up.
+        // Deck dropdown rebuilt on every open (decks can change); self-heals missing
+        // deck ids like renderVesselDeck does.
         vessel.ship_decks = vessel.ship_decks || [];
         if (window.ensureDeckIds(vessel.ship_decks)) {
             db.from('ship_markers').update({ ship_decks: vessel.ship_decks }).eq('id', vessel.id);
@@ -3069,10 +2692,8 @@ window.addArsenalItem = async function() {
     if(typeof window.loadAllProfiles === 'function') window.loadAllProfiles();
 };
 
-// Reuses the same lazy-loaded window.diceLogsList the Comms "Dice Streamer"
-// tab already maintains — no separate query/cache needed, just a second
-// place that renders the same data so you don't have to leave this screen
-// to see what you just rolled.
+// Reuses the lazy-loaded window.diceLogsList from the Comms "Dice Streamer"
+// tab, so recent rolls show here without a separate query.
 window.renderArsenalDiceFeed = function() {
     const container = document.getElementById('arsenal-dice-feed');
     if (!container) return;
@@ -3178,8 +2799,8 @@ window.deleteArsenalItem = async function(id) {
 window.rollArsenalWeapon = async function(id) {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
-    // Looked up by stable weapon id, not array position — position shifts
-    // once personal reorder arrows are in play (see window.applySavedOrder).
+    // Looked up by stable weapon id, not array position (personal reorder can
+    // shift positions; see window.applySavedOrder).
     let wpn = (myProf.arsenal || []).find(w => w.id === id);
     if (!wpn) return;
 
@@ -3237,36 +2858,19 @@ window.rollArsenalWeapon = async function(id) {
     }
 };
 
-/* --- GROUND COMBAT TO-HIT SYSTEM ---
-   Confirmed design: attacker rolls d20 + weapon modifier + attacker's
-   chosen skill modifier + perk bonuses on that skill; defender rolls ONE
-   core stat die — a PC defender's die size comes from their own character
-   sheet (whoever resolves the attack picks WHICH stat, fresh each time);
-   an NPC defender (no linked character sheet at all) has no stat to pull
-   from, so a raw die size is picked manually instead. Higher total wins;
-   on a tie the player-controlled side wins. Triggered by a new "⚔" button
-   next to each Arsenal weapon's existing ROLL button — the attacker is
-   always the current user's own character (their own Arsenal weapon),
-   same scope as ROLL already has. A miss blocks the damage roll entirely
-   (one integrated action, not a separate advisory step); ammo is
-   consumed either way since the shot was still fired. This is a genuine
-   prototype like the boarding system — the d20 does NOT explode (flat
-   1-20, standard d20-system convention, not stated either way by the
-   confirmed design), the defender's die DOES explode (matches every
-   other core-stat-die roll elsewhere in this app), and `wpn.modifier` is
-   reused as-is for BOTH the to-hit bonus AND the existing damage bonus —
-   the schema only has one modifier field per weapon, so a well-modified
-   weapon is being treated as both more accurate and harder-hitting
-   rather than splitting it into two fields. Flag any of this to revisit
-   after it's actually played.
-
-   DM decisions 2026-09-26 (supersede the above where they differ): the
-   d20 stays non-exploding; `wpn.modifier` now applies to DAMAGE ONLY, not
-   to-hit; the defender now gets modifiers -- a PC defender adds perk +
-   augment + gear bonuses on the chosen stat (and uses any augment
-   explode_threshold on that stat), an NPC defender gets a DM-entered flat
-   NPC Defense Mod, and ANY defender gets a Situational Mod (cover, prone,
-   etc.) typed into the attack popup. */
+/* --- GROUND COMBAT TO-HIT SYSTEM (prototype) ---
+   Attacker: flat d20 (does NOT explode) + chosen skill modifier +
+   perk/augment/gear bonuses on that skill. wpn.modifier applies to DAMAGE
+   only, not to-hit (DM decision).
+   Defender: ONE core stat die, which explodes. A PC uses their own sheet
+   (the resolver picks which stat each time) plus perk/augment/gear bonuses on
+   that stat and any augment explode_threshold. An NPC (no sheet) uses a
+   manually picked die size plus a DM-entered NPC Defense Mod. Any defender
+   can also get a Situational Mod (cover, prone, etc.) from the attack popup.
+   Higher total wins; on a tie the player-controlled side wins. Triggered by
+   the "⚔" button next to an Arsenal weapon's ROLL; the attacker is always the
+   current user's own character. A miss blocks the damage roll; ammo is
+   consumed either way. */
 window.DAMAGE_TYPE_TO_SKILL = {
     'Impact': 'Ballistic Weapons', 'Piercing': 'Ballistic Weapons', 'Flak': 'Ballistic Weapons',
     'Cold': 'Ballistic Weapons', 'Corrosive': 'Ballistic Weapons',
@@ -3276,19 +2880,12 @@ window.DAMAGE_TYPE_TO_SKILL = {
 };
 
 function rollExplodingDie(faces, canExplode, explodeThreshold) {
-    // Optional 3rd arg (2026-09-02, Carver Eclipse's torso augment build):
-    // every existing call site still passes just (faces, canExplode) and
-    // gets the exact old behavior -- explodeThreshold defaults to faces,
-    // so "roll >= threshold" is identical to the old "roll === faces" when
-    // no override is given. An augment can now lower that threshold (a d8
-    // Dexterity die exploding on 6+ instead of only on an 8) by passing a
-    // smaller explodeThreshold; a threshold above faces (nonsensical) is
-    // clamped back down to faces rather than trusted blindly.
+    // Optional explodeThreshold (defaults to faces, i.e. explode on max face).
+    // Augments can lower it (e.g. a d8 exploding on 6+). Values above faces are
+    // clamped to faces.
     let threshold = (explodeThreshold != null && explodeThreshold < faces) ? explodeThreshold : faces;
-    // Bug-hunt pass (2026-09-24): an augment explode_threshold of 1 or less
-    // (or a non-number) meant EVERY roll exploded forever -- an infinite
-    // loop that froze the browser tab. Clamp to 2+ (the lowest value that
-    // still ends). No current augment in the database uses <= 1.
+    // Clamp to 2+: a threshold of 1 or less (or a non-number) would explode
+    // forever and freeze the tab.
     threshold = Number(threshold);
     if (!(threshold >= 2)) threshold = Math.max(2, faces);
     let roll, subRolls = [], rollTotal = 0;
@@ -3303,18 +2900,10 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
 (function() {
     let overlay, currentWeaponId;
 
-    // Pending-list follow-up (this session): now reads the real
-    // combat_tracker.is_npc column (set explicitly at insert time by every
-    // combat_tracker insert site — addCombatant, joinCombatInitiative,
-    // spawnSquadronToken, deployTemplateToInitiative) instead of inferring
-    // PC-vs-NPC from the owner's profile role + linked-character at read
-    // time. Closes the previously-flagged edge case where a DM adding their
-    // own PC through the NPC-only "+ ADD TO INITIATIVE" form would have
-    // been misread as an NPC purely from owner_id — intent is now recorded
-    // once, at the point each combatant is actually created, not
-    // re-derived every render. `!== false` treats a legacy/missing value as
-    // NPC (fails toward the manual-die branch, matching the column's own
-    // DB default), though every current insert site sets it explicitly.
+    // Reads combat_tracker.is_npc, set explicitly by every insert site
+    // (addCombatant, joinCombatInitiative, spawnSquadronToken,
+    // deployTemplateToInitiative). `!== false` treats a missing value as NPC
+    // (the manual-die branch), matching the column's DB default.
     function defenderIsPC(combatant) {
         return !!(combatant && combatant.is_npc === false);
     }
@@ -3344,12 +2933,8 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
     }
 
     function groundCombatTargets() {
-        // Strike-craft squadron tokens share the same Initiative Tracker as
-        // personal combatants (owner_id set to the squadron's owning
-        // player) — excluded here since this is a personal-combat system;
-        // a squadron "defending" with its pilot's personal Charisma/
-        // Willpower die makes no sense. Ship-to-ship combat already has
-        // its own separate weapon-roll system.
+        // Squadron tokens share the Initiative Tracker but are excluded here: this is
+        // personal combat, and ship-to-ship combat has its own weapon-roll system.
         return combatantsList.filter(c => !c.is_strike_craft);
     }
 
@@ -3420,24 +3005,23 @@ window.resolveArsenalAttack = async function(weaponId) {
     let wpn = (myProf.arsenal || []).find(w => w.id === weaponId);
     if (!wpn) return;
 
-    // Validated up front, same as window.rollArsenalWeapon's own check — a
-    // malformed dice string must not be discovered only after ammo's been
-    // spent and a hit already broadcast to chat with no damage number.
+    // Validated up front (as in window.rollArsenalWeapon) so a malformed dice
+    // string fails before ammo is spent or a hit is broadcast to chat.
     const diceRegex = /^(\d*)d(\d+)$/i;
     if (!wpn.dice || !wpn.dice.trim().match(diceRegex)) { alert("This weapon's dice format is invalid — edit it before attacking."); return; }
 
     const targetSel = document.getElementById('atk-target-select');
     const target = targetSel ? combatantsList.find(c => c.id === targetSel.value) : null;
     if (!target) { alert("Select a target first."); return; }
-    // Phase 9 (2026-10-03): on a deck plan, the weapon's optional Short/Long
-    // range applies (js/deck-plans.js): past Long = refused (nothing spent),
-    // past Short = -2 to hit. Off the board, range isn't used.
+    // On a deck plan, the weapon's optional Short/Long range applies
+    // (js/deck-plans.js): past Long = refused (nothing spent), past Short = -2 to
+    // hit. Off the board, range isn't used.
     const deckRange = typeof window.deckRangeCheck === 'function' ? window.deckRangeCheck(wpn, target.id) : null;
     if (deckRange && deckRange.refuse) { alert(deckRange.refuse); return; }
     const skillName = document.getElementById('atk-skill-select').value;
 
     // --- Attacker roll: flat d20 (no explode) + skill mod + perk/augment/gear bonus on that skill ---
-    // (DM decision 2026-09-26: weapon modifier is damage-only, NOT added to to-hit.)
+    // (DM decision: weapon modifier is damage-only, NOT added to to-hit.)
     let atkBreakdown = [];
     let atkTotal = Math.floor(Math.random() * 20) + 1;
     atkBreakdown.push(`d20: ${atkTotal}`);
@@ -3459,11 +3043,8 @@ window.resolveArsenalAttack = async function(weaponId) {
     if (gearBonus.total !== 0) { atkTotal += gearBonus.total; atkBreakdown.push(`${skillName} Gear: ${gearBonus.sources.join(', ')}`); }
 
     // --- Defender roll: one core stat die (PC, explodes) or a manually-picked die size (NPC, also explodes) ---
-    // Pending-list follow-up (this session): reads the real
-    // combat_tracker.is_npc column now, same as defenderIsPC above (see its
-    // comment) — a targetProfile lookup is still needed below for the PC
-    // branch's actual stat block, just no longer for the PC/NPC decision
-    // itself.
+    // PC/NPC comes from combat_tracker.is_npc; targetProfile is only needed for
+    // the PC branch's stat block.
     const targetProfile = allProfiles.find(p => p.id === target.owner_id);
     const isPC = !!(target && target.is_npc === false);
     let defTotal = 0, defLabel = '';
@@ -3471,9 +3052,9 @@ window.resolveArsenalAttack = async function(weaponId) {
         const statName = document.getElementById('atk-defense-stat-select').value;
         const statKey = 'stat_' + statName.toLowerCase();
         const faces = parseInt((targetProfile.character[statKey] || 'd4').replace('d', '')) || 4;
-        // Defense modifiers (DM decision 2026-09-26): same stat bonuses the
-        // self-service dice-pool roller already applies -- perk/augment/gear
-        // bonuses on this stat, plus any augment explode_threshold.
+        // Defense modifiers (DM decision): same stat bonuses as the self-service
+        // dice-pool roller - perk/augment/gear on this stat, plus any augment
+        // explode_threshold.
         const defThreshold = typeof window.getAugmentExplodeThreshold === 'function' ? window.getAugmentExplodeThreshold(targetProfile.augments, statName) : null;
         const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2, defThreshold);
         defTotal = rollTotal;
@@ -3486,11 +3067,8 @@ window.resolveArsenalAttack = async function(weaponId) {
         const dGear = typeof window.getGearBonusFor === 'function' ? window.getGearBonusFor(targetProfile.gear, 'stat', statName) : { total: 0, sources: [] };
         if (dGear.total !== 0) { defTotal += dGear.total; defLabel += ` + [Gear: ${dGear.sources.join(', ')}]`; }
     } else {
-        // Bug fix (bug hunt, this session): a combatant can have is_npc:
-        // false (joined initiative as a PC) but no character sheet saved
-        // yet -- targetProfile.character would be undefined and crash the
-        // stat lookup above. Fall back to the manual DM-picked die-size
-        // path used for NPCs rather than throwing.
+        // A PC combatant (is_npc false) may have no character sheet yet; fall back to
+        // the manual die-size path used for NPCs instead of crashing.
         const faces = parseInt((document.getElementById('atk-defense-die-select').value || 'd8').replace('d', '')) || 8;
         const { rollTotal, subRolls } = rollExplodingDie(faces, faces >= 2);
         defTotal = rollTotal;
@@ -3503,10 +3081,9 @@ window.resolveArsenalAttack = async function(weaponId) {
     const sitMod = sitModEl ? (parseInt(sitModEl.value) || 0) : 0;
     if (sitMod !== 0) { defTotal += sitMod; defLabel += ` + [Situational: ${sitMod >= 0 ? '+' : ''}${sitMod}]`; }
 
-    // --- Resolution: higher total wins. On a tie, the player-controlled side
-    // wins; if that's ambiguous (both sides player-controlled, or neither is —
-    // e.g. two DM-run NPCs), the attacker wins the tie as a deliberate
-    // default, not something the confirmed design specified either way. ---
+    // --- Resolution: higher total wins. On a tie the player-controlled side
+    // wins; if that's ambiguous (both or neither player-controlled), the
+    // attacker wins the tie. ---
     const attackerIsPlayer = currentUserRole !== 'dm';
     const defenderIsPlayer = isPC; // isPC already requires a non-DM owner, see the comment above
     let hit;
@@ -3514,7 +3091,7 @@ window.resolveArsenalAttack = async function(weaponId) {
     else if (atkTotal < defTotal) hit = false;
     else hit = !(defenderIsPlayer && !attackerIsPlayer);
 
-    // Ammo is consumed on any fired shot, hit or miss — the round left the barrel either way.
+    // Ammo is consumed on any fired shot, hit or miss.
     if (wpn.ammo !== null && wpn.ammo !== undefined) {
         wpn.ammo = Math.max(0, wpn.ammo - 1);
         await db.from('character_arsenal').update({ ammo: wpn.ammo }).eq('id', wpn.id);
@@ -3531,9 +3108,7 @@ window.resolveArsenalAttack = async function(weaponId) {
     let finalTotal = atkTotal;
 
     if (hit) {
-        // wpn.dice was already validated against diceRegex before this
-        // function did anything else (ammo spend, chat broadcast) — this
-        // match is guaranteed to succeed, no silent "hit with no damage" path.
+        // wpn.dice was validated before anything else ran, so this match always succeeds.
         const match = wpn.dice.trim().match(diceRegex);
         let numDice = parseInt(match[1]) || 1;
         let diceFaces = parseInt(match[2]);
@@ -3562,21 +3137,12 @@ window.resolveArsenalAttack = async function(weaponId) {
     }
 };
 
-// idPrefix (added this session, live-session feature request: "dice roller
-// integrated into the battle map"): the Combat Arsenal tab's "Multi-Stat &
-// Skill Pool Roller" is now duplicated into a compact docked panel inside
-// the Battle Map (js/battle-map.js's Comms & Dice dock, index.html) so
-// players don't have to leave the map to make an ad-hoc roll. Rather than
-// give the second copy different class names, both copies reuse the exact
-// same .roll-stat-cb/.roll-skill-cb classes and are instead disambiguated
-// by SCOPING every query to the relevant idPrefix + 'dice-roller-stats'/
-// 'dice-roller-skills' container -- querying document-wide (the original
-// behavior, still exactly what happens when idPrefix is '') would otherwise
-// double-count checkboxes from whichever copy isn't the one just used.
-// #roll-extra-mod/#roll-advantage-cb get real idPrefix'd ids instead (two
-// elements can't safely share one id). Always rolls the CALLING user's own
-// character (myProf = current logged-in user) regardless of prefix -- there
-// was never a way to roll for anyone else's sheet from here to begin with.
+// idPrefix: the "Multi-Stat & Skill Pool Roller" exists twice - in the Combat
+// Arsenal tab ('') and in the Battle Map's Comms & Dice dock. Both copies use
+// the same .roll-stat-cb/.roll-skill-cb classes, so every query is scoped to
+// idPrefix + 'dice-roller-stats'/'dice-roller-skills' to avoid counting the
+// other copy's checkboxes. #roll-extra-mod/#roll-advantage-cb get prefixed
+// ids. Always rolls the current user's own character.
 window.executeDicePoolRoll = async function(idPrefix) {
     idPrefix = idPrefix || '';
     const myProf = allProfiles.find(p => p.id === currentUserId);
@@ -3606,22 +3172,12 @@ window.executeDicePoolRoll = async function(idPrefix) {
         let faces = parseInt(diceStr.replace('d', ''));
         const canExplode = faces >= 2;
 
-        // Advantage roll mode (confirmed design): the relevant die is rolled
-        // TWICE, each independently exploding as normal, and the higher
-        // total is kept -- both rolls shown in the breakdown so nothing is
-        // hidden. Scoped to this pool roller only (skills are flat modifiers
-        // with no die to re-roll), applying to every selected stat's die
-        // when the toggle is on, not just a single-stat roll.
-        // Custom explode threshold (2026-09-02, Carver Eclipse's torso
-        // augment build): normally a stat die only explodes on its own max
-        // face (the rollExplodingDie default below). An augment's effects
-        // can instead carry {target:'stat', name:<StatName>, explode_threshold:N}
-        // to lower that -- looked up fresh on every roll (not cached) since
-        // which augments a character has can change mid-campaign. Scoped
-        // deliberately to just this self-service dice-pool roller, not
-        // every other place a stat die gets rolled in this app (NPC
-        // defender rolls, etc.) -- not asked for there, and a broader
-        // change would need its own pass.
+        // Advantage: each selected stat's die is rolled TWICE (each exploding
+        // normally) and the higher total kept; both rolls appear in the breakdown.
+        // Skills are flat modifiers, so they aren't re-rolled.
+        // Custom explode threshold: an augment effect {target:'stat',
+        // name:<StatName>, explode_threshold:N} lowers the stat die's explode point.
+        // Looked up fresh each roll. Applies only to this self-service roller.
         const customThreshold = typeof window.getAugmentExplodeThreshold === 'function' ? window.getAugmentExplodeThreshold(myProf.augments, statName) : null;
         const thresholdNote = (customThreshold != null && customThreshold < faces) ? `, explodes ${customThreshold}+` : '';
 
@@ -3786,13 +3342,7 @@ window.addCombatant = async function(suffix) {
     
     if (!name) return;
     
-    // Pending-list follow-up (this session): is_npc set explicitly here
-    // rather than inferred later from owner_id -- this form ("+ ADD TO
-    // INITIATIVE") is the DM-only NPC-add tool, so intent is unambiguous
-    // regardless of whether the DM's own profile happens to have a linked
-    // character. Closes the exact edge case the old owner-role heuristic
-    // used to flag as unresolvable ("nothing in the data distinguishes an
-    // NPC the DM added from the DM's own PC by owner_id alone").
+    // is_npc set explicitly: "+ ADD TO INITIATIVE" is the DM-only NPC-add tool.
     const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId, is_npc: true });
     if (error) { alert("Failed to add combatant: " + error.message); return; }
     nameInput.value = ''; initInput.value = ''; hpInput.value = '10/10';
@@ -3809,9 +3359,7 @@ window.joinCombatInitiative = async function(suffix) {
     const vitality = (myProf && myProf.character && myProf.character.vitality !== undefined) ? myProf.character.vitality : null;
     const hp = vitality !== null ? `${vitality}/${vitality}` : '10/10';
 
-    // Pending-list follow-up (this session): is_npc: false set explicitly —
-    // self-add ("+ JOIN INITIATIVE") is definitionally that player's own
-    // character joining, regardless of the owner-profile heuristic.
+    // is_npc: false - "+ JOIN INITIATIVE" is always the player's own character.
     const { error } = await db.from('combat_tracker').insert({ name, initiative, hp, owner_id: currentUserId, is_npc: false });
     if (error) { alert("Failed to join initiative: " + error.message); return; }
     initInput.value = '';
@@ -3825,16 +3373,11 @@ window.removeCombatant = async function(id) {
     if(typeof loadCombatTracker === 'function') loadCombatTracker(); 
 };
 
-/* Initiative + Action Economy build (this session): extracted the whole
-   body of window.advanceCombatRound below into this DOM/confirm-independent
-   core so the new per-turn engine (js/battle-map.js's window.endCurrentTurn)
-   can trigger the exact same global tick the instant the initiative order
-   wraps back to the top, with no human confirm dialog in the way and no
-   DM-only gate blocking a player who legitimately ends the last turn of a
-   round. Same "core has no human gates, wrapper adds them" convention this
-   codebase already uses everywhere else (resolveShipWeaponFire vs
-   rollShipWeapon, etc.) — logic itself is completely unchanged by this
-   extraction, byte-for-byte the same tick as before. */
+/* DOM/confirm-free core of window.advanceCombatRound, so the per-turn engine
+   (window.endCurrentTurn, js/battle-map.js) can run the same global tick when
+   initiative wraps, with no confirm dialog and no DM-only gate (a player may
+   end the last turn of a round). Same core/wrapper split as
+   resolveShipWeaponFire vs rollShipWeapon. */
 window.resolveRoundTick = async function() {
     let anyChanged = false;
     let klaxonTriggered = false;
@@ -3847,21 +3390,17 @@ window.resolveRoundTick = async function() {
         let flightLog = [];
         let recalledSquadronIds = [];
 
-        // System Lockdown build (this session): hoisted above weapons.forEach
-        // (it used to be declared after) so the consecutive-fire self-damage
-        // check inside that loop can also flip it.
+        // Declared before weapons.forEach so the consecutive-fire self-damage check
+        // inside the loop can set it.
         let hullChanged = false;
 
         weapons.forEach(w => {
             if (w.cooldown > 0) { w.cooldown -= 1; changed = true; }
             if (w.overheat > 0) { w.overheat -= 1; changed = true; }
-            // System Lockdown build (this session): consecutive-fire
-            // self-damage. `fired_this_round` is set by rollShipWeapon at
-            // fire time; THIS tick is the round boundary where "fired in two
-            // consecutive rounds" is actually detected and paid for. Only
-            // weapons with `self_damage_on_consecutive_fire` set (currently
-            // just the Jupiter-class Spinal EMP Cannon) track this at all —
-            // a no-op for every other weapon.
+            // Consecutive-fire self-damage: rollShipWeapon sets `fired_this_round`; this
+            // round-boundary tick detects two rounds in a row and applies the damage.
+            // Only weapons with `self_damage_on_consecutive_fire` (e.g. the Spinal EMP
+            // Cannon) are affected.
             if (w.self_damage_on_consecutive_fire) {
                 if (w.fired_this_round) {
                     if (w.fired_prev_round) {
@@ -3881,12 +3420,8 @@ window.resolveRoundTick = async function() {
             }
         });
 
-        // System Lockdown build (this session): decrement the three
-        // per-vessel disable timers on the same tick. PERMANENT_DISABLE_ROUNDS
-        // (9999, see applySystemLockdown/window.PERMANENT_DISABLE_ROUNDS
-        // above) is deliberately never decremented below itself — a
-        // "permanently disabled" strike craft/Escort needs to actually stay
-        // disabled, not eventually recover after ~9999 rounds.
+        // Decrement the three per-vessel disable timers. PERMANENT_DISABLE_ROUNDS
+        // (9999) is never decremented, so a permanently disabled vessel stays disabled.
         let disabledChanged = false;
         ['disabled_weapons_until', 'disabled_sensors_until', 'disabled_engines_until'].forEach(field => {
             const val = vessel[field] || 0;
@@ -3897,10 +3432,9 @@ window.resolveRoundTick = async function() {
             }
         });
 
-        // System hazard effects: Pulsar Radiation was pure flavor text on star
-        // systems until now — this is what actually makes it "double weapon
-        // overheat" and apply minor continuous thermal damage, as originally
-        // described in the System Architect tool's own hazard dropdown.
+        // System hazard: Pulsar Radiation doubles weapon overheat and applies minor
+        // continuous thermal damage (as described in the System Architect hazard
+        // dropdown).
         const hazardHits = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(vessel) : [];
         const pulsarHit = hazardHits.find(h => h.type === 'pulsar');
         if (pulsarHit) {
@@ -3917,9 +3451,7 @@ window.resolveRoundTick = async function() {
         let stillDeployed = [];
         deployed.forEach(sq => {
             if (sq.loiter > 0) { sq.loiter -= 1; changed = true; }
-            // Weapon Cooldowns build (this session): decrements every
-            // per-weapon cooldown this squadron is tracking, same tick
-            // ship_weapons' own cooldown/overheat use above.
+            // Decrement this squadron's per-weapon cooldowns on the same tick as ship weapons.
             if (sq.weapon_cooldowns) {
                 Object.keys(sq.weapon_cooldowns).forEach(k => {
                     if (sq.weapon_cooldowns[k] > 0) { sq.weapon_cooldowns[k] -= 1; changed = true; }
@@ -3965,17 +3497,14 @@ window.resolveRoundTick = async function() {
         }
     }
 
-    // Tactical Battle Map movement: refreshes every active-battle token's
-    // move_remaining back to its vessel's tactical_speed on this same tick,
-    // per confirmed design (see js/battle-map.js file header). No-op outside
-    // an active battle.
+    // Battle Map movement: reset every active-battle token's move_remaining to
+    // its vessel's tactical_speed. No-op outside an active battle.
     if (typeof window.resetBattleMapMovement === 'function') await window.resetBattleMapMovement();
 
     // Range/Ordnance: ages in-flight ordnance (splits into 6 after turn 1,
-    // resolves impact when turns run out) and auto-resolves Point Defense
-    // against both inbound payloads and engaged strike craft, on this same
-    // tick. See js/battle-map.js's file header for the full confirmed
-    // design. No-op outside an active battle.
+    // resolves impact when turns run out) and auto-resolves Point Defense against
+    // inbound payloads and engaged strike craft. See js/battle-map.js's header.
+    // No-op outside an active battle.
     if (typeof window.processBattleRoundAutomations === 'function') await window.processBattleRoundAutomations();
 
     if (anyChanged) {
@@ -3987,12 +3516,9 @@ window.resolveRoundTick = async function() {
         window.AudioEngine.playKlaxon();
     }
 
-    // Initiative + Action Economy build (this session): switched from
-    // sender_id:currentUserId/message_type:'text' to a system line, since
-    // this tick can now fire automatically (a player ending the last turn
-    // of a round via window.endCurrentTurn) and not just from the DM's own
-    // manual ADVANCE ROUND click — matches the convention every other
-    // automated tick in this app already announces itself with.
+    // Announced as a system line, since this tick can fire automatically (a
+    // player ending the last turn via window.endCurrentTurn), not only from the
+    // DM's ADVANCE ROUND click.
     await db.from('chat_logs').insert({
         sender_id: null,
         content: `⏭️ [TACTICAL] Combat round advanced. Cooldowns reduced. Heat dissipated. Strike craft loiter time degraded.`,
@@ -4000,11 +3526,9 @@ window.resolveRoundTick = async function() {
     });
 };
 
-/* Thin human-facing wrapper around window.resolveRoundTick above — adds
-   back the DM-only gate and confirm dialog a manual button click needs.
-   The new per-turn engine (js/battle-map.js) calls resolveRoundTick()
-   directly instead, bypassing both, same as every other opts.auto path in
-   this codebase skips its own human-only gates. */
+/* Human-facing wrapper around window.resolveRoundTick: adds the DM-only gate
+   and confirm dialog. The per-turn engine (js/battle-map.js) calls
+   resolveRoundTick() directly. */
 window.advanceCombatRound = async function() {
     if (currentUserRole !== 'dm') return;
     if (!(await window.showConfirmModal("Advance combat round? This will process cooldowns, overheat, and force-recall any strike craft that run out of fuel."))) return;

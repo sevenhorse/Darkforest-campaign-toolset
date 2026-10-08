@@ -1,5 +1,5 @@
 /* ==========================================================================
-   js/map.js - Cartography, Map Tools, & FOW Engine (100% COMPLETE & VERIFIED)
+   js/map.js - Cartography, Map Tools, & FOW Engine
    ========================================================================== */
 
 window.camera = { x: 0, y: 0, zoom: 0.2, isDragging: false, startX: 0, startY: 0 };
@@ -11,7 +11,7 @@ window.pingModeActive = false; window.activePings = [];
 window.jumpPlottingActive = false; window.activeJumpShip = null; window.jumpTargetPoint = null; window.selectedDriveSpeed = 250; window.selectedDriveTypeKey = 'ftl_class1';
 window.territoryToolActive = false; window.territoryDrawActive = false; window.activeTerritoryVertices = [];
 window.hyperlaneDrawActive = false; window.activeHyperlaneNodes = [];
-window.hyperlanesVisible = true; // was never initialized before — left routes invisible until manually toggled once
+window.hyperlanesVisible = true; // must be initialized, or routes stay invisible until toggled once
 
 function stringToHash(str) { let hash = 0; for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; } return Math.abs(hash); }
 function mulberry32(a) { return function() { var t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 8, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -36,21 +36,13 @@ function getPlanetResources(type, prng) {
 }
 
 let generatedSystems = {};
-// getSystemBodies is memoized per-system (generatedSystems{}) for procedural
-// bodies and reads star_systems.custom_bodies directly for custom ones — the
-// override merge below happens OUTSIDE both of those, on every call, so a
-// DM's saved edit (window.globalPlanetaryModifiersCache) always reflects the
-// latest DB state even against a stale cached/shared base array, and so we
-// never mutate the cached objects themselves (new objects are returned).
+// Merges DM overrides (globalPlanetaryModifiersCache) onto bodies on every
+// call, outside the per-system memo, so edits always show the latest DB state.
+// Returns new objects; never mutates the cached base array.
 function applyPlanetaryOverrides(bodies) {
     const overrides = window.globalPlanetaryModifiersCache || {};
-    // Personal labels (live-session feature request, 2026-09-13): applied
-    // LAST, on top of the DM's own custom_name, per confirmed design ("my
-    // personal label wins for me even over the DM's official name") --
-    // this cache only ever holds the CURRENT viewer's own rows (see
-    // loadPersonalLabels, js/db.js), so this never touches what anyone
-    // else sees, DM included. Falls through to b.name/o.custom_name
-    // unchanged for every body this viewer hasn't personally relabeled.
+    // Personal labels win over the DM's custom_name, for this viewer only
+    // (the cache holds only the current viewer's rows; see loadPersonalLabels in js/db.js).
     const personalLabels = window.globalPersonalLabelsCache || {};
     return bodies.map(b => {
         const o = overrides[b.id];
@@ -65,33 +57,22 @@ function applyPlanetaryOverrides(bodies) {
     });
 }
 
-// Personal system renaming (live-session feature request, 2026-09-13):
-// star_systems has no override-merge choke point the way bodies do (a DM's
-// rename writes straight into star_systems.name, read directly everywhere)
-// -- this small wrapper is the equivalent single injection point for
-// systems. Applied at the two highest-value display sites (the galaxy map's
-// own star label and the selected-target HUD panel's heading) rather than
-// every last read of `.name` across the codebase (search results, the jump
-// plotter's snap-target label, etc. still show the canonical name) --
-// flagged as a deliberate scope trim, not an oversight; easy to extend to
-// more sites later if it turns out to matter at the table.
+// System name with the viewer's personal label applied. Used only at a few
+// display sites (galaxy map star label, HUD telemetry); other reads of
+// `.name` (search results, jump plotter labels, etc.) show the canonical name.
 window.getDisplaySystemName = function(system) {
     if (!system) return '';
     const personalLabels = window.globalPersonalLabelsCache || {};
     return personalLabels[`system:${system.id}`] ?? system.name;
 };
 
-// Shared save/clear for BOTH personal-label editors below (system + body).
-// Upsert-by-conflict on (user_id, target_type, target_id) -- same
-// "only ever this viewer's own row" scoping the load query and RLS-adjacent
-// honor-system convention rely on elsewhere in this feature (see the
-// personal_labels migration / loadPersonalLabels in js/db.js).
+// Save/clear for both personal-label editors (system + body). Upserts on
+// (user_id, target_type, target_id); only ever touches this viewer's own row.
 window.savePersonalLabel = async function(targetType, targetId, newName) {
     const trimmed = (newName || '').trim();
     const cacheKey = `${targetType}:${targetId}`;
     if (!trimmed) {
-        // Empty input clears the personal label back to the canonical name,
-        // rather than saving a blank string as if it were a real label.
+        // Empty input clears the label back to the canonical name.
         await db.from('personal_labels').delete().eq('user_id', currentUserId).eq('target_type', targetType).eq('target_id', targetId);
         delete window.globalPersonalLabelsCache[cacheKey];
     } else {
@@ -102,50 +83,20 @@ window.savePersonalLabel = async function(targetType, targetId, newName) {
     }
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
-// Bug fix (DM report, 2026-09-01): the render loop has its OWN eligibility
-// checks -- separate from getSystemBodiesRaw above -- that also
-// short-circuited on system.type === 'Nebula' in four places (focus
-// eligibility, the selected-target focus override, the actual orbit-draw
-// call, and the click hit-test). Those checks predate custom stars
-// entirely, written back when 'Nebula' could only mean a procedural gas
-// cloud with zero planets -- so even after the getSystemBodiesRaw fix
-// above started correctly RETURNING a Dense-Nebula-hazard custom star's
-// real custom_bodies, none of these four gates let that reach the
-// screen: the system was excluded from ever winning "focus" and excluded
-// from the orbit-draw call entirely, regardless of its distance from
-// every other star. Confirmed live: Tartarus Prime (hazard: Dense
-// Nebula, real custom planets), moved deliberately far from every other
-// system, still showed no planets zoomed in and centered -- ruling out
-// remaining focus/distance contention and pointing straight at these
-// type-based gates instead. This helper is now the one place that
-// decides "can this system ever show orbiting bodies": true for every
-// non-Nebula system, and true for a Nebula-typed system that still has
-// real custom_bodies (i.e. a custom star whose only 'Nebula'-ness is its
-// DM-picked hazard flavor, not an actual empty procedural gas cloud).
+// The one place that decides "can this system ever show orbiting bodies".
+// Used by the render loop's focus, orbit-draw and click hit-test gates.
+// True for every non-Nebula system, and for a Nebula-typed system that has
+// custom_bodies (a custom star with the Dense Nebula hazard, not an empty
+// procedural gas cloud).
 function systemCanHaveBodies(s) {
     if (s.type !== 'Nebula') return true;
     return !!(s.custom_bodies && s.custom_bodies.length > 0);
 }
 window.getSystemBodies = function(system) { return applyPlanetaryOverrides(getSystemBodiesRaw(system)); };
 function getSystemBodiesRaw(system) {
-    // Bug fix (DM report: "scanned it and do not see my custom planets
-    // around it"): custom_bodies must be checked BEFORE the Nebula
-    // short-circuit below, not after. A custom star tagged with the
-    // "Dense Nebula" environmental hazard gets system.type === 'Nebula'
-    // (see the globalDbSystemsCache mapping in loadGalaxyData: type is
-    // derived from hazard === 'Nebula', not a separate "this field has no
-    // star at all" flag) -- so with the old ordering, ANY custom star that
-    // merely had Dense Nebula picked as its hazard flavor had its real,
-    // DM-placed custom_bodies unconditionally discarded, even though they
-    // were saved correctly in the DB (confirmed directly against the live
-    // schema: Tartarus Prime's row has all 7 planets intact in
-    // custom_bodies, just never reachable through this function). The
-    // Nebula short-circuit only actually needs to apply to a PROCEDURAL
-    // nebula field, which never has custom_bodies set at all (that column
-    // only exists on this table's own custom stars) -- so checking
-    // custom_bodies first changes nothing for a real procedural nebula
-    // (still falls through to the empty-array line below) and only fixes
-    // the custom-star-with-Nebula-hazard case.
+    // custom_bodies must be checked BEFORE the Nebula short-circuit: a custom
+    // star with the Dense Nebula hazard also gets type 'Nebula' (derived from
+    // hazard in loadGalaxyData). Procedural nebulae never have custom_bodies.
     if (system.custom_bodies && Array.isArray(system.custom_bodies) && system.custom_bodies.length > 0) { return system.custom_bodies.map((b, idx) => ({ ...b, id: b.id || `${system.id}-custom-${idx}`, baseAngle: b.baseAngle || (idx * 1.2), speed: b.speed || (0.0002 / (idx + 1)), parentSystem: system })); }
     if(system.type === 'Nebula') return [];
     if(generatedSystems[system.id]) return generatedSystems[system.id];
@@ -168,45 +119,22 @@ function getSystemBodiesRaw(system) {
     generatedSystems[system.id] = bodies; return bodies;
 };
 
-/* Both explicit DM-placed hazard zones (system_hazards table — precise
-   x/y/radius/intensity, independent of any star) and the implicit hazard
-   already carried on star systems themselves (the `hazard` field set via
-   the System Architect / procedural generation — Pulsar, Nebula, Gravity
-   Well) mechanically affect ships — see window.checkShipHazards below (past
-   getFowTier/isPositionSensorVisible, which it depends on). The implicit
-   check uses a default radius centered on the star so every existing
-   system's hazard flavor is mechanically real without the DM needing to
-   manually re-place a zone on each one. */
+/* Hazards that affect ships (see window.checkShipHazards below):
+   explicit DM-placed zones (system_hazards: x/y/radius/intensity) and the
+   implicit `hazard` field on star systems (Pulsar, Nebula, Gravity Well),
+   which applies within a default radius centered on the star. */
 window.HAZARD_IMPLICIT_RADIUS = 350;
-// Explicit DM-placed zones (system_hazards) used to accept any radius the
-// DM typed, unbounded relative to the star it was near — a zone could
-// visually (and mechanically) engulf half the map. Clamped to match the
-// implicit per-system hazard radius above, both here (mechanical effect
-// range) and in drawHazardZones below (visual ring) so what you see and
-// what actually affects your ship always agree.
+// Explicit zone radius is clamped to this, both for the mechanical effect and
+// the visual ring in drawHazardZones, so what you see matches what applies.
 window.SYSTEM_HAZARD_MAX_RADIUS = window.HAZARD_IMPLICIT_RADIUS;
 
 /* FOW ENGINE
-   isPositionSensorVisible is the shared "is this point on the map within
-   sensor range of any allied asset (or the DM, who sees everything)" check —
-   pulled out of getFowTier so hazards can use the exact same rule against
-   their own real x/y instead of borrowing a system's. Note this is evaluated
-   against the CURRENT CLIENT's own/allied ships, same as every other FOW
-   check in this app (stars, planets) — it's viewer-relative, not a single
-   shared truth. That's fine for the display/telemetry call sites (each
-   client already sees stars/planets at their own FOW tier); for the one
-   mechanical call site with a real consequence (gravity-well jump-distance
-   inflation in js/db.js), it's always evaluated against the jumping ship's
-   OWNER's own client, so viewer and ship-owner are always the same person
-   there — no cross-client divergence in practice. */
+   isPositionSensorVisible: is this point within 300 units of any owned or
+   friendly ship? The DM always sees everything. Viewer-relative (evaluated
+   against the current client's ships), like every FOW check here. The one
+   mechanical caller (gravity-well jump inflation in js/db.js) runs on the
+   jumping ship owner's client, so viewer and owner are the same there. */
 window.isPositionSensorVisible = function(x, y) {
-    // Bug fix (bug hunt, this session, confirmed design): this doc comment
-    // has always said the DM "sees everything," but the code only relaxed
-    // the ownership filter for a DM (any ship's range counted, not just
-    // owned/allied) -- it still required SOME ship within 300 units of the
-    // point, so a DM querying a location with no nearby fleet got the same
-    // fowTier 1 (hidden) result as a player. Confirmed: DM should be
-    // unconditionally omniscient, matching the comment literally.
     if (currentUserRole === 'dm') return true;
     for (let m of globalShipMarkersCache) {
         if (m.docked_to) continue; // docked craft use their master's position, not their own stale coords
@@ -223,44 +151,20 @@ window.getFowTier = function(system) {
 };
 
 /* --- HYPERLANE DISCOVERY (persistent Fog of War for trade routes) ---
-   Deliberately a different FOW model from hazards/stars: this session's
-   design call was "once discovered, stays revealed" (matching how a fully
-   DRADIS-scanned star system stays known via window.scannedSystems) rather
-   than "live sensor range only" (how hazards/tier-2 systems work — visible
-   only while an allied ship is currently nearby, gone again once it
-   leaves). There's no manual "scan" action for a route node the way there
-   is for a star, though — discovery here is automatic: the first render
-   pass where a node is within sensor range (isPositionSensorVisible) marks
-   it permanently discovered for this browser. Same localStorage-per-
-   browser pattern as window.scannedSystems — not DB-synced, so each player
-   (and the DM) tracks their own discovered nodes independently. */
+   Unlike hazards/tier-2 systems (live sensor range only), route nodes stay
+   revealed once discovered, like scanned systems. Discovery is automatic:
+   the first render pass where a node is within sensor range marks it.
+   Stored per browser in localStorage, not DB-synced. */
 window.discoveredHyperlaneNodes = new Set(window.safeJsonParse(window.safeLocalGet('odyssey_discovered_hyperlane_nodes', '[]'), []));
-// Every node created from this session onward carries its own stable id
-// (see genHyperlaneNodeId / the hyperlane click handler further down), so
-// node.id is normally all this needs. Older routes drawn before this
-// session may have nodes with no id at all (deep-space nodes specifically —
-// system-snapped nodes always had the system's own id). For those, fall
-// back to a route+index-derived key — stable as long as that route's path
-// isn't later edited/reordered (the same index-based fragility already
-// accepted elsewhere in this app, e.g. custom system body ids). Editing and
-// re-saving a legacy route bakes a real id into every node going forward
-// (see startEditHyperlane), so this fallback is self-healing over time.
+// Nodes normally carry a stable id (genHyperlaneNodeId). Legacy deep-space
+// nodes may not; they fall back to a route+index key, which breaks if the
+// route is reordered. Re-saving a route via startEditHyperlane assigns real ids.
 function hyperlaneNodeKey(route, node, index) { return node.id || (route.id + '-n' + index); }
 function updateHyperlaneDiscovery() {
-    // Bug fix (DM reported "routes do not obey FOW"): isPositionSensorVisible
-    // short-circuits true unconditionally for role 'dm' (by design -- DM sees
-    // everything), but this function used to run for the DM exactly like
-    // everyone else, which meant the FIRST time a DM's browser ever rendered
-    // the map, every node of every route got marked "discovered" -- forever,
-    // via this same browser's localStorage. On a shared screen/browser (this
-    // campaign's own established pattern of testing a "player" account from
-    // the DM's own already-logged-in browser tab, see darkforest-history.md),
-    // that leaves any player account later logged into that SAME physical
-    // browser with full route reveal it never actually earned via sensor
-    // range. The DM's own omniscience is handled entirely on the read side
-    // now (see the render() call site below) -- this function no longer
-    // needs to run for the DM at all, so it no longer writes anything to
-    // this shared, persistent set on a DM's behalf.
+    // Skipped for the DM: isPositionSensorVisible is always true for the DM,
+    // so running this would mark every node discovered in this browser's
+    // localStorage, leaking to any player later using the same browser.
+    // DM omniscience is handled on the read side in render().
     if (currentUserRole === 'dm') return;
     let changed = false;
     globalHyperlanesCache.forEach(route => {
@@ -275,24 +179,15 @@ function updateHyperlaneDiscovery() {
     if (changed) localStorage.setItem('odyssey_discovered_hyperlane_nodes', JSON.stringify([...window.discoveredHyperlaneNodes]));
 }
 
-/* --- FOW RESET SYNC (DM Maintenance panel, 2026-09-02, DM request: "add a
-   way to reset FOW to the players without wiping all data") ---
-   Verified against the actual codebase before building anything: both
-   window.scannedSystems (js/db.js) and window.discoveredHyperlaneNodes
-   above are per-browser localStorage ONLY -- never DB-synced. That means
-   a DM-side button, by itself, has no way to reach into a player's own
-   browser and clear their FOW state; something server-side has to sit in
-   between. fow_reset_state is a new singleton table (id=1, same
-   one-row-plus-realtime-channel pattern as campaign_clock) holding
-   nothing but reset_epoch, a counter the DM bumps. Every client --
-   including the DM's own browser -- compares that epoch against its own
-   last-applied epoch (a third localStorage key) both at login and live
-   via realtime, and wipes ONLY its local FOW state the moment it sees a
-   newer epoch. No other table is touched by any of this.
-   Confirmed design (DM, 2026-09-02): one combined action clears BOTH
-   scanned systems and discovered hyperlanes together, targets every
-   player at once (not a per-player pick), and applies live to anyone
-   online right now, not just on next login. */
+/* --- FOW RESET SYNC (DM Maintenance panel) ---
+   Scanned systems and discovered hyperlane nodes live only in each
+   browser's localStorage, so the DM can't clear them directly.
+   fow_reset_state is a singleton row (id=1, realtime, like campaign_clock)
+   holding reset_epoch, a counter the DM bumps. Every client compares it to
+   its own last-applied epoch (localStorage) at login and via realtime, and
+   wipes its local FOW state when it sees a newer one.
+   DM decision: one action clears both scans and hyperlanes, for every
+   player at once, live for anyone online. No other data is touched. */
 window.applyFowResetIfNewer = function(serverEpoch) {
     const localEpoch = parseInt(localStorage.getItem('odyssey_fow_reset_epoch') || '0');
     if (!(serverEpoch > localEpoch)) return;
@@ -329,9 +224,7 @@ window.resetFowForAllPlayers = async function() {
     const { error } = await db.from('fow_reset_state').update({ reset_epoch: newEpoch, updated_at: new Date().toISOString(), updated_by: currentUserId }).eq('id', 1);
     if (error) { alert("Failed to reset FOW: " + error.message); return; }
 
-    // Apply immediately to this browser too, rather than waiting on the
-    // realtime message to round-trip back to the same client that just
-    // triggered it.
+    // Apply locally now rather than waiting for the realtime round-trip.
     window.applyFowResetIfNewer(newEpoch);
 
     db.from('chat_logs').insert({ sender_id: currentUserId, content: `🌫️ [FOG OF WAR RESET] Overseer wiped all DRADIS scans and discovered hyperlane routes back to unexplored, for everyone.`, message_type: 'text' });
@@ -339,22 +232,15 @@ window.resetFowForAllPlayers = async function() {
 };
 
 /* --- SYSTEM HAZARD ENGINE ---
-   Both hazard sources below now respect Fog of War: a hazard zone or a
-   system's implicit hazard flavor only mechanically affects a ship if that
-   zone/system's own location is within sensor range (see
-   isPositionSensorVisible above) — previously this check didn't exist at
-   all here, only on the map's visual ring, so ships were taking hazard
-   effects from space nobody had discovered yet. Reversed deliberately this
-   session (was previously "physics don't care about sensors" on purpose;
-   see the architecture reference doc's prior checkpoint notes). */
+   Hazards respect Fog of War: a zone or a system's implicit hazard only
+   affects a ship if the zone/system location is within sensor range
+   (isPositionSensorVisible). Returns a list of hit descriptors. */
 window.checkShipHazards = function(shipMarker) {
     if (!shipMarker) return [];
     let hits = [];
 
-    // Bug-hunt pass (2026-09-24, performance): the cheap distance test now
-    // runs BEFORE the sensor-visibility test (which loops every ship). Same
-    // result, far less work -- this runs per ship per frame on the map,
-    // which mattered most on phones.
+    // Cheap distance test first; the sensor test loops every ship and this
+    // runs per ship per frame.
     (window.globalSystemHazardsCache || []).forEach(hz => {
         const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
         let dist = Math.hypot(shipMarker.x - hz.x, shipMarker.y - hz.y);
@@ -384,30 +270,23 @@ window.wipeGalaxySlate = async function() {
     window.selectedTarget = null; if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
 
-// Bug-hunt pass (2026-09-24): loadGalaxyData is called from many places at
-// once (every ship_markers realtime event, every save), and overlapping runs
-// could finish out of order -- an older fetch landing last would overwrite
-// newer data. It's now coalesced (see window.coalesceAsync, js/db.js): at
-// most one fetch in flight plus one trailing refresh. Callers that `await`
-// it still get data at least as fresh as their own change.
+// Called from many places (every ship_markers realtime event, every save).
+// Coalesced (window.coalesceAsync, js/db.js) so overlapping runs can't land
+// out of order: at most one fetch in flight plus one trailing refresh.
+// Callers that `await` it get data at least as fresh as their own change.
 window.loadGalaxyData = window.coalesceAsync(async function() {
     const { data: starData } = await db.from('star_systems').select('*');
     if (starData) globalDbSystemsCache = starData.map(s => ({ ...s, isCustom: true, size: s.size || 5.0, type: s.luminosity === 'Black Hole' ? 'Black Hole' : (s.hazard === 'Nebula' ? 'Nebula' : 'Star'), multiType: s.multiType || 'Single', custom_bodies: s.custom_bodies || [] }));
     const { data: markerData } = await db.from('ship_markers').select('*');
     if (markerData) globalShipMarkersCache = markerData.map(m => ({ ...m, cargo_inventory: window.sanitizeCargo ? window.sanitizeCargo(m.cargo_inventory) : (m.cargo_inventory || {}), ship_weapons: m.ship_weapons || [], ship_decks: m.ship_decks || [] }));
-    // Custom Star Tracker (QOL request, 2026-08-31): every create/edit/delete
-    // of a custom star already round-trips through loadGalaxyData to refresh
-    // globalDbSystemsCache, so hooking the tracker's re-render here (instead
-    // of at every individual save/delete call site) keeps it in sync for
-    // free, including the very first population at login.
+    // Every custom star create/edit/delete reloads here, so the tracker
+    // re-renders here rather than at each call site.
     if (typeof window.renderDmCustomStarsList === 'function') window.renderDmCustomStarsList();
-    // Phase 4d fog of war (js/battle-map.js): re-fetch battle tokens if a ship
+    // Battle-map fog of war (js/battle-map.js): re-fetch battle tokens if a ship
     // just became visible to this player. First call after login only seeds.
     if (markerData && typeof window.battleFogCheckReveal === 'function') window.battleFogCheckReveal();
-    // Bug-hunt pass (2026-09-24): the caches above are rebuilt as brand-new
-    // objects, so a selected ship/custom star (and an active jump plot)
-    // kept pointing at the OLD object -- the HUD showed stale position/
-    // stats until you re-clicked it. Re-point them at the fresh copies.
+    // The caches are rebuilt as new objects; re-point the selected target and
+    // active jump ship at the fresh copies so the HUD doesn't go stale.
     const freshOf = (t) => {
         if (!t || !t.data || t.data.id === undefined) return null;
         if (t.type === 'ship') return globalShipMarkersCache.find(m => m.id === t.data.id) || null;
@@ -423,14 +302,9 @@ window.loadGalaxyData = window.coalesceAsync(async function() {
 });
 
 /* --- CUSTOM STAR TRACKER (DM Operations > SPAWN tab) ---
-   DM-only index of every custom star (globalDbSystemsCache entries with
-   isCustom === true -- procedural galaxy stars are deliberately excluded,
-   since those aren't something a DM "made" and can already be found via
-   the galaxy's own spiral-arm layout) with a search box and a LOCATE button
-   per row. LOCATE reuses the exact same selectedTarget/lockCameraOnSelected/
-   renderHUDTelemetry path a normal map click on a star already uses, so the
-   existing "OVERSEER STAR EDITOR" box (rename/reclass/destroy) shows up in
-   Telemetry immediately after -- this list is a finder, not a second editor. */
+   DM-only searchable list of custom stars (procedural stars excluded).
+   LOCATE selects the star the same way a map click does, so the Overseer
+   Star Editor appears in Telemetry. This list is a finder, not an editor. */
 window.renderDmCustomStarsList = function() {
     const container = document.getElementById('dm-custom-stars-list-container');
     if (!container) return;
@@ -474,19 +348,9 @@ window.locateCustomStar = function(id) {
 
 /* SYSTEM ARCHITECT */
 let architectPlanets = [];
-// Bug fix (tester-found crash, 2026-08-31): this used to reset
-// architectPlanets to [] but never told the visible Orbital Manifest list
-// about it -- any planet rows left over from a PREVIOUS System Architect
-// session (added a planet then Cancelled, or successfully spawned a star)
-// stayed on screen with their onchange handlers still pointing at indices
-// into the now-empty array. Editing Name/Type/Gravity/Atmosphere/Resources
-// on one of those stale rows then threw "Cannot set properties of
-// undefined (setting 'name'/'resources'/etc.)" -- the row still existed in
-// the DOM, but architectPlanets[idx] didn't exist anymore. Re-rendering
-// here keeps the visible list in sync with the reset array. Also resets
-// the core fields (name/class/multiplicity/hazard) to their defaults, same
-// reasoning -- reopening should start a genuinely fresh system, not show
-// whatever was typed for the last one.
+// Opens with a fresh system: resets fields and re-renders the planet list.
+// The re-render matters: stale rows would keep onchange handlers indexing
+// into the now-empty architectPlanets and throw on edit.
 window.openSystemArchitect = function() {
     if (currentUserRole !== 'dm') return;
     architectPlanets = [];
@@ -525,16 +389,10 @@ window.renderArchitectPlanets = function() {
     cont.innerHTML = html;
 };
 
-/* OVERSEER STAR EDITOR — Planet Manifest (DM edit-EXISTING-system flow,
-   2026-09-01, DM report: "can we add in the ability to edit fully a
-   spawned system from the main map"). Separate state from System
-   Architect's own architectPlanets above -- that one is create-only and
-   gets reset to [] every time System Architect opens; this one holds the
-   in-progress edit for whichever custom star is currently selected, and
-   is intentionally NOT reset just because renderHUDTelemetry re-runs (it
-   runs on plain selection/hover churn, not just when the DM actually
-   wants a fresh copy) -- only reset when the selected star's id actually
-   changes, so mid-edit typing survives incidental re-renders. */
+/* OVERSEER STAR EDITOR — Planet Manifest (edit an existing custom star).
+   Separate state from System Architect's create-only architectPlanets.
+   Holds the in-progress edit for the selected custom star and is reset only
+   when the selected star's id changes, so typing survives HUD re-renders. */
 let editingStarBodyId = null; let editingStarBodies = [];
 window.addEditStarPlanetRow = function() { let count = editingStarBodies.length + 1; editingStarBodies.push({ name: `Planet ${count}`, type: 'Terrestrial', gravity: '1.0 G', atmosphere: 'Breathable', resources: 'Unknown', radius: 20 + count * 25, size: 1.6, color: '#4287f5' }); window.renderEditStarPlanets(); };
 window.removeEditStarPlanetRow = function(idx) { editingStarBodies.splice(idx, 1); window.renderEditStarPlanets(); };
@@ -542,12 +400,9 @@ window.buildEditStarPlanetsHtml = function() {
     if (editingStarBodies.length === 0) { return `<span style="font-size:10px; color:#6b826a;">No custom planets.</span>`; }
     let html = '';
     editingStarBodies.forEach((p, idx) => {
-        // Confirmed design choice (DM, 2026-09-01): removing a planet row
-        // here and saving silently discards any Overseer Planet Editor
-        // scan override saved on it (planetary_modifiers, keyed by
-        // body_id) -- retyping/editing a row in place keeps its id and
-        // therefore its override. The warning below is the only signal
-        // before that happens; there's no separate confirmation dialog.
+        // DM decision: removing a row and saving discards its scan override
+        // (planetary_modifiers, keyed by body_id); editing in place keeps it.
+        // This warning is the only signal; there is no confirmation dialog.
         const hasOverride = !!(p.id && window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id]);
         html += `<div style="background:#030403; border:1px solid #3c4e36; padding:6px; border-radius:2px; font-size:10px; margin-top:4px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -575,13 +430,8 @@ window.commitArchitectSystem = async function() {
     let color = '#ffe9c4'; if (luminosity === 'Class M (Red Dwarf)') color = '#ffb37b'; if (luminosity === 'Class O (Blue Giant)') color = '#7694ff'; if (luminosity === 'Black Hole') color = '#000000'; if (luminosity === 'Hidden Anomaly') color = '#ff3333';
     let customBodiesClean = architectPlanets.map((p, idx) => ({ ...p, isStar: false, radius: 25 + (idx + 1) * 30, baseAngle: idx * 1.25, speed: 0.0002 / (idx + 1) }));
     const payload = { name, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, size: luminosity === 'Black Hole' ? 7.0 : 5.0, color, luminosity, multiType, hazard, ownership: 'Unclaimed', control: 'Uncontested', industry_tier: 1, custom_bodies: customBodiesClean };
-    // Bug fix (2026-08-31, DM report): this used to fire-and-forget the
-    // insert with no error check at all -- when star_systems was missing
-    // the multiType/hazard/custom_bodies columns this payload has always
-    // sent (see the star_systems_add_missing_hazard_multitype_custom_bodies_columns
-    // migration), the insert 400'd server-side and the DM had no way to
-    // know: the modal just closed as if it had worked, and the star was
-    // simply never created. Now surfaces the failure instead of hiding it.
+    // Surface insert errors (e.g. missing columns); otherwise the modal would
+    // close as if the star had been created.
     const { error } = await db.from('star_systems').insert(payload);
     if (error) { alert("Failed to create star system: " + error.message); return; }
     window.closeSystemArchitect(); if(typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
@@ -599,10 +449,7 @@ window.spawnTokenAtCenter = async function() {
 
     let newCargo = typeof window.sanitizeCargo === 'function' ? window.sanitizeCargo({}) : {};
 
-    // IFF unification (this session): quick-spawned ships now write the real
-    // ship_markers.iff column directly instead of the old cargo_inventory.iff
-    // sub-field -- see the architecture doc for the full writeup of why two
-    // parallel IFF systems existed and why this one was chosen as canonical.
+    // IFF lives in the ship_markers.iff column (canonical), not cargo_inventory.
     let payload = { owner_ids: [currentUserId], name: name, drive_type: driveType, iff: iffStatus, x: -window.camera.x / window.camera.zoom, y: -window.camera.y / window.camera.zoom, color: (typeof window.getIffColor === 'function' ? window.getIffColor(iffStatus) : '#00e1ff'), cargo_inventory: newCargo };
 
     if (isJupiter) {
@@ -611,38 +458,20 @@ window.spawnTokenAtCenter = async function() {
         payload.integrity_reactive = 10; payload.max_reactive = 10;
         payload.integrity_ablative = 10; payload.max_ablative = 10;
         payload.integrity_hardened = 15; payload.max_hardened = 15;
-        // Weapon Cooldowns build (this session): reconciled against the DM's
-        // original paper stat sheet for the Jupiter Heavy Cruiser.
-        // CONFIRMED (AskUserQuestion): damage_type values are LEFT AS-IS —
-        // the paper lists two damage types per weapon (e.g. "heat/piercing")
-        // but this engine only supports one, and whoever set this preset up
-        // originally already made that single-type call; not revisited here.
-        // gun_count IS raised to match the paper's physical mount/tube
-        // counts (a real balance swing, confirmed explicitly, not a small
-        // data fix — a bigger single-volley ceiling per weapon than before).
-        // cooldown_period is new: "every turn" -> 0, "every other turn" -> 1,
-        // "once every N turns" -> N-1 (fires on turn 1, ready again on turn
-        // N). range is new too, first-pass placeholder mapping of the
-        // paper's short/medium/long/cone bands onto this app's existing
-        // range convention (short=300, medium=450, long=650, ordnance
-        // long=700 matching STRIKE_CRAFT_DB's own anti_capital-ordnance
-        // distinction) — a dual-band weapon ("short/med", "medium/long")
-        // uses the HIGHER band, a judgment call, not DM-confirmed per weapon.
-        // System Lockdown/AOE build (this session, follow-on to the above):
-        // the Spinal EMP Cannon's "bypasses armor, affects shield" flavor was
-        // already covered by the pre-existing Ion damage type (hullMult
-        // 0.25, bypassesLayers reactive/ablative/hardened) -- no change
-        // needed there. New this pass: system_lockdown (flat d20 vs DC16,
-        // fail = one random system disabled 1d4 rounds; strike craft/
-        // Escort-class instead get an instant, no-check PERMANENT disable of
-        // all three systems) and self_damage_on_consecutive_fire (1d4 Heat
-        // to own hull if fired two rounds running) on the EMP Cannon; a real
-        // multi-token aoe_radius splash (100px) on Capitol Killer Tubes only
-        // (NOT Flak Guns, per confirmed design) applied per-payload. Still
-        // NOT added: the paper's embarked air group (12x Raven, 12x Hawk,
-        // 48x Messenger, 48x "Messenger Gunship" — the last of which isn't
-        // even an existing STRIKE_CRAFT_DB type) — noticed but out of scope,
-        // flagging rather than silently populating ship_hangar with a guess.
+        // Jupiter Heavy Cruiser preset, from the DM's paper stat sheet.
+        // - damage_type: one per weapon (the paper lists two; engine supports one).
+        // - gun_count matches the paper's mount/tube counts (DM-confirmed).
+        // - cooldown_period: "every turn" -> 0, "every other turn" -> 1,
+        //   "once every N turns" -> N-1.
+        // - range: short=300, medium=450, long=650, ordnance long=700. Dual-band
+        //   weapons use the higher band (placeholder, not DM-confirmed per weapon).
+        // - EMP Cannon: Ion damage type covers "bypasses armor"; system_lockdown
+        //   is d20 vs DC16, fail = one random system disabled 1d4 rounds (strike
+        //   craft/Escort: all three systems disabled permanently, no check);
+        //   self_damage_on_consecutive_fire = 1d4 Heat if fired two rounds running.
+        // - aoe_radius splash (100px) on Capitol Killer Tubes only, not Flak Guns (DM rule).
+        // - Not included: the paper's embarked air group (12 Raven, 12 Hawk,
+        //   48 Messenger, 48 "Messenger Gunship", the last not a STRIKE_CRAFT_DB type).
         payload.ship_weapons = [
             { loc: "Primary", name: "Gauss Cannons", dice: "1d10", modifier: "+0", explodes: false, ammo: 10, max_ammo: 10, cooldown: 0, overheat: 0, cooldown_period: 0, gun_count: 32, damage_type: "Piercing", range: 450 },
             { loc: "Turrets", name: "Dual Railguns", dice: "1d20", modifier: "+0", explodes: false, ammo: -1, max_ammo: -1, cooldown: 0, overheat: 0, cooldown_period: 1, gun_count: 12, damage_type: "Piercing", range: 650 },
@@ -668,16 +497,6 @@ window.spawnTokenAtCenter = async function() {
     payload.ai_controlled = currentUserRole === 'dm' && (payload.ship_weapons || []).length > 0; // playtest rebalance: armed NPC spawns default to AI
     await db.from('ship_markers').insert(payload); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 };
-
-// Pending-list follow-up (this session): window.spawnStarSystemAtCenter was
-// removed here — dead code found during an earlier bug hunt (references
-// dm-tool-luminosity/dm-tool-color DOM ids that don't exist anywhere in
-// index.html, and had zero call sites anywhere in the codebase; would have
-// thrown immediately if ever wired to a button). Deleting it rather than
-// fixing it in place, since a real fix would mean inventing new star-spawn
-// UI scope that was never asked for — see the architecture doc's Pending
-// list for the original finding. The working DM system-spawn tool uses
-// dm-tool-name/dm-tool-iff/dm-tool-drivetype and is unaffected.
 
 /* --- TOOL TOGGLES --- */
 window.toggleMeasuringTool = function() {
@@ -705,38 +524,16 @@ window.toggleTerritoryTool = function() {
     window.updateToolButtonStyles();
 };
 
-// Territory editor follow-on (this session): edit-in-place, ported directly
-// from the hyperlane edit-in-place pattern (window.editingHyperlaneId /
-// startEditHyperlane / finishActiveHyperlane's UPDATE-vs-INSERT branch) —
-// same underlying draw-tool state machine, so the same shape applies here
-// with no new invention needed. window.editingTerritoryId: set by
-// startEditTerritory; null = finishActiveTerritory inserts a new territory
-// instead of updating one. window.editingTerritoryWasHidden: a territory's
-// "hidden" state lives as a '[HIDDEN] ' prefix baked into faction_name
-// (see toggleTerritoryVisibility) — the edit form only ever shows/saves the
-// stripped faction name, so this flag is what lets a save re-apply that
-// prefix instead of silently un-hiding a hidden territory just by editing it.
+// Territory edit-in-place (same pattern as hyperlane editing).
+// editingTerritoryId: set by startEditTerritory; null means finishActiveTerritory inserts.
+// editingTerritoryWasHidden: "hidden" is a '[HIDDEN] ' prefix on faction_name;
+// the form shows the stripped name, so this lets a save re-apply the prefix.
 window.editingTerritoryId = null;
 window.editingTerritoryWasHidden = false;
 
-/* Bug fix (tester report, 2026-08-31): "editing a territory doesn't let me
-   set a new faction/color, and Apply always says no faction set." Root
-   cause traced to the panel's OWN layout, not the save logic (which reads
-   the form fields correctly and was already saving whatever they held) --
-   the territory-control-panel has TWO buttons both effectively labeled
-   "CLOSE" visible at the same time during an active edit: the real save
-   action ("✓ CLOSE & SAVE", btn-finish-territory-draw) and the panel's own
-   dismiss button (plain "CLOSE", btn-close-territory-panel, always present
-   at the bottom of the panel to back out of the tool entirely). Clicking
-   the latter mid-edit calls toggleTerritoryTool() -> cancelDrawingTerritory(),
-   which silently discards the in-progress edit (including any faction/color
-   just picked) with no confirmation and no error -- so a DM who clicked the
-   wrong "CLOSE" would see their faction choice vanish and Apply keep
-   complaining, with nothing on screen explaining why. Fixed by hiding
-   btn-close-territory-panel for the duration of any draw/edit (same
-   show/hide pattern already used for btn-start-territory-draw), forcing an
-   explicit Cancel or Finish/Save instead -- see startDrawingTerritory,
-   startEditTerritory, and cancelDrawingTerritory below. */
+/* btn-close-territory-panel is hidden during any draw/edit: it calls
+   cancelDrawingTerritory and would silently discard the edit, and it is
+   easily confused with "✓ CLOSE & SAVE". The DM must explicitly Cancel or Save. */
 
 function resetTerritoryFormFields() {
     const nameEl = document.getElementById('territory-name-input'); if (nameEl) nameEl.value = '';
@@ -744,27 +541,14 @@ function resetTerritoryFormFields() {
     const factionEl = document.getElementById('territory-faction-select'); if (factionEl) factionEl.value = '';
 }
 
-// Bug fix (tester report, 2026-08-31): this used to call
-// resetTerritoryFormFields() right here, which silently wiped whatever
-// name/faction/color the DM had just typed/picked the INSTANT they clicked
-// "DRAW POLYGON" -- so the natural fill-the-form-then-draw-the-border
-// workflow always lost the faction and color the moment drawing started,
-// and the territory saved with faction_name: '' regardless of what was
-// selected. Fields are already guaranteed blank/default here anyway: the
-// only ways to reach this function are a fresh panel-open (HTML defaults)
-// or after cancelDrawingTerritory()/finishActiveTerritory() (both already
-// reset the form themselves), so dropping the extra reset costs nothing
-// and stops it from clobbering input entered before "DRAW POLYGON".
+// Does NOT reset the form: the DM may fill name/faction/color before
+// clicking DRAW POLYGON. Cancel and finish already reset it.
 window.startDrawingTerritory = function() { window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; window.territoryDrawActive = true; window.activeTerritoryVertices = []; document.getElementById('btn-start-territory-draw').style.display = 'none'; document.getElementById('btn-finish-territory-draw').style.display = 'block'; document.getElementById('btn-cancel-territory-draw').style.display = 'block'; document.getElementById('btn-undo-territory-vertex').style.display = 'block'; document.getElementById('territory-drawing-status').style.display = 'block'; const closeBtn1 = document.getElementById('btn-close-territory-panel'); if (closeBtn1) closeBtn1.style.display = 'none'; window.updateToolButtonStyles(); };
 
-// Loads an existing territory's vertices/name/color/faction back into the
-// draw state so the DM can add/remove waypoints and save in place (an
-// UPDATE, not a new territory) instead of the old delete-and-redraw-only
-// workflow. Deliberately does NOT touch owned_system_ids or re-flip galaxy
-// ownership — saving an edit only updates the territory's own row; Apply
-// stays the separate, explicit action it already was (an earlier session's
-// confirmed design), so an edited-but-not-yet-re-Applied territory's shape
-// change has no effect on the shared galaxy until the DM hits Apply again.
+// Loads an existing territory into the draw state for in-place editing
+// (saved as an UPDATE). Does NOT touch owned_system_ids or galaxy ownership:
+// Apply stays a separate explicit action, so shape changes have no effect
+// on ownership until the DM hits Apply again.
 window.startEditTerritory = function(territoryId) {
     if (currentUserRole !== 'dm') return;
     const t = globalTerritoriesCache.find(x => x.id === territoryId);
@@ -792,14 +576,8 @@ window.finishActiveTerritory = async function() {
     if (window.activeTerritoryVertices.length < 3) { alert("Requires at least 3 nodes."); return; }
     const name = document.getElementById('territory-name-input').value || 'New Sector'; const color = document.getElementById('territory-color-input').value || '#00e5a3';
     let faction = document.getElementById('territory-faction-select') ? document.getElementById('territory-faction-select').value : '';
-    // Bug fix (pre-deploy review): this used to also require `faction` to be
-    // truthy before re-applying the hidden prefix — editing a hidden
-    // territory that has no faction assigned (the "-- No Faction / Neutral
-    // --" option) silently un-hid it, since an empty faction skipped the
-    // prefix entirely. toggleTerritoryVisibility's own hide path prefixes
-    // unconditionally (`'[HIDDEN] ' + (t.faction_name || '')`), so a hidden
-    // territory with no faction is already a valid, pre-existing stored
-    // shape — the edit path just needs to match that, not gate on faction.
+    // Re-apply the hidden prefix even with no faction, matching
+    // toggleTerritoryVisibility, so editing never un-hides a territory.
     if (window.editingTerritoryId && window.editingTerritoryWasHidden) faction = '[HIDDEN] ' + faction;
     const payload = { name, color, vertices: window.activeTerritoryVertices, faction_name: faction };
     const { error } = window.editingTerritoryId
@@ -811,26 +589,17 @@ window.finishActiveTerritory = async function() {
 window.cancelDrawingTerritory = function() { window.territoryDrawActive = false; window.activeTerritoryVertices = []; window.editingTerritoryId = null; window.editingTerritoryWasHidden = false; resetTerritoryFormFields(); document.getElementById('btn-start-territory-draw').style.display = 'block'; document.getElementById('btn-finish-territory-draw').style.display = 'none'; document.getElementById('btn-cancel-territory-draw').style.display = 'none'; document.getElementById('btn-undo-territory-vertex').style.display = 'none'; document.getElementById('territory-drawing-status').style.display = 'none'; const closeBtn3 = document.getElementById('btn-close-territory-panel'); if (closeBtn3) closeBtn3.style.display = ''; window.updateToolButtonStyles(); };
 
 /* --- TERRITORY FACTION OWNERSHIP FLIP ---
-   Territories were purely cosmetic before this — drawing one and assigning
-   a faction only ever saved the faction name. This is the piece that
-   actually flips ownership on the systems inside the drawn border.
+   Flips ownership of the systems inside a territory's border. DM rules:
+   - Applying is an explicit DM action, not automatic on save/edit.
+   - Overlaps resolve "last applied wins" (Apply shows a count of systems
+     taken from another faction, but does not block).
+   - Deleting or shrinking a territory un-claims what it no longer covers.
+   territories.owned_system_ids records what this territory owns, so a
+   release only touches systems still owned by its faction, never undoing a
+   more recently applied overlapping territory. */
 
-   Confirmed design (all recommended options, one exception noted where it
-   applies): applying is an explicit, separate DM action (not automatic on
-   every save/edit) so a small tweak like a color change doesn't re-trigger
-   a galaxy-wide pass; overlapping territories resolve "last applied wins"
-   with no conflict warning; and — the one non-default choice — deleting
-   or re-applying a territory with a smaller shape DOES automatically
-   un-claim whatever it no longer covers, rather than leaving ownership
-   sticky. That last part is why `territories.owned_system_ids` exists:
-   it's the authoritative record of what THIS territory currently owns, so
-   a release only ever touches systems verified to still belong to this
-   territory's faction — never guessed purely from re-testing geometry,
-   which could otherwise wrongly undo a different, more-recently-applied
-   overlapping territory's claim on the same system. */
-
-// Standard ray-casting point-in-polygon test. `vertices` is the same plain
-// [{x,y}, ...] array territories.vertices already stores.
+// Ray-casting point-in-polygon test. `vertices` is [{x,y}, ...] as stored
+// in territories.vertices.
 window.isPointInPolygon = function(x, y, vertices) {
     if (!vertices || vertices.length < 3) return false;
     let inside = false;
@@ -843,12 +612,9 @@ window.isPointInPolygon = function(x, y, vertices) {
     return inside;
 };
 
-// Procedural systems have no DB row — this mutates the matching entries in
-// the long-lived globalProceduralSystemsCache in place so `.ownership`
-// reads correctly everywhere regardless of which persistence path a given
-// system actually uses (override table for procedural, real column for
-// custom). Custom systems need no equivalent step: window.loadGalaxyData
-// already rebuilds globalDbSystemsCache fresh from star_systems.ownership.
+// Procedural systems have no DB row: copy ownership overrides onto
+// globalProceduralSystemsCache in place. Custom systems get ownership from
+// star_systems via loadGalaxyData.
 window.applySystemOwnershipOverrides = function() {
     const overrides = window.globalSystemOwnershipCache || {};
     (globalProceduralSystemsCache || []).forEach(s => {
@@ -859,11 +625,9 @@ window.applySystemOwnershipOverrides = function() {
     });
 };
 
-// Shared by both delete (releases everything a territory owns) and apply
-// (releases only what fell OUT of its current shape) — releases each
-// listed system ONLY if it's still owned by this territory's faction,
-// which is what makes it safe to call even on systems another,
-// more-recently-applied territory may have since re-claimed.
+// Used by delete (release all) and apply (release what fell outside the
+// shape). Releases a system only if it is still owned by this territory's
+// faction. Returns the number released.
 window.releaseTerritoryOwnership = async function(t) {
     const faction = (t.faction_name || '').replace('[HIDDEN] ', '').replace('[HIDDEN]', '').trim();
     const ids = t.owned_system_ids || [];
@@ -873,10 +637,7 @@ window.releaseTerritoryOwnership = async function(t) {
     for (const id of ids) {
         const sys = allSystems.find(s => s.id === id);
         if (!sys || sys.ownership !== faction) continue;
-        // Control follow-on: reset alongside Ownership on release, same
-        // reasoning as Ownership reverting to Unclaimed — a released system
-        // shouldn't keep showing a stale "faction X is in functional control"
-        // tag once that faction no longer owns it either.
+        // Control resets along with ownership.
         if (sys.isCustom) {
             await db.from('star_systems').update({ ownership: 'Unclaimed', control: 'None' }).eq('id', id);
         } else {
@@ -900,12 +661,8 @@ window.applyTerritoryToGalaxy = async function(territoryId) {
     const allSystems = (globalProceduralSystemsCache || []).concat(globalDbSystemsCache || []);
     const newOwnedIds = allSystems.filter(s => window.isPointInPolygon(s.x, s.y, t.vertices)).map(s => s.id);
 
-    // Territory editor follow-on (this session): warn the DM when this Apply
-    // would take systems away from a DIFFERENT faction, rather than applying
-    // silently. Still purely informational — "last applied wins, no hard
-    // block on overlap" is a confirmed decision from an earlier session and
-    // isn't being reversed here, this just surfaces the count before the
-    // one confirm click that already existed.
+    // Informational only: count systems taken from a different faction.
+    // Overlap is never blocked ("last applied wins").
     const contestedCount = newOwnedIds.filter(id => {
         const sys = allSystems.find(s => s.id === id);
         return sys && sys.ownership && sys.ownership !== 'Unclaimed' && sys.ownership !== faction;
@@ -922,9 +679,8 @@ window.applyTerritoryToGalaxy = async function(territoryId) {
     for (const id of newOwnedIds) {
         const sys = allSystems.find(s => s.id === id);
         if (!sys) continue;
-        // DM decision 2026-09-26: EVERY Apply (not just a new claim) now
-        // resets Control to the owning faction -- a hand-set "owned by A,
-        // controlled by B" override is overwritten on re-apply.
+        // DM decision: every Apply resets Control to the owning faction,
+        // overwriting any hand-set "owned by A, controlled by B".
         const controlValue = faction;
         if (sys.isCustom) {
             await db.from('star_systems').update({ ownership: faction, control: controlValue }).eq('id', id);
@@ -956,12 +712,9 @@ window.toggleHyperlanes = function() {
     window.updateToolButtonStyles();
 };
 
-// Every hyperlane node carries a stable id: the underlying system's own id
-// for a snapped node, or a freshly generated one for a deep-space node (see
-// the click handler below). This id is what Fog-of-War discovery tracking
-// keys off (window.discoveredHyperlaneNodes) — it has to survive edits, so
-// re-plotting a route's path must preserve existing nodes' ids rather than
-// regenerating them (see startEditHyperlane / finishActiveHyperlane).
+// Hyperlane node ids: the system's id for a snapped node, a generated one
+// for a deep-space node. FOW discovery keys off these, so edits must
+// preserve existing ids rather than regenerate them.
 function genHyperlaneNodeId() { return (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : ('node-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)); }
 
 window.editingHyperlaneId = null; // set by startEditHyperlane; null = finishActiveHyperlane inserts a new route instead of updating one
@@ -974,15 +727,10 @@ function resetHyperlaneFormFields() {
 
 window.startDrawingHyperlane = function() { window.editingHyperlaneId = null; resetHyperlaneFormFields(); window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('btn-undo-hyperlane-node').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
 
-// Loads an existing route's nodes/name/color/faction back into the drawing
-// state so the DM can add/remove waypoints and save in place (an UPDATE,
-// not a new route) rather than the old delete-and-redraw-from-scratch-only
-// workflow. Existing node ids are preserved untouched; only brand-new nodes
-// added during this edit get a fresh id (see the click handler below) —
-// this also self-heals any legacy node that never had a stable id (older
-// routes drawn before this session): the fallback id assigned for display
-// purposes (see updateHyperlaneDiscovery) gets baked in for real the next
-// time the route is saved.
+// Loads an existing route into the drawing state for in-place editing
+// (saved as an UPDATE). Existing node ids are kept; legacy nodes without
+// one get the same route+index fallback key used by discovery, which is
+// then saved for real.
 window.startEditHyperlane = function(routeId) {
     if (currentUserRole !== 'dm') return;
     const route = globalHyperlanesCache.find(h => h.id === routeId);
@@ -1002,9 +750,7 @@ window.undoLastHyperlaneNode = function() { if (window.activeHyperlaneNodes.leng
 
 window.finishActiveHyperlane = async function() {
     if (window.activeHyperlaneNodes.length < 2) { alert("Requires at least 2 nodes."); return; }
-    // Every node must have a stable id before this saves — brand-new nodes
-    // added via the map click handler already get one at creation time, but
-    // this is a defensive backstop (e.g. very old cached node shapes).
+    // Backstop: ensure every node has a stable id before saving.
     const nodes = window.activeHyperlaneNodes.map(n => n.id ? n : { ...n, id: genHyperlaneNodeId() });
     const name = document.getElementById('hyperlane-name-input').value || 'Trade Route';
     const color = document.getElementById('hyperlane-color-input').value || '#00e1ff';
@@ -1024,19 +770,14 @@ window.triggerTacticalPing = function(x, y) {
     if (window.AudioEngine) window.AudioEngine.playPing();
     const username = allProfiles.find(p => p.id === currentUserId)?.username || 'Commander';
     const color = currentUserRole === 'dm' ? '#ff6b6b' : '#00e5a3';
-    // httpSend() always delivers via REST regardless of WebSocket state — a ping
-    // is infrequent/low-volume, so there's no latency reason to prefer the
-    // WebSocket path, and this sidesteps supabase-js's "send() automatically
-    // falling back to REST" deprecation warning entirely by being explicit
-    // about the transport instead of relying on its automatic fallback.
+    // httpSend() always uses REST: pings are low-volume, and this avoids
+    // supabase-js's deprecation warning for send()'s automatic REST fallback.
     realtimeChannel.httpSend('tactical_ping', { x, y, username, color });
     window.activePings.push({ x, y, color, user: username, startTime: Date.now() });
     if(window.pingModeActive) window.togglePingMode();
 
-    // Also post a Comms notification with a clickable jump link, so anyone
-    // who steps away or misses the live map animation can still navigate
-    // straight to the ping afterward. Coordinates ride in roll_data (an
-    // existing jsonb column reused here) rather than needing a new column.
+    // Also post a Comms message with a jump link. Coordinates ride in the
+    // existing roll_data jsonb column.
     db.from('chat_logs').insert({
         sender_id: currentUserId,
         content: `📍 ${username} dropped a tactical ping.`,
@@ -1061,10 +802,8 @@ window.updateToolButtonStyles = function() {
 };
 
 /* --- MAP CENTERING: LOCK ON GALACTIC CORE ---
-   Sagittarius Prime (the core black hole) is generated at exact world (0,0)
-   — see initGalaxyEngine's proceduralSystems seeding. Camera (0,0) at zoom 1
-   puts world (0,0) dead-center in the viewport (the render transform is
-   translate(cssWidth/2 + camera.x, ...), so camera.x/y = 0 means no offset). */
+   Sagittarius Prime (the core black hole) is at world (0,0); camera (0,0)
+   centers world (0,0) in the viewport. */
 window.recenterOnGalacticCore = function() {
     window.camera.x = 0;
     window.camera.y = 0;
@@ -1072,9 +811,7 @@ window.recenterOnGalacticCore = function() {
 };
 
 /* --- CIC TACTICAL TABLE: RADAR SWEEP TOGGLE ---
-   Pure CSS conic-gradient + animation (see .radar-sweep in style.css) — no
-   canvas redraw or per-frame JS cost at all, so it can't touch render-loop
-   or drag performance. Only the on/off state lives here. */
+   Pure CSS animation (.radar-sweep in style.css); only on/off state lives here. */
 window.radarSweepActive = localStorage.getItem('odyssey_radar_sweep') === 'true';
 function applyRadarSweepState() {
     const overlay = document.getElementById('radar-sweep-overlay');
@@ -1090,13 +827,9 @@ window.toggleRadarSweep = function() {
 };
 
 /* --- CIC TACTICAL TABLE: DYNAMIC GRID ---
-   Drawn in world-space (inside the camera transform) so it pans/scales with
-   the map. Spacing snaps to a "1-2-5" sequence so on-screen cell size stays
-   in a readable band at any zoom instead of becoming a solid wall of lines
-   zoomed in or invisible zoomed out. Bounded to the visible viewport only
-   (cx/cy/hw/hh, already computed once per frame by the caller) so cost stays
-   flat regardless of total map size. Returns the spacing used, for the
-   telemetry readout. */
+   Drawn in world space. Spacing snaps to a 1-2-5 sequence so cells stay
+   readable at any zoom; only the visible viewport (cx/cy/hw/hh) is drawn.
+   Returns the spacing used, for the telemetry readout. */
 function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
     const targetPx = 90;
     const rawSpacing = targetPx / zoom;
@@ -1135,29 +868,11 @@ function drawTacticalGrid(ctx, cx, cy, hw, hh, zoom) {
 }
 
 /* --- CIC OVERLAY: SYSTEM HAZARD ZONE VISUALS ---
-   Renders both explicit DM-placed zones (system_hazards table) and the
-   implicit hazard already carried by star systems themselves (see
-   window.checkShipHazards above) — so a Pulsar-flagged system shows its
-   danger ring on the map even if no DM ever placed an explicit zone there.
-   Bounded to visible viewport per hazard, same pattern as everything else
-   in this render loop.
-
-   FOW gating (reworked this session): every hazard — explicit zone or
-   implicit per-star ring — is hidden at FOW tier 1 based on ITS OWN x/y via
-   isPositionSensorVisible, not a "tied system." Previously an explicit
-   zone's visibility was gated by whichever system it was tied to
-   (hz.system_id) even though that tie has no enforced relationship to the
-   zone's actual placement (js/ui.js's placeHazardZone drops a new zone at
-   wherever the camera happened to be centered, independent of the tied
-   system's coordinates) — a zone tied to a discovered system could sit
-   physically on top of an undiscovered one and still render, or vice
-   versa. Checking the zone's own position sidesteps that mismatch entirely.
-   One behavior change from this: untied zones used to always render
-   regardless of FOW ("hazard NOT centered on a star" flexibility) — now
-   they're gated like everything else, since we no longer need a tie to
-   know where to check. system_id is still stored and still shown in the
-   DM's hazard zone list (js/ui.js) — it's just informational now, not a
-   FOW input. Radius is always clamped to window.SYSTEM_HAZARD_MAX_RADIUS. */
+   Draws explicit zones (system_hazards) and implicit per-star hazards, for
+   on-screen hazards only. Each is FOW-gated on its OWN x/y via
+   isPositionSensorVisible. A zone's system_id is informational only (zones
+   are placed at the camera center, not necessarily near that system).
+   Radius is clamped to window.SYSTEM_HAZARD_MAX_RADIUS. */
 function drawHazardZones(ctx, cx, cy, hw, hh, zoom, time) {
     (window.globalSystemHazardsCache || []).forEach(hz => {
         const r = Math.min(hz.radius || 300, window.SYSTEM_HAZARD_MAX_RADIUS);
@@ -1198,9 +913,8 @@ function drawSingleHazard(ctx, x, y, radius, type, zoom, time) {
         ctx.lineWidth = 1 / zoom;
         for (let r = radius; r > radius * 0.15; r -= radius / 5) {
             let warp = Math.sin(time * 0.003 + r * 0.02) * (6 / zoom);
-            // The oscillating warp offset can exceed a small ring's own radius at
-            // extreme zoom-out, which would otherwise push arc()'s radius negative
-            // and throw — clamp it to a tiny positive floor instead.
+            // At extreme zoom-out the warp can exceed a small ring's radius;
+            // clamp so arc() never gets a negative radius (it throws).
             let ringR = Math.max(0.01, r + warp);
             ctx.beginPath(); ctx.arc(x, y, ringR, 0, Math.PI * 2); ctx.stroke();
         }
@@ -1209,15 +923,11 @@ function drawSingleHazard(ctx, x, y, radius, type, zoom, time) {
 }
 
 /* --- DRADIS RADAR: DYNAMIC ANCHOR TRACKING ---
-   Converts a world-space anchor point (galactic core, or the currently
-   focused system from the render loop above) into screen-space left/top
-   using the exact same transform the canvas itself uses, so the dish is
-   always pixel-locked to what's actually on screen. Runs every frame while
-   active (early-returns instantly when not, so it's zero-cost otherwise) —
-   left/top are NOT CSS-transitioned so tracking stays perfectly in sync
-   during pan/zoom; only the dish's width/height transition (see .radar-sweep
-   in style.css) for a smooth resize at the galaxy<->system-focus boundary. */
-const GALAXY_RADIUS_WORLD = 16000; // kept in sync with initGalaxyEngine's own galaxyRadius (this session's star-spacing fix widened it from 11000)
+   Places the dish over a world-space anchor (galactic core, or the focused
+   system) using the canvas transform. Runs every frame while active.
+   left/top are not CSS-transitioned so tracking stays in sync during
+   pan/zoom; only width/height transition (.radar-sweep in style.css). */
+const GALAXY_RADIUS_WORLD = 16000; // must match initGalaxyEngine's galaxyRadius
 function updateRadarSweepPosition(cssWidth, cssHeight) {
     if (!window.radarSweepActive) return;
     const overlay = document.getElementById('radar-sweep-overlay');
@@ -1229,8 +939,7 @@ function updateRadarSweepPosition(cssWidth, cssHeight) {
         anchorWorldX = focused.x; anchorWorldY = focused.y;
         radiusPx = 260; // fixed dish size at system-scale focus
     } else {
-        // No system in focus (zoomed out, or nothing nearby) — default to
-        // the galactic core, sized to cover the major galactic bounds.
+        // No system in focus: anchor on the galactic core, sized to the galaxy.
         radiusPx = Math.max(160, Math.min(520, GALAXY_RADIUS_WORLD * window.camera.zoom));
     }
 
@@ -1245,10 +954,7 @@ function updateRadarSweepPosition(cssWidth, cssHeight) {
 }
 
 /* --- CIC TACTICAL TABLE: TELEMETRY READOUT ---
-   Corner brackets are static CSS (see .cic-frame), zero runtime cost. This
-   just updates the handful of text values (sector coords, zoom%, grid
-   scale) — throttled well below frame rate since a coordinate readout
-   doesn't need 60 DOM writes/sec. */
+   Updates sector coords, zoom % and grid scale text, throttled to every 150 ms. */
 let lastCicTelemetryUpdate = 0;
 function updateCicTelemetry(cx, cy, zoom, gridSpacing) {
     const now = Date.now();
@@ -1266,11 +972,8 @@ function updateCicTelemetry(cx, cy, zoom, gridSpacing) {
 window._globalSearchResults = [];
 let _searchDropdownEscaped = false;
 function escapeSearchDropdownClipping() {
-    // #search-results-dropdown lives inside #top-bar, which has overflow-y:hidden
-    // (so the horizontally-scrolling toolbar doesn't grow a vertical scrollbar).
-    // That silently clips the dropdown to nothing once it's taller than the bar.
-    // Moving it to <body> and switching to position:fixed escapes that clipping
-    // without touching the CSS rule (which other things in the bar likely rely on).
+    // #top-bar has overflow-y:hidden, which clips the dropdown. Move it to
+    // <body> (and use position:fixed) instead of changing that CSS rule.
     if (_searchDropdownEscaped) return;
     const dropdown = document.getElementById('search-results-dropdown');
     if (!dropdown) return;
@@ -1329,7 +1032,7 @@ document.addEventListener('click', (e) => {
 
 window.clearSelectedTarget = function() {
     window.selectedTarget = null;
-    window._lastMobileNavAutoOpenKey = null; // Mobile Nav Drawer build -- so re-selecting the same target later still auto-opens the drawer
+    window._lastMobileNavAutoOpenKey = null; // so re-selecting the same target still auto-opens the mobile nav drawer
     if (window.jumpPlottingActive) window.cancelJumpPlotting();
     if (window.measuringTapeActive) window.toggleMeasuringTool();
     if (window.hyperlaneDrawActive) window.cancelDrawingHyperlane();
@@ -1358,7 +1061,7 @@ window.startJumpPlottingMode = function() {
     if (!window.selectedTarget || window.selectedTarget.type !== 'ship') return;
     window.jumpPlottingActive = true; window.measuringTapeActive = false; window.pingModeActive = false; window.territoryDrawActive = false; window.hyperlaneDrawActive = false;
     window.activeJumpShip = window.selectedTarget.data; window.jumpTargetPoint = null;
-    window.selectedDriveTypeKey = driveSpeeds[window.activeJumpShip.drive_type] ? window.activeJumpShip.drive_type : 'ftl_class1'; // bug-hunt pass: unknown drive types used to crash here
+    window.selectedDriveTypeKey = driveSpeeds[window.activeJumpShip.drive_type] ? window.activeJumpShip.drive_type : 'ftl_class1'; // unknown drive types fall back to ftl_class1
     window.selectedDriveSpeed = driveSpeeds[window.selectedDriveTypeKey].speed;
     window.updateToolButtonStyles(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
@@ -1368,11 +1071,9 @@ window.updateShipDriveType = async function(shipId, newDriveType) { await db.fro
 window.updateShipIff = async function(shipId, newIff) { let ship = globalShipMarkersCache.find(s => s.id === shipId); if (!ship) return; const iffValue = newIff || null; await db.from('ship_markers').update({ iff: iffValue }).eq('id', shipId); ship.iff = iffValue; if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 
 /* --- MASTER-TO-SUB-TOKEN DOCKING ---
-   A docked craft stops rendering/being independently selectable on the map
-   (see the docked_to skip-checks in the render loop and click handler above)
-   and instead shows up as a "🔗 count" tag on its master's label. Only one
-   level of nesting is supported — you can't dock a ship to something that's
-   itself docked — to keep the map's notion of "independent tokens" simple. */
+   A docked craft is not drawn or selectable on the map (docked_to checks in
+   the render loop and click handler); it shows as a "🔗 count" tag on its
+   master's label. Only one level of nesting is supported. */
 window.dockShipToMaster = async function(subShipId, masterShipId) {
     if (!masterShipId) { alert("Select a master vessel to dock to."); return; }
     if (subShipId === masterShipId) return;
@@ -1392,8 +1093,7 @@ window.undockShip = async function(shipId) {
     const ship = globalShipMarkersCache.find(m => m.id === shipId);
     if (!ship) return;
     if (currentUserRole !== 'dm' && !window.vesselHasOwner(ship, currentUserId)) { alert("You can only undock vessels you control."); return; }
-    // Detach near wherever its master currently is, not the sub-craft's own
-    // stale pre-dock coordinates, so it doesn't reappear somewhere unrelated.
+    // Detach near the master's current position, not the stale pre-dock coords.
     const master = globalShipMarkersCache.find(m => m.id === ship.docked_to);
     let updates = { docked_to: null };
     if (master) { updates.x = master.x + (Math.random() * 60 - 30); updates.y = master.y + (Math.random() * 60 - 30); }
@@ -1418,11 +1118,9 @@ window.executePlottedJump = async function() {
         else { if (window.AudioEngine) window.AudioEngine.playError(); alert(`Insufficient Fuel! Requires ${fuelCost} Energy Cores.`); return; }
     }
 
-    // Relativistic time-inversion (this session's lore fix, see the block
-    // comment above window.JUMP_TIME_INVERSION_MAX_HOURS in js/db.js for the
-    // full design rationale) — REPLACES the old forward "trip takes N
-    // hours" model. Gravity-well distortion carried over unchanged from the
-    // retired jumpToActiveShip mechanic this supersedes.
+    // Relativistic time inversion: a jump rewinds the clock (see
+    // window.JUMP_TIME_INVERSION_MAX_HOURS in js/db.js). A gravity well
+    // multiplies the effective distance by 1 + 0.5 * intensity.
     let driftDist = dist;
     let gravityWellHit = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(ship).find(h => h.type === 'gravity_well') : null;
     let gravityWellNote = '';
@@ -1440,11 +1138,8 @@ window.executePlottedJump = async function() {
     const cappedNote = rawDriftHours > window.JUMP_TIME_INVERSION_MAX_HOURS ? ' [CAPPED]' : '';
 
     if (window.AudioEngine) window.AudioEngine.playWarp();
-    // Shared campaign clock (this session's live-sync fix): the drift is
-    // applied via the same atomic RPC every other clock write path uses
-    // (js/ui.js), not a direct read-modify-write of window.universeTimeHours
-    // — per the DM's own confirmed choice, this genuinely rewinds the ONE
-    // shared clock the whole table sees, not just this player's own view.
+    // DM rule: the jump rewinds the one shared campaign clock for everyone.
+    // Uses the atomic adjust_campaign_clock RPC like every other clock write.
     let oldTime = window.universeTimeHours, newTime = window.universeTimeHours;
     if (driftHours > 0) {
         const { data: clockData, error: clockError } = await db.rpc('adjust_campaign_clock', { delta_hours: -driftHours });
@@ -1482,31 +1177,17 @@ window.saveDMStarProperties = async function(id) {
     const name = document.getElementById('edit-star-name').value; const ownership = document.getElementById('edit-star-ownership').value; const control = document.getElementById('edit-star-control') ? document.getElementById('edit-star-control').value : undefined; const luminosity = document.getElementById('edit-star-luminosity').value; const tier = parseInt(document.getElementById('edit-star-tier').value) || 0;
     const payload = { name, ownership, luminosity, industry_tier: tier };
     if (control !== undefined) payload.control = control;
-    // Full System Editor extension (2026-09-01, DM report: "can we add in
-    // the ability to edit fully a spawned system from the main map"):
-    // Hazard, Multiplicity, and the planet manifest itself are now
-    // editable here too, not just at System Architect creation time.
-    // edit-star-hazard only exists on the full custom-system Overseer
-    // Star Editor box (not the smaller procedural-system Ownership/
-    // Control override box that also calls into this same table), so its
-    // presence is what gates all of this extra work.
+    // Hazard, multiplicity and the planet manifest are saved only when
+    // edit-star-hazard exists, i.e. in the full custom-system editor box.
     const hazardEl = document.getElementById('edit-star-hazard'); const multiEl = document.getElementById('edit-star-multi');
     let removedOverrideIds = [];
     if (hazardEl) {
         payload.hazard = hazardEl.value;
         payload.multiType = multiEl ? multiEl.value : 'Single';
-        // Per-planet id stability (confirmed design, DM 2026-09-01): a
-        // body's id is either already stored in custom_bodies, or (for
-        // rows saved before ids existed on this table) synthesized from
-        // array position the same way getSystemBodiesRaw's own fallback
-        // does -- editingStarBodies was populated with that exact same
-        // fallback when this box opened, so "kept" ids line up correctly
-        // here. Any id present in the star's CURRENT saved custom_bodies
-        // but absent from editingStarBodies was deliberately removed in
-        // this editing session, and its planetary_modifiers scan override
-        // (if any) is discarded below, per the confirmed "discard
-        // silently on removal, keep on retype" behavior -- a row that's
-        // just been retyped keeps its id, so its override survives.
+        // Body ids are stored in custom_bodies, or synthesized from array
+        // position as in getSystemBodiesRaw (editingStarBodies uses the same
+        // fallback). Ids saved on the star but missing from editingStarBodies
+        // were removed, and their scan overrides are deleted below (DM decision).
         const keptIds = new Set(editingStarBodies.map(b => b.id).filter(Boolean));
         const currentStar = (globalDbSystemsCache || []).find(x => x.id === id);
         removedOverrideIds = ((currentStar && currentStar.custom_bodies) || []).map(b => b.id).filter(bid => bid && !keptIds.has(bid));
@@ -1520,30 +1201,20 @@ window.saveDMStarProperties = async function(id) {
     }
     alert("Parameters updated.");
     if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
-    // Bug fix (pre-deploy review): loadGalaxyData rebuilds globalDbSystemsCache
-    // with brand-new objects — window.selectedTarget/hoveredTarget still held
-    // a reference to the OLD (pre-edit) object, so the Overseer Star Editor
-    // box kept showing stale values until the DM deselected and re-clicked
-    // the star. Mirrors the same re-sync already applied for the Planet
-    // Editor (saveDMBodyProperties) and for saveDMSystemOwnershipControl.
+    // loadGalaxyData rebuilds the cache with new objects; copy the fresh
+    // values onto selectedTarget/hoveredTarget so the editor isn't stale.
     const refreshed = (globalDbSystemsCache || []).find(s => s.id === id);
     if (refreshed) {
         if (window.selectedTarget && window.selectedTarget.data && window.selectedTarget.data.id === id) Object.assign(window.selectedTarget.data, refreshed);
         if (window.hoveredTarget && window.hoveredTarget.data && window.hoveredTarget.data.id === id) Object.assign(window.hoveredTarget.data, refreshed);
     }
-    // Force a fresh re-derive of the Planet Manifest editor state from the
-    // just-saved (now-canonical) custom_bodies on next render, rather than
-    // continuing to trust the in-memory editingStarBodies array.
+    // Re-derive the Planet Manifest editor state from the saved custom_bodies.
     editingStarBodyId = null;
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 
-// Control follow-on (this session): procedural systems have no real
-// star_systems row to write Ownership/Control onto directly (same split
-// planetary_modifiers and system_ownership_overrides already solved) — this
-// is the direct single-system editor for that majority of the galaxy,
-// mirroring the custom-system SAVE SYSTEM button above but scoped to only
-// the two fields that exist for a procedural system at all.
+// Ownership/Control editor for a procedural system, which has no
+// star_systems row: writes to system_ownership_overrides instead.
 window.saveDMSystemOwnershipControl = async function(id) {
     if (currentUserRole !== 'dm') return;
     const ownershipEl = document.getElementById('edit-star-ownership'); const controlEl = document.getElementById('edit-star-control');
@@ -1556,14 +1227,9 @@ window.saveDMSystemOwnershipControl = async function(id) {
     if (typeof loadSystemOwnershipOverrides === 'function') await loadSystemOwnershipOverrides();
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
-// Was purely cosmetic — mutated the in-memory selectedTarget.data object and
-// showed an "updated locally" alert, but never wrote to the DB, so edits
-// vanished on refresh and never reached other players. Now persists to
-// planetary_modifiers (see js/db.js loadPlanetaryModifiers for why that
-// table/keying rather than a direct star_systems write — most bodies, being
-// procedural, have no real star_systems row to write onto). Select-then-
-// update/insert on body_id rather than .upsert(): body_id isn't confirmed to
-// have a unique constraint, so this avoids depending on one existing.
+// Saves a body's scan data to planetary_modifiers (most bodies are
+// procedural and have no star_systems row). Uses select-then-update/insert
+// rather than .upsert() because body_id may not have a unique constraint.
 window.saveDMBodyProperties = async function(id) {
     if (currentUserRole !== 'dm' || !window.selectedTarget || window.selectedTarget.type !== 'body') return;
     const payload = {
@@ -1582,21 +1248,15 @@ window.saveDMBodyProperties = async function(id) {
 
     window.globalPlanetaryModifiersCache = window.globalPlanetaryModifiersCache || {};
     window.globalPlanetaryModifiersCache[id] = { ...window.globalPlanetaryModifiersCache[id], body_id: id, ...payload };
-    // selectedTarget.data is the raw (pre-override) body object; refreshing
-    // it from getSystemBodies would require re-locating it in its parent
-    // system's list, so just reflect the saved values directly here too —
-    // renderHUDTelemetry reads selectedTarget.data for the 'body' branch.
+    // Reflect saved values onto selectedTarget.data, which the HUD reads.
     Object.assign(window.selectedTarget.data, { name: payload.custom_name, type: payload.custom_type, gravity: payload.custom_gravity, atmosphere: payload.custom_atmosphere, resources: payload.custom_resources });
 
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
     alert("Scan data saved — synced to all players.");
 };
-// New this session, alongside the minimum-star-spacing fix above: there was
-// previously no way for a DM to remove a planetary_modifiers override once
-// saved (only insert/update existed) — a gap regardless of the spacing fix,
-// but one that matters more now since that fix can detach an override from
-// the body it was meant for. Reverts the body to its raw generated/custom
-// values, not to any particular prior state (there's no history kept).
+// Removes a planetary_modifiers override; the body reverts to its raw
+// generated/custom values (no history is kept). Also useful for cleaning up
+// overrides orphaned when procedural star positions change.
 window.deletePlanetOverride = async function(id) {
     if (currentUserRole !== 'dm') return;
     if (!(await window.showConfirmModal("Clear this scan-data override? The body will revert to its default generated/custom values."))) return;
@@ -1616,16 +1276,11 @@ window.deletePlanetOverride = async function(id) {
 window.deleteStarSystem = async function(id) { if (currentUserRole !== 'dm') return; if(!(await window.showConfirmModal("Destroy star system?"))) return; await db.from('star_systems').delete().eq('id', id); window.clearSelectedTarget(); if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData(); };
 window.deleteShipToken = async function(id) {
     const ship = globalShipMarkersCache.find(m => m.id === id);
-    // Was DM-only with no ownership carve-out, unlike every other decommission/
-    // delete action in this app (weapons, colonies, fleet groups, templates) —
-    // a player couldn't remove even their own deployed ship.
+    // DM or the ship's owner may decommission.
     if (ship && currentUserRole !== 'dm' && !window.vesselHasOwner(ship, currentUserId)) return;
     if (!(await window.showConfirmModal("Decommission token?"))) return;
-    // If this is a strike craft token, clean up its squadron record + initiative
-    // row too — otherwise decommissioning it directly (instead of using the
-    // proper "RECORD CASUALTY" button in the carrier's Hangar Bay panel) leaves
-    // an orphaned combat_tracker row and a dangling entry in the carrier's
-    // ship_deployed list that still thinks the squadron is out there.
+    // Strike craft: also remove the squadron from the carrier's ship_deployed
+    // list and its combat_tracker row, so nothing is left orphaned.
     if (ship && ship.is_strike_craft && ship.parent_id && ship.squadron_id) {
         const parent = globalShipMarkersCache.find(m => m.id === ship.parent_id);
         if (parent) {
@@ -1655,13 +1310,8 @@ window.initGalaxyEngine = function() {
     window.updateToolButtonStyles();
     
     const proceduralSystems = []; const rng = mulberry32(1048596);
-    // galaxyRadius widened 11000->16000 this session (real 4 LY spacing
-    // floor, see below, wasn't reachable at the old radius without losing
-    // ~42% of the spiral-arm star count — the DM's own confirmed choice was
-    // to widen the map instead of losing that much population). Every
-    // absolute in-galaxy distance is now proportionally larger as a result —
-    // sublight/FTL travel times across the whole map, not just the pairs
-    // that used to be too close, are all longer than before this session.
+    // galaxyRadius is sized so the 4 LY spacing floor below fits most spiral
+    // stars (DM decision). Must match GALAXY_RADIUS_WORLD.
     const coreRadius = 1400; const galaxyRadius = 16000;
     
     proceduralSystems.push({ id: 'proc-core-blackhole', name: 'Sagittarius Prime', x: 0, y: 0, size: 10, color: '#000000', type: 'Black Hole', luminosity: 'Supermassive Singularity', hazard: 'Gravity Well', multiType: 'Single', ownership: 'Uninhabitable Core', isCustom: false });
@@ -1671,35 +1321,16 @@ window.initGalaxyEngine = function() {
         if (heat > 0.85) { color = '#000000'; luminosity = 'Singularity'; hazard = 'Gravity Well'; } else if (heat > 0.5) { color = '#ffe9c4'; luminosity = 'Class G (Yellow)'; hazard = 'None'; }
         proceduralSystems.push({ id: `proc-core-${i}`, name: `Core Sector-${2000 + i}`, x, y, size: rng() * 2.5 + 3.5, color, type: luminosity === 'Singularity' ? 'Black Hole' : 'Star', luminosity, hazard, multiType: rng() > 0.7 ? 'Binary' : 'Single', ownership: 'Galactic Core', isCustom: false });
     }
-    // Minimum spiral-arm star spacing (this session): with no distance check
-    // at all, pure random scatter of 2,400 stars produced occasional pairs
-    // landing within a handful of world units of each other — reading as
-    // "half a light year apart" on the measuring tool (100 units = 1 LY),
-    // vs. the real nearest-star distance of ~4.2 LY (Proxima Centauri).
-    // Deliberately NOT applied to the galactic core loop above (240 stars,
-    // radius <=1400) — real galactic cores are genuinely far denser than the
-    // solar neighborhood, so that loop's tight packing stays as-is on purpose.
-    // A rejected candidate rerolls its position (not its type/color rolls,
-    // which only happen once a position is accepted) up to
-    // MAX_PLACEMENT_ATTEMPTS times; if it still can't find a clear spot, that
-    // star is skipped rather than forced in — see MIN_STAR_SPACING_FALLBACK
-    // below. This does NOT touch star_systems, is fully deterministic (same
-    // seed every load), and only affects freshly-generated positions — but
-    // because rerolls consume extra draws from the single shared `rng()`
-    // stream, every star from this point on lands somewhere different than
-    // it did before this fix, and a small number of `proc-spiral-N` ids will
-    // no longer exist at all. Confirmed acceptable with the DM before
-    // building this: any territory claim / hazard zone / planet-editor
-    // override that was tied to a procedural star may now be orphaned — see
-    // the new Planet Editor override delete button (added alongside this
-    // fix) and the pre-existing Hazard Zone / Territory delete buttons for
-    // cleaning those up.
+    // Minimum spiral-arm star spacing (100 units = 1 LY). Not applied to the
+    // denser galactic core above. A rejected candidate rerolls its position
+    // (type/color are rolled only once placed) up to MAX_PLACEMENT_ATTEMPTS
+    // times, then is skipped. Deterministic (fixed seed), but every extra
+    // draw shifts all later stars in the shared rng() stream, so changing
+    // these constants moves stars and can drop proc-spiral-N ids, orphaning
+    // territory claims, hazard zones and planet overrides tied to them.
     const MIN_STAR_SPACING = 400; // ~4 LY at 100 units = 1 LY
     const MIN_STAR_SPACING_SQ = MIN_STAR_SPACING * MIN_STAR_SPACING;
-    // 20 attempts (not the initially-tried 8) + the widened galaxyRadius
-    // above together keep spiral-star loss to ~3% (~2,328/2,400 placed) —
-    // tested directly rather than assumed; 8 attempts at the old radius lost
-    // 42%, which is why both numbers changed together.
+    // With this galaxyRadius, 20 attempts places ~97% of the 2,400 spiral stars.
     const MAX_PLACEMENT_ATTEMPTS = 20;
     const MIN_STAR_SPACING_FALLBACK = 'skip'; // drop the star rather than force an overlap
     const spiralPositions = [];
@@ -1711,13 +1342,13 @@ window.initGalaxyEngine = function() {
         for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS; attempt++) {
             let r = Math.pow(rng(), 0.6) * (galaxyRadius - coreRadius) + coreRadius;
 
-            // 1.6 winding factor removes the "pointiness", making arms open up gracefully
+            // 1.6 winding factor lets the arms open up gracefully
             let spiralTheta = (Math.log(r / coreRadius) * 1.6) + ((arm * 2 * Math.PI) / 4);
-            // Doubled scatter angle to widen the arms
+            // Angle scatter widens the arms
             let finalTheta = spiralTheta + (rng() - 0.5) * (0.8 + (r / galaxyRadius) * 0.8);
-            // Doubled radius scatter to fill the gaps between arms
+            // Radius scatter fills the gaps between arms
             let finalR = r + (rng() - 0.5) * (400 + (r / galaxyRadius) * 800);
-            // Increased outlier chance from 12% to 18% to seed the dark voids with rogue stars
+            // 18% outliers seed the dark voids with rogue stars
             if (rng() > 0.82) { finalTheta = rng() * Math.PI * 2; finalR = rng() * galaxyRadius; }
 
             let candX = Math.cos(finalTheta) * finalR; let candY = Math.sin(finalTheta) * finalR;
@@ -1743,24 +1374,15 @@ window.initGalaxyEngine = function() {
         proceduralSystems.push({ id: `proc-spiral-${i}`, name: `Arm ${['Alpha','Beta','Gamma','Delta'][arm]}-${1000 + i}`, x, y, size, color, type, luminosity, hazard, multiType: rng() > 0.8 ? 'Binary' : 'Single', ownership: 'Unclaimed', isCustom: false });
     }
     globalProceduralSystemsCache = proceduralSystems;
-    // Defensive re-apply in case the ownership override cache (js/db.js)
-    // already finished loading before the procedural galaxy existed to
-    // merge onto — order shouldn't matter either way.
+    // Re-apply in case the ownership override cache (js/db.js) loaded
+    // before the procedural galaxy existed.
     if (typeof window.applySystemOwnershipOverrides === 'function') window.applySystemOwnershipOverrides();
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
 
     function screenToWorld(sx, sy) { const rect = canvas.getBoundingClientRect(); return { x: (sx - rect.left - container.clientWidth / 2 - window.camera.x) / window.camera.zoom, y: (sy - rect.top - container.clientHeight / 2 - window.camera.y) / window.camera.zoom }; }
 
-    // Mobile compatibility pass (this session): the map's pan/zoom/select
-    // interactions were mouse-only -- no touch support existed at all, so a
-    // phone/tablet user with no mouse could tap to select but never pan or
-    // zoom the galaxy view. The mousedown/mousemove/mouseup/wheel bodies
-    // below are unchanged; they're just extracted into named functions
-    // (handlePointerDown/Move/Up, applyZoomAtPoint) that take plain
-    // coordinates instead of a MouseEvent, so touchstart/touchmove/touchend
-    // can drive the exact same logic using a finger's clientX/clientY.
-    // Two-finger pinch is new (there's no mouse equivalent) and only
-    // affects zoom/pan -- it never touches ship/star dragging.
+    // Pointer handlers take plain coordinates so mouse and touch share the
+    // same logic. Two-finger pinch only zooms/pans; it never drags ships/stars.
     function handlePointerDown(clientX, clientY, targetEl, shiftKey) {
         if (targetEl && targetEl.closest && targetEl.closest('.panel')) return;
         const worldPos = screenToWorld(clientX, clientY);
@@ -1772,10 +1394,8 @@ window.initGalaxyEngine = function() {
         }
 
         if (window.hyperlaneDrawActive) {
-            // Snapped nodes reuse the real system's id (stable, and doubles
-            // as its Fog-of-War discovery key — see updateHyperlaneDiscovery
-            // below). Deep-space nodes get a freshly generated one so they
-            // have a stable identity too, independent of x/y.
+            // Snapped nodes reuse the system's id; deep-space nodes get a
+            // generated one. Either serves as the FOW discovery key.
             let snapNode = { x: worldPos.x, y: worldPos.y, name: "Deep Space Node", id: genHyperlaneNodeId() };
             let allSystems = proceduralSystems.concat(globalDbSystemsCache);
             for (let s of allSystems) { if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < Math.max(15, 25 / window.camera.zoom)) { snapNode = { x: s.x, y: s.y, id: s.id, name: s.name }; break; } }
@@ -1786,14 +1406,8 @@ window.initGalaxyEngine = function() {
 
         if (window.jumpPlottingActive && window.activeJumpShip) {
             let snapTarget = null; let allSystems = proceduralSystems.concat(globalDbSystemsCache);
-            // Bug fix (bug hunt, this session): every other click hit-test in
-            // this handler scales its tolerance by window.camera.zoom so the
-            // on-screen (pixel) target size stays constant (see starHitRadius/
-            // tokenHitRadius/planetHitRadius below, and the hyperlane/territory
-            // snap radii above) -- this one used a bare 40 world-unit radius,
-            // which is sub-pixel when zoomed far out (jump snapping silently
-            // never triggers) and hundreds of screen pixels when zoomed far in
-            // (snaps to a star nowhere near the actual click).
+            // Scaled by zoom like the other hit-tests, so the on-screen snap
+            // size stays roughly constant.
             const jumpSnapRadius = Math.max(15, 40 / window.camera.zoom);
             for (let s of allSystems) { if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < jumpSnapRadius) { snapTarget = { x: s.x, y: s.y, name: s.name, hazard: s.hazard }; break; } }
             if (snapTarget) { window.jumpTargetPoint = { x: snapTarget.x, y: snapTarget.y, name: snapTarget.name, hazard: snapTarget.hazard }; }
@@ -1814,15 +1428,9 @@ window.initGalaxyEngine = function() {
 
         if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD) {
             for (let s of allSystems) {
-                // Bug fix (bug hunt, this session): the render loop only ever
-                // draws a system's planets/moons at FOW tier 3 (DRADIS-scanned)
-                // AND when it's the camera-focused system (window._radarFocusedSystem,
-                // set in the render loop below) -- this hit-test never checked
-                // either condition, so a player could click near a completely
-                // unscanned system (rendered as just a dim tier-1 dot, but its
-                // real x/y is always known client-side) and still select and
-                // see full body data (resources/atmosphere/gravity) that was
-                // never actually revealed. Gate the hit-test the same way.
+                // Same gate as the render loop: bodies are only clickable at
+                // FOW tier 3 and in the focused system, so unscanned body data
+                // can't be selected.
                 if (window.getFowTier(s) !== 3 || (window._radarFocusedSystem && s.id !== window._radarFocusedSystem.id)) continue;
                 if (Math.hypot(s.x - worldPos.x, s.y - worldPos.y) < 250 && systemCanHaveBodies(s)) {
                     for (let b of window.getSystemBodies(s)) {
@@ -1837,7 +1445,7 @@ window.initGalaxyEngine = function() {
 
         for (let m of globalShipMarkersCache) {
             if (m.docked_to) continue; // docked craft aren't independently selectable — they're part of their master
-            if (m.hide_from_galaxy_map) continue; // not drawn here, so not clickable/draggable here either (was an invisible grab target)
+            if (m.hide_from_galaxy_map) continue; // not drawn here, so not clickable/draggable here
             if (Math.hypot(m.x - worldPos.x, m.y - worldPos.y) < tokenHitRadius && (currentUserRole === 'dm' || window.vesselHasOwner(m, currentUserId))) {
                 window.draggedMarker = m; window._dragOrigin = { x: m.x, y: m.y }; window.selectedTarget = { type: 'ship', data: m }; window.addRecentTarget(window.selectedTarget);
                 if(typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); return;
@@ -1867,11 +1475,8 @@ window.initGalaxyEngine = function() {
         }
     }
 
-    // Bug-hunt pass (2026-09-24): a plain click on your own ship (no drag)
-    // used to write the ship's CACHED x/y back to the database. If another
-    // player had just moved/jumped that ship and your cache hadn't caught up
-    // yet, the click silently teleported it back. Now only an actual drag
-    // (position changed since pointer-down) writes anything.
+    // Only write a position if it actually changed since pointer-down; a
+    // plain click must not write stale cached x/y over another player's move.
     async function handlePointerUp() {
         const origin = window._dragOrigin; window._dragOrigin = null;
         const movedFromOrigin = (obj) => !origin || obj.x !== origin.x || obj.y !== origin.y;
@@ -1910,12 +1515,9 @@ window.initGalaxyEngine = function() {
         };
     }
 
-    // Mobile pan fix (2026-09-24): browsers fire synthetic "compatibility"
-    // mouse events ~300ms after a touch ends. The touch handlers below now
-    // run the select/tap logic themselves on touchend, so a trailing
-    // synthetic mousedown would run handlePointerDown a SECOND time
-    // (double-placing a measuring-tape point, double ping, etc.). Ignore any
-    // mousedown that lands shortly after a real touch.
+    // Browsers fire synthetic mouse events ~300ms after a touch. Touch
+    // handlers already run the tap logic, so ignore mousedown shortly after
+    // a touch to avoid running it twice.
     window._lastTouchTime = 0;
     container.addEventListener('mousedown', (e) => { if (Date.now() - window._lastTouchTime < 800) return; handlePointerDown(e.clientX, e.clientY, e.target, e.shiftKey); });
     window.addEventListener('mousemove', (e) => { handlePointerMove(e.clientX, e.clientY); });
@@ -1929,26 +1531,16 @@ window.initGalaxyEngine = function() {
         applyZoomAtPoint(mouseX, mouseY, zoomFactor);
     }, { passive: false });
 
-    // --- Touch input -- REVISED (2026-09-24, mobile tester report: "the
-    // moment you touch a star you are basically forced to bunny hop around
-    // by clicking the next furthest star"). Root cause: touchstart called
-    // handlePointerDown immediately, and handlePointerDown RETURNS as soon
-    // as it hits a star/ship/body (select) BEFORE it ever sets
-    // camera.isDragging -- so any finger landing within a star's hit radius
-    // (almost everywhere, in a dense galaxy, with a finger-sized touch)
-    // could never pan. Touching your own ship was worse: it grabbed the
-    // ship and dragged it instead of the camera.
-    // New model (touch only; mouse is untouched):
-    //   * one finger down  -> always starts a camera pan
-    //   * lifted without moving > TOUCH_TAP_SLOP px -> a TAP: runs the exact
-    //     same handlePointerDown select/tool logic a mouse click would, at
-    //     the original touch point (so measure/ping/territory/hyperlane/jump
-    //     modes all still work, now as taps)
+    // --- Touch input (mouse is handled separately) ---
+    // Calling handlePointerDown on touchstart would select whatever star is
+    // under the finger and never pan, so:
+    //   * one finger down -> always starts a camera pan
+    //   * lifted without moving > TOUCH_TAP_SLOP px -> TAP: runs the same
+    //     handlePointerDown select/tool logic as a mouse click
     //   * held still for TOUCH_LONG_PRESS_MS -> LONG PRESS: runs
-    //     handlePointerDown then too, which is how you pick up a draggable
-    //     token (your own ship / a DM custom star) and then drag it; a
-    //     short vibration confirms the pickup where supported
-    //   * two fingers -> pinch-zoom (unchanged), and cancels any tap
+    //     handlePointerDown, which picks up a draggable token (own ship / DM
+    //     custom star); a short vibration confirms where supported
+    //   * two fingers -> pinch-zoom, and cancels any tap
     const TOUCH_TAP_SLOP = 10; const TOUCH_LONG_PRESS_MS = 450;
     let touchGesture = null; // { x, y, target, moved, longPressed, timer }
     function clearTouchGesture() { if (touchGesture && touchGesture.timer) clearTimeout(touchGesture.timer); touchGesture = null; }
@@ -1971,9 +1563,8 @@ window.initGalaxyEngine = function() {
             }, TOUCH_LONG_PRESS_MS);
             touchGesture = g;
         } else if (e.touches.length >= 2) {
-            // A second finger landing mid-drag cancels any single-finger
-            // pan/tap/drag in favor of starting a pinch, so a ship/star
-            // isn't left "stuck" to the finger after the gesture changes.
+            // A second finger cancels any single-finger pan/tap/drag and
+            // starts a pinch, so a ship/star isn't left stuck to the finger.
             if (touchGesture) { touchGesture.moved = true; if (touchGesture.timer) clearTimeout(touchGesture.timer); }
             window.camera.isDragging = false; window.draggedMarker = null; window.draggedStar = null;
             window._pinchStartDist = touchDist(e.touches);
@@ -2017,11 +1608,8 @@ window.initGalaxyEngine = function() {
             const g = touchGesture; clearTouchGesture();
             window._pinchStartDist = null;
             if (g && !g.moved && !g.longPressed) {
-                // TAP: same select/tool logic as a mouse click, at the
-                // original touch point. handlePointerDown may arm a drag
-                // (own ship / DM custom star) or a camera pan on empty
-                // space -- a tap never moved, so disarm both without the
-                // pointless DB position write handlePointerUp would do.
+                // TAP: run the click logic at the original touch point, then
+                // disarm any drag/pan it armed (no DB position write).
                 window.camera.isDragging = false;
                 handlePointerDown(g.x, g.y, g.target, false);
                 window.draggedMarker = null; window.draggedStar = null; window.camera.isDragging = false; window._dragOrigin = null;
@@ -2040,25 +1628,11 @@ window.initGalaxyEngine = function() {
     window.renderHUDTelemetry = function() {
         const content = document.getElementById('hud-content'); if (!content) return;
 
-        // Mobile Nav Drawer build (this session) -- REVISED (2026-08-29,
-        // real non-DM tester report on mobile: "clicking on any star
-        // attempts to open the menu, meaning I have to play minesweeper
-        // just to navigate"). The original build force-opened the whole
-        // drawer on every new selection, on the DM-confirmed theory that it
-        // should match desktop's always-visible Telemetry panel -- but on a
-        // touchscreen that meant every exploratory tap on the map yanked a
-        // half-screen drawer over it, which had to be closed again before
-        // the next tap. Real usage said that assumption was wrong, so this
-        // now flags a small non-blocking dot on the hamburger button
-        // instead of force-opening anything -- the map stays tappable, and
-        // whoever wants the details taps the menu themselves.
-        // window.flagMobileNavUpdate (js/ui.js) is a no-op on desktop, same
-        // as toggleMobileNav was. Still keyed on a cheap identity string
-        // rather than reference equality: selectedTarget is a fresh object
-        // literal on every click (see this file's click handlers above), so
-        // `!==` would fire on every re-render too (an IFF change, a
-        // drive-type change, jumpToBookmark, etc.), not just a genuinely
-        // NEW selection.
+        // Mobile: on a new selection, flag a dot on the nav menu button
+        // rather than force-opening the drawer over the map.
+        // flagMobileNavUpdate (js/ui.js) is a no-op on desktop. Keyed on a
+        // type:id string, since selectedTarget is a fresh object on every
+        // click and reference equality would fire on every re-render.
         const _mobileNavSelKey = window.selectedTarget ? `${window.selectedTarget.type}:${(window.selectedTarget.data && (window.selectedTarget.data.id || window.selectedTarget.data.name)) || ''}` : null;
         if (_mobileNavSelKey && _mobileNavSelKey !== window._lastMobileNavAutoOpenKey) {
             window._lastMobileNavAutoOpenKey = _mobileNavSelKey;
@@ -2090,12 +1664,8 @@ window.initGalaxyEngine = function() {
         if (dynamicTarget.type === 'star') {
             const s = dynamicTarget.data; let fowTier = window.getFowTier(s);
             let dmEditorBox = '';
-            // Personal system renaming (live-session feature request,
-            // 2026-09-13): visible to EVERY user (not DM-gated, unlike
-            // dmEditorBox above) -- only affects this viewer's own client,
-            // see window.savePersonalLabel/getDisplaySystemName above. Not
-            // offered at fowTier 1 (Unknown Contact) -- nothing to rename
-            // yet if you don't even know what it is.
+            // Personal label editor: shown to every user (only affects this
+            // viewer). Not offered at fowTier 1 (Unknown Contact).
             const myPersonalSystemLabel = (window.globalPersonalLabelsCache || {})[`system:${s.id}`] || '';
             const personalLabelBox = `<div style="background:#040605; border:1px solid #3c4e36; padding:6px; margin-top:8px; border-radius:2px;">
                 <span style="font-size:9px; color:#6b826a;">📝 Personal Label (only you see this):</span>
@@ -2104,35 +1674,18 @@ window.initGalaxyEngine = function() {
                     <button class="btn-reveal" onclick="window.savePersonalLabel('system', '${s.id}', document.getElementById('personal-label-system-${s.id}').value)" style="width:auto; padding:4px 8px; font-size:9px; margin:0;" title="Leave blank and click SET to clear your personal label">SET</button>
                 </div>
             </div>`;
-            // Control follow-on (this session): Ownership/Control fields now
-            // show for the DM on EVERY system, not just DM-authored custom
-            // ones. Custom systems keep the full "OVERSEER STAR EDITOR" box
-            // (name/class/tier/destroy, unchanged) with Ownership+Control
-            // added to it. Procedural systems previously had NO per-system
-            // editor at all — Ownership could only ever be set by drawing
-            // and Applying a whole Territory over them. That gap meant
-            // Control (confirmed to need to "remain editable after the
-            // fact") had no path to actually be edited on a procedural
-            // system once Territory Apply's one-time default stamp had been
-            // set, short of redrawing an entire territory border. This adds
-            // a smaller "SYSTEM CONTROL OVERRIDE" box for that case —
-            // Ownership+Control only, writing straight to
-            // system_ownership_overrides (same table/pattern Territory
-            // Apply already uses for procedural systems).
+            // DM sees Ownership/Control on every system. Custom systems get the
+            // full OVERSEER STAR EDITOR box; procedural systems get a smaller
+            // SYSTEM CONTROL OVERRIDE box (Ownership+Control only, written to
+            // system_ownership_overrides). DM rule: Control stays editable
+            // after a Territory Apply.
             if (currentUserRole === 'dm') {
                 const ownershipControlFields = `
                     <label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Ownership:</label><input type="text" id="edit-star-ownership" value="${s.ownership || 'Unclaimed'}" style="font-size:10px; margin:2px 0;">
                     <label style="font-size:9px; color:#6b826a; display:block;">Control:</label><input type="text" id="edit-star-control" value="${s.control || 'None'}" style="font-size:10px; margin:2px 0;">`;
                 if (s.isCustom) {
-                    // Full System Editor extension (2026-09-01, DM report:
-                    // "can we add in the ability to edit fully a spawned
-                    // system from the main map") -- Hazard, Multiplicity,
-                    // and the Planet Manifest (add/remove/edit existing
-                    // custom_bodies) joined the pre-existing Name/Class/
-                    // Tier/Ownership/Control fields below. editingStarBodies
-                    // only re-derives from s.custom_bodies when the
-                    // SELECTED star actually changes, so switching tabs or
-                    // an incidental re-render mid-edit doesn't wipe typing.
+                    // editingStarBodies re-derives from s.custom_bodies only
+                    // when the selected star changes, so re-renders keep typing.
                     if (editingStarBodyId !== s.id) {
                         editingStarBodyId = s.id;
                         editingStarBodies = (s.custom_bodies || []).map((b, idx) => ({ ...b, id: b.id || `${s.id}-custom-${idx}` }));
@@ -2164,14 +1717,9 @@ window.initGalaxyEngine = function() {
                 content.innerHTML = `<div style="font-size: 11px;">${lockStatusHtml}<br><strong style="color: #00e5a3; font-size: 13px;">${s.type === 'Black Hole' ? '🕳️' : '⭐'} ${window.getDisplaySystemName(s)}</strong><br><span style="color: #6b826a;">Class:</span> ${s.luminosity || 'Standard'} (${s.multiType || 'Single'})<br>${hazardBadge}<span style="color: #6b826a;">Ownership:</span> ${s.ownership || 'Unclaimed'}<br><span style="color: #6b826a;">Control:</span> ${s.control || 'None'}<br><span style="color: #00e5a3; font-size:9px; margin-top:6px; display:block;">✓ DRADIS TELEMETRY COMPLETE</span><div style="display:flex; gap:6px;">${isLocked ? lockBtn : ''} ${bookmarkBtn}</div>${dmEditorBox}${personalLabelBox}</div>`;
             }
         } else if (dynamicTarget.type === 'ship') {
-            // IFF unification (this session): now reads/writes the real ship_markers.iff
-            // column instead of the old cargo_inventory.iff sub-field. Unlike the old
-            // field this one can be genuinely null (never tagged) -- previously that
-            // state was silently mislabeled "Allied" to every viewer including players;
-            // now it shows no tag at all here (matching window.renderIffBadge's own
-            // convention elsewhere) and the DM-only dropdown gets an explicit "Unset"
-            // option so a ship can be deliberately un-tagged again, not just cycled
-            // between the three real designations.
+            // IFF comes from ship_markers.iff and may be null (never tagged):
+            // null shows no tag (like window.renderIffBadge), and the DM
+            // dropdown has an "Unset" option to clear it.
             const m = dynamicTarget.data; let iff = m.iff || null; let iffColor = iff ? ((window.IFF_COLORS && window.IFF_COLORS[iff]) || '#00e1ff') : '#6b826a'; let iffTag = iff ? ` [${iff.toUpperCase()}]` : '';
 
             let driveOptionsHtml = ''; Object.keys(driveSpeeds).forEach(k => { driveOptionsHtml += `<option value="${k}" ${m.drive_type === k ? 'selected' : ''}>${driveSpeeds[k].label}</option>`; });
@@ -2184,10 +1732,7 @@ window.initGalaxyEngine = function() {
                 if (window.jumpTargetPoint) {
                     let dist = Math.hypot(window.jumpTargetPoint.x - m.x, window.jumpTargetPoint.y - m.y);
                     let fuelCost = window.selectedDriveSpeed < 50 ? 0 : Math.max(1, Math.round(dist / 100));
-                    // Preview mirrors window.executePlottedJump's real relativistic
-                    // time-inversion math exactly (this session's lore fix) so the
-                    // player sees the actual chronometer effect before committing,
-                    // not the old forward "trip duration" estimate.
+                    // Must mirror executePlottedJump's time-inversion math exactly.
                     let driftDist = dist;
                     let gwHit = (typeof window.checkShipHazards === 'function') ? window.checkShipHazards(m).find(h => h.type === 'gravity_well') : null;
                     if (gwHit) driftDist = driftDist * (1 + (0.5 * (gwHit.intensity || 1)));
@@ -2200,10 +1745,9 @@ window.initGalaxyEngine = function() {
                 jumpPlotterBox = `<div style="background:#040605; border:1px solid #00e1ff; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#00e1ff; font-weight:bold;">🌌 JUMP VECTOR PLOTTER</span><div style="font-size:10px; color:#d4c5a9; margin:4px 0;">${targetInfo}</div><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Drive System Override:</label><select onchange="window.setDriveSpeedKey(this.value)" style="font-size:9px; margin:2px 0; background:#0a1410; color:#00e1ff;">${driveOptionsHtml}</select>${calcTimeStr}<div style="display:flex; gap:6px; margin-top:6px;"><button class="btn-reveal" onclick="window.executePlottedJump()" ${!window.jumpTargetPoint ? 'disabled style="opacity:0.5;"' : ''} style="flex:2; font-size:9px; padding:6px;">🚀 EXECUTE JUMP</button><button class="btn-remove" onclick="window.cancelJumpPlotting()" style="flex:1; font-size:9px; padding:6px;">CANCEL</button></div></div>`;
             } else if (isLocked) { jumpPlotterBox = `<button class="btn-deploy" onclick="window.startJumpPlottingMode()" style="font-size:9px; padding:6px; margin-top:6px;">🌌 PLOT JUMP VECTOR</button>`; }
 
-            // DOCKING BAY: undock button if this ship IS a docked sub-craft (reachable
-            // here via search/bookmarks/recents even though it's no longer clickable
-            // on the map directly), or a docking-bay manager if it's an independent
-            // ship — list of what's currently docked to it, plus a dock-new control.
+            // DOCKING BAY: an undock button for a docked sub-craft (reachable via
+            // search/bookmarks/recents), or for an independent ship, a list of
+            // docked craft plus a dock control.
             let dockingBox = '';
             if (m.docked_to) {
                 const master = globalShipMarkersCache.find(s => s.id === m.docked_to);
@@ -2244,14 +1788,9 @@ window.initGalaxyEngine = function() {
         } else if (dynamicTarget.type === 'body') {
             const p = dynamicTarget.data;
             let dmBodyEditorBox = currentUserRole === 'dm' ? `<div style="background:#040605; border:1px solid #ff3366; padding:8px; margin-top:8px; border-radius:2px;"><span style="font-size:9px; color:#ff6b6b; font-weight:bold;">🛠️ OVERSEER PLANET EDITOR</span><label style="font-size:9px; color:#6b826a; display:block; margin-top:4px;">Designation:</label><input type="text" id="edit-body-name" value="${p.name}" style="font-size:10px; margin:2px 0;"><div style="display:flex; gap:6px;"><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Body Type:</label><select id="edit-body-type" style="font-size:9px; margin:2px 0;"><option value="Terrestrial" ${p.type==='Terrestrial'?'selected':''}>Terrestrial</option><option value="Gas Giant" ${p.type==='Gas Giant'?'selected':''}>Gas Giant</option><option value="Ice World" ${p.type==='Ice World'?'selected':''}>Ice World</option><option value="Barren Rock" ${p.type==='Barren Rock'?'selected':''}>Barren Rock</option><option value="Volcanic" ${p.type==='Volcanic'?'selected':''}>Volcanic</option></select></div><div style="flex:1;"><label style="font-size:9px; color:#6b826a;">Gravity:</label><input type="text" id="edit-body-gravity" value="${p.gravity}" style="font-size:10px; margin:2px 0;"></div></div><label style="font-size:9px; color:#6b826a; display:block;">Atmosphere:</label><input type="text" id="edit-body-atmosphere" value="${p.atmosphere}" style="font-size:10px; margin:2px 0;"><label style="font-size:9px; color:#6b826a; display:block;">Scans:</label><textarea id="edit-body-resources" rows="2" style="font-size:10px; margin:2px 0;">${p.resources}</textarea><button class="btn-reveal" onclick="window.saveDMBodyProperties('${p.id}')" style="font-size:9px; padding:6px; margin-top:6px; width:100%;">APPLY SCANS</button>${(window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id]) ? `<button class="btn-remove" onclick="window.deletePlanetOverride('${p.id}')" style="font-size:9px; padding:4px; margin-top:4px; width:100%;">🗑️ CLEAR OVERRIDE (revert to default)</button>` : ''}</div>` : '';
-            // Personal planet renaming (live-session feature request,
-            // 2026-09-13): visible to every user. p.name here already
-            // reflects THIS viewer's own personal label if set (see the
-            // personalLabels merge in applyPlanetaryOverrides above, which
-            // getSystemBodies runs through before p ever reaches here) --
-            // this box is just the editor for setting/clearing it. Value
-            // pulled straight from the cache (not p.name) so the input
-            // shows the raw label you typed, not whatever it resolved to.
+            // Personal label editor, shown to every user. p.name may already
+            // be the personal label (applyPlanetaryOverrides), so the input
+            // reads the raw label from the cache instead.
             const myPersonalBodyLabel = (window.globalPersonalLabelsCache || {})[`body:${p.id}`] || '';
             const canonicalBodyName = (window.globalPlanetaryModifiersCache && window.globalPlanetaryModifiersCache[p.id] && window.globalPlanetaryModifiersCache[p.id].custom_name) || p.name;
             const personalBodyLabelBox = `<div style="background:#040605; border:1px solid #3c4e36; padding:6px; margin-top:8px; border-radius:2px;">
@@ -2286,20 +1825,11 @@ window.initGalaxyEngine = function() {
             updateHyperlaneDiscovery();
             globalHyperlanesCache.forEach(route => {
                 if (!route.nodes || route.nodes.length < 2) return;
-                // Per-segment, not whole-route: a segment only draws once
-                // BOTH its endpoint nodes are discovered (see
-                // updateHyperlaneDiscovery/hyperlaneNodeKey above) — a
-                // partially-explored route renders partially, not all-or-
-                // nothing. Undiscovered segments render nothing at all, same
-                // as a hidden hazard zone (no partial hint).
+                // A segment draws only once BOTH endpoint nodes are
+                // discovered, so a partly explored route draws partly.
                 for (let k = 0; k < route.nodes.length - 1; k++) {
                     const a = route.nodes[k], b = route.nodes[k + 1];
-                    // DM is unconditionally omniscient (matches isPositionSensorVisible's
-                    // own DM short-circuit elsewhere) -- draw every segment directly for
-                    // the DM rather than consulting the discovered-node set below, which
-                    // exists ONLY to give a non-DM player a persistent memory of what
-                    // they've actually had real sensor coverage over. See the bug fix
-                    // note on updateHyperlaneDiscovery above for the full writeup.
+                    // The DM sees every segment; the discovered set is for players only.
                     if (currentUserRole !== 'dm' && (!window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, a, k)) || !window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, b, k + 1)))) continue;
                     ctx.save(); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
                     ctx.strokeStyle = route.color || '#00e1ff'; ctx.lineWidth = 3 / window.camera.zoom; ctx.shadowColor = route.color || '#00e1ff'; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0; ctx.restore();
@@ -2314,7 +1844,7 @@ window.initGalaxyEngine = function() {
             ctx.stroke(); window.activeHyperlaneNodes.forEach((v) => { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(v.x, v.y, 4 / window.camera.zoom, 0, Math.PI * 2); ctx.fill(); }); ctx.restore();
         }
 
-        /* MODULE C: FOW TERRITORY STEALTH HACK */
+        /* TERRITORIES: '[HIDDEN]' territories are drawn only for the DM (dashed, fainter). */
         globalTerritoriesCache.forEach(t => {
             if (!t.vertices || t.vertices.length < 3) return;
             
@@ -2368,13 +1898,9 @@ window.initGalaxyEngine = function() {
             ctx.beginPath(); ctx.arc(p.x, p.y, pSize, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1.0;
         });
 
-        // Which system (if any) is "in focus" for full orbital detail — the
-        // one nearest the camera center. Without this, every system that
-        // happens to pass the zoom+viewport+scan gate below renders its full
-        // planet/orbit diagram simultaneously, which in dense clusters (the
-        // galactic core especially) makes neighboring systems visually bleed
-        // into each other instead of showing one system at a time.
-        // Also drives the DRADIS radar overlay's re-anchoring below.
+        // Only one system is "in focus" for full orbital detail (the one
+        // nearest the camera center), so dense clusters don't overlap.
+        // Also anchors the DRADIS radar overlay.
         let focusedSystemId = null; let focusedSystemObj = null;
         if (window.camera.zoom > SYSTEM_ZOOM_THRESHOLD) {
             let nearestDist = Infinity;
@@ -2383,21 +1909,8 @@ window.initGalaxyEngine = function() {
                 let d = Math.hypot(s.x - cx, s.y - cy);
                 if (d < nearestDist) { nearestDist = d; focusedSystemId = s.id; focusedSystemObj = s; }
             }
-            // Bug fix (DM report, same investigation as the Nebula-hazard
-            // custom-planet fix above): pure nearest-to-exact-center-pixel
-            // meant that in a dense cluster (the comment above already called
-            // this case out), a star you deliberately selected/centered on
-            // could still lose the single "focused" orbit-render slot to a
-            // procedural neighbor that happened to sit a few world-units
-            // closer to dead-center -- confirmed live: Tartarus Prime,
-            // perfectly centered and zoomed in, still lost focus to "Arm
-            // Alpha-1472" this way. Whatever the player/DM has actually
-            // SELECTED (clicked, scanned, located) now wins outright over
-            // raw distance, but ONLY when it's still on-screen right now --
-            // same viewport-cull bounds (hw+200/hh+200) already used just
-            // below for whether a system draws at all -- so an old selection
-            // from somewhere else in the galaxy can't permanently hijack
-            // focus from whatever's actually in view once you've panned away.
+            // A selected star wins focus over raw distance, but only while it
+            // is on screen (same hw+200/hh+200 cull bounds as below).
             const sel = window.selectedTarget;
             if (sel && sel.type === 'star' && systemCanHaveBodies(sel.data) && Math.abs(sel.data.x - cx) <= hw + 200 && Math.abs(sel.data.y - cy) <= hh + 200) {
                 focusedSystemObj = sel.data; focusedSystemId = sel.data.id;
@@ -2438,34 +1951,22 @@ window.initGalaxyEngine = function() {
 
         for (let m of globalShipMarkersCache) {
             if (m.docked_to) continue; // docked craft render as part of their master, not as their own token
-            // DM note #6 fix (this session): a strike-craft token launched from
-            // the Battle Map's hangar control is tactical-only -- it still exists
-            // as a real ship_markers row (Battle Map grid token, initiative entry,
-            // HP tracking all depend on it), it just shouldn't show up on THIS
-            // canvas. A squadron launched from the Vessel Deck is unaffected and
-            // keeps rendering here as before.
+            // Battle-Map-only tokens (e.g. strike craft launched from the Battle
+            // Map hangar) are real ship_markers rows but are not drawn here.
             if (m.hide_from_galaxy_map) continue;
             if (Math.abs(m.x - cx) > hw + 50 || Math.abs(m.y - cy) > hh + 50) continue;
-            // IFF unification (this session): was reading cargo_inventory.iff and only
-            // ever distinguished hostile-vs-everything-else -- a 'neutral' tag rendered
-            // identically to a friendly one on this view, silently. Now reads the real
-            // iff column through the shared 3-way (+unset) color helper.
             const size = 10 / window.camera.zoom; let iffColor = typeof window.getIffColor === 'function' ? window.getIffColor(m.iff) : '#00e1ff';
 
-            // FEATURE: Faction-based token ownership — visually distinguish "mine" from
-            // "another player's" from "Overseer/NPC asset" so the drag-permission
-            // boundary already enforced in the click handler above is visible before
-            // you try to drag, not just discovered by a failed drag attempt.
+            // Ownership ring: mine / another player's / Overseer-NPC, so drag
+            // permission is visible before you try.
             const isMine = window.vesselHasOwner(m, currentUserId);
             const ownerIds = window.vesselOwnerIds(m);
             const ownerProfiles = ownerIds.map(id => allProfiles.find(p => p.id === id)).filter(Boolean);
             const isNpcAsset = ownerProfiles.length === 0 || ownerProfiles.every(p => p.role === 'dm');
             let ringColor = isMine ? '#00e5a3' : (isNpcAsset ? '#ff6b6b' : '#4a7ab5');
 
-            // Dense Nebula EMCON: a non-owned, non-DM-viewed contact sitting inside a
-            // nebula reads as a vague sensor return rather than a clean IFF lock —
-            // rendered faded with its identity withheld, not hidden outright (you know
-            // something's there, just not what).
+            // Dense Nebula EMCON: a non-owned contact inside a nebula is drawn
+            // faded with its identity withheld (not hidden). The DM sees it normally.
             const nebulaObscured = !isMine && currentUserRole !== 'dm' && window.checkShipHazards(m).some(h => h.type === 'nebula');
             let tokenAlpha = nebulaObscured ? 0.35 : 1;
 
@@ -2482,10 +1983,8 @@ window.initGalaxyEngine = function() {
             ctx.fillStyle = iffColor; ctx.beginPath(); ctx.moveTo(m.x, m.y - size); ctx.lineTo(m.x + size, m.y); ctx.lineTo(m.x, m.y + size); ctx.lineTo(m.x - size, m.y); ctx.closePath(); ctx.fill();
             ctx.restore();
 
-            // Persistent callout label: dark outline stroke behind the fill keeps it
-            // legible over any canvas background (starfield, nebula haze, territory
-            // fills), and font size is clamped so it scales gracefully with zoom
-            // instead of vanishing when zoomed out or overwhelming the view zoomed in.
+            // Label: dark outline keeps it legible on any background; font size
+            // is clamped across zoom levels.
             ctx.save();
             ctx.globalAlpha = tokenAlpha;
             let labelSize = Math.max(9, Math.min(13, 11 / window.camera.zoom));
@@ -2519,7 +2018,7 @@ window.initGalaxyEngine = function() {
             ctx.beginPath(); ctx.arc(targetX, targetY, (16 + Math.sin(time * 0.008) * 4) / window.camera.zoom, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
         }
 
-        // RESTORED MEASURE TOOL DISTANCE TEXT
+        // MEASURE TOOL DISTANCE TEXT (100 units = 1 LY)
         if (window.measuringTapeActive && window.measureStartPoint) {
             ctx.strokeStyle = '#00e5a3'; ctx.lineWidth = 2 / window.camera.zoom; ctx.setLineDash([4, 4]);
             let endX = window.measureEndPoint ? window.measureEndPoint.x : (window._lastMouseWorldX || window.measureStartPoint.x);
@@ -2545,23 +2044,14 @@ window.initGalaxyEngine = function() {
         updateCicTelemetry(cx, cy, window.camera.zoom, _gridSpacing);
         updateRadarSweepPosition(cssWidth, cssHeight);
     }
-    // Bug-hunt pass (2026-09-24): requestAnimationFrame used to be scheduled
-    // at the very END of render(), so any exception mid-frame (one malformed
-    // row in the data) stopped the galaxy map permanently until a reload.
-    // Now the next frame is always scheduled; a failing frame is logged once
-    // and the canvas state is reset (resize() reassigns the canvas size,
-    // which clears any unbalanced ctx.save() stack left by the throw).
+    // The next frame is always scheduled, so one bad frame (e.g. a malformed
+    // row) can't stop the map. Errors are logged at most every 5 s, and
+    // resize() resets the canvas, clearing any unbalanced ctx.save() stack.
     let lastRenderErrorAt = 0;
-    // Mobile lag fix (2026-09-30, live report: ~1s touch lag on the Battle
-    // Map on a Galaxy S21 Ultra): this loop redrew the whole galaxy (~2,569
-    // systems, full-screen canvas at the phone's native pixel density) every
-    // single frame even while the full-screen Battle Map covered it
-    // completely, starving touch handling on phones. Skip the redraw while
-    // the Battle Map overlay is open or the tab is in the background; the
-    // loop keeps running and redraws the moment the map is visible again.
-    // Nothing time-critical lives in render() (the campaign clock runs on
-    // its own setInterval in js/ui.js); hyperlane/DRADIS discovery done
-    // during render just catches up once the galaxy is visible again.
+    // Skip the redraw while the Battle Map overlay covers the galaxy or the
+    // tab is hidden (the full redraw starved touch handling on phones).
+    // Nothing time-critical lives in render(): the campaign clock runs on its
+    // own interval (js/ui.js), and hyperlane discovery catches up when visible.
     const battleMapPanelEl = document.getElementById('battle-map-panel');
     function galaxyIsCovered() {
         if (document.hidden) return true;

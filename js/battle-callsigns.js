@@ -1,13 +1,9 @@
 /* ==========================================================================
    js/battle-callsigns.js - Auto-callsigns for same-named NPC ships in a battle.
-   Split out of js/battle-map.js (consolidation pass 2, 2026-10-08), code
-   unchanged. Classic script sharing the global scope: loads right after
-   battle-map.js (see index.html for the order).
+   Classic script sharing the global scope: loads right after battle-map.js
+   (see index.html for the order).
    ========================================================================== */
-/* ==========================================================================
-   AUTO-CALLSIGNS (Command Terminal refactor, Phase 1, 2026-10-01)
-   ==========================================================================
-   DM-confirmed design: when two or more NPC ships with the same name are in
+/* DM rule: when two or more NPC ships with the same name are in
    the same battle, each gets a callsign "<name> <NATO letter>-<number>":
    "Typhon Sub-Chaser Alpha-01", "...Bravo-02", ... "...Zulu-26", then
    "...Alpha-27". A lone copy keeps its plain name; the moment a second copy
@@ -24,8 +20,7 @@
    - The new name is written to the ship itself (ship_markers.name), so it
      shows everywhere (cards, targeting lists, galaxy map, chat), and the
      callsign is also stored on the battle token (callsign_base/index).
-   - Underlying ids are untouched -- every ship was already a separate row
-     with its own id; this is purely the label.
+   - Ids are untouched; this is purely the label.
    - Runs in the browser that added the ships, right after they're saved.
    - Not part of the undo log: undoing a placement removes the ship but the
      remaining ships keep their callsigns. */

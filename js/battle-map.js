@@ -1,95 +1,30 @@
 /* ==========================================================================
-   js/battle-map.js - Tactical Battle Map (Phase 1)
+   js/battle-map.js - Tactical Battle Map core
    ==========================================================================
-   New this session. Confirmed design (see darkforest-architecture-reference.md
-   checkpoints): a simple fixed-size arena, no pan/zoom/starfield — click to
-   place, click to target. Full mutual visibility once in a battle (no FOW).
-   Dragging a Secret Repository template onto the map creates a REAL
-   ship_markers row via the existing window.deployShipTemplate flow — a
-   battle token is a placement record pointing at a real vessel, never a
-   parallel lightweight entity. Free drag-to-reposition (no movement rules/
-   stats — that's an explicitly separate, not-yet-designed thread).
-
-   Data shape: battle_encounters row = { id, name, is_active, created_by,
-   created_at, tokens: [{ token_id, ship_marker_id, x, y }] }. Only one
-   active battle at a time (Phase 1 scope) — starting a new one deactivates
-   any currently-active row rather than deleting it (keeps history).
-
-   Deliberately NOT in Phase 1 (see architecture doc): range rules, draw-tool
-   AOE targeting, hex/grid overlay, multiple simultaneous battles, and the
-   MLRS multi-turn ordnance/counter-fire engine itself (weapon classification
-   groundwork for that exists in combat.js, but the actual resolution loop is
-   a later build).
-
-   --- MOVEMENT (built same session as a follow-up to Phase 1, confirmed
-   design) --- No dedicated turn/initiative tracker: move_remaining refreshes
-   on the SAME global tick every other per-round mechanic in this app already
-   uses (js/combat.js's advanceCombatRound, via window.resetBattleMapMovement
-   below) rather than inventing a separate turn concept. Allowance comes from
-   a new ship_templates/ship_markers.tactical_speed stat (grid px/round,
-   default 80), copied onto ship_markers at deploy time exactly like
-   integrity_hull/max_hull already are — deliberately NOT derived from
-   drive_type/speed, which is the galaxy-scale FTL travel stat and the wrong
-   scale for this 460x380 grid. Enforcement is DM-trusted, not code-blocked:
-   dragging a token past its move_remaining is never prevented, it just goes
-   negative and renders red (roster line + a small "!" badge on the token)
-   so the DM can see at a glance who overspent. move_remaining lives on the
-   battle_encounters.tokens record itself (per-battle, per-round state —
-   not on ship_markers, which persists across battles).
-
-   --- BATTLEFIELD SALVAGE (built same session, layered on the destroyed-
-   token hook below) --- Confirmed design: destroying a token spawns a
-   battlefield_salvage row at a player-owned vessel's position (any player
-   ship still in the battle, not necessarily the killing blow — no player
-   ship present means no salvage). A manual "Gather" action (ship must be
-   within SALVAGE_GATHER_RANGE) starts a DM/player-set duration timer
-   against the existing universeTimeHours clock; completion is automatic
-   once that clock passes the deadline (checked every time advancement, not
-   just daily ticks, since a duration can be sub-day) and delivers the raw
-   resource into the gathering vessel's cargo misc array. Separately, any
-   vessel with BOTH the raw resource in cargo AND a configured
-   salvage_processing_output/rate (new ship_markers columns, same
-   nullable/zero-means-off convention as fleet_groups' production fields)
-   converts some per day, scaled by its Manufacturing deck's HP% exactly
-   like fleet-group production already does — see
-   window.processSalvageConversion. Deliberately NOT built: any UI rendering
-   of salvage markers on the galaxy canvas itself (map.js's render loop
-   wasn't touched) — salvage is presented as a DOM list panel only, same
-   pattern as Territory Control, not a clickable map token. */
+   Encounter loading/realtime, per-row token storage, deploy actions, range
+   rules, the DOM renderer, and the panel render + render-hook registry.
+   A battle token is a placement record pointing at a real ship_markers row
+   (deploys go through window.deployShipTemplate), never a separate entity.
+   Only one battle is active at a time; starting a new one marks the old
+   row inactive instead of deleting it.
+   Movement: move_remaining (per token, per battle) refreshes on the global
+   round tick; allowance is ship_markers.tactical_speed (grid px/round), not
+   the galaxy-scale FTL speed. Overspending is allowed but shown in red with
+   a "!" badge -- enforcement is DM-trusted. */
 
 window.globalBattleEncounterCache = null;
 window.battleMapArmedToken = null; // { ship_marker_id } while a palette entry is armed for click-to-place, else null
 
 function genBattleTokenId() { return (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : ('tok-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)); }
 
-// Battle Map Grid Expansion build (this session): doubled from 460x380 to
-// 920x760 (DM's confirmed choice, among 3 options presented) -- growing the
-// actual LOGICAL battlespace, not just the visual zoom (see
-// BATTLE_GRID_SCALE's own comment below for that distinction; this is the
-// "actually growing the battlespace" lever it warns changing SCALE alone
-// doesn't do). Raised at the DM's own request after Squadron AI Stances
-// shipped: the grid hadn't grown since the very first Battle Map build,
-// while token count and simultaneous visual effects had grown a lot since.
-// Existing weapon `range` values are mostly 0/unset (this app's "unlimited"
-// convention) so this is lower-risk than resizing usually would be -- see
-// the Grid Expansion checkpoint notes for what WAS touched to keep relative
-// mobility consistent (SQUADRON_TACTICAL_SPEED and the tactical_speed
-// defaults for NEW ships, both doubled) and what deliberately WASN'T
-// (existing ships' already-stored tactical_speed values -- not bulk-
-// migrated; flagged, not silently left inconsistent). The index.html
-// #battle-map-grid element's inline width/height must match these two
-// constants exactly (same requirement as before this build -- see that
-// element's own comment), and #battle-map-grid-wrap switched from a fixed
-// clipped viewport to a scrollable one since the fully-scaled grid
-// (920*1.5 x 760*1.5 = 1380x1140 CSS px) no longer fits most screens at
-// once -- see that element's comment for the reasoning.
+// Logical grid size in px (Standard map). index.html's #battle-map-grid
+// inline width/height must match; applyBattleGridSize changes both.
 let BATTLE_GRID_W = 920;
 let BATTLE_GRID_H = 760;
-/* Phase 7 (2026-10-03, DM decision): a saved map picks one of 3 fixed sizes.
-   Weapon range bands (BATTLE_RANGE_TIERS) and tactical_speed stay the SAME
-   distances on every size -- a bigger map just means more room. The size
-   comes from the active battle's map snapshot (battle_encounters.map.size);
-   no map / unknown size = Standard, today's grid. */
+/* DM decision: a saved map picks one of 3 fixed sizes. Range bands and
+   tactical_speed stay the same distances on every size -- a bigger map just
+   means more room. Size comes from battle_encounters.map.size; no map or an
+   unknown size = Standard. */
 window.BATTLE_MAP_SIZES = { standard: [920, 760], large: [1380, 1140], huge: [1840, 1520] };
 window.battleGridSize = function () { return { w: BATTLE_GRID_W, h: BATTLE_GRID_H }; };
 window.applyBattleGridSize = function (sizeKey) {
@@ -110,61 +45,32 @@ window.applyBattleGridSize = function (sizeKey) {
     return true;
 };
 const BATTLE_TOKEN_SIZE = 34;
-// Polish pass (this session, DM-reported): strike craft tokens were
-// rendering at the exact same size as capital ships/stations (both used
-// BATTLE_TOKEN_SIZE) -- the DM's "emblem needs to be much smaller" note.
-// FLAGGED FIRST-PASS SIZE, DM-tunable, same as every other placeholder
-// constant in this app.
+// Strike craft tokens are drawn smaller than ships/stations (DM-tunable).
 const BATTLE_STRIKE_CRAFT_TOKEN_SIZE = 20;
 
-// Visual-only zoom (tester feedback: "make the map bigger" -- see
-// darkforest-architecture-reference.md's Battle Map layout addendum). The
-// grid's LOGICAL coordinate space (BATTLE_GRID_W/H above, every stored
-// token x/y, every weapon range and tactical_speed check via Math.hypot)
-// is completely unchanged by this -- those are all still defined in the
-// same 460x380 units they always were. Only the on-screen rendering is
-// scaled up via CSS transform (index.html's #battle-map-grid), so a click
-// or drag's raw mouse-pixel delta has to be divided by this factor before
-// it means anything in logical grid units. Change this one constant (and
-// the matching transform:scale()/wrapper size in index.html) to retune
-// the visual size -- it deliberately does NOT touch tactical_speed or any
-// weapon's range value, unlike actually growing the battlespace would.
+// Visual-only zoom: the grid is scaled up by a CSS transform in index.html.
+// Logical coordinates (token x/y, ranges, tactical_speed) are unaffected, so
+// raw mouse-pixel deltas must be divided by this factor. Keep it in sync with
+// index.html's transform:scale() and wrapper size.
 const BATTLE_GRID_SCALE = 1.5;
 
-/* Weapon Range Tiers build (this session, DM-confirmed design): four range
-   bands, replacing the old ad hoc per-weapon placeholder numbers (300/450/
-   650/700) with values derived from the grid's own size. LONG/MEDIUM/SHORT
-   are 33% / 16.5% / 8.25% of the battle grid's DIAGONAL (sqrt(920^2+760^2)
-   ~= 1193px), rounded to clean numbers -- the DM's own explicit pick of
-   "diagonal" as what counts as the map's overall size, out of diagonal/
-   width/average offered. The 4th tier (missiles/torpedoes, and a strike
-   craft's own effective reach) isn't a number here at all: ship-mounted
-   ordnance tubes get range 0 (unlimited launch distance, DM-confirmed)
-   since they already travel over multiple turns via the existing
-   ordnance-aging mechanic rather than hitting instantly, and a strike
-   craft closes distance every round via moveTokenToward instead of
-   needing a long weapon range to begin with. See getEffectiveWeaponRange
-   and getUplinkedEnemyIds below for the two new rules built on top of
-   these tiers (strike-craft-vs-capital short-range requirement, and the
-   Messenger squadron's target-uplink exception to it). */
+/* DM rule: weapon range bands in grid px, roughly 33% / 16.5% / 8.25% of the
+   Standard grid's diagonal (~1193 px). Ship-mounted ordnance uses range 0
+   (unlimited) because it travels over several rounds; strike craft close
+   distance by moving. getEffectiveWeaponRange applies the strike craft caps
+   and the Messenger uplink exception on top of these. */
 window.BATTLE_RANGE_TIERS = { LONG: 400, MEDIUM: 200, SHORT: 100 };
-// Playtest rebalance (2026-10-03, DM): strike craft reach. See getEffectiveWeaponRange.
+// DM rule: strike craft reach (px). See getEffectiveWeaponRange.
 window.STRIKE_CRAFT_RANGES = { GUN: 90, ORDNANCE: 200 };
 window.strikeCraftRangeCap = function(wpn) {
     return (wpn && wpn.weapon_class === 'ordnance') ? window.STRIKE_CRAFT_RANGES.ORDNANCE : window.STRIKE_CRAFT_RANGES.GUN;
 };
 
-/* Squadron Target Uplink build (this session, DM-described mechanic, exact
-   trigger/scope/duration NOT explicitly spec'd beyond "gets close enough" --
-   my own concrete reading, flagged plainly per standing instruction 5:
-   a Messenger-type squadron (STRIKE_CRAFT_DB's `messenger` entry) within
-   SHORT range of an enemy ship "uplinks" that ship for its OWN side (same
-   owner_id as the Messenger) for the rest of THIS round only -- recomputed
-   fresh every time this is called, nothing persists across rounds. Returns
-   a Set of ship_marker ids (enemy ships currently uplinked for forOwnerId).
-   Deliberately does not care about the Messenger's own ai_stance -- this is
-   read as a passive sensor/spotter effect of just being close, not an
-   attack action, so a Manual-stance Messenger still projects it. */
+/* Target uplink: an enemy ship within SHORT range of a Messenger-type
+   squadron owned by forOwnerIds' side is "uplinked" for that side.
+   Recomputed on every call; nothing persists. Passive effect, so it ignores
+   the Messenger's ai_stance. Returns a Set of enemy ship_marker ids.
+   (The exact trigger was an interpretation, not a confirmed DM spec.) */
 function getUplinkedEnemyIds(forOwnerIds) {
     if (!window.globalBattleEncounterCache) return new Set();
     const tokens = window.globalBattleEncounterCache.tokens || [];
@@ -188,48 +94,25 @@ function getUplinkedEnemyIds(forOwnerIds) {
 }
 window.getUplinkedEnemyIds = getUplinkedEnemyIds;
 
-/* Weapon Range Tiers + Squadron Target Uplink builds (this session):
-   computes the ACTUAL max range (px) for `wpn` fired by `firerVessel` at
-   `targetVessel` this round, folding in both new rules on top of whatever
-   `wpn.range` already says (0 = unlimited, existing convention unchanged):
-     1. (DM-confirmed, applies to BOTH manual fire and AI-stance auto-fire)
-        A strike craft (`firerVessel.is_strike_craft`) attacking anything
-        that ISN'T itself a strike craft is hard-capped at SHORT range,
-        regardless of its own weapon's listed range and regardless of the
-        squadron's own type/size -- "must close to within short range to
-        hit," full stop, unless rule 2 below already granted an exception.
-        Deliberately keyed on `!targetVessel.is_strike_craft` rather than
-        `vessel_class === 'Capital'/'Escort'` -- most live ships don't have
-        `vessel_class` set yet (see Pending list), and gating on it here
-        would let an untagged capital ship get sniped at full weapon range
-        by accident, which reads as a worse bug than being slightly broader
-        than "escort/capital" than asked.
-     2. (My own reading of "the messenger... allows medium and long range
-        weapons to hit regardless of distance" -- not explicitly scoped to
-        ship guns vs. squadron weapons in what was described, so applied to
-        both here; flagging this as a judgment call, not a confirmed spec)
-        If `targetVessel` is currently uplinked for `firerVessel`'s side
-        (see getUplinkedEnemyIds above) AND `wpn`'s own range already
-        qualifies as medium-or-long tier (>= MEDIUM), that weapon ignores
-        range entirely against this target this round -- checked BEFORE
-        rule 1, so it also lets a strike craft's medium/long weapon skip
-        the short-range-vs-capital requirement once uplinked. A weapon
-        that's short-tier or already unlimited gets no benefit from an
-        uplink -- there's nothing for it to extend. */
+/* Effective max range (px) for `wpn` fired by `firerVessel` at
+   `targetVessel` this round; 0 = unlimited. Used by manual fire and AI
+   auto-fire. Rules, in order:
+     1. Uplink: if the target is uplinked for the firer's side and the
+        weapon's own range is MEDIUM or more, range is unlimited this round
+        (applies to strike craft too). Short-range or unlimited weapons gain
+        nothing.
+     2. DM rule: every strike craft weapon is capped against any target --
+        guns/rockets/PD at 90, ordnance at 200 -- whatever the chassis lists.
+     3. Otherwise the weapon's own range. */
 function getEffectiveWeaponRange(wpn, firerVessel, targetVessel) {
     const tiers = window.BATTLE_RANGE_TIERS || { LONG: 400, MEDIUM: 200, SHORT: 100 };
-    const baseRange = (wpn && wpn.range) || 0; // 0 = unlimited, existing convention
+    const baseRange = (wpn && wpn.range) || 0; // 0 = unlimited
 
     if (firerVessel && targetVessel && baseRange >= tiers.MEDIUM) {
         const uplinked = getUplinkedEnemyIds(window.vesselOwnerIds(firerVessel));
         if (uplinked.has(targetVessel.id)) return 0; // unlimited this round
     }
 
-    // Playtest rebalance (2026-10-03, DM): every strike craft weapon is
-    // capped -- guns/rockets/PD at just under SHORT (90), ordnance (missiles,
-    // bombs) at MEDIUM (200) -- against ANY target, whatever range the
-    // chassis lists (so a newly designed chassis gets it too). This replaces
-    // the old "SHORT vs non-strike-craft" cap, which it's stricter than.
     if (firerVessel && firerVessel.is_strike_craft) {
         const cap = window.strikeCraftRangeCap(wpn);
         return baseRange > 0 ? Math.min(baseRange, cap) : cap;
@@ -239,56 +122,28 @@ function getEffectiveWeaponRange(wpn, firerVessel, targetVessel) {
 }
 window.getEffectiveWeaponRange = getEffectiveWeaponRange;
 
-/* --- ANIMATION ENGINE (built a prior session, confirmed scope: in-flight
-   ordnance visualization, smooth token movement, direct-fire shot flashes, a
-   decorative starfield backdrop — CSS/SVG-transform-driven per the DM's own
-   choice, NOT a canvas/sprite pipeline, staying consistent with the rest of
-   this file's plain-DOM approach. Strike-craft animation was explicitly out
-   of scope at the time — squadrons had no real grid position (the
-   "target-lock proxy" thread) and animating movement needs a real position
-   to animate between. RESOLVED this session (see the Strike Craft Grid
-   Position checkpoint below and window.addSquadronToBattleMap) — a
-   squadron's token is a normal entry in battle_encounters.tokens now, so it
-   flows through the exact same diff/reuse render loop and gets smooth
-   movement + fire-beam flashes automatically, no separate animation path
-   needed.
-
-   Smooth token movement required a real architecture change: the grid used
-   to be torn down (innerHTML = '') and rebuilt from scratch on every single
-   render, which meant a token's DOM element never survived between renders
-   — nothing for a CSS transition to animate FROM. The three maps below let
-   the grid render function diff against what's already on screen and reuse
-   existing elements (so style.left/top changes actually transition) instead
-   of destroying and recreating everything every time. */
+/* Rendering state. Token and ordnance elements persist across renders (the
+   grid is diffed, not rebuilt), so CSS transitions can animate moves.
+   Strike craft tokens use the same path. */
 let battleMapTokenEls = {};        // token_id -> token DOM element (reused across renders)
-let battleMapTokenMarkerIds = {};  // token_id -> ship_marker_id, kept even after a token is removed from `tokens` (see the destruction-effect pass below)
-let battleMapPendingExplosions = []; // [{token_id, x, y}] staged by checkBattleTokenDestroyed just before a destroyed token is removed — see Visual Polish checkpoint
+let battleMapTokenMarkerIds = {};  // token_id -> ship_marker_id, kept after the token leaves `tokens` (for the destruction effect)
+let battleMapPendingExplosions = []; // [{token_id, x, y}] staged by checkBattleTokenDestroyed just before a destroyed token is removed
 let battleMapOrdnanceEls = {};     // salvo_id -> ordnance marker DOM element
 let battleMapPrevOrdnanceIds = new Set(); // salvo_ids seen on the previous render, to detect resolved/removed payloads
-let battleMapLastEncounterId = null; // hard-resets the three maps above when the active battle itself changes
+let battleMapLastEncounterId = null; // when the active battle changes, all of the above are reset
 
-/* --- PER-ROW TOKEN STORAGE (Command Terminal refactor, Phase 0, 2026-09-30) ---
-   Battle Map tokens used to live in ONE jsonb array on the battle_encounters
-   row, and every move rewrote the whole array -- two people dragging at the
-   same moment could silently undo each other (last writer wins), and every
-   single move made every client reload the whole encounter. Tokens now live
-   in the `battle_tokens` table, one row per token (id = the old token_id).
-
-   The IN-MEMORY shape is deliberately unchanged:
-   window.globalBattleEncounterCache.tokens is still an array of
-   { token_id, ship_marker_id, x, y, move_remaining, initiative?, ap_current?, ... }
-   so every one of the ~30 places that READS tokens keeps working untouched.
-   Only the write path changed: saveBattleTokens(newArray) now diffs the new
-   array against the last-known saved state and writes just what changed --
-   an insert for a new token, a column-level update for a changed one, a
-   delete for a removed one. Other clients get per-row realtime deltas
-   (battle_tokens_stream below) instead of a full encounter reload.
-
-   Legacy battles: the first time any client loads an encounter whose
-   `tokens_migrated` flag is false, its old jsonb tokens are copied into
-   battle_tokens (duplicate-safe) and the flag is set. The old
-   battle_encounters.tokens column is left in place as dead schema, never
-   written again (same precedent as ship_markers.owner_id). */
+/* --- PER-ROW TOKEN STORAGE ---
+   Tokens live in the `battle_tokens` table, one row per token (id = token_id),
+   so concurrent moves don't overwrite each other. In memory,
+   window.globalBattleEncounterCache.tokens stays an array of
+   { token_id, ship_marker_id, x, y, move_remaining, initiative?, ap_current?, ... }.
+   saveBattleTokens(newArray) diffs against the last saved snapshot and writes
+   only inserts / changed columns / deletes. Other clients apply per-row
+   realtime deltas (battle_tokens_stream). Fields not in BATTLE_TOKEN_COLUMNS
+   go into the row's `extra` jsonb.
+   Legacy battles: on load, tokens still in the old battle_encounters.tokens
+   jsonb column are copied into battle_tokens (duplicate-safe), the column is
+   emptied and tokens_migrated is set. */
 const BATTLE_TOKEN_COLUMNS = ['ship_marker_id', 'x', 'y', 'z', 'facing', 'move_remaining', 'initiative', 'ap_current', 'turned_round', 'callsign_base', 'callsign_index'];
 let battleTokenSnapshot = {};           // token_id -> row fields as last saved/received (diff baseline)
 let battleTokenSnapshotEncounterId = null;
@@ -337,12 +192,9 @@ async function importLegacyBattleTokens(encounter, existingRows) {
         const { error } = await db.from('battle_tokens').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
         if (error) { console.error('importLegacyBattleTokens: copy failed', error); return false; }
     }
-    // Empty the legacy column once its contents are copied, so anything that
-    // shows up in it LATER can only have come from a browser still running
-    // the pre-2026-09-30 code (a stale cache) -- and gets picked up by the
-    // next load instead of silently vanishing (live bug, 2026-09-30: the DM's
-    // browser was on the old build, placed two ships into this column, and
-    // nobody on the new build could see them).
+    // Empty the legacy column after copying, so anything written there later
+    // (a browser still running old cached code) is imported on the next load
+    // instead of being invisible to everyone else.
     const { error: flagErr } = await db.from('battle_encounters').update({ tokens_migrated: true, tokens: [] }).eq('id', encounter.id);
     if (flagErr) console.error('importLegacyBattleTokens: could not set tokens_migrated', flagErr);
     return true;
@@ -355,10 +207,8 @@ async function fetchBattleTokenRows(encounterId) {
 }
 
 async function loadBattleEncountersInner() {
-    // Battle music hook (2026-08 audio polish): this function already runs
-    // on EVERY connected client via battle_encounters_stream below, whoever
-    // started/ended the fight -- so comparing the active-state edge here
-    // fires the music bed for the whole table, not just the DM's browser.
+    // Runs on every client (via battle_encounters_stream), so the
+    // active-state edge below starts/stops battle music for the whole table.
     const wasActive = !!window.globalBattleEncounterCache;
     const prevCache = window.globalBattleEncounterCache;
     const { data, error } = await db.from('battle_encounters').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(1);
@@ -462,13 +312,13 @@ function initBattleEncountersRealtimeChannel() {
         })
         .subscribe();
 }
-/* Phase 4d (2026-10-02): server-side fog of war. battle_tokens' read rule now
-   withholds tokens of hidden ships from everyone except the DM and the ship's
-   owner(s) (public.df_battle_token_visible). Realtime never re-sends a row
-   that just BECAME visible, so when a ship this player couldn't see turns
-   visible (un-hidden, or handed to them) we re-fetch the battle's tokens.
+/* Server-side fog of war: battle_tokens' read rule (public.df_battle_token_visible)
+   hides tokens of hidden ships from everyone but the DM and the ship's owners.
+   Realtime never re-sends a row that just BECAME visible, so when a ship this
+   player couldn't see turns visible we re-fetch the battle's tokens.
    Called from the ship_markers realtime handler (js/db.js) after the vessel
-   cache refreshes. First call only seeds the set. DM sees everything: no-op. */
+   cache refreshes. The first call only seeds the set; no-op for the DM.
+   Returns true if a reload was triggered. */
 let battleFogHiddenFromMe = null;
 window.battleFogCheckReveal = function() {
     if (typeof currentUserRole !== 'undefined' && currentUserRole === 'dm') return false;
@@ -487,17 +337,12 @@ window.initBattleEncountersRealtimeChannel = initBattleEncountersRealtimeChannel
 window.loadBattleEncounters = loadBattleEncounters;
 window.applyBattleTokenRealtime = applyBattleTokenRealtime;
 
-/* --- BATTLE BROADCAST CHANNEL (Command Terminal refactor, Phase 0, 2026-09-30) ---
-   An ephemeral Supabase Realtime *broadcast* channel per battle
-   ('battle:<encounter id>'), for things that should be SEEN by everyone but
-   never STORED: weapon-fire effects and destruction explosions today;
-   drag previews, rulers and pings in later phases. Nothing here touches
-   the database. Before this, fire/explosion effects only ever played on
-   the firing player's own screen (see the old note on
-   window.playWeaponFireEffect). Same broadcast mechanism db.js already
-   uses for tactical pings. self:false -- a sender never receives its own
-   message, so nothing plays twice. Receivers skip any effect involving a
-   vessel they aren't allowed to see (hidden ships). */
+/* --- BATTLE BROADCAST CHANNEL ---
+   An ephemeral Supabase Realtime broadcast channel per battle
+   ('battle:<encounter id>') for things everyone should see but nothing
+   stores: weapon-fire effects, destruction explosions, the shared measuring
+   tape. self:false -- a sender never receives its own message, so nothing
+   plays twice. Receivers skip effects involving vessels they can't see. */
 let battleBroadcastChannel = null;
 let battleBroadcastEncounterId = null;
 window.syncBattleBroadcastChannel = function() {
@@ -530,8 +375,7 @@ function handleRemoteBattleFx(p) {
     };
     if (p.k === 'fire') {
         if (!visible(p.src) || !visible(p.dst)) return;
-        // Everyone at the table now hears the shot too (it used to play only
-        // on the shooter's own device); the impact sound follows it.
+        // Receivers hear the shot too; the impact sound follows it.
         if (window.AudioEngine && window.AudioEngine.playShoot) { try { window.AudioEngine.playShoot(); } catch (e) {} }
         window.playWeaponFireEffect(p.src, p.dst, p.col || undefined, p.dmg || undefined, true);
     } else if (p.k === 'boom') {
@@ -539,7 +383,7 @@ function handleRemoteBattleFx(p) {
         if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
         window.battleRenderer.destruction(p.x, p.y);
     } else if (p.k === 'tape' && typeof window.showRemoteTape === 'function') {
-        window.showRemoteTape(p); // shared measuring tape (Phase 4b, js/grid-tools.js)
+        window.showRemoteTape(p); // shared measuring tape (js/grid-tools.js)
     }
 }
 window.handleRemoteBattleFx = handleRemoteBattleFx;
@@ -562,9 +406,9 @@ window.startBattleEncounter = async function() {
         await db.from('battle_encounters').update({ is_active: false }).eq('id', window.globalBattleEncounterCache.id);
     }
 
-    // Phase 7: optional map from the library (js/battle-maps.js), stored as a snapshot.
+    // Optional map from the library (js/battle-maps.js), stored as a snapshot.
     const map = typeof window.pickedStartMap === 'function' ? window.pickedStartMap() : null;
-    // Phase 10: terrain rules per battle (stored on the map snapshot).
+    // Terrain rules are per battle, stored on the map snapshot.
     if (map) map.rules = typeof window.terrainRulesAllowed === 'function' && window.terrainRulesAllowed() && typeof window.terrainRulesDefaultFor === 'function' && window.terrainRulesDefaultFor(map);
     const { error } = await db.from('battle_encounters').insert({ name, is_active: true, created_by: currentUserId, tokens: [], tokens_migrated: true, map });
     if (error) { alert('Failed to start battle: ' + error.message); return; }
@@ -582,10 +426,10 @@ window.endBattleEncounter = async function() {
     loadBattleEncounters();
 };
 
-/* Same signature every caller already used: hand it the complete new token
-   array. It updates the local cache immediately, then writes ONLY the
-   differences to battle_tokens (see the PER-ROW TOKEN STORAGE comment near
-   the top of this file). Returns once every write has settled. */
+/* Pass the complete new token array. Updates the local cache immediately
+   (after separateBattleTokens), then writes only the differences to
+   battle_tokens (see PER-ROW TOKEN STORAGE). Resolves once every write has
+   settled; on any failed write it reloads the encounter from the database. */
 async function saveBattleTokens(tokens) {
     const enc = window.globalBattleEncounterCache;
     if (!enc) return;
@@ -630,8 +474,7 @@ async function persistBattleTokenDiff(enc, tokens) {
         loadBattleEncounters();
         return;
     }
-    // Auto-callsigns (Phase 1, 2026-10-01): whenever this browser adds
-    // ships to the battle, give same-named NPC copies clean callsigns.
+    // When this browser adds ships, give same-named NPC copies callsigns.
     if (inserts.length > 0 && typeof window.assignBattleCallsigns === 'function') window.assignBattleCallsigns();
 }
 window.saveBattleTokens = saveBattleTokens;
@@ -643,39 +486,22 @@ function clampToGrid(x, y) {
     };
 }
 
-/* Called from js/combat.js's renderVesselDeck weapon-target dropdown. Returns
-   null when there's no restriction to apply (no active battle, or this
-   vessel isn't currently a token in it) so the caller falls back to its
-   existing full-galaxy target list unchanged. Returns an array of
-   {id, name} (battle tokens other than the vessel itself) otherwise. */
-// Small shared lookup used across Movement, Range, and the ordnance/PD
-// automation below — returns the {x,y} of a ship_marker's current token in
-// the active battle, or null if there's no active battle or it isn't in it.
+// {x, y} of a ship_marker's token in the active battle, or null if there's
+// no active battle or the vessel isn't in it.
 window.getBattleTokenPosition = function(vesselId) {
     if (!window.globalBattleEncounterCache) return null;
     const tok = (window.globalBattleEncounterCache.tokens || []).find(t => t.ship_marker_id === vesselId);
     return tok ? { x: tok.x, y: tok.y } : null;
 };
 
-// `range` (optional, grid px) added this session for the Range/Ordnance
-// build: when provided and > 0, candidates further than `range` from the
-// firing vessel's own token are filtered out. 0/undefined preserves the
-// original "no restriction" behavior — legacy callers that don't pass a
-// range are completely unaffected.
-// Fog of War build (this session): a hidden vessel is also excluded here --
-// this is the single choke point behind BOTH ship_weapons' and squadron
-// weapons' target dropdowns (js/combat.js), so filtering here covers both
-// surfaces at once instead of duplicating the check at each call site. Uses
-// window.isVesselVisibleToMe so the vessel's own player-owner (if any) still
-// sees it in their own dropdown even while it's hidden from everyone else.
-// Weapon Range Tiers build (this session): now takes an optional `opts`
-// ({ firerVessel, wpn }) so the per-CANDIDATE effective range (short-range-
-// vs-capital cap, target-uplink exception -- see getEffectiveWeaponRange
-// above) can be applied instead of one flat `range` for every candidate.
-// Every existing caller was updated to pass it; `range` alone still works
-// as a plain flat-distance filter for any caller that doesn't (none left,
-// kept for safety/back-compat rather than assuming every call site here
-// and in every other file got updated).
+/* Target list for the weapon dropdowns in js/combat.js (ship and squadron
+   weapons). Returns null when no restriction applies (no active battle, or
+   the vessel isn't a token in it) so the caller uses its full target list.
+   Otherwise returns [{ id, name, is_strike_craft, out_of_arc, terrain_block }]
+   for other tokens that are in range and visible to this viewer.
+   opts = { firerVessel, wpn, includeOutOfArc }: with `wpn`, range is computed
+   per candidate via getEffectiveWeaponRange; without it, `range` (grid px,
+   0/undefined = unlimited) is a flat distance filter. */
 window.getBattleScopedTargets = function(vesselId, range, opts) {
     if (!window.globalBattleEncounterCache) return null;
     const tokens = window.globalBattleEncounterCache.tokens || [];
@@ -693,32 +519,17 @@ window.getBattleScopedTargets = function(vesselId, range, opts) {
     }).map(t => globalShipMarkersCache.find(sm => sm.id === t.ship_marker_id))
       .filter(Boolean)
       .filter(m => (typeof window.isVesselVisibleToMe === 'function') ? window.isVesselVisibleToMe(m) : true)
-      // Firing arcs (Phase 3, 2026-10-02): out-of-arc targets are dropped,
-      // unless the caller asks to keep them flagged (the weapon dropdowns
-      // show them greyed with "out of arc" so they don't silently vanish).
+      // Out-of-arc / terrain-blocked targets are dropped unless the caller
+      // passes includeOutOfArc (the dropdowns then show them greyed out).
       .map(m => ({ id: m.id, name: m.name, is_strike_craft: m.is_strike_craft, out_of_arc: !!(wpn && typeof window.isTargetInArc === 'function' && !window.isTargetInArc(vesselId, m.id, wpn)),
-          // Phase 10: terrain (planet/station in the way, or hidden in a nebula past lock range)
+          // terrain: planet/station in the way, or hidden in a nebula past lock range
           terrain_block: (typeof window.terrainFireCheck === 'function' ? window.terrainFireCheck(vesselId, m.id) : '') }))
       .filter(m => (!m.out_of_arc && !m.terrain_block) || (opts && opts.includeOutOfArc));
 };
 
-/* Ordnance LAUNCH (Range/Ordnance build, this session). An ordnance-classified
-   weapon's button calls this instead of window.rollShipWeapon. If the firer
-   isn't currently a token in an active battle, there's no grid to track a
-   multi-turn flight against, so this just delegates straight to the old
-   instant-resolve behavior — same fallback pattern as every other
-   battle-scoped feature in this file. Inside an active battle, this
-   validates + consumes ammo/cooldown exactly like a normal shot (mirroring
-   rollShipWeapon's own checks, since this replaces that call for ordnance
-   weapons specifically) but does NOT roll damage — it snapshots the
-   weapon's profile into a new battle_encounters.in_flight_ordnance entry
-   instead. Aging, the turn-1 split into 6, PD auto-fire, and impact
-   resolution all happen in window.processBattleRoundAutomations, called
-   from combat.js's advanceCombatRound. */
-// Shared by deployTemplateToBattle and deployFleetToBattle (Saved Fleets
-// follow-on, this session) — same stagger formula both used to duplicate.
-// tokenCount is however many tokens are already placed (plus however many
-// this same batch-deploy has already placed before this call).
+// Default placement for newly deployed tokens: staggered rows from the
+// top-left. tokenCount = tokens already placed, including earlier ones in
+// the same batch deploy.
 function staggeredTokenPos(tokenCount) {
     const stagger = tokenCount * 24;
     return clampToGrid(20 + (stagger % (BATTLE_GRID_W - 60)), 20 + Math.floor(stagger / (BATTLE_GRID_W - 60)) * 40);
@@ -728,17 +539,14 @@ window.deployTemplateToBattle = async function() {
     if (currentUserRole !== 'dm' || !window.globalBattleEncounterCache) return;
     const select = document.getElementById('battle-map-template-select');
     if (!select || !select.value) { alert('Select a template first.'); return; }
-    // 2026-10-01 (DM report): ships deployed from the Battle Map used to
-    // appear on the galaxy map too. They're Battle-Map-only now, same as
-    // preset NPCs and hangar-launched strike craft (hide_from_galaxy_map).
-    // silent: no "deployed to your DRADIS position" toast -- it isn't there.
+    // Ships deployed here are Battle-Map-only (hide_from_galaxy_map), like
+    // preset NPCs and launched strike craft. silent: skip the "deployed to
+    // your DRADIS position" toast, since it isn't there.
     const newId = await window.deployShipTemplate(select.value, { silent: true, overrides: { hide_from_galaxy_map: true } });
     if (!newId) return; // deployShipTemplate already alerted on failure
     if (window.AudioEngine) window.AudioEngine.playPing();
-    // deployShipTemplate fires its own loadGalaxyData() without awaiting it,
-    // so globalShipMarkersCache may not have the new marker yet — await our
-    // own call here so the token we're about to place doesn't briefly render
-    // as "(vessel not found)" on the DM's own client.
+    // deployShipTemplate doesn't await its own loadGalaxyData(), so reload
+    // here or the new token briefly renders as "(vessel not found)".
     if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
     const tokens = (window.globalBattleEncounterCache.tokens || []).slice();
     const pos = staggeredTokenPos(tokens.length);
@@ -748,24 +556,11 @@ window.deployTemplateToBattle = async function() {
     window.renderBattleMapPanel();
 };
 
-// Saved Fleets follow-on (this session) — deploys every member of a saved
-// fleet composition in one click instead of one deployTemplateToBattle
-// click per vessel. Loops window.deployShipTemplate once per unit (quantity
-// times per member) — each call is the SAME real deploy path a single
-// template deploy already uses, so a fleet vessel is exactly as fresh/
-// fully-stocked as if placed individually; there's no separate "fleet
-// vessel" data model and nothing carries over from a prior battle, since
-// each deploy creates a brand-new ship_markers row.
-//
-// Pending-list follow-up (this session): originally had no confirmation
-// prompt at all (an asymmetry with every other DM action in this panel,
-// flagged in the checkpoint notes) and silently skipped any member whose
-// saved template_id no longer resolved to a real template — deployShipTemplate
-// only alerts on a genuine DB insert error, not on "template not found", so
-// a deleted-template member used to just vanish from the placed count with
-// nothing surfaced anywhere. Both closed out: missing-template members are
-// now detected up front and named in the confirm prompt (and in the
-// resulting chat log line) instead of silently disappearing mid-loop.
+// Deploys every unit of a saved fleet (quantity per member), each through
+// window.deployShipTemplate, so every vessel is a brand-new ship_markers row.
+// Members whose template no longer exists are counted up front, named in
+// the confirm prompt and chat log, and skipped (deployShipTemplate itself
+// only alerts on DB errors, not missing templates).
 window.deployFleetToBattle = async function() {
     if (currentUserRole !== 'dm' || !window.globalBattleEncounterCache) return;
     const select = document.getElementById('battle-map-fleet-select');
@@ -787,10 +582,10 @@ window.deployFleetToBattle = async function() {
     let tokens = (window.globalBattleEncounterCache.tokens || []).slice();
     let placedCount = 0;
     for (const member of members) {
-        if (!findAnyTemplateById(member.template_id)) continue; // already warned above — skip entirely, don't attempt
+        if (!findAnyTemplateById(member.template_id)) continue; // already warned above
         for (let i = 0; i < (member.quantity || 1); i++) {
             const newId = await window.deployShipTemplate(member.template_id, { silent: true, overrides: { hide_from_galaxy_map: true } }); // Battle-Map-only, see deployTemplateToBattle
-            if (!newId) continue; // deployShipTemplate already alerted on a real DB error — skip this unit, keep going with the rest of the fleet
+            if (!newId) continue; // already alerted; skip this unit, keep deploying the rest
             if (typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
             const pos = staggeredTokenPos(tokens.length);
             const newVessel = globalShipMarkersCache.find(m => m.id === newId);
@@ -805,16 +600,13 @@ window.deployFleetToBattle = async function() {
     window.renderBattleMapPanel();
 };
 
-/* DAMAGE RING (Command Terminal refactor, Phase 1, 2026-10-01) ---
-   Every Battle Map token gets rings showing how much it has left:
-   - inner ring = HULL: filled clockwise from 12 o'clock in the existing
-     hull color (green > 66%, amber > 33%, red below), the lost part grey.
-   - outer ring = SHIELDS (cyan), only for ships that have shields at all
-     and never for strike craft (their tokens are too small for two rings).
-   Pure CSS (conic-gradient + a mask that hollows it into a ring), so it
-   costs nothing per frame on phones. Numbers are in the token's tooltip.
-   Visibility follows the token itself -- anyone who can see a token sees
-   its rings (same as the side card's health bars for visible ships). */
+/* DAMAGE RINGS around each token:
+   - inner ring = HULL, filled clockwise from 12 o'clock in the hull color
+     (green > 66%, amber > 33%, red below); the lost part is grey.
+   - outer ring = SHIELDS (cyan), only for ships with shields, never for
+     strike craft (too small for two rings).
+   Pure CSS (conic-gradient + mask), so no per-frame cost. Exact numbers are
+   in the token tooltip. Anyone who can see a token sees its rings. */
 function battleTokenFraction(cur, max) {
     if (!(max > 0)) return null;
     const c = (cur === undefined || cur === null) ? max : cur;
@@ -853,15 +645,10 @@ function battleTokenHpColor(vessel) {
     return '#ff3333';
 }
 
-/* Visual Polish build (this session, confirmed design): "player-owned" (an
-   owner profile with role !== 'dm') is the same heuristic already used
-   throughout this app (renderBattleShipCards' fullDetail check, Battlefield
-   Salvage's spawn condition, Ground Combat's PC-vs-NPC filter) rather than a
-   new one invented for this. For the DM's own view this naturally collapses
-   to a clean 2-tier result (every player ship reads as "ally" green, every
-   DM/NPC ship reads red) since no player id ever equals the DM's own
-   currentUserId. For a player's view it's a real 3-tier read: their own
-   ship (cyan), another player's (green), DM/NPC (red). */
+/* Token border color by faction, from the viewer's point of view: own ship
+   cyan, another player's green, DM/NPC red. "Player-owned" = any owner
+   profile with role !== 'dm' (the same test used app-wide). The DM sees
+   only green/red. */
 function battleTokenFactionColor(vessel) {
     if (!vessel) return '#6b826a';
     const ownerProfs = window.vesselOwnerIds(vessel).map(id => (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === id)).filter(Boolean);
@@ -872,24 +659,18 @@ function battleTokenFactionColor(vessel) {
 }
 
 /* ==========================================================================
-   BATTLE RENDERER (Command Terminal refactor, Phase 0, 2026-10-01)
+   BATTLE RENDERER
    ==========================================================================
-   Everything that DRAWS the battle grid now goes through one object,
-   window.battleRenderer, instead of being spread through this file. The
-   rules (movement limits, turns, AP, firing) never touch the DOM grid
-   directly any more -- they ask the renderer to convert a screen point into
-   grid coordinates (screenToWorld / screenDeltaToWorld) and hand it the
-   current tokens to draw (sync). That's the seam a future Three.js renderer
-   (roadmap Phase 6) plugs into: implement the same five methods and swap
-   window.battleRenderer -- no rules code changes.
-
-   Coordinates: "world" = the grid's own logical px space (BATTLE_GRID_W x
-   BATTLE_GRID_H, origin top-left, +y down), the space every stored token
-   x/y, range and move_remaining already uses. "Screen" = browser clientX/Y.
-
-   DomBattleRenderer is the existing plain-DOM grid, moved here unchanged:
-   persistent token divs diffed every render (CSS transitions animate moves),
-   the ordnance overlay, and the four weapon-fire effect families. */
+   All drawing of the battle grid goes through window.battleRenderer. Rules
+   code never touches the grid DOM; it converts screen points via
+   screenToWorld / screenDeltaToWorld and hands tokens to sync(). Another
+   renderer can be swapped in by implementing the same methods.
+   "World" = logical grid px (BATTLE_GRID_W x BATTLE_GRID_H, origin top-left,
+   +y down), the space of stored token x/y, ranges and move_remaining.
+   "Screen" = browser clientX/Y.
+   DomBattleRenderer: persistent token divs diffed each render (CSS
+   transitions animate moves), the ordnance overlay, and four weapon-fire
+   effect families. */
 const DomBattleRenderer = {
     name: 'dom',
     grid() { return document.getElementById('battle-map-grid'); },
@@ -904,7 +685,7 @@ const DomBattleRenderer = {
     screenDeltaToWorld(dx, dy) {
         return { x: dx / BATTLE_GRID_SCALE, y: dy / BATTLE_GRID_SCALE };
     },
-    // Grid point -> screen point (for anchoring HUD panels over a token later).
+    // Grid point -> screen point (e.g. to anchor HUD panels over a token).
     worldToScreen(x, y) {
         const grid = this.grid();
         if (!grid) return null;
@@ -913,20 +694,14 @@ const DomBattleRenderer = {
     },
     // Draw/refresh every visible token + in-flight ordnance for this encounter.
     sync(encounter, tokens) {
-        // Animation Engine build (this session): diff against existing DOM
-        // elements instead of the old innerHTML='' + full rebuild every render.
-        // A token's element now persists across renders, which is what lets the
-        // .battle-token-el CSS transition (style.css) actually animate a
-        // position change instead of teleporting -- e.g. another player's drag
-        // syncing in through realtime, a fresh deploy landing via
-        // staggeredTokenPos, or resetBattleMapMovement's round tick.
+        // Diffs against existing DOM elements instead of rebuilding, so the
+        // .battle-token-el CSS transition (style.css) animates position changes.
         const grid = document.getElementById('battle-map-grid');
         if (grid) {
             grid.onclick = window.handleBattleGridClick;
 
-            // Switching to a different active battle (or to none) invalidates
-            // every cached element outright -- stale token/ordnance divs from a
-            // PRIOR encounter must never leak into this one.
+            // A different battle: drop every cached element so nothing from the
+            // previous encounter leaks in.
             if (encounter.id !== battleMapLastEncounterId) {
                 grid.innerHTML = '';
                 battleMapTokenEls = {};
@@ -938,20 +713,14 @@ const DomBattleRenderer = {
             }
 
             const seenTokenIds = new Set();
-            // Initiative + Action Economy build (this session): whose turn it is,
-            // for the glow highlight below -- undefined/harmless when initiative
-            // hasn't been rolled for this battle.
+            // Whose turn it is, for the glow below (null before initiative is rolled).
             const currentTurnTokenId = (encounter.initiative_rolled && (encounter.turn_order || []).length > 0)
                 ? encounter.turn_order[encounter.current_turn_index]
                 : null;
             tokens.forEach(tok => {
                 const vessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
-                // Fog of War build (this session): a hidden token is simply
-                // never added to seenTokenIds -- the cleanup pass below (which
-                // removes any tokenEl NOT in that set) then deletes its DOM
-                // element on this render if it had one, or the token just never
-                // gets created in the first place. The DM and the vessel's own
-                // player-owner still see it normally.
+                // Fog of war: a token this viewer can't see is left out of
+                // seenTokenIds, so the cleanup pass below removes its element.
                 if (vessel && typeof window.isVesselVisibleToMe === 'function' && !window.isVesselVisibleToMe(vessel)) return;
                 seenTokenIds.add(tok.token_id);
                 const isStationTok = !!(vessel && vessel.is_station);
@@ -962,7 +731,7 @@ const DomBattleRenderer = {
                 if (!tokenEl) {
                     tokenEl = document.createElement('div');
                     tokenEl.className = 'battle-token-el';
-                    tokenEl.dataset.tokenId = tok.token_id; // Phase 4b: lets grid tools find a token's element
+                    tokenEl.dataset.tokenId = tok.token_id; // lets grid tools find a token's element
                     tokenEl.style.position = 'absolute';
                     tokenEl.style.left = tok.x + 'px';
                     tokenEl.style.top = tok.y + 'px';
@@ -970,10 +739,8 @@ const DomBattleRenderer = {
                     battleMapTokenEls[tok.token_id] = tokenEl;
                     wireTokenDrag(tokenEl, tok.token_id, tok.ship_marker_id);
                 }
-                // Visual Polish build: kept even after the token leaves `tokens`
-                // (updated every render while the token is present) so the
-                // removal pass below can still look up which vessel a just-
-                // vanished token belonged to, for the destruction-effect check.
+                // Kept after the token leaves `tokens`, so the removal pass can
+                // still tell which vessel a vanished token belonged to.
                 battleMapTokenMarkerIds[tok.token_id] = tok.ship_marker_id;
 
                 tokenEl.title = isStationTok
@@ -982,9 +749,8 @@ const DomBattleRenderer = {
                     ? `${vessel.name} — strike craft, Move: ${moveRemaining}/${vessel.tactical_speed ?? 160} px remaining. Fire from the Hangar Bay panel, not this token.`
                     : `${vessel ? vessel.name : '(vessel not found)'} — Move: ${moveRemaining}${vessel ? '/' + (vessel.tactical_speed ?? 160) : ''} px remaining this round`;
                 if (vessel) tokenEl.title += battleTokenIntegrityText(vessel);
-                // left/top set separately from the rest so re-applying the same
-                // value every render (nothing moved) never re-triggers the CSS
-                // transition -- only an ACTUAL change animates.
+                // Re-applying an unchanged left/top doesn't re-trigger the CSS
+                // transition; only an actual change animates.
                 tokenEl.style.left = tok.x + 'px';
                 tokenEl.style.top = tok.y + 'px';
                 const tokenSize = isStrikeCraftTok ? BATTLE_STRIKE_CRAFT_TOKEN_SIZE : BATTLE_TOKEN_SIZE;
@@ -992,57 +758,24 @@ const DomBattleRenderer = {
                 tokenEl.style.height = tokenSize + 'px';
                 tokenEl.style.borderRadius = isStationTok ? '4px' : '50%';
                 tokenEl.style.background = '#0a1410';
-                // Strike Craft Grid Position build: a dashed border is the only
-                // visual differentiator (kept intentionally light — squadrons
-                // don't get their own ship-status card, see the checkpoint notes
-                // for why the data model doesn't fit renderBattleShipCards).
-                // Damage ring build (Phase 1, 2026-10-01): the token's own
-                // border now carries the FACTION color (whose ship it is),
-                // and hull/shields are shown by the rings drawn around it
-                // (battleTokenDamageRingsHtml below) -- the old HP-colored
-                // border is superseded by the hull ring, which shows the
-                // same color AND how much is left.
+                // Border = faction color (dashed for strike craft); hull/shields
+                // are shown by the damage rings.
                 tokenEl.style.border = `2px ${isStrikeCraftTok ? 'dashed' : 'solid'} ${battleTokenFactionColor(vessel)}`;
-                // Initiative + Action Economy build (this session): a bright
-                // glow on whichever token currently has the turn -- purely
-                // additive to the existing HP-color border above, cleared for
-                // every other token by re-setting boxShadow unconditionally
-                // every render (same "re-apply every render" pattern the rest
-                // of this loop already uses).
                 const isCurrentTurnTok = !!(currentTurnTokenId && tok.token_id === currentTurnTokenId);
                 tokenEl.style.display = 'flex';
                 tokenEl.style.alignItems = 'center';
                 tokenEl.style.justifyContent = 'center';
-                // Polish pass (this session): strike craft tokens are now much
-                // smaller (BATTLE_STRIKE_CRAFT_TOKEN_SIZE above) -- a bit bigger
-                // relative font so the single emoji glyph doesn't look lost, and
-                // the name text drops entirely below (an emblem, not a label;
-                // the full name still shows in the hover title set above).
+                // Strike craft show a single emoji (larger font) instead of a
+                // name; the full name is in the tooltip.
                 tokenEl.style.fontSize = isStrikeCraftTok ? '11px' : '8px';
                 tokenEl.style.color = vessel ? (vessel.color || '#00e5a3') : '#ff3333';
                 tokenEl.style.cursor = isStationTok ? 'pointer' : 'grab';
                 tokenEl.style.userSelect = 'none';
-                // Fog of War build (this session): the token is only ever built
-                // for a viewer who's allowed to see it at all (see the
-                // isVesselVisibleToMe skip above) -- for the DM specifically,
-                // dim it slightly so a hidden-from-players token is still
-                // visually distinguishable on their own grid, without changing
-                // anything a player (who never gets this token built) would see.
+                // The DM sees hidden ships dimmed; players never get them at all.
                 tokenEl.style.opacity = (vessel && vessel.is_hidden && currentUserRole === 'dm') ? '0.55' : '1';
-                // Visual Polish build (this session): an outer ring in the
-                // viewer's own faction color (mine/ally/DM-NPC), layered outside
-                // the existing HP-color border via a second box-shadow ring
-                // rather than replacing that border -- HP state stays visible,
-                // ownership becomes ALSO visible at a glance without a click
-                // into the side card.
-                // Bug fix (2026-10-01): this line used to overwrite the gold
-                // "current turn" glow set a few lines above on every render,
-                // so the glow never actually showed. The faction color is on
-                // the border now; the shadow only carries the turn glow.
                 tokenEl.style.boxShadow = '0 0 6px rgba(0,0,0,0.6)';
-                // The current-turn glow is a pulsing ring drawn by CSS
-                // (.battle-token-current-turn::after in style.css), so it
-                // survives re-renders and animates without per-frame repaints.
+                // Current-turn glow is a pulsing CSS ring
+                // (.battle-token-current-turn::after in style.css).
                 tokenEl.classList.toggle('battle-token-current-turn', isCurrentTurnTok);
                 tokenEl.style.textAlign = 'center';
                 tokenEl.style.overflow = 'visible'; // rings sit outside the token; the name text clips itself below
@@ -1054,7 +787,7 @@ const DomBattleRenderer = {
                 label.style.cssText = 'position:relative; z-index:1; max-width:100%; overflow:hidden; white-space:nowrap; pointer-events:none;';
                 label.textContent = !vessel ? '???' : isStrikeCraftTok ? '🛩️' : vessel.name.slice(0, 6);
                 tokenEl.appendChild(label);
-                // Phase 3 (2026-10-02): nose chevron + rotate knob (js/firing-arcs.js; no-op while the firing_arcs switch is off).
+                // Nose chevron + rotate knob (js/firing-arcs.js; no-op while the firing_arcs switch is off).
                 if (typeof window.decorateBattleTokenHeading === 'function') window.decorateBattleTokenHeading(tokenEl, tok, vessel);
                 if (!isStationTok && moveRemaining < 0) {
                     const moveBadge = document.createElement('div');
@@ -1064,12 +797,9 @@ const DomBattleRenderer = {
                 }
             });
 
-            // Remove elements for tokens no longer present (withdrawn/destroyed).
-            // Visual Polish build: if the removed token has a matching entry in
-            // battleMapPendingExplosions (staged by checkBattleTokenDestroyed
-            // just before this render ran), play a destruction effect at its
-            // last known position first. A plain withdraw/recall never stages
-            // an entry, so those vanish silently exactly as before.
+            // Remove elements for tokens no longer shown. A destroyed token has a
+            // battleMapPendingExplosions entry (from checkBattleTokenDestroyed)
+            // and explodes first; withdrawn/recalled ones just vanish.
             Object.keys(battleMapTokenEls).forEach(id => {
                 if (!seenTokenIds.has(id)) {
                     const pendingIdx = battleMapPendingExplosions.findIndex(p => p.token_id === id);
@@ -1107,13 +837,12 @@ window.DomBattleRenderer = DomBattleRenderer;
 window.battleRenderer = DomBattleRenderer;
 
 let lastAnnouncedTurnKey = null;
-/* Battle Map render hooks (consolidation pass, 2026-10-08). Other files used
-   to wrap window.renderBattleMapPanel one inside another, so what ran when
-   depended on script order. Now they register here instead:
+/* Battle Map render hooks. Other files must not wrap
+   window.renderBattleMapPanel; they register here instead:
      window.onBattleMapRender(name, fn, order)
-   Every hook runs after each render, lowest `order` first; a hook that
-   throws is logged and the rest still run. Registering the same name again
-   replaces it. */
+   Every hook runs after each render, lowest `order` first (default 500); a
+   hook that throws is logged and the rest still run. Registering the same
+   name again replaces it. */
 const battleRenderHooks = [];
 window.onBattleMapRender = function(name, fn, order) {
     if (typeof fn !== 'function') return;
@@ -1141,40 +870,30 @@ const renderBattleMapPanelCore = function() {
 
     dmControls.style.display = (isDm && !encounter) ? 'block' : 'none';
     inactiveMsg.style.display = encounter ? 'none' : 'block';
-    // activeContainer is now the two-column .battle-map-layout flex box
-    // (full-screen build, this session) — 'flex', not 'block', or the grid
-    // + ship-cards columns collapse back to a single stacked column.
+    // 'flex', not 'block': .battle-map-layout is a two-column flex box.
     activeContainer.style.display = encounter ? 'flex' : 'none';
     if (!encounter) return;
 
     document.getElementById('battle-map-encounter-name').innerText = encounter.name;
     const endBtn = document.getElementById('battle-map-end-btn');
     if (endBtn) endBtn.style.display = isDm ? 'inline-block' : 'none';
-    // Initiative + Action Economy build (this session): ADVANCE ROUND is now
-    // only the pre-initiative free-for-all's round tick -- once a battle has
-    // real initiative rolled, ending the last turn in the order fires the
-    // exact same tick automatically (window.endCurrentTurn), so a DM
-    // manually clicking ADVANCE ROUND mid-turn-order would desync the two.
-    // ROLL INITIATIVE is the mirror image: only useful before that's
-    // happened for this battle.
+    // ADVANCE ROUND and ROLL INITIATIVE are DM-only and shown only before
+    // initiative is rolled. After that, ending the last turn
+    // (window.endCurrentTurn) fires the round tick, and a manual advance
+    // would desync it.
     const advanceBtn = document.getElementById('battle-map-advance-btn');
-    // ADVANCE ROUND was already functionally DM-only (advanceCombatRound
-    // itself returns immediately for a non-DM caller) but the button had no
-    // visibility check of its own, so a player saw a clickable button that
-    // silently did nothing -- tester feedback asked for it hidden outright.
-    // Same toggle pattern as endBtn above.
     if (advanceBtn) advanceBtn.style.display = (isDm && !encounter.initiative_rolled) ? 'inline-block' : 'none';
     const rollInitBtn = document.getElementById('battle-map-roll-initiative-btn');
     if (rollInitBtn) rollInitBtn.style.display = (isDm && !encounter.initiative_rolled) ? 'inline-block' : 'none';
     const dmDeploy = document.getElementById('battle-map-dm-deploy');
     if (dmDeploy) dmDeploy.style.display = isDm ? 'block' : 'none';
-    // Undo log (2026-10-01): DM-only, behind the 'battle_undo' feature switch.
+    // Undo log: DM-only, behind the 'battle_undo' feature switch.
     const showUndo = isDm && typeof window.isFeatureOn === 'function' && window.isFeatureOn('battle_undo');
     ['battle-map-undo-btn', 'battle-map-redo-btn', 'battle-map-log-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = showUndo ? 'inline-block' : 'none'; });
 
     const tokens = encounter.tokens || [];
 
-    // --- Turn bar (Initiative + Action Economy build, this session) ---
+    // --- Turn bar ---
     const turnBar = document.getElementById('battle-map-turn-bar');
     if (turnBar) {
         if (encounter.initiative_rolled && (encounter.turn_order || []).length > 0) {
@@ -1184,9 +903,8 @@ const renderBattleMapPanelCore = function() {
             const curTok = tokens.find(t => t.token_id === curTokId);
             const curVessel = curTok ? globalShipMarkersCache.find(m => m.id === curTok.ship_marker_id) : null;
             const turnInfo = document.getElementById('battle-map-turn-info');
-            // "Your turn" alert (2026-10-01): a chime on the owning player's
-            // own device the moment their ship's turn comes up -- once per
-            // turn, so re-renders don't repeat it. The DM doesn't get it.
+            // "Your turn" chime on the owning player's device, once per turn
+            // (re-renders don't repeat it). Not played for the DM.
             const turnKey = `${encounter.id}:${encounter.round_number || 1}:${encounter.current_turn_index}`;
             if (!isDm && !encounter.pending_round_tick && curVessel && window.vesselHasOwner(curVessel, currentUserId) && lastAnnouncedTurnKey !== turnKey) {
                 lastAnnouncedTurnKey = turnKey;
@@ -1204,46 +922,31 @@ const renderBattleMapPanelCore = function() {
                 const canEndTurn = isDm || (!encounter.pending_round_tick && curVessel && window.vesselHasOwner(curVessel, currentUserId));
                 endTurnBtn.style.display = canEndTurn ? 'inline-block' : 'none';
             }
-            // Cheap, idempotent tail check (own in-flight guard) -- picks up
-            // any token placed/launched onto the grid after initiative was
-            // first rolled for this battle.
+            // Idempotent: adds tokens placed after initiative was rolled.
             if (typeof window.ensureNewTokensInTurnOrder === 'function') window.ensureNewTokensInTurnOrder();
         } else {
             turnBar.style.display = 'none';
         }
     }
 
-    // --- Grid / placed tokens --- drawn by the active renderer (see
-    // BATTLE RENDERER below). Today that's always the DOM renderer, which is
-    // exactly the code that used to live inline here.
+    // --- Grid / placed tokens --- drawn by the active renderer (BATTLE RENDERER above).
     window.battleRenderer.sync(encounter, tokens);
 
     // --- Palette (undeployed candidates) ---
     const placedIds = new Set(tokens.map(t => t.ship_marker_id));
     const palette = document.getElementById('battle-map-palette');
     if (palette) {
-        // Bug fix (2026-08-29, DM report): a DM prepping an encounter needs
-        // to place a PLAYER's vessel (e.g. their primary combat ship), not
-        // just their own NPC markers -- but every NPC in this app is ALSO
-        // owned by the DM's own account, so the old "your own vessels only"
-        // rule (still correct for a player's own self-service placement)
-        // silently hid every PC ship from the DM's palette with no error,
-        // just an empty/wrong-looking list. globalShipMarkersCache already
-        // holds every vessel regardless of owner (js/map.js's
-        // loadGalaxyData does an unfiltered `.select('*')`), so this is a
-        // pure display-filter fix, no new query needed. A non-DM player
-        // keeps the old own-vessels-only behavior unchanged.
+        // The DM can place any vessel (including players' ships); a player
+        // only their own. Strike craft and already-placed vessels are excluded.
         const candidates = globalShipMarkersCache.filter(m => !m.is_strike_craft && !placedIds.has(m.id) && (isDm || window.vesselHasOwner(m, currentUserId)));
         if (candidates.length === 0) {
             palette.innerHTML = '<span style="font-size:9px; color:#6b826a;">No available vessels to place.</span>';
         } else {
             palette.innerHTML = candidates.map(m => {
                 const armed = window.battleMapArmedToken && window.battleMapArmedToken.ship_marker_id === m.id;
-                // DM view only: label another player's vessel with their
-                // username (from live presence, the only owner->name lookup
-                // already loaded in this app -- offline owners just show no
-                // suffix rather than a stale/guessed name) so a DM looking
-                // at a mixed NPC+PC list can tell them apart at a glance.
+                // DM view: suffix another player's vessel with the owner's
+                // username. Names come from live presence, so offline owners
+                // get no suffix.
                 const otherOwnerIds = (isDm && !window.vesselHasOwner(m, currentUserId)) ? window.vesselOwnerIds(m) : [];
                 const otherOwnerNames = otherOwnerIds.map(id => (onlineUsersMap[id] || [])[0]).filter(Boolean).map(p => p.username);
                 const ownerSuffix = otherOwnerNames.length ? ` <span style="color:#6b826a;">— ${otherOwnerNames.join('/')}</span>` : '';
@@ -1269,7 +972,7 @@ const renderBattleMapPanelCore = function() {
             : allTemplates.map(t => `<option value="${t.id}">${t.name}${t.is_secret ? ' 🔒' : ''}</option>`).join('');
     }
 
-    // --- DM saved-fleet deploy select (Saved Fleets follow-on, this session) ---
+    // --- DM saved-fleet deploy select ---
     const fleetSelect = document.getElementById('battle-map-fleet-select');
     if (fleetSelect && isDm) {
         const fleets = window.globalSavedFleetsCache || [];
@@ -1278,9 +981,8 @@ const renderBattleMapPanelCore = function() {
             : fleets.map(f => `<option value="${f.id}">${f.name} (${(f.members || []).reduce((n, m) => n + (m.quantity || 1), 0)} vessels)</option>`).join('');
     }
 
-    // --- Ship-status cards (weapons + health) — replaces the old plain
-    // "Engaged Roster" list this session; see window.renderBattleShipCards
-    // below for the permission rule (own/allied vs. DM/NPC vessels).
+    // --- Ship-status cards (weapons + health); see window.renderBattleShipCards
+    // for what each viewer may see.
     window.renderBattleShipCards(tokens);
 
     // --- Incoming Ordnance (informational — PD is fully automatic, see
@@ -1306,10 +1008,7 @@ const renderBattleMapPanelCore = function() {
         }
     }
 
-    // Manual Damage Application build (this session): keep the DM Tools
-    // "MANUAL DMG" subtab's Firer/Target dropdowns in sync with whatever's
-    // actually deployed right now -- cheap, idempotent, called unconditionally
-    // same as every other tail-of-render refresh in this codebase (e.g. the
-    // Custom Star Tracker refresh in window.loadGalaxyData).
+    // Keep the DM Tools "MANUAL DMG" Firer/Target dropdowns in sync with the
+    // deployed tokens (cheap, idempotent).
     if (typeof window.renderManualDamagePanel === 'function') window.renderManualDamagePanel();
 };

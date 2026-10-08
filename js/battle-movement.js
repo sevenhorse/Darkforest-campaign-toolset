@@ -1,15 +1,12 @@
 /* ==========================================================================
    js/battle-movement.js - Ship token movement: overlap separation, AI move-toward, the 2D token drag and the shared move rules (battle_tokens moves).
-   Split out of js/battle-map.js (consolidation pass 2, 2026-10-08), code
-   unchanged. Classic script sharing the global scope: loads right after
-   battle-map.js (see index.html for the order).
+   Classic script sharing the global scope: loads right after battle-map.js
+   (see index.html for the order).
    ========================================================================== */
-/* Playtest rebalance (2026-10-03, DM): ships and strike craft stacked on
-   top of / inside each other (AI moves ended exactly on their target's
-   position; launches scattered randomly round the carrier). Every token
-   that is new or moved in a save is now nudged to the nearest free spot:
-   footprints are circles sized from the 3D hull lengths (craft 12, escort
-   23, capital 31, station 22, x model_scale). A moved token first backs off
+/* Token separation (DM rule): tokens may not overlap. Every token that is
+   new or moved in a save is nudged to the nearest free spot. Footprints are
+   circles sized from the 3D hull lengths (craft 12, escort 23, capital 31,
+   station 22, x model_scale clamped to 0.5-2). A moved token first backs off
    along its own path; a new one spirals outward. Hidden (fog) ships aren't
    obstacles for players, so a nudge never gives one away. */
 const TOKEN_FOOTPRINT = { craft: 12, escort: 23, capital: 31, station: 22 };
@@ -68,19 +65,11 @@ function separateBattleTokens(tokens) {
 }
 window.separateBattleTokens = separateBattleTokens;
 
-/* Squadron Movement + Retreat build (this session): moves ONE token
-   (identified by its ship_marker_id) up to maxDist px straight toward
-   targetPos, clamped to the grid -- used by the AI Stances' offensive
-   advance-on-target and low-HP retreat-toward-carrier behavior in
-   processBattleRoundAutomations below. Reads/writes through
-   window.globalBattleEncounterCache.tokens directly (via a fresh slice,
-   same "never mutate the live array in place" convention every other
-   token-position writer in this file already follows) so a caller can
-   await saveBattleTokens() on the result and have window.
-   getBattleTokenPosition immediately reflect the new position for
-   whatever it does next (e.g. firing from the arrived-at position).
-   Returns null (no-op) if the token isn't found -- fails open, same
-   as every other "squadron has no grid token" check in this file. */
+/* Moves one token (by ship_marker_id) up to maxDist px straight toward
+   targetPos, clamped to the grid. Used by AI stance advance/retreat in
+   processBattleRoundAutomations. Returns a new tokens array (the live array
+   is never mutated) for the caller to pass to saveBattleTokens, or null if
+   the token isn't found. */
 function moveTokenToward(shipMarkerId, targetPos, maxDist) {
     if (!window.globalBattleEncounterCache) return null;
     const currentTokens = (window.globalBattleEncounterCache.tokens || []).slice();
@@ -92,16 +81,16 @@ function moveTokenToward(shipMarkerId, targetPos, maxDist) {
     let newPos = (dist <= maxDist || dist === 0)
         ? { x: targetPos.x, y: targetPos.y }
         : clampToGrid(cur.x + dx * (maxDist / dist), cur.y + dy * (maxDist / dist));
-    // Phase 10: terrain rules (asteroids cost more, planets/stations stop
-    // the move, debris crossed is queued for damage -- flushed by the caller
-    // after it saves the move, via window.terrainFlushDebris).
+    // Terrain rules: asteroids cost more, planets/stations stop the move,
+    // debris crossed is queued for damage (the caller flushes it after
+    // saving, via window.terrainFlushDebris).
     if (typeof window.terrainRulesActive === 'function' && window.terrainRulesActive()) {
         const v = globalShipMarkersCache.find(m => m.id === shipMarkerId);
         const walk = window.terrainWalk(v, { x: cur.x, y: cur.y }, clampToGrid(targetPos.x, targetPos.y), maxDist);
         newPos = walk.pos;
         window.terrainQueueDebris(shipMarkerId, walk.debrisLen);
     }
-    // Playtest rebalance: never end a move inside another ship (see separateBattleTokens).
+    // Never end a move inside another ship (see separateBattleTokens).
     if (typeof window.findFreeTokenSpot === 'function') newPos = window.findFreeTokenSpot(cur, newPos, currentTokens, { x: cur.x, y: cur.y });
     currentTokens[idx] = { ...cur, x: newPos.x, y: newPos.y };
     return currentTokens;
@@ -109,45 +98,20 @@ function moveTokenToward(shipMarkerId, targetPos, maxDist) {
 
 
 
-/* Native drag (mousedown/mousemove/mouseup), constrained to the grid bounds,
-   same pattern as makePanelDraggable (js/ui.js) but scoped to a token div
-   inside the arena rather than a whole floating panel. A short-drag (< 5px)
-   is treated as a click (opens the vessel terminal) rather than a move.
-
-   ** SUPERSEDED 2026-09-26: movement is now enforced for players (owner-
-   only, own-turn-only once initiative is rolled, hard-capped at
-   move_remaining; DM exempt) -- see the comment inside wireTokenDrag. The
-   original design note below is kept for history. **
-   Movement (added this session, confirmed design): DM-trusted, not
-   code-enforced — the drag itself is never blocked or snapped back. On
-   drop, the straight-line distance moved is subtracted from the token's
-   move_remaining (grid px) as an informational readout only; it's allowed
-   to go negative (rendered in red — "overdrawn") so the DM sees at a glance
-   that a token moved further than its Tactical Speed for the round, same
-   as this app trusts the DM's eye everywhere else (combat rolls, hazards).
-   move_remaining resets to the vessel's tactical_speed whenever the DM
-   clicks ADVANCE ROUND — see resetBattleMapMovement below. */
-// Animation Engine build (this session): parameterized by the STABLE
-// tokenId/shipMarkerId now, not a captured token object -- the grid render
-// now diffs and REUSES token DOM elements across renders (see the maps
-// above) instead of tearing down and rebuilding everything every time, so
-// this function's closure can no longer trust a token object captured once
-// at element-creation time; a remote move synced in through realtime (or
-// any other render) would leave it stale. Both ids are immutable for a
-// token's lifetime, so they're safe to close over; x/y are looked up fresh
-// from window.globalBattleEncounterCache at the moment a drag actually
-// starts instead.
+/* Mouse + touch drag for a 2D token div, constrained to the grid. A press
+   that moves no more than 5 grid units is a tap (opens the vessel terminal
+   or auto-targets a hostile). Move rules live in battleMoveRule below.
+   Takes the stable tokenId/shipMarkerId rather than a token object: token
+   DOM elements are reused across renders, so x/y are read fresh from
+   window.globalBattleEncounterCache when a drag starts. */
 function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
-    // Station Designer build: a station is fully immobile on the Battle Map
-    // (confirmed design — no move-remaining tracking, can't be repositioned
-    // by drag) rather than just defaulting to 0 speed like any other ship
-    // could. A plain click still opens the vessel terminal, same as a
-    // short/non-drag click on a normal token.
+    // DM rule: stations never move on the Battle Map (not even by drag).
+    // A click still works like a tap on any other token.
     const stationVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
     if (stationVessel && stationVessel.is_station) {
         tokenEl.addEventListener('mousedown', (e) => { e.stopPropagation(); });
         tokenEl.addEventListener('click', () => {
-            // Phase 4c: with the tactical HUD on, a tap selects the ship in the HUD first.
+            // With the tactical HUD on, a tap selects the ship in the HUD first.
             if (typeof window.tv2HandleTokenTap === 'function' && window.tv2HandleTokenTap(shipMarkerId)) return;
             if (stationVessel.iff === 'hostile' && !window.vesselHasOwner(stationVessel, currentUserId)) {
                 window.autoTargetAllMyWeapons(shipMarkerId);
@@ -157,34 +121,16 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         });
         return;
     }
-    // Mobile pass (2026-09-24): token dragging was mouse-only, so on a phone
-    // you could tap a token (the browser fakes a click) but never MOVE your
-    // ship on the Battle Map. The drag logic is now three plain functions
-    // (begin/move/end, taking screen coordinates) driven by BOTH mouse and
-    // touch listeners -- same math, same save, same tap-vs-drag rule (more
-    // than 5 grid units = a drag, otherwise it's a tap that opens the vessel
-    // or auto-targets a hostile). Desktop mouse behavior is unchanged.
-    // Movement enforcement (DM decision 2026-09-26 -- replaces the old
-    // honor-system "overdrawn in red" behavior for players):
-    //   - DM is exempt: can drag any token any distance at any time, and a
-    //     DM drag does NOT spend move_remaining (pure repositioning).
-    //   - A player can only drag a token they own (vesselHasOwner); on
-    //     anyone else's token a press is always treated as a tap.
-    //   - Once initiative is rolled, a player's token that HAS a turn slot
-    //     can only move during its own turn (tokens with no slot --
-    //     AI-stance / ai_controlled -- are unrestricted, same rule as
-    //     spendTokenAp). Movement still does not cost AP.
-    //   - Distance is hard-capped at move_remaining: the token stops at
-    //     max reach along the drag direction instead of overspending.
-    // dragMode is decided at press time: 'free' (DM), 'capped' (player,
-    // allowed), or 'tap' (not allowed to move -- press only opens/targets).
+    // begin/move/end take screen coordinates and are driven by both mouse
+    // and touch listeners. dragMode is decided at press time by
+    // battleMoveRule: 'free' (DM), 'capped' (player, allowed) or 'tap'
+    // (press only opens/targets).
     let isDragging = false, moved = false, startX, startY, initialLeft, initialTop;
     let dragMode = 'tap', blockReason = '', moveRule = null;
     let lastTouchX = 0, lastTouchY = 0, lastTouchEndAt = 0;
     let pressIsTouch = false; // phones: a touch press on a LOCKED map is tap-only (js/battle-mobile.js)
-    // Phase 6a: the move rules now live in shared functions (battleMoveRule /
-    // battleConstrainMove / battleCommitMove / battleTokenTapped, just below
-    // this function) so the 3D Command view applies exactly the same rules.
+    // Move rules are shared with the 3D Command view (battleMoveRule /
+    // battleConstrainMove / battleCommitMove / battleTokenTapped, below).
     function constrainPos(x, y) { return window.battleConstrainMove(moveRule, x, y); }
     function beginDrag(clientX, clientY) {
         isDragging = true; moved = false;
@@ -195,15 +141,12 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         moveRule.x0 = initialLeft; moveRule.y0 = initialTop;
         dragMode = moveRule.mode; blockReason = moveRule.blockReason;
         if (pressIsTouch && typeof window.battleMapTouchLocked === 'function' && window.battleMapTouchLocked()) { dragMode = 'tap'; blockReason = ''; }
-        // Suspend the CSS position transition (see .battle-token-el in
-        // style.css) for the duration of this drag -- otherwise every move
-        // write would animate TOWARD the new value instead of tracking the
-        // pointer directly. Restored on drop.
+        // Suspend the CSS position transition (.battle-token-el) during the
+        // drag so the token tracks the pointer directly. Restored on drop.
         tokenEl.style.transition = 'none';
     }
-    // Screen-pixel deltas are converted by the renderer (screenDeltaToWorld --
-    // today a divide by BATTLE_GRID_SCALE) because the token
-    // lives inside #battle-map-grid's CSS transform:scale().
+    // Screen-pixel deltas go through the renderer (screenDeltaToWorld)
+    // because the token lives inside #battle-map-grid's CSS transform:scale().
     function moveDrag(clientX, clientY) {
         if (!isDragging) return;
         const { x: dx, y: dy } = window.battleRenderer.screenDeltaToWorld(clientX - startX, clientY - startY);
@@ -217,8 +160,8 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
         isDragging = false;
         tokenEl.style.transition = '';
         if (moved && dragMode === 'tap' && blockReason) {
-            // A real drag attempt on the player's OWN token that isn't allowed
-            // right now -- say why instead of silently opening the terminal.
+            // A drag on the player's own token that isn't allowed right now:
+            // say why instead of opening the terminal.
             alert(blockReason);
             return;
         }
@@ -273,14 +216,15 @@ function wireTokenDrag(tokenEl, tokenId, shipMarkerId) {
     });
 }
 
-/* Phase 6a (2026-10-03): the token move rules, shared by the 2D grid's drag
-   (wireTokenDrag above) and the 3D Command view (js/battle-3d.js). Same
-   rules as before, unchanged:
+/* Token move rules (DM decision), shared by the 2D drag (wireTokenDrag) and
+   the 3D Command view (js/battle-3d.js):
      - DM: 'free' -- any token, any distance, no move spent.
      - Player: only their own token; once initiative is rolled, only on its
        own turn (tokens with no turn slot are unrestricted); not while the
        round waits for the DM; capped at move_remaining ('capped').
-     - Otherwise 'tap' (a press only selects / opens / targets).
+       Movement does not cost AP.
+     - Otherwise 'tap' (a press only selects / opens / targets); blockReason
+       says why when it's the player's own token.
      - Stations never move. */
 window.battleMoveRule = function(tokenId, shipMarkerId) {
     const enc = window.globalBattleEncounterCache;
@@ -308,7 +252,7 @@ window.battleMoveRule = function(tokenId, shipMarkerId) {
 // maxReach from the start point along the same direction.
 window.battleConstrainMove = function(rule, x, y) {
     let pos = clampToGrid(x, y);
-    // Phase 10: with terrain rules on, a capped move walks the straight line
+    // With terrain rules on, a capped move walks the straight line
     // and stops where the budget runs out (asteroids cost more) or where it
     // would enter a planet / station (js/terrain-rules.js).
     if (rule && rule.mode === 'capped' && typeof window.terrainRulesActive === 'function' && window.terrainRulesActive()) {
@@ -338,7 +282,7 @@ window.battleCommitMove = function(rule, pos) {
     if (!rule || rule.mode === 'tap' || !window.globalBattleEncounterCache) return Promise.resolve();
     let distMoved = Math.hypot(pos.x - rule.x0, pos.y - rule.y0);
     const dragVessel = globalShipMarkersCache.find(m => m.id === rule.shipMarkerId);
-    // Phase 10: terrain cost + debris crossed (not for DM 'free' repositioning).
+    // Terrain cost + debris crossed (not for DM 'free' repositioning).
     let terrainWalkResult = null;
     if (rule.mode === 'capped' && typeof window.terrainRulesActive === 'function' && window.terrainRulesActive()) {
         terrainWalkResult = window.terrainWalk(dragVessel, { x: rule.x0, y: rule.y0 }, pos, null);
@@ -350,7 +294,7 @@ window.battleCommitMove = function(rule, pos) {
         const prevRemaining = t.move_remaining !== undefined ? t.move_remaining : (dragVessel?.tactical_speed ?? 160);
         return { ...t, x: pos.x, y: pos.y, move_remaining: Math.max(0, Math.round((prevRemaining - distMoved) * 10) / 10) };
     });
-    // Undo log (2026-10-01): every token move is recorded.
+    // Every token move is recorded in the undo log.
     return window.recordBattleAction('Move', async () => {
         await saveBattleTokens(tokens);
         if (terrainWalkResult && terrainWalkResult.debrisLen >= 5 && dragVessel) await window.terrainApplyDebris(dragVessel, terrainWalkResult.debrisLen);
@@ -358,7 +302,7 @@ window.battleCommitMove = function(rule, pos) {
 };
 // A tap (press without a drag) on a token.
 window.battleTokenTapped = function(shipMarkerId) {
-    // Phase 4c: with the tactical HUD on, a tap selects the ship in the HUD first
+    // With the tactical HUD on, a tap selects the ship in the HUD first
     // (own ships stop here; FULL SHEET opens the terminal; hostiles still auto-target).
     if (typeof window.tv2HandleTokenTap === 'function' && window.tv2HandleTokenTap(shipMarkerId)) return;
     const clickedVessel = globalShipMarkersCache.find(m => m.id === shipMarkerId);
@@ -369,17 +313,14 @@ window.battleTokenTapped = function(shipMarkerId) {
     if (typeof window.openFullVesselTerminal === 'function') window.openFullVesselTerminal(shipMarkerId);
 };
 
-/* Called from js/combat.js's advanceCombatRound (the same global tick every
-   other per-round mechanic in this app already reuses — confirmed design,
-   see file header). Refreshes every token's move_remaining back to its
-   vessel's tactical_speed. No-op if there's no active battle. */
+/* Called from the round tick (js/combat.js advanceCombatRound). Refills every
+   token's move_remaining to its vessel's tactical_speed (default 160).
+   No-op if there's no active battle. */
 window.resetBattleMapMovement = async function() {
     if (!window.globalBattleEncounterCache) return;
     const tokens = (window.globalBattleEncounterCache.tokens || []).map(t => {
         const vessel = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
-        // System Lockdown build (this session): an Engines-disabled vessel
-        // gets its move allowance forced to 0 for the round instead of the
-        // normal tactical_speed refill.
+        // System Lockdown: an Engines-disabled vessel gets 0 movement.
         const enginesDown = vessel && (vessel.disabled_engines_until || 0) > 0;
         return { ...t, move_remaining: enginesDown ? 0 : (vessel?.tactical_speed ?? 160) };
     });

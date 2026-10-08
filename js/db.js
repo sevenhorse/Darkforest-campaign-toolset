@@ -6,13 +6,12 @@ console.log('%c [SYSTEM] DB.JS LOADED SUCCESSFULLY', 'color: #00e5a3; font-weigh
 const SUPABASE_URL = 'https://uodeeyfaizbjplvvslry.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_7Kj1D_Frh3v0MLNuAyyROQ_rcaTx2F8';
 
-/* --- SHARED BACKEND HELPERS (2026-09-24 bug-hunt pass) ---
+/* --- SHARED BACKEND HELPERS ---
    Small, dependency-free utilities used across the app. Defined here because
    db.js is the first app script index.html loads, so every other file can
    rely on them existing. Nothing here touches the database or the UI style.
-   - safeJsonParse / safeLocalGet: localStorage reads that can't throw. A
-     single corrupted localStorage value used to throw during THIS file's
-     top-level setup, which killed the whole app (login never appeared).
+   - safeJsonParse / safeLocalGet: localStorage reads that can't throw (a
+     throw during this file's top-level setup kills the whole app).
    - escapeHtml: for putting user-typed text into innerHTML safely.
    - coalesceAsync: wraps an async loader so overlapping calls share one
      in-flight run plus at most one trailing re-run, instead of N parallel
@@ -81,8 +80,8 @@ window.preserveFormState = function(container, render, selector) {
     saved.filter(s => !s.id.startsWith('sq-wpn-select-')).forEach(apply);
 };
 
-/* --- MEDIA IMAGES (Command Terminal refactor, Phase 1, 2026-10-01) ---
-   Images on Codex entries and ships. DM-confirmed: an image can be either
+/* --- MEDIA IMAGES ---
+   Images on Codex entries and ships. An image can be either
    UPLOADED (shrunk to max 1600px, stored in the PRIVATE Supabase Storage
    bucket 'media' -- only logged-in users can load it, via short-lived
    signed links) or a PASTED https:// link. Who can set one = whoever can
@@ -289,8 +288,7 @@ window.setMediaPickerValue = function(prefix, ref, fromUrlBox) {
     if (fromUrlBox && ref && !valid) { hidden.value = ''; if (preview) preview.style.display = 'none'; if (status) status.textContent = 'Links must start with https://'; return; }
     // A pasted link is only accepted once it actually loads as a picture
     // (a web page link or a host that blocks embedding would just show
-    // "unavailable" everywhere). Live report 2026-10-01: a forum-page link
-    // was saved as an image.
+    // "unavailable" everywhere).
     if (fromUrlBox && valid) {
         const seq = (mediaPickerProbeSeq[prefix] || 0) + 1;
         mediaPickerProbeSeq[prefix] = seq;
@@ -331,7 +329,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
     } finally { input.value = ''; }
 };
 
-/* --- FEATURE SWITCHES (Command Terminal refactor, Phase 0, 2026-09-30) ---
+/* --- FEATURE SWITCHES ---
    DM-controlled switches that keep new, unfinished features hidden from
    players until the DM unlocks them. Backed by the `app_settings` table
    (one row per feature: feature_key, mode, tester_ids). RLS: everyone
@@ -347,11 +345,10 @@ window.handleMediaPickerUpload = async function(prefix, input) {
    hidden feature still downloads to every browser, so a player poking in
    devtools could force it on for themselves. Anything that must be truly
    secret lives in DM-only tables instead (e.g. encounter presets). */
-// Build stamp for this copy of the app. Bump it (format YYYY-MM-DD.NN) on
-// every deploy that changes how data is stored, THEN (after the push is
-// live) raise app_settings 'min_client_build'.value to match -- any browser
-// still running an older cached copy then shows a "reload" banner instead
-// of quietly writing data the new build can't see (2026-09-30 live bug).
+// Build stamp (YYYY-MM-DD.NN). Compared with app_settings 'min_client_build'
+// to force stale browsers to reload: bump it on every deploy that changes how
+// data is stored, then (once live) raise min_client_build to match, so older
+// cached copies show a "reload" banner instead of writing incompatible data.
 window.DARKFOREST_BUILD = '2026-10-04.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
@@ -422,7 +419,7 @@ window.toggleFeatureTester = async function(key, profileId, on) {
 window.renderFeatureSwitchPanel = function() {
     const box = document.getElementById('feature-switch-list');
     if (!box || currentUserRole !== 'dm') return;
-    const keys = Object.keys(window.appSettingsCache).filter(k => k !== 'min_client_build' && !/_config$/.test(k)).sort(); // *_config rows hold numbers, not switches (Phase 10)
+    const keys = Object.keys(window.appSettingsCache).filter(k => k !== 'min_client_build' && !/_config$/.test(k)).sort(); // *_config rows hold numbers, not switches
     if (keys.length === 0) { box.innerHTML = '<div style="font-size:9px; color:#6b826a;">No feature switches found.</div>' + window.combatBalancePanelHtml(); return; }
     const players = (typeof allProfiles !== 'undefined' ? allProfiles : []).filter(p => p.role !== 'dm');
     const modeLabels = { off: 'OFF', dm: 'DM ONLY', testers: 'TESTERS', everyone: 'EVERYONE' };
@@ -445,7 +442,7 @@ window.renderFeatureSwitchPanel = function() {
         </div>`;
     }).join('') + window.combatBalancePanelHtml();
 };
-// Playtest rebalance (2026-10-03): the hidden damage bonus knob
+// DM panel for the hidden damage bonus knob
 // (app_settings 'combat_balance_config', read by window.combatBalanceConfig).
 window.combatBalancePanelHtml = function() {
     if (!window.appSettingsCache || !window.appSettingsCache.combat_balance_config || typeof window.combatBalanceConfig !== 'function') return '';
@@ -475,29 +472,13 @@ if (window.supabase) {
     console.error("CRITICAL ERROR: Supabase CDN failed to load. Check internet connection or AdBlockers.");
 }
 
-// Session-restore-on-refresh fix (2026-09-13, live-session bug report): the
-// app never checked whether a Supabase session already existed on page load
-// -- fetchUserProfile() (below) was only ever called from inside
-// handleLogin's own submit handler. The Supabase JS client persists the
-// session token to localStorage and keeps it valid across refreshes by
-// default, but this app ignored that entirely and always showed the raw
-// login form again, forcing everyone to re-enter credentials after every
-// refresh even though they were still technically authenticated. This
-// checks once at boot for an existing session and, if one is found, skips
-// straight into fetchUserProfile the same way a fresh login does. Wrapped
-// in DOMContentLoaded to match the same safety margin audio.js/ui.js already
-// use for their own boot-time init calls, even though this script's own
-// position (end of body) means the DOM is already parsed either way.
+// Session restore on refresh: Supabase persists the session in localStorage,
+// so at boot an existing session skips straight into fetchUserProfile, the
+// same as a fresh login.
 document.addEventListener('DOMContentLoaded', async function checkExistingSession() {
-    // Login-flash fix (2026-09-13, live-session bug report): the restore-on-
-    // refresh check above fixed the actual kickout, but #login-wrapper still
-    // defaulted to display:flex in CSS, so it was visible the instant the
-    // page painted and only got hidden ~1s later once this async check
-    // resolved and fetchUserProfile ran -- a valid-session user saw the raw
-    // login form flash before the map appeared. #login-wrapper now defaults
-    // to display:none instead, so every path here that does NOT end in a
-    // successful fetchUserProfile call has to explicitly reveal it again --
-    // nothing else ever will.
+    // #login-wrapper defaults to display:none in CSS (avoids a login-form
+    // flash for restored sessions), so every path here that does NOT reach
+    // fetchUserProfile must reveal it -- nothing else will.
     const showLogin = () => {
         const el = document.getElementById('login-wrapper');
         if (el) el.style.display = 'flex';
@@ -538,10 +519,8 @@ let recentTargets = window.safeJsonParse(window.safeLocalGet('odyssey_recents', 
 // MODULE C: Fog of War DRADIS Scan State
 window.scannedSystems = window.safeJsonParse(window.safeLocalGet('odyssey_scanned', '[]'), []);
 
-// Bug-hunt pass (2026-09-24): these used to be `let` declarations, but every
-// reader/writer in the app uses window.X -- and a top-level `let` in a classic
-// script does NOT create a window property, so the intended defaults never
-// applied (window.activeCodexCategory started undefined, etc.).
+// These live on window because every reader/writer uses window.X -- a
+// top-level `let` in a classic script does NOT create a window property.
 window.activeHudTab = 'telemetry';
 let globalProceduralSystemsCache = [];
 let globalShipMarkersCache = [];
@@ -561,9 +540,7 @@ window.selectedTarget = null;
 
 // Map tool state (measuring tape, ping, jump plotter, territory/hyperlane
 // drawing, hyperlanesVisible) lives on window and is initialized at the top
-// of js/map.js. Bug-hunt pass (2026-09-24): removed the unused `let`
-// duplicates that used to sit here -- nothing read them, and they made it
-// look like there were two copies of that state.
+// of js/map.js.
 
 const driveSpeeds = {
     sublight: { name: "Sublight Thrusters (0.1c)", speed: 10, label: "0.1c Sublight" },
@@ -571,26 +548,18 @@ const driveSpeeds = {
     ftl_class2: { name: "Military Class 2 Hyperdrive", speed: 600, label: "Class 2 Hyperdrive" },
     ftl_fold: { name: "Experimental Fold/Jump Drive", speed: 2500, label: "Fold Jump" }
 };
-// Relativistic time-inversion constant (this session's lore fix — see
-// window.executePlottedJump in js/map.js for where this is actually used).
-// A plotted FTL jump's backward chronometer drift = distance * drive speed
-// / this constant, so a faster/more exotic drive causes proportionally MORE
-// drift for the same distance covered (a bigger causality violation for a
-// bigger technological edge) — confirmed design, not guessed. Sublight
-// drives cause none of this by default (see window.jumpInversionFtlOnly
-// below). First-pass tuning, not battle-tested: 62500 was picked so a
-// baseline Class 1 Warp jump between two just-barely-4-LY-apart stars (the
-// new minimum star spacing) drifts ~2 hours, and a full width-of-the-galaxy
-// jump on the same drive drifts ~128 hours (~5.3 days) — both matching the
-// DM's own "a couple hours... several days" examples.
+// Relativistic time-inversion constant (used by window.executePlottedJump in
+// js/map.js). DM rule: a plotted FTL jump's backward chronometer drift =
+// distance * drive speed / this constant, so faster drives drift MORE for
+// the same distance. Sublight causes none by default (window.jumpInversionFtlOnly).
+// Tuning: a Class 1 Warp jump between stars 4 LY apart (minimum spacing)
+// drifts ~2 hours; a full galaxy-width jump ~128 hours (~5.3 days).
 window.TEMPORAL_DRIFT_CONSTANT = 62500;
 
 window.handleLogin = async function() {
     if (!db) { alert("Database connection failed."); return; }
-    // Guards against a double-click firing two concurrent login flows — each
-    // one independently created its own presence channel (and its own ping
-    // listener), so a single ping would fire audio/visual twice until one of
-    // the duplicate channels eventually dropped.
+    // Guards against a double-click starting two login flows, which would
+    // create duplicate presence channels (pings would fire twice).
     if (window._loginInProgress) return;
     window._loginInProgress = true;
     const email = document.getElementById('email').value;
@@ -608,15 +577,8 @@ window.handleLogin = async function() {
 async function fetchUserProfile(user) {
     currentUserId = user.id; currentUserEmail = user.email;
     const { data, error } = await db.from('profiles').select('*').eq('id', user.id).single();
-    // Bug fix (bug hunt, this session): this used to just `return` on error,
-    // leaving window._loginInProgress stuck at true forever (it's only reset
-    // in handleLogin's own sign-in-error branch, not here). A transient
-    // network blip or RLS hiccup on this SELECT right after a successful
-    // sign-in would leave the login screen frozen with no feedback, and
-    // every subsequent login click would silently no-op at the
-    // `_loginInProgress` guard in handleLogin -- only a full page reload
-    // could recover. Reset the guard and surface an error the same way the
-    // sign-in-error branch does.
+    // On failure, reset the login guard and show an error; otherwise every
+    // later login click would silently no-op at handleLogin's guard.
     if (error) {
         window._loginInProgress = false;
         const errorDiv = document.getElementById('error-message');
@@ -634,14 +596,9 @@ async function fetchUserProfile(user) {
         document.getElementById('user-role').classList.add('role-dm');
         document.getElementById('user-role').innerText = 'OVERSEER (DM)';
         document.getElementById('dm-tools').style.display = 'block';
-        // DM note #7 build (this session): Secret Repository's full-screen
-        // editor tab lives in the Command Terminal now (same nav as Vessel
-        // Deck/Ship Designer), not the floating DM Tools panel -- gated here
-        // the same way every other DM-only element on this screen already is.
+        // DM-only Command Terminal tabs (Secret Repository, Strike Craft).
         const secretRepoTabBtn = document.getElementById('term-tab-btn-secretrepo');
         if (secretRepoTabBtn) secretRepoTabBtn.style.display = 'flex';
-        // Strike Craft Designer build (this session): same DM-only tab-reveal
-        // convention as Secret Repository just above.
         const strikeCraftTabBtn = document.getElementById('term-tab-btn-strikecraft');
         if (strikeCraftTabBtn) strikeCraftTabBtn.style.display = 'flex';
         document.getElementById('dm-time-controls-box').style.display = 'block';
@@ -682,13 +639,11 @@ async function fetchUserProfile(user) {
     if (typeof initManufacturingOrdersRealtimeChannel === 'function') initManufacturingOrdersRealtimeChannel();
     if (typeof initGalaxyEngine === 'function') initGalaxyEngine();
     if (typeof initCalendarEngine === 'function') initCalendarEngine();
-    // FOW Reset Sync (DM Maintenance panel build, 2026-09-02): picks up any
-    // pending fow_reset_state epoch bump and subscribes for live ones.
+    // FOW reset sync: picks up any pending fow_reset_state epoch bump and
+    // subscribes for live ones.
     if (typeof window.initFowResetSync === 'function') window.initFowResetSync();
-    // Kick off the ambient music bed now that we have a real authenticated
-    // session -- the music files live in a private Supabase Storage bucket
-    // (signed URLs only), so this can't succeed before login the way the
-    // old local-file version could.
+    // Start the ambient music bed now: its tracks need signed URLs from a
+    // private bucket, which only work once logged in.
     if (window.AudioEngine && !window.AudioEngine.isMuted()) window.AudioEngine.startAmbient();
 
     loadAllProfiles(); loadPlayerNotes(); loadCombatTracker(); loadCampaignObjectives();
@@ -712,8 +667,8 @@ async function fetchUserProfile(user) {
     if (typeof loadSavedFleets === 'function') loadSavedFleets();
     if (typeof loadManufacturingBlueprints === 'function') loadManufacturingBlueprints();
     if (typeof loadManufacturingOrders === 'function') loadManufacturingOrders();
-    // Player tutorial (2026-09-24): auto-runs once per device for non-DM
-    // players on first login -- see js/tutorial.js.
+    // Player tutorial: auto-runs once per device for non-DM players on first
+    // login -- see js/tutorial.js.
     if (typeof window.maybeAutoStartTutorial === 'function') window.maybeAutoStartTutorial();
 }
 
@@ -841,20 +796,12 @@ async function loadHazardDefinitions() {
     if (data) { window.hazardDefinitionsList = data; if (typeof window.renderHazardDefinitionsPanel === 'function') window.renderHazardDefinitionsPanel(); if (typeof window.populateHazardDefSelect === 'function') window.populateHazardDefSelect(); }
 }
 
-// Overseer Planet Editor persistence — DM edits to a body's scan data
-// (name/type/gravity/atmosphere/resources) used to only mutate the
-// in-memory object (window.saveDMBodyProperties in js/map.js never wrote
-// to the DB), so edits vanished on refresh and never reached other
-// players. planetary_modifiers is an existing-but-previously-unused table
-// keyed on body_id (text, no FK — same reasoning as system_hazards.system_id:
-// most bodies belong to the procedural galaxy, not a real star_systems row,
-// so there's nothing to foreign-key against). It holds ONE override row per
-// edited body; js/map.js merges these on top of a body's generated/base
-// values every time it's read. Only the fields the current Overseer Planet
-// Editor form actually exposes (custom_name/custom_type/custom_gravity/
-// custom_atmosphere/custom_resources) are touched here — the table's other
-// columns (industry/control/defenses/wealth/tech_level/infrastructure/
-// resource_rating) aren't wired to any UI yet and are left alone.
+// Overseer Planet Editor overrides. planetary_modifiers holds ONE override
+// row per DM-edited body, keyed on body_id (text, no FK: most bodies are
+// procedural, with no star_systems row). js/map.js merges these over a
+// body's generated values on every read. Only custom_name/type/gravity/
+// atmosphere/resources are used; the table's other columns (industry,
+// control, defenses, wealth, tech_level, ...) aren't wired to any UI yet.
 window.globalPlanetaryModifiersCache = {}; // keyed by body_id for O(1) lookup in getSystemBodies
 async function loadPlanetaryModifiers() {
     const { data } = await db.from('planetary_modifiers').select('*');
@@ -867,22 +814,13 @@ async function loadPlanetaryModifiers() {
     }
 }
 
-// Personal system/planet renaming (live-session feature request,
-// 2026-09-13): "the ability for players to rename system/planets per
-// person (only applies to that user)". Deliberately NOT the same mechanism
-// as planetary_modifiers above -- that's a DM-set override visible to
-// EVERYONE; this is a purely personal label, only ever loaded/applied for
-// the CURRENT viewer. Confirmed design: a personal label takes precedence
-// over even a DM's custom_name/star name IN THAT VIEWER'S OWN CLIENT ONLY
-// -- nothing here ever touches star_systems.name or planetary_modifiers,
-// so nobody else's view changes. Keyed by `${target_type}:${target_id}` in
-// the cache (target_id is TEXT in the table so both real uuids and
-// procedural string ids like 'proc-spiral-14' work identically -- same id
-// space planetary_modifiers already keys off). The load query filters to
-// this user's own rows even though the table's RLS is the same blanket
-// "Allow Auth Users" convention as the rest of this app (see the
-// personal_labels migration) -- real isolation is enforced here, and by
-// every render site only ever reading its OWN cache, not by RLS.
+// Personal system/planet labels: a player's own rename, applied only in
+// their own client. It takes precedence over a DM's custom_name/star name
+// for that viewer, and never touches star_systems or planetary_modifiers.
+// Cache key: `${target_type}:${target_id}` (target_id is TEXT, so uuids and
+// procedural ids like 'proc-spiral-14' both work). RLS is the blanket
+// "Allow Auth Users" policy, so isolation comes from the user_id filter
+// here, not from RLS.
 window.globalPersonalLabelsCache = {};
 async function loadPersonalLabels() {
     if (!currentUserId) return;
@@ -896,24 +834,15 @@ async function loadPersonalLabels() {
     }
 }
 
-// Territory Faction Ownership Flip: same procedural-vs-custom split as
-// planetary_modifiers above, one level up (system ownership instead of
-// body properties). Custom systems already have a real, live-reloaded
-// `star_systems.ownership` column (no cache needed here for those) — this
-// override table + cache exists ONLY for the ~2,641 procedurally-seeded
-// systems, which have no database row at all to write ownership onto
-// directly. window.applySystemOwnershipOverrides() (js/map.js) mutates
-// the matching entries in globalProceduralSystemsCache in place after
-// every load, so `.ownership` reads the same way regardless of which of
-// the two persistence paths a given system actually uses.
+// System ownership/control overrides for PROCEDURAL systems only (they
+// have no star_systems row; custom systems use star_systems.ownership).
+// window.applySystemOwnershipOverrides() (js/map.js) patches
+// globalProceduralSystemsCache in place after each load, so `.ownership`
+// reads the same for both kinds of system.
 window.globalSystemOwnershipCache = {}; // keyed by system_id (procedural systems only) -> { ownership, control }
 async function loadSystemOwnershipOverrides() {
     const { data } = await db.from('system_ownership_overrides').select('*');
     window.globalSystemOwnershipCache = {};
-    // Control follow-on (this session): cache value widened from a plain
-    // ownership string to { ownership, control } — see the new checkpoint
-    // in the architecture doc for why Control needed the same override-table
-    // treatment procedural systems already had for Ownership.
     if (data) data.forEach(row => { window.globalSystemOwnershipCache[row.system_id] = { ownership: row.ownership, control: row.control }; });
     if (typeof window.applySystemOwnershipOverrides === 'function') window.applySystemOwnershipOverrides();
     if (window.selectedTarget && window.selectedTarget.type === 'star' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
@@ -938,15 +867,9 @@ async function checkAnomalyProximity(ship) {
     for (let anomaly of anomalies) {
         let dist = Math.hypot(ship.x - anomaly.x, ship.y - anomaly.y);
         if (dist < DRADIS_RANGE) {
-            // Bug fix (bug hunt, this session): mark the anomaly revealed in
-            // the local cache BEFORE the awaits, not after. This can be
-            // called repeatedly while a ship sits inside DRADIS_RANGE of the
-            // same anomaly (e.g. once per movement tick); the old ordering
-            // let every overlapping call still see 'Hidden Anomaly' during
-            // its own DB round-trip, so a ship lingering near an anomaly for
-            // more than one tick could fire the update/chat-log/klaxon
-            // sequence multiple times for what should be a single one-time
-            // reveal.
+            // Mark revealed locally BEFORE the awaits: this can be called
+            // every movement tick, and overlapping calls must not repeat the
+            // one-time reveal (update/chat log/klaxon).
             anomaly.luminosity = 'Revealed Anomaly'; anomaly.color = '#ff3333';
             await db.from('star_systems').update({ luminosity: 'Revealed Anomaly', color: '#ff3333' }).eq('id', anomaly.id);
             await db.from('chat_logs').insert({ sender_id: null, content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' detected a subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}.`, message_type: 'system' });
@@ -1024,13 +947,9 @@ function initChatRealtimeChannel() {
 }
 
 /* --- COMBAT INITIATIVE TRACKER: REAL-TIME SYNC ---
-   Without this, a player's addCombatant()/removeCombatant() only ever
-   updates their OWN client's combatantsList — nobody else, including the
-   DM, finds out until something else on their end happens to re-trigger
-   loadCombatTracker() (or they reload the page). Subscribing to every
-   change on the table and just refetching keeps everyone's tracker in
-   sync live. Same Supabase Realtime replication requirement as chat_logs
-   (Database > Replication) — enable it for combat_tracker too. */
+   Refetches on any change so every client's tracker stays in sync.
+   Requires Realtime replication enabled for combat_tracker
+   (Database > Replication). */
 let combatTrackerRealtimeChannel = null;
 function initCombatTrackerRealtimeChannel() {
     combatTrackerRealtimeChannel = db.channel('combat_tracker_stream')
@@ -1041,9 +960,8 @@ function initCombatTrackerRealtimeChannel() {
 }
 
 /* --- COLONIES & FLEET GROUPS: REAL-TIME SYNC ---
-   Same reasoning as combat_tracker above — without this, one player's
-   addColony()/addFleetGroup()/edits only update their own client. Requires
-   Realtime replication enabled for both tables (Database > Replication). */
+   Requires Realtime replication enabled for both tables
+   (Database > Replication). */
 let coloniesRealtimeChannel = null;
 let fleetGroupsRealtimeChannel = null;
 function initColoniesRealtimeChannel() {
@@ -1073,34 +991,14 @@ function initShipTemplatesRealtimeChannel() {
         .subscribe();
 }
 
-/* --- SHIP MARKERS (deployed vessels/stations/strike craft): REAL-TIME SYNC
-   (Visual Polish follow-on, this session) ---
-   Confirmed via grep before writing this: ship_markers had NO realtime
-   channel anywhere in this app. Confirmed via pg_publication_tables that it
-   was ALREADY in the supabase_realtime publication (unlike a brand new
-   table, no migration or Database > Replication dashboard step was needed
-   here — the gap was purely a missing client-side subscription). Without
-   this, a vessel's HP/shields/weapons/ownership/decks only ever updated on
-   the client that made the change — the Battle Map's token HP-color border,
-   its ship-status cards' health bars, and the Vessel Deck all showed stale
-   numbers on every OTHER connected client until something unrelated on
-   THEIR end happened to call loadGalaxyData() again. Deliberately scoped to
-   what actually matters for the Battle Map / Vessel Deck (what prompted
-   this): re-renders those two surfaces (renderBattleMapPanel's own ship-
-   status cards are covered transitively, since it calls
-   window.renderBattleShipCards internally). Does NOT touch the overworld
-   galaxy canvas (js/map.js) — a separate rendering pipeline with its own
-   existing triggers, out of scope here. Also does NOT touch combat_tracker
-   (a separate table with its own already-existing realtime channel above,
-   used for personal/NPC initiative — its `hp` field is a point-in-time
-   snapshot string, not live-linked back to ship_markers; a related but
-   different gap, flagged, not fixed by this build).
-
-   Same "echoes back to the acting client too" characteristic as every other
-   channel here (see chat_logs_stream's comment) — a client that just fired
-   a weapon will re-run this refresh redundantly on top of its own direct
-   render calls. Harmless (an extra fetch + repaint), not worth filtering
-   out, same as this app's other channels don't bother either. */
+/* --- SHIP MARKERS (deployed vessels/stations/strike craft): REAL-TIME SYNC ---
+   Keeps HP/shields/weapons/ownership/decks live on every client: reloads
+   galaxy data, then re-renders the Vessel Deck and Battle Map (which also
+   covers its ship-status cards). Does NOT redraw the overworld galaxy
+   canvas (js/map.js has its own triggers). combat_tracker's `hp` is a
+   snapshot string, not linked to ship_markers.
+   Like every channel here, this also echoes to the acting client -- a
+   redundant but harmless refresh. */
 let shipMarkersRealtimeChannel = null;
 function initShipMarkersRealtimeChannel() {
     shipMarkersRealtimeChannel = db.channel('ship_markers_stream')
@@ -1173,9 +1071,7 @@ function initHazardDefinitionsRealtimeChannel() {
         .subscribe();
 }
 
-/* --- PLANETARY MODIFIERS (Overseer Planet Editor overrides): REAL-TIME SYNC ---
-   So a DM's scan-data edit shows up on other clients (and the DM's own other
-   tab) without needing a manual refresh — same pattern as system_hazards. */
+/* --- PLANETARY MODIFIERS (Overseer Planet Editor overrides): REAL-TIME SYNC --- */
 let planetaryModifiersRealtimeChannel = null;
 function initPlanetaryModifiersRealtimeChannel() {
     planetaryModifiersRealtimeChannel = db.channel('planetary_modifiers_stream')
@@ -1186,12 +1082,9 @@ function initPlanetaryModifiersRealtimeChannel() {
 }
 
 /* --- PERSONAL LABELS: REAL-TIME SYNC ---
-   Same whole-table-subscribe-then-reload pattern as planetary_modifiers
-   above (this codebase has no precedent for a server-side realtime FILTER
-   on any channel -- every one just reloads and re-filters client-side,
-   even for per-user data), so this fires on every player's label changes,
-   not just this user's own -- loadPersonalLabels' own .eq('user_id', ...)
-   still means only this user's rows ever land in the cache either way. */
+   Subscribes to the whole table (no server-side filter, like every channel
+   here), so it fires on any player's change; loadPersonalLabels' user_id
+   filter keeps only this user's rows in the cache. */
 let personalLabelsRealtimeChannel = null;
 function initPersonalLabelsRealtimeChannel() {
     personalLabelsRealtimeChannel = db.channel('personal_labels_stream')
@@ -1210,11 +1103,7 @@ function initSystemOwnershipRealtimeChannel() {
         .subscribe();
 }
 
-/* --- HYPERLANES: REAL-TIME SYNC ---
-   Was never wired up before this session (confirmed via grep — every other
-   table in this app has a channel; this one didn't) — a DM's placed/edited/
-   deleted route never synced live to other clients. Matters more now that
-   routes are actually editable in place rather than just delete-and-redraw. */
+/* --- HYPERLANES: REAL-TIME SYNC --- */
 let hyperlanesRealtimeChannel = null;
 function initHyperlanesRealtimeChannel() {
     hyperlanesRealtimeChannel = db.channel('hyperlanes_stream')
@@ -1242,32 +1131,16 @@ function renderPresenceTicker() {
     listDiv.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No active commanders</span>';
 }
 
-/* Multi-owner ship tokens build (this session, DM-confirmed via
-   AskUserQuestion): ship_markers.owner_ids (uuid[]) is now the source of
-   truth for who controls a ship token -- a token can have zero, one, or
-   several owners. The old single-value ship_markers.owner_id column is
-   left in place as deprecated dead schema (backfilled once into owner_ids,
-   matching this app's existing characters.aug_ columns / character_perks.perk_key
-   precedent for a superseded column) -- nothing should read or write it
-   going forward. These three helpers are the single shared way every file
-   checks/reads ownership now, replacing the old `vessel.owner_id === x`
-   pattern used ~35 places across combat.js/map.js/battle-map.js/
-   ship-designer.js/squadrons.js/this file.
-   window.vesselOwnerIds(vessel) -- always an array, even for a legacy/
-   malformed row with no owner_ids at all.
-   window.vesselHasOwner(vessel, userId) -- "is userId one of this vessel's
-   owners" -- the direct replacement for every old `=== currentUserId`
-   permission check (docking, decommission, Vessel Deck access, Salvage/
-   Manufacturing config, etc).
-   window.ownerIdsShareOwner(idsA, idsB) -- "same side" for combat purposes
-   (Point Defense, squadron target-uplink, AI-stance friend/foe filtering):
-   true if the two owner lists share at least one id. DM-confirmed
-   semantics: co-owning ANY one owner in common counts as allied, even if
-   each side also has a different other owner. Two UNOWNED vessels (both
-   empty lists) still count as "same side," matching this app's existing
-   null-owner_id-equals-null-owner_id behavior exactly -- so two ownerless
-   NPCs keep not targeting each other, the one pre-existing edge case this
-   build was careful not to silently flip. */
+/* SHIP OWNERSHIP: ship_markers.owner_ids (uuid[]) is the source of truth;
+   a token can have zero, one, or several owners. The old single
+   ship_markers.owner_id column is deprecated -- never read or write it.
+   Always check ownership through these helpers:
+   - vesselOwnerIds(vessel): always an array, even for a malformed row.
+   - vesselHasOwner(vessel, userId): is userId an owner (permission checks).
+   - ownerIdsShareOwner(idsA, idsB): "same side" for combat (Point Defense,
+     squadron uplink, AI friend/foe). DM rule: sharing ANY one owner counts
+     as allied. Two UNOWNED vessels also count as same side, so ownerless
+     NPCs don't target each other. */
 window.vesselOwnerIds = function(vessel) {
     return (vessel && Array.isArray(vessel.owner_ids)) ? vessel.owner_ids : [];
 };
@@ -1294,20 +1167,10 @@ window.snapToCommander = function(userId) {
 };
 
 /* --- FEATURE: "JUMP TO SHIP" CAMERA SHORTCUT ---
-   Pans the canvas to the user's own vessel and opens the character terminal
-   straight to the Vessel Deck tab. Used to carry its own clock-rollback
-   "temporal desync" flourish (see window.JUMP_TIME_INVERSION_MAX_HOURS /
-   window.jumpInversionFtlOnly below) — that logic moved this session to
-   window.executePlottedJump (js/map.js), the action that actually MOVES a
-   ship, since attaching a real relativistic-drift game mechanic to a pure
-   camera-recenter shortcut meant it could fire on a ship that was dragged
-   into position by hand, or not fire at all if a player never happened to
-   click this button, rather than consistently on every genuine jump. This
-   function is now a plain camera/terminal shortcut with no calendar effect
-   of its own. `ship_markers.last_ftl_position`, which only ever existed to
-   support the old distance-since-last-jump calculation here, is no longer
-   written or read anywhere — left in the DB as unused dead schema (like
-   character_perks.perk_key before it), not worth a migration to drop. */
+   Pans the canvas to the user's own vessel and opens its Vessel Deck. A
+   pure camera/terminal shortcut with no calendar effect (time inversion
+   lives in window.executePlottedJump, js/map.js).
+   ship_markers.last_ftl_position is unused dead schema. */
 window.jumpToActiveShip = async function() {
     let ship = globalShipMarkersCache.find(m => window.vesselHasOwner(m, currentUserId));
     if (!ship) { alert("DRADIS Error: No active vessel found assigned to your callsign."); return; }
@@ -1319,23 +1182,15 @@ window.jumpToActiveShip = async function() {
     if (window.AudioEngine) window.AudioEngine.playPing();
 };
 
-/* --- RELATIVISTIC TIME-INVERSION (this session's lore fix) ---
-   Every genuine FTL jump (see window.executePlottedJump, js/map.js) makes
-   the ship's chronometer read EARLIER than departure — scaled by distance
-   covered and how exotic the drive is, per the DM's own confirmed lore rule
-   — REPLACING the old forward "trip takes N hours" model entirely, not
-   applying on top of it. Hard-capped so a single jump can't rewind more
-   than ~7 days (168h) even on the most exotic drive across the full width
-   of the galaxy; raised from this mechanic's old 72h cap (which predates
-   this session, attached to the jumpToActiveShip shortcut above) once the
-   DM confirmed a true edge-to-edge jump should be able to read "several
-   days," not clip at 3. Only applies to FTL-drive vessels by default —
-   sublight vessels cause none of this — but a DM can flip
-   window.jumpInversionFtlOnly off (checkbox in the Chronology Control Deck
-   panel) to apply it to every drive type. Always logged to Comms so a DM
-   watching the timeline isn't surprised by it — it's automatic physics, not
-   a way for players to freely rewind the clock at will (that stays
-   DM-gated via window.adjustTime). */
+/* --- RELATIVISTIC TIME-INVERSION ---
+   DM rule: every genuine FTL jump (window.executePlottedJump, js/map.js)
+   makes the ship's chronometer read EARLIER than departure, scaled by
+   distance and drive (see TEMPORAL_DRIFT_CONSTANT). This replaces any
+   forward "trip takes N hours" travel time. Capped at 168h (~7 days) per
+   jump. FTL drives only by default; the DM can untick
+   window.jumpInversionFtlOnly (Chronology Control Deck) to apply it to all
+   drives. Always logged to Comms. Free clock rewinds stay DM-only
+   (window.adjustTime). */
 window.JUMP_TIME_INVERSION_MAX_HOURS = 168;
 window.jumpInversionFtlOnly = localStorage.getItem('odyssey_jump_ftl_only') !== 'false'; // default ON
 window.setJumpInversionFtlOnly = function(checked) {
@@ -1359,86 +1214,43 @@ window.exportCampaignBackup = function() {
 };
 
 /* ==========================================================================
-   FULL CAMPAIGN BACKUP / RESTORE (QOL request, 2026-08-31)
+   FULL CAMPAIGN BACKUP / RESTORE
    ==========================================================================
-   The QUICK BACKUP above (unchanged, kept as-is) only ever covered the
-   galaxy-map-adjacent tables it happened to have in memory already --
-   star_systems/ship_markers/territories (a superset of what WIPE GALAXY
-   SLATE below it deletes) plus hyperlanes/codex/initiative as a bonus. It
-   was never a real campaign backup: no characters, no ship catalogs
-   (public OR Secret Repository), no perks/augments/gear, no colonies,
-   no manufacturing, no saved fleets, nothing. This section is the real
-   thing -- a full read/write of every live campaign table -- plus, since
-   an export nobody can load back in isn't a backup, an actual paste-to-
-   restore flow.
+   The QUICK BACKUP above only covers in-memory map data and was never meant
+   to be restored. This exports every live campaign table and restores it.
 
-   DM-confirmed design (AskUserQuestion, all answered this session):
-     - Restore is a TRUE wipe-and-replace, not a merge -- every row
-       currently in every covered table is deleted, then the pasted
-       backup's rows are inserted exactly as captured. This is the
-       disaster-recovery version: it makes the DB look exactly like the
-       moment the backup was taken, which means anything created or
-       changed since is permanently gone. Not for casual undo.
-     - Restore DOES include `profiles` (accounts/usernames/roles/avatars)
-       at the DM's explicit choice -- the safer default would have left
-       player accounts untouched, but was turned down. This only actually
-       matters if profiles.id rows get out of sync with the real Supabase
-       Auth users backing them (e.g. someone's login was deleted and
-       recreated since the backup) -- restoring an old profiles row
-       whose id no longer matches a real auth user would leave an orphaned
-       profile row rather than break anything destructively, since this
-       client has no ability to touch auth.users itself either way.
-     - Requires typing an exact confirmation phrase (RESTORE FULL CAMPAIGN)
-       before it runs, same "can't trigger by accident" bar as WIPE GALAXY
-       SLATE's own confirm modal, but stricter since this is strictly more
-       destructive (33 tables, not 3).
-     - Chat logs and player notes ARE included (the "truly full" option).
+   DM decisions:
+     - Restore is a TRUE wipe-and-replace, not a merge: every covered table
+       is emptied, then the backup's rows are inserted as captured. Anything
+       created since the backup is gone. Not for casual undo.
+     - `profiles` IS restored. A profile whose auth user was since recreated
+       becomes an orphan row; this client can't touch auth.users.
+     - Needs the typed phrase RESTORE FULL CAMPAIGN plus a confirm modal.
+     - Chat logs and player notes are included.
+   Not covered: the abandoned tables (celestial_bodies, stations,
+   explored_sectors, campaign_codex) and the music-tracks Storage bucket
+   (re-upload by hand via the Supabase dashboard if lost).
 
-   Table list is every entry in the architecture doc's "confirmed live"
-   list except the 4 already-flagged abandoned/unreferenced tables
-   (celestial_bodies, stations, explored_sectors, campaign_codex) and the
-   music-tracks Storage bucket, which isn't a table and isn't covered by
-   this at all -- if that's ever actually lost, the audio files themselves
-   need re-uploading by hand via the Supabase dashboard, same as they were
-   uploaded originally.
-
-   FULL_BACKUP_TABLE_GROUPS is ordered by real FK dependency (verified
-   directly against the live schema's foreign key constraints before
-   writing this, not guessed) -- group N only ever references group N-1
-   or earlier, or `profiles`. INSERT must run in this order (parents
-   before children); DELETE must run in exactly the reverse order
-   (children before parents) or every delete/insert would 400 on a FK
-   violation. ship_markers is self-referential (docked_to/parent_id both
-   point at other ship_markers rows) so it can't just be "one group
-   earlier than itself" -- handled with a 2-phase insert instead (see
-   restoreOneTable below): insert every row with those two columns
-   nulled out, then a second pass patches each row's real values back in,
-   which is FK-safe regardless of insertion order. */
+   FULL_BACKUP_TABLE_GROUPS is ordered by FK dependency: a group only
+   references earlier groups. INSERT runs in this order, DELETE in reverse,
+   or FK violations fail the request. ship_markers references itself
+   (docked_to/parent_id), so restoreOneTable inserts those columns as null
+   and patches them in a second pass. */
 window.FULL_BACKUP_TABLE_GROUPS = [
     ['profiles'],
     ['campaign_objectives', 'perk_definitions', 'augment_definitions', 'gear_definitions', 'hazard_definitions',
      'hyperlanes', 'star_systems', 'system_ownership_overrides', 'territories', 'planetary_modifiers', 'personal_labels',
      'campaign_clock', 'saved_fleets', 'manufacturing_blueprints', 'strike_craft_templates', 'ship_templates',
      'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes',
-     // Bug-hunt pass (2026-09-24): cargo_item_catalog (the DM's cargo item
-     // catalog) was missing from the backup entirely. No other table
-     // references it, so it sits safely in this parent group.
-     'cargo_item_catalog',
-     // Command Terminal refactor Phase 0 (2026-09-30): DM feature switches.
-     // encounter_presets (2026-10-01): DM-only saved battle setups.
+     'cargo_item_catalog', // no table references it
      'app_settings', 'encounter_presets'],
     ['ship_markers', 'system_hazards'],
-    // battle_tokens (2026-09-30): one row per Battle Map token, child of battle_encounters.
-    // battle_events (2026-10-01): the Battle Map undo log, also a child of battle_encounters.
-    // battle_reinforcements (2026-10-01): DM-only pending preset waves, child of battle_encounters.
+    // battle_tokens / battle_events (undo log) / battle_reinforcements are children of battle_encounters.
     ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events', 'battle_reinforcements'],
     ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
 ];
-// Primary key column per table -- verified directly against the live schema.
-// Every table not listed here uses the default 'id'. Needed so the wipe
-// step can delete "every row" without hardcoding a uuid-vs-text sentinel
-// per table -- `.not(pkCol, 'is', null)` matches every row regardless of
-// the PK's type, since a primary key column is never actually null.
+// Primary key column per table (default 'id'). The wipe step deletes every
+// row with `.not(pkCol, 'is', null)`, which works for any PK type.
 window.FULL_BACKUP_PK_COLUMN = {
     character_skills: 'character_id',
     planetary_modifiers: 'body_id',
@@ -1538,11 +1350,8 @@ window.executeFullCampaignRestore = async function() {
     // --- Delete phase: reverse group order (children before parents) ---
     for (let i = groups.length - 1; i >= 0; i--) {
         for (const table of groups[i]) {
-            // Bug-hunt pass (2026-09-24): a table that isn't in the backup
-            // file at all (e.g. one added to the backup list after the
-            // file was made) is now left untouched instead of wiped and
-            // left empty. A table that IS in the file with 0 rows is still
-            // cleared, exactly as before.
+            // A table missing from the backup file (e.g. added to the list
+            // later) is left untouched. A table present with 0 rows is cleared.
             if (!(table in payload.tables)) { fullBackupLog(`${table}: not in this backup file -- left as-is`); continue; }
             const pk = fullBackupPkColumn(table);
             const { error } = await db.from(table).delete().not(pk, 'is', null);
