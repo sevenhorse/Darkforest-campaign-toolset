@@ -1790,3 +1790,37 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 #battle-map-panel.bmm:not(.bmm-more-open) #battle-map-end-btn, #battle-map-panel.bmm:not(.bmm-more-open) #btut-btn { display: none !important; }
 #battle-map-panel.bmm.bmm-more-open .bmm-more { background: rgba(0, 225, 255, 0.16) !important; }
 #battle-map-panel.bmm .b3d-toolbar { right: 34px; }   /* keep the 3D buttons clear of the scroll strip */
+
+/* ===== UI restyle R0: shared look kit (the Codex look, for every page) =====
+   New restyled pages use these df- names; the Codex keeps its own cx2- names.
+   See darkforest-ui-restyle-roadmap.md. */
+:root {
+    --df-cyan: #00e1ff; --df-dim: #6b8590; --df-line: rgba(0, 225, 255, 0.3); --df-line-soft: rgba(0, 225, 255, 0.14);
+    --df-ink: #d4e4ea; --df-ink-hi: #e8f6fa; --df-ink-lo: #8fa7b0; --df-bg: rgba(6, 14, 18, 0.94);
+    --df-gold: #c9962f; --df-red: #ff6b6b; --df-amber: #ffaa00;
+    --df-font: 'Oxanium', 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+}
+.df-tabs { display: flex; gap: 2px; border-bottom: 1px solid rgba(0, 225, 255, 0.22); font-family: var(--df-font); }
+.df-tab { display: flex; align-items: center; gap: 10px; padding: 12px 20px; min-height: 44px; width: auto; margin: 0; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--df-ink-lo); font-family: var(--df-font); font-size: 12px; font-weight: 400; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; box-shadow: none; white-space: nowrap; }
+.df-tab:hover { color: var(--df-ink); background: transparent; }
+.df-tab b { font-size: 10px; font-weight: 400; padding: 1px 6px; border: 1px solid rgba(143, 167, 176, 0.4); }
+.df-tab.on { background: linear-gradient(180deg, rgba(0, 225, 255, 0.16), rgba(0, 225, 255, 0.02)); border-bottom-color: var(--df-cyan); color: var(--df-ink-hi); }
+.df-tab.on svg, .df-tab.on b { color: var(--df-cyan); border-color: rgba(0, 225, 255, 0.6); }
+.df-subtabs { display: flex; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid rgba(0, 225, 255, 0.12); overflow-x: auto; font-family: var(--df-font); }
+.df-subtab { --acc: var(--df-cyan); display: flex; align-items: center; gap: 7px; padding: 8px 14px; min-height: 36px; width: auto; margin: 0; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: #7f98a2; font-family: var(--df-font); font-size: 10px; font-weight: 400; letter-spacing: 0.18em; text-transform: uppercase; cursor: pointer; box-shadow: none; white-space: nowrap; }
+.df-subtab:hover { color: var(--df-ink); background: transparent; }
+.df-subtab b { font-size: 9px; font-weight: 400; color: var(--acc); }
+.df-subtab.on { color: var(--df-ink-hi); border-bottom-color: var(--acc); background: linear-gradient(180deg, transparent, rgba(0, 225, 255, 0.06)); }
+.df-subtab i { font-style: normal; font-size: 8px; letter-spacing: 0.12em; color: var(--df-amber); border: 1px solid rgba(255, 170, 0, 0.5); padding: 0 4px; }
+
+/* ===== UI restyle R1: Command Terminal grouped tabs (js/terminal-tabs.js, switch 'terminal_restyle') ===== */
+#tt-nav { display: none; }
+#character-terminal.tt-on #tt-nav { display: block; position: sticky; top: 0; z-index: 5; background: var(--df-bg); margin-bottom: 14px; }
+#character-terminal.tt-on .term-sidebar { display: none !important; } /* !important: the phone layout forces the sidebar to a flex ribbon */
+#character-terminal.tt-on .term-layout { gap: 0; }
+@media screen and (max-width: 768px) {
+    #character-terminal.tt-on .df-tabs, #character-terminal.tt-on .df-subtabs { flex-wrap: nowrap; overflow-x: auto; }
+    #character-terminal.tt-on .df-tab { flex: 0 0 auto; padding: 12px 14px; font-size: 11px; letter-spacing: 0.18em; }
+    #character-terminal.tt-on .df-tab svg { display: none; }
+    #character-terminal.tt-on .df-subtab { flex: 0 0 auto; min-height: 44px; padding: 10px 12px; }
+}

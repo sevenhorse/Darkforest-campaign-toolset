@@ -30,6 +30,13 @@ const TUTORIAL_SEEN_KEY = 'darkforest_tutorial_seen_v1';
 //   before  -- optional function run before the step is shown (open a tab,
 //              panel, etc.). Must be UI-only -- never save or send anything.
 //   mobileBody -- replaces body on phone-width screens (touch wording).
+// Terminal page tabs live in the grouped tab bar when 'terminal_restyle' is
+// on (js/terminal-tabs.js); point at that tab instead of the hidden sidebar button.
+function tutorialQuery(sel) {
+    const m = /^#term-tab-btn-([a-z]+)$/.exec(sel || '');
+    if (m && typeof window.terminalTabTarget === 'function') { const t = window.terminalTabTarget(m[1]); if (t) return t; }
+    return document.querySelector(sel);
+}
 const TUTORIAL_STEPS = [
     {
         title: 'Welcome aboard, Commander',
@@ -240,7 +247,7 @@ function tutorialEnsureEls() {
 function tutorialResolveTarget(step) {
     if (!step.target) return null;
     let el = null;
-    try { el = typeof step.target === 'function' ? step.target() : document.querySelector(step.target); } catch (e) { el = null; }
+    try { el = typeof step.target === 'function' ? step.target() : tutorialQuery(step.target); } catch (e) { el = null; }
     if (!el) return null;
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return null; // hidden (display:none etc.)
@@ -300,7 +307,7 @@ function tutorialGo(i) {
     const drawer = document.getElementById('mobile-nav-drawer');
     if (tutorialIsMobile() && drawer && typeof window.toggleMobileNav === 'function') {
         let el = null;
-        try { el = typeof step.target === 'function' ? step.target() : (step.target ? document.querySelector(step.target) : null); } catch (e) {}
+        try { el = typeof step.target === 'function' ? step.target() : (step.target ? tutorialQuery(step.target) : null); } catch (e) {}
         const inDrawer = !!(el && drawer.contains(el));
         window.toggleMobileNav(inDrawer);
         if (inDrawer) { tutorialState.opened.add('drawer'); try { el.scrollIntoView({ block: 'center' }); } catch (e) {} }
@@ -310,7 +317,7 @@ function tutorialGo(i) {
     // terminal's tab row scrolls sideways on phones). The galaxy canvas is
     // skipped -- it's full-screen and must never be scrolled.
     try {
-        const t = typeof step.target === 'function' ? step.target() : (step.target ? document.querySelector(step.target) : null);
+        const t = typeof step.target === 'function' ? step.target() : (step.target ? tutorialQuery(step.target) : null);
         if (t && t.id !== 'canvas-container') t.scrollIntoView({ block: 'nearest', inline: 'center' });
     } catch (e) {}
 

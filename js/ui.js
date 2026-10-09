@@ -745,7 +745,8 @@ window.TERM_TAB_ACTIVITY_LABELS = {
     secretrepo: 'Designing NPC Vessels'
 };
 
-window.switchTermTab = function(tabName) {
+// Announces 'term-tab-switched' (tabName) — js/terminal-tabs.js follows it.
+window.switchTermTab = window.withAfterHooks('term-tab-switched', function(tabName) {
     // Polish pass (this session): playClick existed in audio.js but was
     // never wired to anything. Tab switching is the single highest-traffic
     // UI action in the app and a natural fit for a light click cue -- one
@@ -786,7 +787,7 @@ window.switchTermTab = function(tabName) {
 
     const activityLabel = window.TERM_TAB_ACTIVITY_LABELS[tabName];
     if (activityLabel && typeof window.broadcastActivity === 'function') window.broadcastActivity(activityLabel);
-};
+});
 
 window.toggleCharacterTerminal = function() {
     const term = document.getElementById('character-terminal');
