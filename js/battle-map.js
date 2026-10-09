@@ -819,14 +819,15 @@ const DomBattleRenderer = {
 
     },
     // Weapon-fire effect between two grid points, by effect family.
-    fireEffect(sx, sy, tx, ty, color, family) {
+    // Announces 'weapon-fire-effect' (sx, sy, tx, ty, color, family), even with no 2D grid on screen.
+    fireEffect: window.withAfterHooks('weapon-fire-effect', function(sx, sy, tx, ty, color, family) {
         const grid = this.grid();
         if (!grid) return;
         if (family === 'pulse') spawnHealPulseEffect(grid, tx, ty, color);
         else if (family === 'burst') spawnBurstEffect(grid, tx, ty, color);
         else if (family === 'tracer') spawnTracerEffect(grid, sx, sy, tx, ty, color);
         else spawnBeamEffect(grid, sx, sy, tx, ty, color);
-    },
+    }),
     // Destruction explosion at a token's grid position.
     destruction(x, y) {
         const grid = this.grid();

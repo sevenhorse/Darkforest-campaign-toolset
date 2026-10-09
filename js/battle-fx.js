@@ -255,6 +255,8 @@ function spawnDestructionEffect(grid, x, y) {
     grid.appendChild(ring);
     setTimeout(() => ring.remove(), 900);
 }
+// Announces 'destruction-effect' (grid, x, y) — the 3D view adds its own explosion.
+window.spawnDestructionEffect = window.withAfterHooks('destruction-effect', spawnDestructionEffect);
 
 /* --- WEAPON RANGE RING ---
    Shown while a weapon's target <select> has focus/hover (wired in
@@ -297,7 +299,8 @@ window.hideWeaponRangeRing = function() {
    dropdown doesn't offer it as an enabled option (out of range, not visible,
    or out of arc). Does not open the vessel terminal. Flashes the target
    highlight if anything was applied. */
-window.autoTargetAllMyWeapons = function(targetVesselId) {
+// Announces 'auto-target' (targetVesselId) — the tactical HUD records lock lines.
+window.autoTargetAllMyWeapons = window.withAfterHooks('auto-target', function(targetVesselId) {
     if (!window.globalBattleEncounterCache) return;
     const myTokens = (window.globalBattleEncounterCache.tokens || []).filter(t => {
         const v = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
@@ -317,7 +320,7 @@ window.autoTargetAllMyWeapons = function(targetVesselId) {
         });
     });
     if (appliedAny && typeof window.flashBattleTargetHighlight === 'function') window.flashBattleTargetHighlight(targetVesselId);
-};
+});
 
 /* --- TARGET-SELECT HIGHLIGHT ---
    Brief pulse on the chosen target token, wired to each weapon target

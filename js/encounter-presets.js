@@ -553,27 +553,19 @@ window.deployReinforcementWave = async function(rowId) {
 // Round-triggered waves: counted on the DM's browser, which is the only one
 // that resolves rounds (2026-09-30). Launch = round 1, so a "round 3" wave
 // arrives after the 2nd round tick.
-(function wrapRoundTickForWaves() {
-    const orig = window.resolveRoundTick;
-    if (typeof orig !== 'function' || orig.__wavesWrapped) return;
-    const wrapped = async function(...args) {
-        const result = await orig.apply(this, args);
-        try {
-            if (currentUserRole === 'dm' && window.globalBattleEncounterCache) {
-                await window.refreshPendingReinforcements(true);
-                for (const row of pendingReinforcements.slice()) {
-                    const elapsed = (row.rounds_elapsed || 0) + 1;
-                    await db.from('battle_reinforcements').update({ rounds_elapsed: elapsed }).eq('id', row.id);
-                    row.rounds_elapsed = elapsed;
-                    if (row.trigger && row.trigger.type === 'round' && elapsed + 1 >= (row.trigger.round || 2)) await deployReinforcementRow(row);
-                }
+window.onHook('round-tick', 'reinforcement-waves', async () => {
+    try {
+        if (currentUserRole === 'dm' && window.globalBattleEncounterCache) {
+            await window.refreshPendingReinforcements(true);
+            for (const row of pendingReinforcements.slice()) {
+                const elapsed = (row.rounds_elapsed || 0) + 1;
+                await db.from('battle_reinforcements').update({ rounds_elapsed: elapsed }).eq('id', row.id);
+                row.rounds_elapsed = elapsed;
+                if (row.trigger && row.trigger.type === 'round' && elapsed + 1 >= (row.trigger.round || 2)) await deployReinforcementRow(row);
             }
-        } catch (err) { console.error('reinforcement waves: round check failed', err); }
-        return result;
-    };
-    wrapped.__wavesWrapped = true;
-    window.resolveRoundTick = wrapped;
-})();
+        }
+    } catch (err) { console.error('reinforcement waves: round check failed', err); }
+});
 
 /* --- Buttons on the Battle Map (DM + switch only) --- */
 function ensurePresetButtons() {

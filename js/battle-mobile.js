@@ -109,13 +109,7 @@ window.battleMobileSync = sync;
 
 // Run after every Battle Map render (battle-chrome may rebuild the bar).
 window.onBattleMapRender('battle-mobile', sync, 90);
-['setGridTool', 'clearGridTools'].forEach(name => {
-    const o = window[name];
-    if (typeof o !== 'function' || o.__bmm) return;
-    const w = function () { const r = o.apply(this, arguments); try { sync(); } catch (e) {} return r; };
-    w.__bmm = true;
-    window[name] = w;
-});
+window.onHook('grid-tools-changed', 'battle-mobile', sync); // MEASURE / SELECT lift the lock
 window.addEventListener('resize', () => { try { sync(); } catch (e) {} });
 document.addEventListener('darkforest:features-changed', () => { try { sync(); } catch (e) {} });
 })();

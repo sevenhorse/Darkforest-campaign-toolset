@@ -52,18 +52,19 @@ window.tapeLabel = function(a, b) {
 };
 
 /* --- Tool modes --- */
-window.setGridTool = function(mode) {
+// Tool / selection changes announce 'grid-tools-changed' (3D view, phone lock listen).
+window.setGridTool = window.withAfterHooks('grid-tools-changed', function(mode) {
     GT.tool = (GT.tool === mode) ? null : mode;
     if (GT.tool !== 'measure') GT.tape = null;
     GT.box = null;
     updateGridToolbar();
     drawGridTools();
-};
-window.toggleTapeShare = function() { GT.share = !GT.share; updateGridToolbar(); };
-window.clearGridTools = function() {
+});
+window.toggleTapeShare = window.withAfterHooks('grid-tools-changed', function() { GT.share = !GT.share; updateGridToolbar(); });
+window.clearGridTools = window.withAfterHooks('grid-tools-changed', function() {
     GT.tool = null; GT.tape = null; GT.box = null; GT.selected.clear(); GT.preview = null;
     updateGridToolbar(); drawGridTools(); applySelectionClasses();
-};
+});
 
 /* --- Range rings --- */
 window.toggleRangeRings = function(vesselId) {
@@ -78,22 +79,22 @@ window.canSelectBattleToken = function(tok) {
     if (currentUserRole === 'dm') return true;
     return typeof window.vesselHasOwner === 'function' && window.vesselHasOwner(v, currentUserId);
 };
-window.toggleBattleTokenSelected = function(tokenId) {
+window.toggleBattleTokenSelected = window.withAfterHooks('grid-tools-changed', function(tokenId) {
     const tok = gtTokens().find(t => t.token_id === tokenId);
     if (!window.canSelectBattleToken(tok)) return false;
     if (GT.selected.has(tokenId)) GT.selected.delete(tokenId); else GT.selected.add(tokenId);
     updateGridToolbar(); applySelectionClasses();
     return true;
-};
-window.selectBattleTokensInBox = function(x1, y1, x2, y2) {
+});
+window.selectBattleTokensInBox = window.withAfterHooks('grid-tools-changed', function(x1, y1, x2, y2) {
     const lx = Math.min(x1, x2), hx = Math.max(x1, x2), ly = Math.min(y1, y2), hy = Math.max(y1, y2);
     gtTokens().forEach(t => {
         const c = gtCenter(t);
         if (c.x >= lx && c.x <= hx && c.y >= ly && c.y <= hy && window.canSelectBattleToken(t)) GT.selected.add(t.token_id);
     });
     updateGridToolbar(); applySelectionClasses();
-};
-window.clearBattleSelection = function() { GT.selected.clear(); updateGridToolbar(); applySelectionClasses(); };
+});
+window.clearBattleSelection = window.withAfterHooks('grid-tools-changed', function() { GT.selected.clear(); updateGridToolbar(); applySelectionClasses(); });
 function pruneSelection() {
     const ids = new Set(gtTokens().map(t => t.token_id));
     Array.from(GT.selected).forEach(id => { if (!ids.has(id)) GT.selected.delete(id); });
@@ -258,12 +259,12 @@ function applySelectionClasses() {
 }
 
 /* --- Shared tape --- */
-window.showRemoteTape = function(p) {
+window.showRemoteTape = window.withAfterHooks('remote-tape', function(p) {
     if (!p || !p.a || !p.b || typeof p.a.x !== 'number') return;
     GT.remoteTapes.push({ a: p.a, b: p.b, who: p.who || '', until: Date.now() + 6000 });
     drawGridTools();
     setTimeout(drawGridTools, 6100);
-};
+});
 function shareTape() {
     if (!GT.share || !GT.tape || typeof window.sendBattleBroadcast !== 'function') return;
     const profs = (typeof allProfiles !== 'undefined' && Array.isArray(allProfiles)) ? allProfiles : [];

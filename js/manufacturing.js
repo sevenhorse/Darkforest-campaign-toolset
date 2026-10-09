@@ -1351,12 +1351,7 @@ window.processManufacturingOrders = async function(newHours) {
 };
 
 // A cancel frees a line (or a queue slot): start whatever is waiting right away.
-(function () {
-    const orig = window.cancelManufacturingOrder;
-    if (typeof orig !== 'function') return;
-    window.cancelManufacturingOrder = async function () {
-        const r = await orig.apply(this, arguments);
-        try { await window.processManufacturingOrders(window.universeTimeHours || 0); } catch (e) { console.error('manufacturing: queue refresh after cancel failed', e); }
-        return r;
-    };
-})();
+window.cancelManufacturingOrder = window.withAfterHooks('manufacturing-order-cancelled', window.cancelManufacturingOrder);
+window.onHook('manufacturing-order-cancelled', 'start-queued', async () => {
+    try { await window.processManufacturingOrders(window.universeTimeHours || 0); } catch (e) { console.error('manufacturing: queue refresh after cancel failed', e); }
+});

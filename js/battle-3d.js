@@ -1137,28 +1137,14 @@ function ordnanceFx(o, p) {
     if (!low) sparks(pos, '#9fb4bc', 8, 40, 600);
     return o;
 }
-(function hookEffects() {
-    const dom = window.DomBattleRenderer;
-    if (dom && !dom.__b3dHooked) {
-        const origFire = dom.fireEffect;
-        dom.fireEffect = function (sx, sy, tx, ty, color, family) {
-            const r = origFire.apply(this, arguments);
-            try { fireFx(family || 'beam', { x: sx, y: sy }, { x: tx, y: ty }, color || '#ff3333'); } catch (e) { console.error('3D view: effect failed', e); }
-            return r;
-        };
-        dom.__b3dHooked = true;
-    }
-    if (typeof window.spawnDestructionEffect === 'function' && !window.spawnDestructionEffect.__b3d) {
-        const origBoom = window.spawnDestructionEffect;
-        const wrapped = function (grid, x, y) {
-            const r = origBoom.apply(this, arguments);
-            try { destructionFx({ x: x + BATTLE_TOKEN_SIZE / 2, y: y + BATTLE_TOKEN_SIZE / 2 }); } catch (e) {}
-            return r;
-        };
-        wrapped.__b3d = true;
-        window.spawnDestructionEffect = wrapped;
-    }
-})();
+// 2D weapon-fire / destruction effects also play in 3D (hooks announced by
+// js/battle-map.js DomBattleRenderer.fireEffect and js/battle-fx.js).
+window.onHook('weapon-fire-effect', 'battle-3d', (sx, sy, tx, ty, color, family) => {
+    try { fireFx(family || 'beam', { x: sx, y: sy }, { x: tx, y: ty }, color || '#ff3333'); } catch (e) { console.error('3D view: effect failed', e); }
+});
+window.onHook('destruction-effect', 'battle-3d', (grid, x, y) => {
+    destructionFx({ x: x + BATTLE_TOKEN_SIZE / 2, y: y + BATTLE_TOKEN_SIZE / 2 });
+});
 
 /* --- Measuring tape (Phase 6b) --- same range bands as the 2D tape; shares
    through the same broadcast, and shows tapes shared from the 2D view. */
@@ -1197,35 +1183,15 @@ function shareTape3d() {
 }
 // Grid-tool state lives in js/grid-tools.js; refresh the 3D view whenever
 // the tool or the selection changes there (buttons, Esc, taps).
-(function hookGridTools() {
-    ['setGridTool', 'clearGridTools', 'toggleBattleTokenSelected', 'selectBattleTokensInBox', 'clearBattleSelection', 'toggleTapeShare'].forEach(name => {
-        const orig = window[name];
-        if (typeof orig !== 'function' || orig.__b3d) return;
-        const wrapped = function () {
-            const r = orig.apply(this, arguments);
-            try {
-                if (window.battle3dActive() && B3.renderer) {
-                    if (tool3d() !== 'tape' && B3.tape) clearTape();
-                    syncScene();
-                }
-            } catch (e) {}
-            return r;
-        };
-        wrapped.__b3d = true;
-        window[name] = wrapped;
-    });
-})();
-(function hookRemoteTape() {
-    const orig = window.showRemoteTape;
-    if (typeof orig !== 'function' || orig.__b3d) return;
-    const wrapped = function () {
-        const r = orig.apply(this, arguments);
-        try { if (window.battle3dActive() && B3.renderer) { drawTape(); setTimeout(drawTape, 6100); } } catch (e) {}
-        return r;
-    };
-    wrapped.__b3d = true;
-    window.showRemoteTape = wrapped;
-})();
+window.onHook('grid-tools-changed', 'battle-3d', () => {
+    if (window.battle3dActive() && B3.renderer) {
+        if (tool3d() !== 'tape' && B3.tape) clearTape();
+        syncScene();
+    }
+});
+window.onHook('remote-tape', 'battle-3d', () => {
+    if (window.battle3dActive() && B3.renderer) { drawTape(); setTimeout(drawTape, 6100); }
+});
 
 /* --- Picking --- */
 function rayAt(clientX, clientY) {
@@ -1561,17 +1527,7 @@ function applyMiniSheet() {
 }
 window.battle3dApplyMiniSheet = applyMiniSheet;
 window.onBattleMapRender('battle-3d', () => { syncView(); applyMiniSheet(); }, 40);
-(function hookSelect() {
-    const orig = window.tv2Select;
-    if (typeof orig !== 'function' || orig.__b3d) return;
-    const wrapped = function () {
-        const r = orig.apply(this, arguments);
-        try { if (window.battle3dActive() && B3.renderer) syncScene(); } catch (e) {}
-        return r;
-    };
-    wrapped.__b3d = true;
-    window.tv2Select = wrapped;
-})();
+window.onHook('tv2-select', 'battle-3d', () => { if (window.battle3dActive() && B3.renderer) syncScene(); });
 try {
     document.addEventListener('darkforest:features-changed', () => { if (window.globalBattleEncounterCache) { try { syncView(); } catch (e) {} } });
     document.addEventListener('keydown', e => {

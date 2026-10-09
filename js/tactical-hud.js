@@ -64,7 +64,8 @@ function defaultSelection() {
     const first = toks.map(t => tvVessel(t.ship_marker_id)).find(v => v && !v.is_strike_craft);
     return first ? first.id : null;
 }
-window.tv2Select = function(vesselId, opts) {
+// Announces 'tv2-select' (vesselId, opts) — the 3D view re-syncs.
+window.tv2Select = window.withAfterHooks('tv2-select', function(vesselId, opts) {
     TV.selected = vesselId;
     renderTv2();
     if (opts && opts.scroll) {
@@ -77,7 +78,7 @@ window.tv2Select = function(vesselId, opts) {
             try { wrap.scrollTo({ left: c.x * scale - wrap.clientWidth / 2, top: c.y * scale - wrap.clientHeight / 2, behavior: 'smooth' }); } catch (e) {}
         }
     }
-};
+});
 // Called from js/battle-map.js on a token tap. true = handled (don't open the terminal).
 window.tv2HandleTokenTap = function(vesselId) {
     if (!window.tv2Active()) return false;
@@ -104,27 +105,18 @@ document.addEventListener('change', (e) => {
     if (p) window.tv2SetLock(p.vesselId, p.idx, t.value);
 }, true);
 // "Tap a hostile = target with all my weapons" also records locks for ships whose dropdowns aren't on screen.
-(function wrapAutoTarget() {
-    const orig = window.autoTargetAllMyWeapons;
-    if (typeof orig !== 'function' || orig.__tv2) return;
-    const wrapped = function(targetId) {
-        const r = orig.apply(this, arguments);
-        if (window.tv2Active()) {
-            tvTokens().forEach(t => {
-                const v = tvVessel(t.ship_marker_id);
-                if (!v || v.id === targetId || !window.vesselHasOwner(v, currentUserId)) return;
-                (v.ship_weapons || []).forEach((w, idx) => {
-                    if (!w || w.is_point_defense) return;
-                    const list = window.getBattleScopedTargets ? window.getBattleScopedTargets(v.id, w.range, { firerVessel: v, wpn: w }) : null;
-                    if (list && list.some(x => x.id === targetId)) window.tv2SetLock(v.id, idx, targetId);
-                });
-            });
-        }
-        return r;
-    };
-    wrapped.__tv2 = true;
-    window.autoTargetAllMyWeapons = wrapped;
-})();
+window.onHook('auto-target', 'tactical-hud', (targetId) => {
+    if (!window.tv2Active()) return;
+    tvTokens().forEach(t => {
+        const v = tvVessel(t.ship_marker_id);
+        if (!v || v.id === targetId || !window.vesselHasOwner(v, currentUserId)) return;
+        (v.ship_weapons || []).forEach((w, idx) => {
+            if (!w || w.is_point_defense) return;
+            const list = window.getBattleScopedTargets ? window.getBattleScopedTargets(v.id, w.range, { firerVessel: v, wpn: w }) : null;
+            if (list && list.some(x => x.id === targetId)) window.tv2SetLock(v.id, idx, targetId);
+        });
+    });
+});
 function restoreLockSelects(vesselId) {
     const locks = TV.locks[vesselId] || {};
     Object.keys(locks).forEach(idx => {

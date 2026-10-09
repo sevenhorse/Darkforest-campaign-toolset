@@ -40,6 +40,48 @@ window.escapeHtml = function(str) {
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 };
+/* Named hooks — use these instead of wrapping another file's window.* function.
+   The file that OWNS a function builds it with window.withAfterHooks('event', fn)
+   (or calls window.runHooks itself); add-ons subscribe with
+   window.onHook('event', 'my-name', fn, order). Hooks get the same arguments as
+   the call, run lowest order first (default 50), and run even when the owner
+   returned early. Re-registering a name replaces it, so files can reload safely.
+   One failing hook is logged and the rest still run. For async owners the hooks
+   are awaited in order before the call resolves.
+   window.hooksAllow('event', ...) is for checks: any hook returning false
+   vetoes the action. (Battle Map renders use window.onBattleMapRender.) */
+(function () {
+    const reg = {};
+    const list = (ev) => (reg[ev] || []).slice().sort((a, b) => a.order - b.order);
+    const fail = (ev, h, e) => console.error(`hook "${h.name}" on "${ev}" failed`, e);
+    window.onHook = function (ev, name, fn, order) {
+        const L = reg[ev] || (reg[ev] = []);
+        const h = { name, fn, order: order === undefined ? 50 : order };
+        const i = L.findIndex(x => x.name === name);
+        if (i >= 0) L[i] = h; else L.push(h);
+    };
+    window.hookNames = (ev) => list(ev).map(h => h.name);
+    window.runHooks = function (ev, ...args) {
+        for (const h of list(ev)) { try { h.fn(...args); } catch (e) { fail(ev, h, e); } }
+    };
+    window.runHooksAsync = async function (ev, ...args) {
+        for (const h of list(ev)) { try { await h.fn(...args); } catch (e) { fail(ev, h, e); } }
+    };
+    window.hooksAllow = function (ev, ...args) {
+        for (const h of list(ev)) {
+            try { if (h.fn(...args) === false) return false; } catch (e) { fail(ev, h, e); }
+        }
+        return true;
+    };
+    window.withAfterHooks = function (ev, fn) {
+        return function (...args) {
+            const r = fn.apply(this, args);
+            if (r && typeof r.then === 'function') return r.then(async v => { await window.runHooksAsync(ev, ...args); return v; });
+            window.runHooks(ev, ...args);
+            return r;
+        };
+    };
+})();
 window.coalesceAsync = function(fn) {
     let running = null, trailing = null;
     const wrapped = function(...args) {
@@ -357,7 +399,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-09.01';
+window.DARKFOREST_BUILD = '2026-10-09.02';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];

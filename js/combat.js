@@ -3007,6 +3007,8 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
 })();
 
 window.resolveArsenalAttack = async function(weaponId) {
+    // Add-ons can refuse the shot first (deck plans: no line of sight).
+    if (!window.hooksAllow('arsenal-attack-check', weaponId)) return;
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
     let wpn = (myProf.arsenal || []).find(w => w.id === weaponId);
@@ -3541,3 +3543,11 @@ window.advanceCombatRound = async function() {
     if (!(await window.showConfirmModal("Advance combat round? This will process cooldowns, overheat, and force-recall any strike craft that run out of fuel."))) return;
     await window.resolveRoundTick();
 };
+
+// --- Hook announcements (window.onHook, js/db.js) ---
+// 'round-tick': after a round resolves (DM's browser) — reinforcement waves.
+// 'combat-tracker-rendered': after the Initiative tracker redraws — Deck View.
+// 'arsenal-attack-modal' (weaponId): after the personal-weapon attack popup opens — deck LOS info.
+window.resolveRoundTick = window.withAfterHooks('round-tick', window.resolveRoundTick);
+window.renderCombatTracker = window.withAfterHooks('combat-tracker-rendered', window.renderCombatTracker);
+window.openArsenalAttackModal = window.withAfterHooks('arsenal-attack-modal', window.openArsenalAttackModal);

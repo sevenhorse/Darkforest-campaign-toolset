@@ -1067,26 +1067,18 @@ function updateAttackInfo() {
         : rc && rc.refuse ? rc.refuse + ' — the shot will be refused' : rc && rc.mod ? 'line of sight clear · past short range: -2 to hit' : 'line of sight clear');
 }
 window.deckAttackInfoRefresh = updateAttackInfo;
-const origOpen = window.openArsenalAttackModal;
-if (typeof origOpen === 'function') {
-    window.openArsenalAttackModal = function (weaponId) {
-        F.atkWeapon = weaponId;
-        const r = origOpen.apply(this, arguments);
-        const sel = document.getElementById('atk-target-select');
-        if (sel && !sel.dataset.deckHooked) { sel.dataset.deckHooked = '1'; sel.addEventListener('change', updateAttackInfo); }
-        updateAttackInfo();
-        return r;
-    };
-}
-const origResolve = window.resolveArsenalAttack;
-if (typeof origResolve === 'function') {
-    window.resolveArsenalAttack = async function () {
-        const sel = document.getElementById('atk-target-select');
-        const rel = F.fight && sel ? window.deckRelation(myCombatantId(), sel.value) : null;
-        if (rel && !rel.los) { alert('No line of sight to that target on the deck plan — move or open a door first.'); return; }
-        return origResolve.apply(this, arguments);
-    };
-}
+window.onHook('arsenal-attack-modal', 'deck-plans', (weaponId) => {
+    F.atkWeapon = weaponId;
+    const sel = document.getElementById('atk-target-select');
+    if (sel && !sel.dataset.deckHooked) { sel.dataset.deckHooked = '1'; sel.addEventListener('change', updateAttackInfo); }
+    updateAttackInfo();
+});
+window.onHook('arsenal-attack-check', 'deck-plans', () => {
+    const sel = document.getElementById('atk-target-select');
+    const rel = F.fight && sel ? window.deckRelation(myCombatantId(), sel.value) : null;
+    if (rel && !rel.los) { alert('No line of sight to that target on the deck plan — move or open a door first.'); return false; }
+    return true;
+});
 
 /* --- Hooks --- */
 // 🚪 DECK PLANS button on the Battle Map (DM), next to the other DM tools.
@@ -1116,14 +1108,7 @@ function ensureBattleButtons() {
     if (b) b.style.display = ok && window.globalBattleEncounterCache ? 'inline-block' : 'none';
 }
 window.onBattleMapRender('deck-plans', ensureBattleButtons, 80);
-const origTracker = window.renderCombatTracker;
-if (typeof origTracker === 'function') {
-    window.renderCombatTracker = function () {
-        const r = origTracker.apply(this, arguments);
-        try { if (F.fight) renderDeckView(); } catch (e) {}
-        return r;
-    };
-}
+window.onHook('combat-tracker-rendered', 'deck-plans', () => { if (F.fight) renderDeckView(); });
 let started = false;
 document.addEventListener('darkforest:features-changed', async () => {
     try {
