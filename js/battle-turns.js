@@ -271,14 +271,28 @@ window.endCurrentTurn = async function(opts) {
         }
         if (wrapped && typeof window.resolveRoundTick === 'function') {
             await window.resolveRoundTick();
-            // The tick can destroy tokens, so re-read the next vessel. Known
-            // limitation: if it died in the tick, nothing is advanced here and
-            // the DM/owner has to press END TURN again.
-            nextVessel = globalShipMarkersCache.find(m => m.id === nextTok.ship_marker_id);
-            if (!nextVessel || (nextVessel.integrity_hull || 0) <= 0) {
+            // The tick can destroy ships (and change the order), so pick the
+            // first living unit of the NEW round again. The round is always
+            // advanced here -- returning without writing it would make the
+            // next END TURN wrap again and resolve the whole round twice.
+            const enc2 = window.globalBattleEncounterCache || encounter;
+            const order2 = enc2.turn_order || turnOrder;
+            const alive = (tid) => {
+                const t = (enc2.tokens || []).find(x => x.token_id === tid);
+                const v = t ? globalShipMarkersCache.find(m => m.id === t.ship_marker_id) : null;
+                return t && v && (v.integrity_hull || 0) > 0 ? { t, v } : null;
+            };
+            const firstIdx = order2.findIndex(tid => alive(tid));
+            if (firstIdx < 0) {
+                const roundOnly = { current_turn_index: 0, pending_round_tick: false, round_number: (enc2.round_number || 1) + 1 };
+                await db.from('battle_encounters').update(roundOnly).eq('id', enc2.id);
+                Object.assign(enc2, roundOnly);
+                await db.from('chat_logs').insert({ sender_id: null, content: `⏭️ [INITIATIVE] Round ${roundOnly.round_number}: no units remain in the turn order.`, message_type: 'system' });
                 if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
                 return;
             }
+            idx = firstIdx;
+            ({ t: nextTok, v: nextVessel } = alive(order2[firstIdx]));
         }
 
         const apMax = window.getTokenApMax(nextVessel);

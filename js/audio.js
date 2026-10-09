@@ -117,7 +117,7 @@ window.AudioEngine = (function() {
     // abort the whole IIFE and leave window.AudioEngine undefined app-wide.
     let musicVolume = (function() {
         try {
-            const v = parseFloat(localStorage.getItem('odyssey_audio_volume'));
+            const v = parseFloat(window.safeLocalGet('odyssey_audio_volume', null));
             return isNaN(v) ? 0.4 : Math.max(0, Math.min(1, v));
         } catch (e) { return 0.4; }
     })();
@@ -305,12 +305,12 @@ window.AudioEngine = (function() {
 
     function setMusicVolume(v) {
         musicVolume = Math.max(0, Math.min(1, parseFloat(v)));
-        localStorage.setItem('odyssey_audio_volume', musicVolume);
+        window.safeLocalSet('odyssey_audio_volume', musicVolume);
         applyLiveVolume();
     }
     function setMuted(b) {
         muted = !!b;
-        localStorage.setItem('odyssey_audio_muted', muted ? 'true' : 'false');
+        window.safeLocalSet('odyssey_audio_muted', muted ? 'true' : 'false');
         applyLiveVolume();
     }
     function toggleMute() { setMuted(!muted); syncControlsUI(); }

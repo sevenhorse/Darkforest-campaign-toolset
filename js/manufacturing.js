@@ -568,7 +568,7 @@ window.approveBlueprint = async function(id) {
             <label for="bp-edit-hours" style="font-size:9px; color:#6b826a;">Base Time Cost (hours, before any perk discount)</label>
             <input type="number" id="bp-edit-hours" min="0.1" step="0.1" value="24" style="border-color:#c9962f;">
 
-            <label style="font-size:9px; color:#6b826a; margin-top:8px; display:block;">Resource Cost (ignored for colony-started builds -- colonies have no cargo of their own). Pick from any existing blueprint's output, grouped by tier below -- Tier 1 is a raw feedstock, Tier 2+ is itself something manufactured. To add a brand-new base feedstock, save a separate time-only blueprint for it first, then it'll appear here.</label>
+            <label style="font-size:9px; color:#6b826a; margin-top:8px; display:block;">Resource Cost (paid from the ship's cargo, or from colony storage for colony builds). Pick from any existing blueprint's output, grouped by tier below -- Tier 1 is a raw feedstock, Tier 2+ is itself something manufactured. To add a brand-new base feedstock, save a separate time-only blueprint for it first, then it'll appear here.</label>
             <div id="bp-cost-list" style="margin-bottom:4px;"></div>
             <div id="bp-tier-warning" style="font-size:9px; margin-bottom:6px;"></div>
             <div style="background:#030403; padding:6px; border:1px solid #c9962f; border-radius:2px; display:flex; gap:4px; align-items:center;">
@@ -614,7 +614,7 @@ window.approveBlueprint = async function(id) {
                 </div>
             </div>
             <div id="bp-output-infra-fields" style="margin-top:6px; display:none;">
-                <label for="bp-out-infra-level" style="font-size:8px; color:#6b826a; display:block;">Target Infrastructure Level -- completing this build raises the colony to this level (never lowers it if already higher). Colony-build-only; per the confirmed design a colony must already be at Infrastructure Level N to build a Tier N item, so this blueprint's OWN resource-cost tier is exempt from that gate (it's how a colony reaches the level in the first place).</label>
+                <label for="bp-out-infra-level" style="font-size:8px; color:#6b826a; display:block;">Target Infrastructure Level -- completing this build raises the colony to this level (never lowers it if already higher). Colony builds only. A colony normally needs Infrastructure Level N to build a Tier N item; this blueprint is exempt from that gate, since it's how a colony reaches the level in the first place.</label>
                 <input type="number" id="bp-out-infra-level" min="1" value="2" style="border-color:#c9962f; text-align:center;">
             </div>
 

@@ -27,6 +27,14 @@ window.safeJsonParse = function(raw, fallback) {
 window.safeLocalGet = function(key, fallback) {
     try { const raw = localStorage.getItem(key); return raw === null ? fallback : raw; } catch (e) { return fallback; }
 };
+// Browsers that block storage (some private modes) throw on any localStorage
+// access; these never throw, so a blocked store can't stop the app starting.
+window.safeLocalSet = function(key, value) {
+    try { localStorage.setItem(key, value); return true; } catch (e) { return false; }
+};
+window.safeLocalRemove = function(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+};
 window.escapeHtml = function(str) {
     return String(str === null || str === undefined ? '' : str)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -610,7 +618,7 @@ async function fetchUserProfile(user) {
         document.getElementById('codex-permission-indicator').innerText = '● OVERSEER AUTHORIZATION';
         document.getElementById('codex-permission-indicator').style.color = '#ff6b6b';
         
-        const savedScratch = localStorage.getItem('odyssey_dm_scratchpad');
+        const savedScratch = window.safeLocalGet('odyssey_dm_scratchpad', null);
         if (savedScratch) document.getElementById('dm-scratchpad-input').value = savedScratch;
     }
 
@@ -726,7 +734,7 @@ window.checkSysScan = function(log) {
     let match = log.content.match(/\[SYS_SCAN:(.+?)\]/);
     if (match && !window.scannedSystems.includes(match[1])) {
         window.scannedSystems.push(match[1]);
-        localStorage.setItem('odyssey_scanned', JSON.stringify(window.scannedSystems));
+        window.safeLocalSet('odyssey_scanned', JSON.stringify(window.scannedSystems));
         if (typeof renderCodexMatrix === 'function') renderCodexMatrix();
         return true;
     }
@@ -1192,10 +1200,10 @@ window.jumpToActiveShip = async function() {
    drives. Always logged to Comms. Free clock rewinds stay DM-only
    (window.adjustTime). */
 window.JUMP_TIME_INVERSION_MAX_HOURS = 168;
-window.jumpInversionFtlOnly = localStorage.getItem('odyssey_jump_ftl_only') !== 'false'; // default ON
+window.jumpInversionFtlOnly = window.safeLocalGet('odyssey_jump_ftl_only', null) !== 'false'; // default ON
 window.setJumpInversionFtlOnly = function(checked) {
     window.jumpInversionFtlOnly = !!checked;
-    localStorage.setItem('odyssey_jump_ftl_only', window.jumpInversionFtlOnly ? 'true' : 'false');
+    window.safeLocalSet('odyssey_jump_ftl_only', window.jumpInversionFtlOnly ? 'true' : 'false');
 };
 
 window.exportCampaignBackup = function() {

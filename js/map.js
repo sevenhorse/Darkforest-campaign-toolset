@@ -176,7 +176,7 @@ function updateHyperlaneDiscovery() {
             }
         });
     });
-    if (changed) localStorage.setItem('odyssey_discovered_hyperlane_nodes', JSON.stringify([...window.discoveredHyperlaneNodes]));
+    if (changed) window.safeLocalSet('odyssey_discovered_hyperlane_nodes', JSON.stringify([...window.discoveredHyperlaneNodes]));
 }
 
 /* --- FOW RESET SYNC (DM Maintenance panel) ---
@@ -189,13 +189,13 @@ function updateHyperlaneDiscovery() {
    DM decision: one action clears both scans and hyperlanes, for every
    player at once, live for anyone online. No other data is touched. */
 window.applyFowResetIfNewer = function(serverEpoch) {
-    const localEpoch = parseInt(localStorage.getItem('odyssey_fow_reset_epoch') || '0');
+    const localEpoch = parseInt(window.safeLocalGet('odyssey_fow_reset_epoch', null) || '0');
     if (!(serverEpoch > localEpoch)) return;
     window.scannedSystems = [];
     window.discoveredHyperlaneNodes = new Set();
-    localStorage.setItem('odyssey_scanned', '[]');
-    localStorage.setItem('odyssey_discovered_hyperlane_nodes', '[]');
-    localStorage.setItem('odyssey_fow_reset_epoch', String(serverEpoch));
+    window.safeLocalSet('odyssey_scanned', '[]');
+    window.safeLocalSet('odyssey_discovered_hyperlane_nodes', '[]');
+    window.safeLocalSet('odyssey_fow_reset_epoch', String(serverEpoch));
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 
@@ -725,7 +725,9 @@ function resetHyperlaneFormFields() {
     const factionEl = document.getElementById('hyperlane-faction-select'); if (factionEl) factionEl.value = '';
 }
 
-window.startDrawingHyperlane = function() { window.editingHyperlaneId = null; resetHyperlaneFormFields(); window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('btn-undo-hyperlane-node').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
+// Keeps whatever name / colour / faction the DM typed first (finish and
+// cancel clear the form, so nothing is left over from an earlier edit).
+window.startDrawingHyperlane = function() { window.editingHyperlaneId = null; window.hyperlaneDrawActive = true; window.activeHyperlaneNodes = []; document.getElementById('btn-start-hyperlane-draw').style.display = 'none'; document.getElementById('btn-finish-hyperlane-draw').style.display = 'block'; document.getElementById('btn-cancel-hyperlane-draw').style.display = 'block'; document.getElementById('btn-undo-hyperlane-node').style.display = 'block'; document.getElementById('hyperlane-drawing-status').style.display = 'block'; window.updateToolButtonStyles(); };
 
 // Loads an existing route into the drawing state for in-place editing
 // (saved as an UPDATE). Existing node ids are kept; legacy nodes without
@@ -812,7 +814,7 @@ window.recenterOnGalacticCore = function() {
 
 /* --- CIC TACTICAL TABLE: RADAR SWEEP TOGGLE ---
    Pure CSS animation (.radar-sweep in style.css); only on/off state lives here. */
-window.radarSweepActive = localStorage.getItem('odyssey_radar_sweep') === 'true';
+window.radarSweepActive = window.safeLocalGet('odyssey_radar_sweep', null) === 'true';
 function applyRadarSweepState() {
     const overlay = document.getElementById('radar-sweep-overlay');
     if (overlay) overlay.classList.toggle('active', window.radarSweepActive);
@@ -821,7 +823,7 @@ function applyRadarSweepState() {
 }
 window.toggleRadarSweep = function() {
     window.radarSweepActive = !window.radarSweepActive;
-    localStorage.setItem('odyssey_radar_sweep', window.radarSweepActive ? 'true' : 'false');
+    window.safeLocalSet('odyssey_radar_sweep', window.radarSweepActive ? 'true' : 'false');
     applyRadarSweepState();
     if (window.radarSweepActive) window.recenterOnGalacticCore();
 };
@@ -1052,7 +1054,7 @@ window.addRecentTarget = function(target) {
     recentTargets = recentTargets.filter(r => !(r.data && r.data.id === target.data.id && r.type === target.type));
     recentTargets.unshift({ type: target.type, data: target.data });
     if (recentTargets.length > 10) recentTargets.length = 10;
-    localStorage.setItem('odyssey_recents', JSON.stringify(recentTargets));
+    window.safeLocalSet('odyssey_recents', JSON.stringify(recentTargets));
     if (window.activeHudTab === 'recents' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 
@@ -1146,7 +1148,7 @@ window.executePlottedJump = async function() {
         if (!clockError && clockData && clockData[0]) {
             oldTime = clockData[0].old_hours; newTime = clockData[0].new_hours;
             window.universeTimeHours = newTime;
-            localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+            window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
             if (typeof window.updateCalendarDisplay === 'function') window.updateCalendarDisplay();
         }
     }
@@ -1165,11 +1167,11 @@ window.toggleBookmarkSelected = function() {
     if (!window.selectedTarget || !window.selectedTarget.data) return;
     let existsIndex = bookmarkedTargets.findIndex(b => b.data.id === window.selectedTarget.data.id);
     if (existsIndex >= 0) { bookmarkedTargets.splice(existsIndex, 1); } else { bookmarkedTargets.push({ type: window.selectedTarget.type, data: window.selectedTarget.data }); }
-    localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+    window.safeLocalSet('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 window.shareBookmarkToChat = function(name, type) { db.from('chat_logs').insert({ sender_id: currentUserId, content: `Shared Coordinate 📍 [${type.toUpperCase()}]: ${name}`, message_type: 'text' }); alert("Broadcasted to Comms!"); };
 window.jumpToBookmark = function(index) { let b = bookmarkedTargets[index]; if (!b) return; window.selectedTarget = b; window.lockCameraOnSelected(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
-window.deleteBookmark = function(index) { bookmarkedTargets.splice(index, 1); localStorage.setItem('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
+window.deleteBookmark = function(index) { bookmarkedTargets.splice(index, 1); window.safeLocalSet('odyssey_bookmarks', JSON.stringify(bookmarkedTargets)); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 window.jumpToRecent = function(index) { let r = recentTargets[index]; if (!r) return; window.selectedTarget = r; window.lockCameraOnSelected(); if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry(); };
 
 window.saveDMStarProperties = async function(id) {
@@ -1777,7 +1779,7 @@ window.initGalaxyEngine = function() {
             const hazardHits = window.checkShipHazards(m);
             let hazardBox = '';
             if (hazardHits.length > 0) {
-                const hazardLabels = { pulsar: '☢️ PULSAR RADIATION — weapons overheating faster', nebula: '🌫️ DENSE NEBULA — sensor emissions masked', gravity_well: '🌀 GRAVITY WELL — FTL jump costs increased' };
+                const hazardLabels = { pulsar: '☢️ PULSAR RADIATION — weapons overheating faster', nebula: '🌫️ DENSE NEBULA — sensor emissions masked', gravity_well: '🌀 GRAVITY WELL — jump time drift stretched' };
                 hazardBox = `<div style="background:#1a0808; border:1px solid #ff3333; padding:6px; margin-top:6px; border-radius:2px;">
                     <span style="font-size:9px; color:#ff6b6b; font-weight:bold;">⚠️ ENVIRONMENTAL HAZARD</span>
                     ${hazardHits.map(h => `<div style="font-size:9px; color:#ffaaaa; margin-top:2px;">${hazardLabels[h.type] || h.type.toUpperCase()}</div>`).join('')}

@@ -188,7 +188,7 @@ window.getSavedListOrder = function(key) {
     try { return JSON.parse(localStorage.getItem('order_' + key)) || []; } catch (e) { return []; }
 };
 window.saveListOrder = function(key, orderedIds) {
-    localStorage.setItem('order_' + key, JSON.stringify(orderedIds));
+    window.safeLocalSet('order_' + key, JSON.stringify(orderedIds));
 };
 // Sorts `items` (array of objects with an `id`) by this browser's saved
 // order for `key`. Items with no saved position keep their original
@@ -275,7 +275,7 @@ window.renderReorderArrows = function(key, items, id, moveFnName) {
    update as a last-known-value cache for the instant before the next
    page's async load resolves — it is NOT the source of truth anymore,
    just a display fallback. */
-window.universeTimeHours = parseInt(localStorage.getItem('odyssey_universe_time') || '24192000');
+window.universeTimeHours = parseInt(window.safeLocalGet('odyssey_universe_time', null) || '24192000');
 window.timeFlowActive = false;
 window.timeFlowInterval = null;
 
@@ -403,7 +403,7 @@ window.initCalendarEngine = async function() {
     if (!clockRow) {
         const { data: inserted } = await db.from('campaign_clock').insert({ id: 1, universe_time_hours: localSeedHours, time_flow_active: false }).select().maybeSingle();
         clockRow = inserted;
-    } else if (currentUserRole === 'dm' && localStorage.getItem('odyssey_clock_migrated_to_shared') !== 'true') {
+    } else if (currentUserRole === 'dm' && window.safeLocalGet('odyssey_clock_migrated_to_shared', null) !== 'true') {
         // One-time migration bootstrap, DM only: per the DM's own confirmed
         // choice, THIS browser's currently-displayed local time becomes the
         // new shared truth for the whole table — overriding whatever the
@@ -414,13 +414,13 @@ window.initCalendarEngine = async function() {
         const { data: updated } = await db.from('campaign_clock').update({ universe_time_hours: localSeedHours }).eq('id', 1).select().maybeSingle();
         clockRow = updated || clockRow;
     }
-    localStorage.setItem('odyssey_clock_migrated_to_shared', 'true');
+    window.safeLocalSet('odyssey_clock_migrated_to_shared', 'true');
 
     if (clockRow) {
         window.universeTimeHours = clockRow.universe_time_hours;
         window.timeFlowActive = clockRow.time_flow_active;
     }
-    localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+    window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay();
     syncTimeFlowButton();
 
@@ -438,7 +438,7 @@ window.initCalendarEngine = async function() {
             if (!payload.new) return;
             window.universeTimeHours = payload.new.universe_time_hours;
             window.timeFlowActive = payload.new.time_flow_active;
-            localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+            window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
             window.updateCalendarDisplay();
             syncTimeFlowButton();
         })
@@ -456,7 +456,7 @@ window.initCalendarEngine = async function() {
         if (error || !data || !data[0]) return;
         const { old_hours, new_hours } = data[0];
         window.universeTimeHours = new_hours;
-        localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+        window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
         window.updateCalendarDisplay();
         await window.processTimeAdvancement(old_hours, new_hours);
     }, 4000);
@@ -484,7 +484,7 @@ window.adjustTime = async function(amount, unit) {
     const { old_hours, new_hours } = data[0];
 
     window.universeTimeHours = new_hours;
-    localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+    window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay(); window.broadcastTimeSync();
     await window.processTimeAdvancement(old_hours, new_hours);
 };
@@ -514,7 +514,7 @@ window.applyManualTime = async function() {
     if (error) { alert("Failed to set chronology: " + error.message); return; }
 
     window.universeTimeHours = newTime;
-    localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+    window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay(); window.broadcastTimeSync();
     await window.processTimeAdvancement(oldTime, newTime);
     alert("Chronology manually updated.");
@@ -532,7 +532,7 @@ window.resetTimeline = async function() {
     if (error) { alert("Failed to reset timeline: " + error.message); return; }
 
     window.universeTimeHours = newTime;
-    localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+    window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay(); window.broadcastTimeSync();
     await window.processTimeAdvancement(oldTime, newTime);
 };
@@ -555,7 +555,7 @@ window.broadcastTimeSync = function() {
 function makePanelDraggable(panelId, handleId, storageKey) {
     const panel = document.getElementById(panelId); const handle = document.getElementById(handleId);
     if (!panel || !handle) return;
-    const savedPos = localStorage.getItem(storageKey);
+    const savedPos = window.safeLocalGet(storageKey, null);
     if (savedPos) {
         try {
             const { left, top } = JSON.parse(savedPos);
@@ -569,11 +569,11 @@ function makePanelDraggable(panelId, handleId, storageKey) {
             // back into view. Falling back to the CSS default position here
             // makes that self-healing instead of a recurring "snap" on click.
             if (isNaN(leftNum) || isNaN(topNum) || leftNum <= 0 || topNum <= 0) {
-                localStorage.removeItem(storageKey);
+                window.safeLocalRemove(storageKey);
             } else {
                 panel.style.left = left; panel.style.top = top; panel.style.right = 'auto';
             }
-        } catch(e) { localStorage.removeItem(storageKey); }
+        } catch(e) { window.safeLocalRemove(storageKey); }
     }
     let isDragging = false, startX, startY, initialLeft, initialTop;
     handle.addEventListener('mousedown', (e) => {
@@ -591,7 +591,7 @@ function makePanelDraggable(panelId, handleId, storageKey) {
             panel.style.top = `${Math.max(60, Math.min(window.innerHeight - panel.offsetHeight - 10, initialTop + dy))}px`;
         };
         const onMouseUp = () => {
-            if (isDragging) { isDragging = false; localStorage.setItem(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); }
+            if (isDragging) { isDragging = false; window.safeLocalSet(storageKey, JSON.stringify({ left: panel.style.left, top: panel.style.top })); }
             window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
         };
         window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
@@ -698,22 +698,12 @@ window.setupMobileNavLayout = function() {
 window.setupMobileNavLayout();
 
 window.resetUiLayout = function() {
-    // Bug avoided rather than introduced (FOW Reset Sync build, 2026-09-02):
-    // this already excluded 'scanned' so a UI-position reset wouldn't
-    // silently wipe a player's own DRADIS scan progress. It did NOT
-    // exclude odyssey_fow_reset_epoch (the new FOW Reset Sync marker) --
-    // wiping that key alone, without the server's fow_reset_state epoch
-    // also moving, would make this browser think a brand-new DM-triggered
-    // reset just arrived and wipe scanned systems/hyperlanes it shouldn't,
-    // the next time initFowResetSync compares epochs. Excluded here for
-    // the same reason 'scanned' already was.
-    // Separately noticed, NOT fixed here (flagging rather than
-    // scope-creeping into an unrelated button): this does NOT exclude
-    // odyssey_discovered_hyperlane_nodes, so "RESET LOCAL UI POSITIONS"
-    // has apparently always also silently cleared this browser's own
-    // discovered hyperlane routes as a side effect. Say the word if you'd
-    // like that excluded too.
-    Object.keys(localStorage).forEach(k => { if (k.startsWith('odyssey_') && !k.includes('universe_time') && !k.includes('scanned') && !k.includes('fow_reset_epoch')) localStorage.removeItem(k); });
+    // Clears saved panel positions/UI state only. Game progress kept in this
+    // browser is excluded: DRADIS scans ('scanned'), discovered trade routes
+    // ('discovered_hyperlane'), the clock, and the FOW reset marker (wiping
+    // that alone would look like a new DM reset and wipe scans next load).
+    let storedKeys = []; try { storedKeys = Object.keys(localStorage); } catch (e) {}
+    storedKeys.forEach(k => { if (k.startsWith('odyssey_') && !k.includes('universe_time') && !k.includes('scanned') && !k.includes('fow_reset_epoch') && !k.includes('discovered_hyperlane')) window.safeLocalRemove(k); });
     location.reload();
 };
 
@@ -861,7 +851,7 @@ window.toggleCommsArray = function() { const panel = document.getElementById('co
 window.toggleDmScratchpad = function() { if (currentUserRole !== 'dm') return; const panel = document.getElementById('dm-scratchpad-panel'); panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
 // Not DM-gated (unlike the scratchpad above) -- attribution info is fine for anyone to see.
 window.toggleCreditsPanel = function() { const panel = document.getElementById('credits-panel'); if (panel) panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; };
-window.saveDmScratchpad = function() { if (currentUserRole !== 'dm') return; const val = document.getElementById('dm-scratchpad-input').value; localStorage.setItem('odyssey_dm_scratchpad', val); };
+window.saveDmScratchpad = function() { if (currentUserRole !== 'dm') return; const val = document.getElementById('dm-scratchpad-input').value; window.safeLocalSet('odyssey_dm_scratchpad', val); };
 
 /* --- SKILLS & CHARACTER TERMINAL --- */
 const skillList = [ "Athletics", "Stealth", "Survival", "Ballistic Weapons", "Energy Weapons", "Explosives", "Computers", "Engineering", "Sciences", "Mechanics", "Medical", "Speechcraft" ];
@@ -1905,13 +1895,13 @@ window.executeDradisScan = async function(sysId) {
     if (dradisClockError || !dradisClockData || !dradisClockData[0]) { alert("DRADIS scan failed: could not advance the mission clock (" + (dradisClockError ? dradisClockError.message : "unknown error") + ")."); return; }
     const { old_hours: oldTime, new_hours: newTime } = dradisClockData[0];
     window.universeTimeHours = newTime;
-    localStorage.setItem('odyssey_universe_time', window.universeTimeHours);
+    window.safeLocalSet('odyssey_universe_time', window.universeTimeHours);
     window.updateCalendarDisplay(); if (typeof window.broadcastTimeSync === 'function') window.broadcastTimeSync();
     await window.processTimeAdvancement(oldTime, newTime);
 
     if (window.scannedSystems && !window.scannedSystems.includes(sysId)) {
         window.scannedSystems.push(sysId);
-        localStorage.setItem('odyssey_scanned', JSON.stringify(window.scannedSystems));
+        window.safeLocalSet('odyssey_scanned', JSON.stringify(window.scannedSystems));
     }
 
     await db.from('chat_logs').insert({ sender_id: null, content: `📡 [DRADIS SWEEP] Task Force Black completed a deep scan of '${s.name}'. Operation took ${scanHours} hours. Orbital census uploaded to mainframe. [SYS_SCAN:${sysId}]`, message_type: 'system' });
@@ -2042,7 +2032,7 @@ window.closedPmTabs = new Set(window.safeJsonParse(window.safeLocalGet('odyssey_
 window.commsUnread = {};
 
 function persistClosedPmTabs() {
-    localStorage.setItem('odyssey_closed_pm_tabs', JSON.stringify(Array.from(window.closedPmTabs)));
+    window.safeLocalSet('odyssey_closed_pm_tabs', JSON.stringify(Array.from(window.closedPmTabs)));
 }
 
 window.renderCommsTabBar = function() {
