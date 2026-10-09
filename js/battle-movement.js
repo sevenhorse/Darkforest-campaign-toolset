@@ -72,6 +72,7 @@ window.separateBattleTokens = separateBattleTokens;
    the token isn't found. */
 function moveTokenToward(shipMarkerId, targetPos, maxDist) {
     if (!window.globalBattleEncounterCache) return null;
+    if (!(maxDist > 0)) return null; // no movement allowed (speed 0, engines out)
     const currentTokens = (window.globalBattleEncounterCache.tokens || []).slice();
     const idx = currentTokens.findIndex(t => t.ship_marker_id === shipMarkerId);
     if (idx < 0) return null;

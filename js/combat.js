@@ -917,7 +917,7 @@ window.renderVesselDeck = function() {
                 <div class="note-card" style="padding:6px; margin-bottom:4px; background:#030403; border-color:#00e1ff; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <strong style="color:#00e1ff; font-size:11px;">${sq.name}</strong>
-                        <div style="font-size:9px; color:#6b826a;">${dbStats.label} | Units: ${sq.count} | Max HP: ${dbStats.base_hp * sq.count}</div>
+                        <div style="font-size:9px; color:#6b826a;">${dbStats.label} | Units: ${window.squadronCountLabel(sq)} | HP: ${sq.hp} / ${sq.max_hp}</div>
                     </div>
                     <div style="display:flex; gap:6px;">
                         <!-- Overworld-visibility fix (live-session feature request,
@@ -1004,7 +1004,7 @@ window.renderVesselDeck = function() {
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
                             <strong style="color:#ffaa00; font-size:12px;">🛫 ${sq.name}</strong>
-                            <div style="font-size:9px; color:#d4c5a9;">${dbStats.label} | Units: ${sq.count} | HP: ${sq.hp} / ${sq.max_hp}</div>
+                            <div style="font-size:9px; color:#d4c5a9;">${dbStats.label} | Units: ${window.squadronCountLabel(sq)} | HP: ${sq.hp} / ${sq.max_hp}</div>
                             <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
                                 <span style="font-size:9px; color:#ff6b6b;">BINGO FUEL LOITER: ${sq.loiter}/4</span>
                                 <button onclick="window.modifySquadronLoiter('${vessel.id}', ${idx}, -1)" style="padding:0 4px; font-size:9px;">-</button>
@@ -1408,6 +1408,21 @@ window.hiddenDamageBonus = function(numDice, faces) {
     if (n <= 0 || f <= 0) return 0;
     return Math.floor(n * (f + 1) / 2 * window.combatBalanceConfig().damage_bonus_pct / 100);
 };
+/* Stance damage multipliers, the one place they live. who = 'firer' (damage
+   dealt; ship direct fire and manual damage only) or 'target' (damage taken;
+   every attack). DM rule: Healing is never scaled by stance. Returns the new
+   total and a log tag ('' when nothing applied). */
+window.STANCE_DAMAGE_MULT = { Aggressive: 1.25, Defensive: 0.75, Evasive: 0.5 };
+window.applyStanceToDamage = function(total, stance, dmgType, who) {
+    const mult = window.STANCE_DAMAGE_MULT[stance];
+    if (!mult || dmgType === 'Healing') return { total, tag: '' };
+    const pct = Math.round((mult - 1) * 100);
+    const sign = pct > 0 ? '+' : '';
+    const tag = who === 'target' ? `[Target ${stance}: ${sign}${pct}% Dmg] ` : `[${stance}: ${sign}${pct}%]`;
+    return { total: Math.floor(total * mult), tag };
+};
+// Engines knocked out (System Lockdown): the unit can't move this round, AI included.
+window.enginesDisabled = function(vessel) { return !!vessel && (vessel.disabled_engines_until || 0) > 0; };
 window.hiddenDamageBonusForDice = function(diceStr) {
     const m = String(diceStr || '').trim().match(/^(\d*)d(\d+)$/i);
     return m ? window.hiddenDamageBonus(parseInt(m[1], 10) || 1, m[2]) : 0;
@@ -1602,25 +1617,23 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
     // shown in the breakdown.
     if (window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name)) !== 'Healing') total +=window.hiddenDamageBonus(numDice, diceFaces);
 
-    let stance = vessel.ship_stance || 'Balanced';
-    if (stance === 'Aggressive') { total = Math.floor(total * 1.25); breakdown.push(`[Aggressive: +25%]`); } 
-    else if (stance === 'Defensive') { total = Math.floor(total * 0.75); breakdown.push(`[Defensive: -25%]`); }
-    else if (stance === 'Evasive') { total = Math.floor(total * 0.50); breakdown.push(`[Evasive: -50%]`); } // DM rule: Evasive halves damage dealt as well as taken
+    let dmgType = window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name));
+    // Firer stance (DM rule: Evasive halves damage dealt as well as taken).
+    const firerSt = window.applyStanceToDamage(total, vessel.ship_stance || 'Balanced', dmgType, 'firer');
+    total = firerSt.total;
+    if (firerSt.tag) breakdown.push(firerSt.tag);
 
     if (modVal !== 0) breakdown.push(`[Mod: ${modVal >= 0 ? '+' : ''}${modVal}]`);
     const breakdownText = breakdown.join(' + ');
-    
+
     let targetShip = null;
     let combatLog = ``;
-    let dmgType = window.normalizeDamageType(wpn.damage_type || window.inferLegacyDamageType(wpn.name));
 
     if (targetId) {
         targetShip = globalShipMarkersCache.find(m => m.id === targetId);
         if (targetShip) {
-            let tStance = targetShip.ship_stance || 'Balanced';
-            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
-            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
-            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+            const tSt = window.applyStanceToDamage(total, targetShip.ship_stance || 'Balanced', dmgType, 'target');
+            total = tSt.total; combatLog += tSt.tag;
             // Asteroid cover (direct fire only).
             const cover = (dmgType !== 'Healing' && typeof window.terrainCover === 'function') ? window.terrainCover(targetId) : null;
             if (cover) { total = Math.floor(total * cover.mult); combatLog += cover.label; }
@@ -2235,15 +2248,9 @@ window.applyManualDamage = async function() {
     let combatLog = '';
 
     // Stance/category multipliers on top of the manual total; same math as rollShipWeapon.
-    let stance = vessel.ship_stance || 'Balanced';
-    if (stance === 'Aggressive') { total = Math.floor(total * 1.25); }
-    else if (stance === 'Defensive') { total = Math.floor(total * 0.75); }
-    else if (stance === 'Evasive') { total = Math.floor(total * 0.50); }
-
-    let tStance = targetShip.ship_stance || 'Balanced';
-    if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
-    if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
-    if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+    total = window.applyStanceToDamage(total, vessel.ship_stance || 'Balanced', dmgType, 'firer').total;
+    const tSt = window.applyStanceToDamage(total, targetShip.ship_stance || 'Balanced', dmgType, 'target');
+    total = tSt.total; combatLog += tSt.tag;
 
     let categoryMult = 1;
     if (dmgType !== 'Healing') {

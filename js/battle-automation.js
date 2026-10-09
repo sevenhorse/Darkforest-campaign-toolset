@@ -172,7 +172,7 @@ window.processBattleRoundAutomations = async function() {
                 });
                 if (!guard) guard = window.getBattleTokenPosition(v.id);
                 const keep = window.STRIKE_CRAFT_RANGES.GUN * 0.75;
-                if (guard && sPos && Math.hypot(guard.x - sPos.x, guard.y - sPos.y) > keep) {
+                if (guard && sPos && !window.enginesDisabled(sqShip) && Math.hypot(guard.x - sPos.x, guard.y - sPos.y) > keep) {
                     const moved = moveTokenToward(sqShip.id, guard, sqShip.tactical_speed || SQUADRON_TACTICAL_SPEED);
                     if (moved) await saveBattleTokens(moved);
                 }
@@ -341,11 +341,9 @@ window.processBattleRoundAutomations = async function() {
             let dmgType = window.normalizeDamageType ? window.normalizeDamageType(salvo.damage_type || 'Impact') : (salvo.damage_type || 'Impact');
             const roll = rollDamageDice(salvo.dice, salvo.modifier, salvo.explodes);
             let total = roll.total;
-            let impactLog = '';
-            let tStance = targetVessel.ship_stance || 'Balanced';
-            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); impactLog += `[Target Defensive: -25% Dmg] `; }
-            else if (tStance === 'Evasive') { total = Math.floor(total * 0.50); impactLog += `[Target Evasive: -50% Dmg] `; }
-            else if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); impactLog += `[Target Aggressive: +25% Dmg] `; }
+            const tSt = window.applyStanceToDamage(total, targetVessel.ship_stance || 'Balanced', dmgType, 'target');
+            total = tSt.total;
+            let impactLog = tSt.tag;
             // total is not clamped to 0, matching rollShipWeapon (js/combat.js).
             // Directional armor: side facing the launch point (fallback: the launcher's current spot, else front).
             const impactSource = (salvo.launch_x !== null && salvo.launch_x !== undefined) ? { point: { x: salvo.launch_x, y: salvo.launch_y } } : { vesselId: salvo.source_vessel_id };
@@ -364,6 +362,7 @@ window.processBattleRoundAutomations = async function() {
                 ...(typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(result) : {})
             });
             markTouched(targetVessel);
+            if (targetVessel.is_strike_craft && typeof syncSquadronHpToParent === 'function') { await syncSquadronHpToParent(targetVessel); touchedCarrierIds.add(targetVessel.parent_id); }
             chatLines.push(`💥 [ORDNANCE IMPACT] ${salvo.source_weapon_name} (from ${salvo.source_vessel_name}) strikes ${targetVessel.name} for ${total} ${dmgType} dmg. ${impactLog}`);
             if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetVessel);
 
@@ -380,12 +379,10 @@ window.processBattleRoundAutomations = async function() {
                         if (Math.sqrt(dx * dx + dy * dy) > salvo.aoe_radius) continue;
                         const splashVessel = globalShipMarkersCache.find(m => m.id === tok.ship_marker_id);
                         if (!splashVessel) continue;
-                        let splashTotal = total;
-                        let splashLog = '';
-                        const sStance = splashVessel.ship_stance || 'Balanced';
-                        if (sStance === 'Defensive') { splashTotal = Math.floor(splashTotal * 0.75); splashLog += `[Target Defensive: -25% Dmg] `; }
-                        else if (sStance === 'Evasive') { splashTotal = Math.floor(splashTotal * 0.50); splashLog += `[Target Evasive: -50% Dmg] `; }
-                        else if (sStance === 'Aggressive') { splashTotal = Math.floor(splashTotal * 1.25); splashLog += `[Target Aggressive: +25% Dmg] `; }
+                        // Splash starts from the primary hit before its stance.
+                        const sSt = window.applyStanceToDamage(roll.total, splashVessel.ship_stance || 'Balanced', dmgType, 'target');
+                        let splashTotal = sSt.total;
+                        let splashLog = sSt.tag;
                         // Directional armor: side facing the blast centre (the primary target).
                         const blastCentre = typeof window.battleTokenCenter === 'function' ? window.battleTokenCenter(primaryTok) : { x: primaryTok.x, y: primaryTok.y };
                         const splashResult = window.resolveShipDamage(splashVessel, dmgType, splashTotal, typeof window.damageSideOpts === 'function' ? window.damageSideOpts(splashVessel, { point: blastCentre }) : undefined);
@@ -397,6 +394,7 @@ window.processBattleRoundAutomations = async function() {
                             ...(typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(splashResult) : {})
                         });
                         markTouched(splashVessel);
+                        if (splashVessel.is_strike_craft && typeof syncSquadronHpToParent === 'function') { await syncSquadronHpToParent(splashVessel); touchedCarrierIds.add(splashVessel.parent_id); }
                         chatLines.push(`💥 [AOE SPLASH] ${salvo.source_weapon_name} (from ${salvo.source_vessel_name}) catches ${splashVessel.name} in the blast for ${splashTotal} ${dmgType} dmg. ${splashLog}`);
                         if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(splashVessel);
                         pdPool = pdPool.filter(entry => entry.vesselId !== splashVessel.id);
@@ -516,10 +514,10 @@ window.processBattleRoundAutomations = async function() {
                 continue; // can't range/nearest-check without a grid token (fails open)
             }
 
-            const moveDist = sqShip.tactical_speed || SQUADRON_TACTICAL_SPEED;
+            const moveDist = window.enginesDisabled(sqShip) ? 0 : (sqShip.tactical_speed || SQUADRON_TACTICAL_SPEED);
 
             // --- Low-HP break-off ---
-            const hpPct = sq.max_hp > 0 ? (sq.hp / sq.max_hp) : 1;
+            const hpPct = window.squadronStrengthPct(sq); // vs commissioned size, so lost craft count
             if (hpPct < 0.30) {
                 const carrierPos = window.getBattleTokenPosition(v.id);
                 if (carrierPos) {
@@ -638,7 +636,8 @@ window.processBattleRoundAutomations = async function() {
 
         const selfPos = { x: tok.x, y: tok.y };
         // Stations and speed-0 hulls hold position (0 must not fall back to 160).
-        const moveDist = (v.is_station || v.tactical_speed === 0) ? 0 : (v.tactical_speed || 160);
+        // Engines knocked out (System Lockdown) = no movement, AI included.
+        const moveDist = (v.is_station || v.tactical_speed === 0 || window.enginesDisabled(v)) ? 0 : (v.tactical_speed || 160);
 
         const candidates = tokens
             .map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id))

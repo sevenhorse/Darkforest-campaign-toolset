@@ -132,6 +132,41 @@ async function despawnSquadronToken(squadronId) {
     if (typeof loadCombatTracker === 'function') loadCombatTracker();
 }
 
+/* Craft losses (DM rule): a squadron has `count` craft sharing one HP pool
+   (max_hp = per-craft HP x count). A craft is lost once its full share is
+   gone: craft left = ceil(hp / per-craft HP). Losses are PERMANENT: count and
+   max_hp shrink, so repairs and healing only restore the survivors.
+   count_max remembers the commissioned size (set on the first loss) for the
+   "3/4" label and the 30% break-off check. Dice scale with the current count. */
+window.squadronPerCraftHp = function(sq) {
+    if (sq && sq.count > 0 && sq.max_hp > 0) return sq.max_hp / sq.count;
+    const chassis = sq && typeof STRIKE_CRAFT_DB !== 'undefined' ? STRIKE_CRAFT_DB[sq.type] : null;
+    return chassis ? (chassis.base_hp || 0) : 0;
+};
+window.applySquadronLosses = function(sq) {
+    if (!sq || !(sq.count > 0)) return 0;
+    const per = window.squadronPerCraftHp(sq);
+    if (!(per > 0)) return 0;
+    const hp = Math.max(0, sq.hp || 0);
+    const alive = hp <= 0 ? 0 : Math.ceil(hp / per - 1e-9);
+    if (alive >= sq.count) return 0;
+    const lost = sq.count - alive;
+    if (!sq.count_max) sq.count_max = sq.count;
+    sq.count = alive;
+    sq.max_hp = Math.round(per * alive);
+    sq.hp = Math.min(hp, sq.max_hp);
+    return lost;
+};
+// Remaining strength vs the commissioned size (for the 30% break-off).
+window.squadronStrengthPct = function(sq) {
+    const full = window.squadronPerCraftHp(sq) * ((sq && (sq.count_max || sq.count)) || 0);
+    return full > 0 ? (sq.hp || 0) / full : 1;
+};
+window.squadronCountLabel = function(sq) {
+    if (!sq) return '0';
+    return sq.count_max && sq.count_max > sq.count ? `${sq.count}/${sq.count_max}` : `${sq.count}`;
+};
+
 // A strike craft token's integrity_hull is only a spawn-time snapshot; the
 // real squadron HP lives in the carrier's ship_deployed[].hp. Call this after
 // damaging any target so hits on a squadron token reach the squadron record.
@@ -144,8 +179,17 @@ async function syncSquadronHpToParent(targetShip) {
     const sq = deployed.find(s => s.id === targetShip.squadron_id);
     if (!sq) return;
     sq.hp = Math.max(0, Math.min(sq.max_hp, targetShip.integrity_hull));
+    const lost = window.applySquadronLosses(sq);
     await db.from('ship_markers').update({ ship_deployed: deployed }).eq('id', parent.id);
     parent.ship_deployed = deployed;
+    if (lost > 0) {
+        // The token's max hull shrinks with the squadron, so healing only
+        // repairs the survivors.
+        targetShip.max_hull = sq.max_hp;
+        targetShip.integrity_hull = Math.min(targetShip.integrity_hull || 0, sq.max_hp);
+        await db.from('ship_markers').update({ max_hull: targetShip.max_hull, integrity_hull: targetShip.integrity_hull }).eq('id', targetShip.id);
+        await db.from('chat_logs').insert({ sender_id: null, content: `💀 [SQUADRON] ${sq.name} loses ${lost} craft — ${window.squadronCountLabel(sq)} left.`, message_type: 'system' });
+    }
     if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
 }
 
@@ -264,14 +308,14 @@ window.renderCompactHangarHtml = function(vessel) {
     hangar.forEach((sq, idx) => {
         const dbStats = STRIKE_CRAFT_DB[sq.type];
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:9px; color:#d4c5a9;">
-            <span>${sq.name} <span style="color:#6b826a;">${dbStats ? dbStats.label : sq.type} x${sq.count}</span></span>
+            <span>${sq.name} <span style="color:#6b826a;">${dbStats ? dbStats.label : sq.type} x${window.squadronCountLabel(sq)}</span></span>
             <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx}, true)" style="padding:2px 8px; font-size:8px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH</button>
         </div>`;
     });
     deployed.forEach((sq, idx) => {
         const dbStats = STRIKE_CRAFT_DB[sq.type];
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:9px; color:#ffaa00;">
-            <span>🛫 ${sq.name} <span style="color:#6b826a;">${dbStats ? dbStats.label : sq.type} · HP ${sq.hp}/${sq.max_hp}</span></span>
+            <span>🛫 ${sq.name} <span style="color:#6b826a;">${dbStats ? dbStats.label : sq.type} x${window.squadronCountLabel(sq)} · HP ${sq.hp}/${sq.max_hp}</span></span>
             <button class="layer-edit" onclick="window.recallSquadron('${vessel.id}', ${idx})" style="padding:2px 8px; font-size:8px; border-color:#00e5a3; color:#00e5a3;">RECALL</button>
         </div>`;
     });
@@ -497,10 +541,8 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
     if (targetId) {
         targetShip = globalShipMarkersCache.find(m => m.id === targetId);
         if (targetShip) {
-            let tStance = targetShip.ship_stance || 'Balanced';
-            if (tStance === 'Defensive') { total = Math.floor(total * 0.75); combatLog += `[Target Defensive: -25% Dmg] `; }
-            if (tStance === 'Evasive') { total = Math.floor(total * 0.50); combatLog += `[Target Evasive: -50% Dmg] `; }
-            if (tStance === 'Aggressive') { total = Math.floor(total * 1.25); combatLog += `[Target Aggressive: +25% Dmg] `; }
+            const tSt = window.applyStanceToDamage(total, targetShip.ship_stance || 'Balanced', dmgType, 'target');
+            total = tSt.total; combatLog += tSt.tag;
             const sqCover = (dmgType !== 'Healing' && typeof window.terrainCover === 'function') ? window.terrainCover(targetId) : null; // asteroid cover
             if (sqCover) { total = Math.floor(total * sqCover.mult); combatLog += sqCover.label; }
 
