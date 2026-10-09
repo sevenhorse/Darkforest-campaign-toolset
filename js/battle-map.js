@@ -70,7 +70,8 @@ window.strikeCraftRangeCap = function(wpn) {
    squadron owned by forOwnerIds' side is "uplinked" for that side.
    Recomputed on every call; nothing persists. Passive effect, so it ignores
    the Messenger's ai_stance. Returns a Set of enemy ship_marker ids.
-   (The exact trigger was an interpretation, not a confirmed DM spec.) */
+   DM-confirmed rule: weapons with range 200+ (ship or squadron) get
+   unlimited range against an uplinked target. */
 function getUplinkedEnemyIds(forOwnerIds) {
     if (!window.globalBattleEncounterCache) return new Set();
     const tokens = window.globalBattleEncounterCache.tokens || [];

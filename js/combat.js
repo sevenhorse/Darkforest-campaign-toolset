@@ -2034,6 +2034,8 @@ window.normalizeDamageType = function(dmgType) {
 // and the result also carries armor_sides (+ integrity_hardened = their sum).
 // Callers get opts from window.damageSideOpts (js/directional-armor.js).
 window.resolveShipDamage = function(targetShip, dmgType, totalDamage, opts) {
+    // Damage never goes below 0 (a big negative modifier must not ADD shields).
+    totalDamage = Math.max(0, Number(totalDamage) || 0);
     let s = targetShip.integrity_shields !== undefined ? targetShip.integrity_shields : 400;
     let r = targetShip.integrity_reactive !== undefined ? targetShip.integrity_reactive : 10;
     let a = targetShip.integrity_ablative !== undefined ? targetShip.integrity_ablative : 10;
@@ -2251,6 +2253,9 @@ window.applyManualDamage = async function() {
     total = window.applyStanceToDamage(total, vessel.ship_stance || 'Balanced', dmgType, 'firer').total;
     const tSt = window.applyStanceToDamage(total, targetShip.ship_stance || 'Balanced', dmgType, 'target');
     total = tSt.total; combatLog += tSt.tag;
+    // Asteroid cover applies to manual damage too (DM ruling 2026-10-09).
+    const manualCover = (dmgType !== 'Healing' && typeof window.terrainCover === 'function') ? window.terrainCover(targetShip.id) : null;
+    if (manualCover) { total = Math.floor(total * manualCover.mult); combatLog += manualCover.label; }
 
     let categoryMult = 1;
     if (dmgType !== 'Healing') {
@@ -2269,16 +2274,18 @@ window.applyManualDamage = async function() {
     const result = window.resolveShipDamage(targetShip, dmgType, total, manualSideOpts);
     combatLog += result.log;
     const sideFields = typeof window.armorSideResultFields === 'function' ? window.armorSideResultFields(result) : {};
+    // Counts as the target's biggest hit this round like a real shot (AI threat retargeting).
+    const biggest = (dmgType !== 'Healing' && total > (targetShip.round_biggest_hit_amount || 0)) ? { round_biggest_hit_amount: total, round_biggest_hit_by: vessel.id } : {};
 
     await db.from('ship_markers').update({
         integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
         integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-        integrity_hardened: result.integrity_hardened, ...sideFields
+        integrity_hardened: result.integrity_hardened, ...sideFields, ...biggest
     }).eq('id', targetShip.id);
     Object.assign(targetShip, {
         integrity_shields: result.integrity_shields, integrity_hull: result.integrity_hull,
         integrity_reactive: result.integrity_reactive, integrity_ablative: result.integrity_ablative,
-        integrity_hardened: result.integrity_hardened, ...sideFields
+        integrity_hardened: result.integrity_hardened, ...sideFields, ...biggest
     });
     if (typeof syncSquadronHpToParent === 'function') await syncSquadronHpToParent(targetShip);
     if (typeof window.checkBattleTokenDestroyed === 'function') await window.checkBattleTokenDestroyed(targetShip);
