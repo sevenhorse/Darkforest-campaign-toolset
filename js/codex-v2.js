@@ -418,65 +418,53 @@ window.cx2ToggleHidden = async function (id) {
     renderV2();
 };
 
-/* --- Hooks into the existing Codex (ui.js) --- */
-const orig = {
-    render: window.renderCodexMatrix, edit: window.editCodexEntry, cancel: window.cancelCodexEdit,
-    save: window.saveNewCodexEntry, del: window.deleteCodexEntry, closeFull: window.closeCodexFullscreen,
-    openFull: window.openCodexFullscreen
-};
+/* --- Hooks into the existing Codex (ui.js announces these; see window.onHook in js/db.js) --- */
+// Take over the draw while the switch is on; otherwise tidy up and let ui.js draw the classic list.
+window.onHook('codex-render', 'codex-v2', () => {
+    if (window.codexRestyleOn()) { renderV2(); return false; }
+    teardown();
+    S.editing = false;
+    return true;
+});
 // Phase 11: the ⛶ fullscreen reader picks up the new Codex look (same
 // switch). Only classes change; ui.js still fills it.
-window.openCodexFullscreen = function () {
-    const r = orig.openFull.apply(this, arguments);
+window.onHook('codex-fullscreen-opened', 'codex-v2', () => {
     const on = window.codexRestyleOn();
     const modal = document.getElementById('codex-fullscreen-reader');
     const body = document.getElementById('reader-body-content');
     if (modal) modal.classList.toggle('cx2-fs', on);
     if (body) body.classList.toggle('cx2-text', on);
-    return r;
-};
-window.renderCodexMatrix = function () {
-    if (window.codexRestyleOn()) return renderV2();
-    teardown();
-    S.editing = false;
-    return orig.render.apply(this, arguments);
-};
-window.editCodexEntry = function (id) {
-    const r = orig.edit.apply(this, arguments);
-    if (window.codexRestyleOn() && isDm()) {
-        const e = (globalCodexEntriesCache || []).find(x => x.id === id);
-        if (e && e.category && e.category !== window.activeCodexCategory) window.activeCodexCategory = e.category;
-        S.selected[window.activeCodexCategory] = id;
-        S.editing = true; S.editTab = 'write'; S.view = 'read';
-        renderV2();
-    }
-    return r;
-};
-window.cancelCodexEdit = function () {
-    const r = orig.cancel.apply(this, arguments);
-    if (S.editing) {
-        S.editing = false; S.editTab = 'write';
-        const content = document.getElementById('new-codex-content'); if (content) content.style.display = '';
-        const prev = document.getElementById('cx2-preview'); if (prev) prev.style.display = 'none';
-        if (window.codexRestyleOn()) renderV2(); else restoreForm();
-    }
-    return r;
-};
-window.saveNewCodexEntry = async function () {
+});
+window.onHook('codex-entry-edit', 'codex-v2', (id) => {
+    if (!window.codexRestyleOn() || !isDm()) return;
+    const e = (globalCodexEntriesCache || []).find(x => x.id === id);
+    if (e && e.category && e.category !== window.activeCodexCategory) window.activeCodexCategory = e.category;
+    S.selected[window.activeCodexCategory] = id;
+    S.editing = true; S.editTab = 'write'; S.view = 'read';
+    renderV2();
+});
+window.onHook('codex-edit-cancelled', 'codex-v2', () => {
+    if (!S.editing) return;
+    S.editing = false; S.editTab = 'write';
+    const content = document.getElementById('new-codex-content'); if (content) content.style.display = '';
+    const prev = document.getElementById('cx2-preview'); if (prev) prev.style.display = 'none';
+    if (window.codexRestyleOn()) renderV2(); else restoreForm();
+});
+// Remember which entry is being saved (read before ui.js clears the form), then select it after.
+window.onHook('codex-save-start', 'codex-v2', () => {
     const t = document.getElementById('new-codex-title');
-    const pending = { title: t ? t.value.trim() : '', id: window.editingCodexId || null };
-    await orig.save.apply(this, arguments);
-    if (window.codexRestyleOn() && !S.editing && pending.title) { S.pendingSelect = pending; S.view = 'read'; renderV2(); }
-};
-window.deleteCodexEntry = async function (id) {
-    await orig.del.apply(this, arguments);
+    S.savePending = { title: t ? t.value.trim() : '', id: window.editingCodexId || null };
+});
+window.onHook('codex-entry-saved', 'codex-v2', () => {
+    const pending = S.savePending; S.savePending = null;
+    if (window.codexRestyleOn() && !S.editing && pending && pending.title) { S.pendingSelect = pending; S.view = 'read'; renderV2(); }
+});
+window.onHook('codex-entry-deleted', 'codex-v2', (id) => {
     if (window.codexRestyleOn()) { Object.keys(S.selected).forEach(k => { if (S.selected[k] === id) delete S.selected[k]; }); }
-};
-window.closeCodexFullscreen = function () {
-    const r = orig.closeFull.apply(this, arguments);
+});
+window.onHook('codex-fullscreen-closed', 'codex-v2', () => {
     if (window.codexRestyleOn() && !S.editing) renderV2(); // its charts were drawn again if the pane shares any
-    return r;
-};
+});
 // The switch flipping while the Codex is open re-draws it.
 document.addEventListener('darkforest:features-changed', () => {
     const panel = document.getElementById('term-panel-codex');

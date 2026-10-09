@@ -1492,7 +1492,13 @@ window.switchCodexCategory = function(cat) {
 
 window.filterCodexEntries = function(val) { window.codexSearchFilter = (val || '').toLowerCase().trim(); window.renderCodexMatrix(); };
 
+/* Codex hooks (window.onHook, js/db.js): 'codex-render' may take over the
+   draw (return false = skip the classic list; the restyle in js/codex-v2.js
+   does), and the edit/save/cancel/delete/fullscreen functions below announce
+   codex-entry-edit, codex-save-start, codex-entry-saved, codex-edit-cancelled,
+   codex-entry-deleted, codex-fullscreen-opened and codex-fullscreen-closed. */
 window.renderCodexMatrix = function() {
+    if (!window.hooksAllow('codex-render')) return;
     const container = document.getElementById('codex-entries-matrix'); if (!container) return;
     let entries = globalCodexEntriesCache.filter(e => e.category === window.activeCodexCategory);
     
@@ -1574,7 +1580,7 @@ window.moveCodexEntryOrder = function(id, direction) {
     window.renderCodexMatrix();
 };
 
-window.editCodexEntry = function(id) {
+window.editCodexEntry = window.withAfterHooks('codex-entry-edit', function(id) {
     if (currentUserRole !== 'dm') return;
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry) return;
     window.editingCodexId = id;
@@ -1600,9 +1606,10 @@ window.editCodexEntry = function(id) {
     setCodexFormAttachment(entry.doc_name, entry.doc_data, entry.doc_type);
     document.getElementById('btn-save-codex-entry').innerText = "✓ UPDATE CODEX ENTRY";
     document.getElementById('btn-cancel-codex-edit').style.display = "block";
-};
+});
 
-window.saveNewCodexEntry = async function() {
+window.saveNewCodexEntry = window.withAfterHooks('codex-entry-saved', async function() {
+    window.runHooks('codex-save-start'); // the restyle notes which entry is being saved
     if (currentUserRole !== 'dm') return;
     const cat = document.getElementById('new-codex-category').value;
     const title = document.getElementById('new-codex-title').value.trim();
@@ -1641,9 +1648,9 @@ window.saveNewCodexEntry = async function() {
     if (saveError) { alert('Failed to save Codex entry: ' + saveError.message); return; }
 
     window.cancelCodexEdit(); window.switchCodexCategory(cat); if (typeof loadCodexEntries === 'function') loadCodexEntries();
-};
+});
 
-window.cancelCodexEdit = function() {
+window.cancelCodexEdit = window.withAfterHooks('codex-edit-cancelled', function() {
     window.editingCodexId = null;
     document.getElementById('codex-creator-heading').innerText = "+ New Codex Entry";
     document.getElementById('new-codex-title').value = ''; document.getElementById('new-codex-subtitle').value = '';
@@ -1654,15 +1661,15 @@ window.cancelCodexEdit = function() {
     setCodexFormAttachment('', '', '');
     document.getElementById('btn-save-codex-entry').innerText = "+ PUBLISH TO CODEX";
     document.getElementById('btn-cancel-codex-edit').style.display = "none";
-};
+});
 
-window.deleteCodexEntry = async function(id) {
+window.deleteCodexEntry = window.withAfterHooks('codex-entry-deleted', async function(id) {
     if (currentUserRole !== 'dm') return;
     if (!(await window.showConfirmModal("Permanently erase this record?"))) return;
     await db.from('codex_entries').delete().eq('id', id);
     if (window.editingCodexId === id) window.cancelCodexEdit();
     if (typeof loadCodexEntries === 'function') loadCodexEntries();
-};
+});
 
 /* --- CODEX MARKDOWN + CHARTS (this session) ---
    Codex entry content was 100% plain text before this build (rendered via
@@ -1792,7 +1799,7 @@ window.drawCodexCharts = function(charts, store) {
     });
 };
 
-window.openCodexFullscreen = function(id) {
+window.openCodexFullscreen = window.withAfterHooks('codex-fullscreen-opened', function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry) return;
     const modal = document.getElementById('codex-fullscreen-reader');
     const authorName = allProfiles.find(p => p.id === entry.created_by)?.username || 'Unknown';
@@ -1826,13 +1833,13 @@ window.openCodexFullscreen = function(id) {
         actionBar.innerHTML = `<button class="btn-reveal" onclick="window.openCodexAttachment('${entry.id}')" style="width:auto; font-size:11px; padding:6px 16px;">📥 OPEN / DOWNLOAD ATTACHED DOCUMENT (${window.escapeHtml(entry.doc_name)})</button>`;
     } else { actionBar.style.display = 'none'; }
     modal.style.display = 'block';
-};
+});
 
-window.closeCodexFullscreen = function() {
+window.closeCodexFullscreen = window.withAfterHooks('codex-fullscreen-closed', function() {
     document.getElementById('codex-fullscreen-reader').style.display = 'none';
     (window.activeCodexCharts || []).forEach(c => { try { c.destroy(); } catch (e) {} });
     window.activeCodexCharts = [];
-};
+});
 
 window.openCodexAttachment = function(id) {
     const entry = globalCodexEntriesCache.find(e => e.id === id); if (!entry || !entry.doc_data) return;
