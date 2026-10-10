@@ -2190,3 +2190,58 @@ body.gc-on #bottom-toggle-bar .gc-round { font-weight: 400; color: #ff8a8a; }
     body.gc-on #mobile-nav-drawer-body #bottom-toggle-bar { padding: 0 !important; gap: 0 !important; }
     body.gc-on #mobile-nav-drawer-body #bottom-toggle-bar button { flex: 1 1 45%; min-height: 44px; border-bottom: 1px solid rgba(0, 225, 255, 0.08) !important; }
 }
+
+
+/* ===== UI restyle R6: polish — form controls kit, popups, telemetry tiles (js/polish-v2.js, switch 'polish_restyle', body.px-on) =====
+   Scope: every restyled page and panel, plus the app's popups. Not the
+   Codex (own look), not the Battle Map, not the weapon cards shared with it. */
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]), select, textarea):not(.dz-search input):not(#vessel-weapons-container *) {
+    background: rgba(4, 10, 13, 0.95) !important; border: 1px solid rgba(0, 225, 255, 0.28) !important; border-radius: 0 !important;
+    color: #e8f6fa !important; font-family: var(--df-font) !important; box-shadow: none !important; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]), select, textarea):not(.dz-search input):not(#vessel-weapons-container *):focus { border-color: var(--df-cyan) !important; box-shadow: 0 0 0 1px rgba(0, 225, 255, 0.35), 0 0 12px rgba(0, 225, 255, 0.15) !important; outline: 0; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]), select, textarea):not(.dz-search input):not(#vessel-weapons-container *)::placeholder { color: #5f7884 !important; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) textarea:not(#vessel-weapons-container *) { line-height: 1.5; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) select:not(#vessel-weapons-container *) option { background: #071216; color: #e8f6fa; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) :is(input[type="checkbox"], input[type="radio"]) { accent-color: #00e1ff; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) label:not(.dz-search):not(#vessel-weapons-container *) { font-family: var(--df-font); }
+
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) button:not(.dz-btn):not(.dz-ftab):not(.dz-row):not(.dz-back):not(.df-subtab):not(.df-tab):not(.hud-tab-btn):not(.comms-tab-btn):not(.cargo-subtab-btn):not(#vessel-weapons-container *) {
+    --px-c: var(--df-cyan);
+    background: transparent !important; border: 1px solid var(--px-c) !important; border-radius: 0 !important; color: var(--px-c) !important;
+    font-family: var(--df-font) !important; letter-spacing: 0.1em; box-shadow: none !important; text-shadow: none !important; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) button:not(.dz-btn):not(.dz-ftab):not(.dz-row):not(.dz-back):not(.df-subtab):not(.df-tab):not(.hud-tab-btn):not(.comms-tab-btn):not(.cargo-subtab-btn):not(#vessel-weapons-container *):hover:not(:disabled) { background: color-mix(in srgb, var(--px-c) 12%, transparent) !important; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) button:not(.dz-btn):not(.dz-ftab):not(.dz-row):not(.dz-back):not(.df-subtab):not(.df-tab):not(.hud-tab-btn):not(.comms-tab-btn):not(.cargo-subtab-btn):not(#vessel-weapons-container *):disabled { opacity: 0.4; cursor: default; }
+/* meaning: green = save / confirm, red = delete, grey = cancel / close, gold = manufacturing */
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) button:not(.dz-btn):not(.dz-ftab):not(.dz-row):not(.dz-back):not(.df-subtab):not(.df-tab):not(.hud-tab-btn):not(.comms-tab-btn):not(.cargo-subtab-btn):not(#vessel-weapons-container *):is(.btn-deploy, [onclick*="save" i], [onclick*="approve" i], [onclick*="executePlottedJump"], [onclick*="executeDradisScan"], [id$="ok-btn"], [id$="done-btn"], [id$="save-btn"]) { --px-c: #00e5a3; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) button:not(.dz-btn):not(.dz-ftab):not(.dz-row):not(.dz-back):not(.df-subtab):not(.df-tab):not(.hud-tab-btn):not(.comms-tab-btn):not(.cargo-subtab-btn):not(#vessel-weapons-container *):is([id$="cancel-btn"], [id$="close"], [id$="close-btn"], [onclick*="cancelJump"], [onclick*="close" i]) { --px-c: #8fa7b0; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) button:not(.dz-btn):not(.dz-ftab):not(.dz-row):not(.dz-back):not(.df-subtab):not(.df-tab):not(.hud-tab-btn):not(.comms-tab-btn):not(.cargo-subtab-btn):not(#vessel-weapons-container *):is(.layer-del, .btn-remove, [onclick*="delete" i], [onclick*="destroy" i], [onclick*="remove" i], [onclick*="cancelManufacturingOrder"], [id="custom-confirm-ok-btn"]) { --px-c: #ff6b6b; }
+body.px-on :is(#vz-root, #cz-root, #mz-root, #cv-root, #av-root, #mf-root, #rz-root, #iz-root, .dz-root, #hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools, div[id$="-overlay"] > .panel) button:not(.dz-btn):not(.dz-ftab):not(.dz-row):not(.dz-back):not(.df-subtab):not(.df-tab):not(.hud-tab-btn):not(.comms-tab-btn):not(.cargo-subtab-btn):not(#vessel-weapons-container *):is([onclick*="BuildModal"], [onclick*="executeManufacturingBuildFromModal"], [onclick*="NewBlueprintModal"], [onclick*="EditBlueprintModal"]) { --px-c: var(--df-gold); }
+
+/* popups: new frame, each keeps its own accent colour (its border) */
+body.px-on div[id$="-overlay"] > .panel {
+    background: rgba(6, 14, 18, 0.98) !important; border-radius: 0 !important; font-family: var(--df-font);
+    clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7) !important; }
+body.px-on div[id$="-overlay"] > .panel :is(h3, h4) { font-family: var(--df-font) !important; letter-spacing: 0.14em; text-transform: uppercase; }
+body.px-on div[id$="-overlay"] > .panel p { font-family: var(--df-font); }
+body.px-on div[id$="-overlay"] > .panel .note-card { background: transparent !important; border-top: 0 !important; border-right: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important; border-radius: 0 !important; margin: 0 !important; padding: 10px 6px !important; }
+body.px-on div[id$="-overlay"] > .panel .note-card strong { font-family: var(--df-font); font-size: 13px !important; }
+body.px-on #custom-confirm-message { color: #e8f6fa !important; font-family: var(--df-font); font-size: 14px !important; }
+body.px-on #expand-textarea-input { font-family: 'IBM Plex Sans', system-ui, sans-serif !important; font-size: 14px !important; line-height: 1.65; }
+
+/* telemetry tiles (map.js draws them when the switch is on) */
+.px-tele { display: flex; flex-direction: column; gap: 8px; font-family: var(--df-font); }
+.px-kick { display: flex; align-items: center; gap: 8px; font-size: 9px; letter-spacing: 0.22em; color: var(--df-gold); }
+.px-kick i { font-style: normal; margin-left: auto; font-size: 8px; letter-spacing: 0.14em; padding: 2px 6px; border: 1px solid #00e5a3; color: #00e5a3; }
+.px-name { font-size: 18px; font-weight: 700; letter-spacing: 0.08em; color: #e8f6fa; text-transform: uppercase; }
+.px-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.px-facts.px-facts3 { grid-template-columns: 1fr 1fr 1fr; margin: 6px 0; }
+.px-fact { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; background: #071216; border: 1px solid rgba(0, 225, 255, 0.22); min-width: 0; }
+.px-fact span { font-size: 8px; letter-spacing: 0.18em; color: #6b8590; }
+.px-fact b { font-size: 12px; font-weight: 600; color: #e8f6fa; overflow-wrap: anywhere; }
+.px-fact.px-bad { border-color: rgba(255, 77, 77, 0.45); } .px-fact.px-bad span, .px-fact.px-bad b { color: #ff8a8a; }
+.px-drift { color: #ff8af0 !important; } .px-fuel { color: var(--df-amber) !important; }
+.px-row { display: flex; gap: 6px; } .px-row button { flex: 1; }
+
+/* Bug fix (2026-10-10, everyone): the build popup's BUILD buttons inherited the
+   global button width:100%, squeezing each blueprint's text into a thin column. */
+#mfg-build-modal-list .note-card button { width: auto !important; }
