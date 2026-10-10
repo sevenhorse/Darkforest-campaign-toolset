@@ -672,7 +672,8 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
     return wHtml;
 };
 
-window.renderVesselDeck = function() {
+// Announces 'vessel-deck-rendered' (js/fleet-v2.js refreshes the restyled header on it).
+window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function() {
     // Firing arcs: Arc dropdown in the "Mount New Weapon System" form (kept across re-renders).
     if (typeof window.ensureArcSelect === 'function') { const cur = document.getElementById('new-ship-wpn-arc'); window.ensureArcSelect('new-ship-wpn-loc', 'new-ship-wpn-arc', cur ? cur.value : ''); }
     const select = document.getElementById('vessel-deck-select');
@@ -1032,7 +1033,7 @@ window.renderVesselDeck = function() {
     // this file calls renderVesselDeck, so hooking here covers them all.
     // No-op if the Battle Map isn't open or there's no active encounter.
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
-};
+});
 
 window.modifyShipHealth = async function(vesselId, key, delta) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);

@@ -1912,3 +1912,38 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .dz-extra:empty { display: none; }
 .dz-extra .sheet-section { margin-top: 4px !important; border-color: var(--df-line) !important; background: rgba(6, 14, 18, 0.86) !important; }
 @media screen and (max-width: 768px) { .dz-pic { flex: 1 1 100%; } .dz-pic img { width: 100% !important; } .dz-nopic { display: none; } }
+
+/* ===== UI restyle R3: fleet pages (js/fleet-v2.js, switch 'fleet_restyle') ===== */
+.vz-on > :not(.vz-root) { display: none !important; }
+:not(.vz-on) > .vz-root { display: none; }
+.vz-root { font-family: var(--df-font); color: var(--df-ink); display: flex; flex-direction: column; gap: 12px; }
+.vz-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.vz-avatar { width: 52px; height: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; color: #9fe9f5; background: linear-gradient(135deg, #0e2228, #071014); border: 1px solid var(--df-line); overflow: hidden; }
+.vz-avatar.vz-hasimg img { width: 52px !important; height: 52px !important; border: 0 !important; }
+.vz-id { display: flex; flex-direction: column; gap: 4px; }
+.vz-kicker { font-size: 10px; letter-spacing: 0.22em; color: var(--df-cyan); }
+.vz-namerow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vz-namerow .dz-chip { font-size: 9px; padding: 3px 8px; margin-right: 4px; }
+.vz-name { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 0.12em; color: var(--df-ink-hi); border: 0; padding: 0; text-transform: uppercase; }
+.vz-pick { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.16em; color: var(--df-dim); }
+.vz-pick select { width: 260px !important; height: 34px; margin: 0 !important; background: rgba(6, 14, 18, 0.9) !important; border: 1px solid var(--df-line) !important; color: var(--df-ink) !important; font-family: var(--df-font); font-size: 12px !important; }
+#vz-broadcast-slot button { height: 34px; padding: 0 14px !important; margin: 0 !important; font-family: var(--df-font); font-size: 10px !important; letter-spacing: 0.14em; background: transparent !important; border: 1px solid var(--df-cyan) !important; color: var(--df-cyan) !important; border-radius: 0; box-shadow: none; }
+.vz-tabs { padding-left: 0; }
+.vz-pane { display: flex; flex-direction: column; gap: 12px; }
+.vz-glance .dz-fact { flex: 1 1 180px; }
+.vz-formbar { display: flex; justify-content: flex-end; }
+.vz-formbar:empty { display: none; }
+.vz-hidden-form { display: none !important; }
+.vz-slot { display: flex; flex-direction: column; gap: 12px; }
+.vz-root .sheet-section { margin: 0 !important; background: rgba(6, 14, 18, 0.86) !important; border: 1px solid var(--df-line) !important; border-radius: 0 !important; clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); padding: 14px 16px; }
+.vz-root .sheet-section > h4 { font-family: var(--df-font); font-size: 10px !important; font-weight: 400; letter-spacing: 0.22em; text-transform: uppercase; color: var(--df-cyan) !important; border-bottom: 1px solid rgba(0, 225, 255, 0.18) !important; padding-bottom: 8px !important; margin: 0 0 12px 0 !important; }
+#vz-root #vessel-decks-container { max-height: none !important; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+#vz-root #vessel-decks-container > div { margin: 0 !important; background: #071216 !important; border-color: rgba(0, 225, 255, 0.25) !important; }
+#vz-root #vessel-weapons-container, #vz-root #vessel-embarked-container, #vz-root #vessel-deployed-container { max-height: none !important; }
+#vz-slot-status > #vessel-ownership-container:empty, #vz-slot-status > #vessel-salvage-container:empty, #vz-slot-status > #vessel-manufacturing-container:empty { display: none; }
+@media screen and (max-width: 768px) {
+    .vz-pick { flex: 1 1 100%; } .vz-pick select { width: 100% !important; flex: 1; }
+    .vz-name { font-size: 20px; }
+    #vz-root #vessel-decks-container { grid-template-columns: 1fr; }
+    .vz-tabs { flex-wrap: nowrap; overflow-x: auto; } .vz-tabs .df-subtab { flex: 0 0 auto; min-height: 44px; }
+}
