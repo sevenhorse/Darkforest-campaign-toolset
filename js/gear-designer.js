@@ -83,7 +83,8 @@ window.getGearBonusFor = function(charGearList, targetType, targetName) {
     return { total, sources };
 };
 
-window.renderGearDesignerPanel = function() {
+// Announces 'gear-designer-rendered' (js/designers-v2.js redraws the restyled view).
+window.renderGearDesignerPanel = window.withAfterHooks('gear-designer-rendered', function() {
     const container = document.getElementById('gear-designer-list-container');
     if (!container) return;
 
@@ -158,7 +159,7 @@ window.renderGearDesignerPanel = function() {
     const totalApproved = gearDefinitionsList.filter(g => g.status === 'approved').length;
     const badge = document.getElementById('badge-geardesigner');
     if (badge) badge.innerText = totalPending > 0 ? `${totalPending} pending` : totalApproved;
-};
+});
 
 window.moveGearDefinitionOrder = function(id, direction) {
     const g = window.findGearDefinition(id);

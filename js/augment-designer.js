@@ -103,7 +103,8 @@ window.getAugmentExplodeThreshold = function(charAugmentsList, statName) {
     return best;
 };
 
-window.renderAugmentDesignerPanel = function() {
+// Announces 'augment-designer-rendered' (js/designers-v2.js redraws the restyled view).
+window.renderAugmentDesignerPanel = window.withAfterHooks('augment-designer-rendered', function() {
     const container = document.getElementById('augment-designer-list-container');
     if (!container) return;
 
@@ -179,7 +180,7 @@ window.renderAugmentDesignerPanel = function() {
     const totalApproved = augmentDefinitionsList.filter(a => a.status === 'approved').length;
     const badge = document.getElementById('badge-augmentdesigner');
     if (badge) badge.innerText = totalPending > 0 ? `${totalPending} pending` : totalApproved;
-};
+});
 
 window.moveAugmentDefinitionOrder = function(id, direction) {
     const a = window.findAugmentDefinition(id);

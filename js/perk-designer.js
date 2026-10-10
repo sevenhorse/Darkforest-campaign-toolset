@@ -58,7 +58,8 @@ window.getPerkBonusFor = function(charPerksList, targetType, targetName) {
     return { total, sources };
 };
 
-window.renderPerkDesignerPanel = function() {
+// Announces 'perk-designer-rendered' (js/designers-v2.js redraws the restyled view).
+window.renderPerkDesignerPanel = window.withAfterHooks('perk-designer-rendered', function() {
     const container = document.getElementById('perk-designer-list-container');
     if (!container) return;
 
@@ -140,7 +141,7 @@ window.renderPerkDesignerPanel = function() {
     const totalApproved = perkDefinitionsList.filter(p => p.status === 'approved').length;
     const badge = document.getElementById('badge-perkdesigner');
     if (badge) badge.innerText = totalPending > 0 ? `${totalPending} pending` : totalApproved;
-};
+});
 window.movePerkDefinitionOrder = function(id, direction) {
     const p = window.findPerkDefinition(id);
     if (!p) return;
