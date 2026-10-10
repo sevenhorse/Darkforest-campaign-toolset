@@ -2075,3 +2075,35 @@ body.gc-on #gc-bar { display: flex; align-items: center; gap: 12px; flex: 1 1 au
     #cv-pane-attributes, #cv-pane-perks, #cv-pane-profile { grid-template-columns: minmax(0, 1fr); }
     #cv-root #skills-input-container > div > span:first-child { flex-basis: 110px; }
 }
+
+/* ===== UI restyle R4b: Arsenal (js/crew-v2.js, switch 'crew_restyle') ===== */
+.av-root .dz-btn { font-family: inherit; margin: 0; width: auto; text-transform: none; }
+.av-root .dz-top .cv-actions { padding-bottom: 0; }
+.av-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); gap: 16px; align-items: start; }
+.av-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#av-root #arsenal-list-container { display: flex; flex-direction: column; }
+#av-root .arsenal-row { grid-template-columns: minmax(0, 2fr) 90px 60px 22px minmax(70px, 1fr) auto; background: transparent; border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); border-radius: 0; margin: 0; padding: 10px 4px; }
+#av-root .arsenal-row:hover { background: rgba(0, 225, 255, 0.05); }
+#av-root .arsenal-row strong { color: var(--df-ink-hi) !important; font-size: 13px !important; font-weight: 600; font-family: var(--df-font); letter-spacing: 0.03em; }
+#av-root .arsenal-row > span:nth-of-type(1) { color: var(--df-cyan) !important; font-size: 15px !important; font-family: var(--df-font); }
+#av-root .arsenal-row button { font-family: var(--df-font); border-radius: 0 !important; min-width: 30px; height: 28px; }
+#av-root .arsenal-row button[onclick^="window.rollArsenalWeapon"] { padding: 0 10px !important; border-color: var(--df-cyan) !important; color: var(--df-cyan) !important; letter-spacing: 0.12em; }
+#av-root #dice-roller-stats, #av-root #dice-roller-skills { display: flex !important; flex-wrap: wrap; gap: 6px; margin: 0 0 10px 0; }
+#av-root #dice-roller-stats label, #av-root #dice-roller-skills label { display: inline-flex !important; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid rgba(0, 225, 255, 0.3); color: #9fb4bd !important; font-family: var(--df-font); font-size: 10px !important; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; }
+#av-root #dice-roller-stats label:has(input:checked), #av-root #dice-roller-skills label:has(input:checked) { border-color: var(--df-cyan); color: var(--df-ink-hi) !important; background: rgba(0, 225, 255, 0.12); }
+#av-root #dice-roller-stats input, #av-root #dice-roller-skills input { width: auto !important; margin: 0 !important; accent-color: #00e1ff; }
+#av-root button[onclick^="window.executeDicePoolRoll"] { font-family: var(--df-font); border-radius: 0 !important; border-color: #00e5a3 !important; color: #00e5a3 !important; background: transparent !important; letter-spacing: 0.14em; }
+#av-root #dice-roll-result-box:not(:empty) { margin-top: 10px; padding: 12px 14px; background: #071216; border: 1px solid var(--df-line); }
+#av-root #arsenal-dice-feed { max-height: 50vh; overflow-y: auto; }
+@media screen and (max-width: 900px) {
+    .av-body { grid-template-columns: minmax(0, 1fr); }
+    #av-root .arsenal-row { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 6px; }
+    #av-root .arsenal-row > div:last-child { grid-column: 1 / -1; flex-wrap: wrap; }
+    #av-root .arsenal-row button { min-height: 40px; min-width: 44px; }
+    .av-root .dz-top .cv-actions { flex: 1 1 100%; } .av-root .dz-top .cv-actions button { width: 100% !important; box-sizing: border-box; min-height: 44px; }
+    #av-add { flex: 1 1 100%; min-height: 44px; }
+}
+#av-root .sheet-section h4 { font-family: var(--df-font); font-size: 10px !important; font-weight: 400; letter-spacing: 0.22em; text-transform: uppercase; color: var(--df-cyan) !important; border-bottom: 0 !important; padding: 0 !important; margin: 0 0 12px 0 !important; }
+#av-root .sheet-section > div:first-child { border-bottom-color: rgba(0, 225, 255, 0.18) !important; }
+#av-root #dice-roller-stats, #av-root #dice-roller-skills { max-height: none !important; overflow: visible !important; }
+#av-root #dice-roller-stats label, #av-root #dice-roller-skills label { width: auto !important; flex: 0 0 auto; margin: 0 !important; }

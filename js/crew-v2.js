@@ -2,6 +2,7 @@
    js/crew-v2.js - Character sheet restyle (UI restyle R4, switch
    'crew_restyle')
    ==========================================================================
+   Parts: R4a Dossier & Stats, R4b Arsenal (further down).
    R4a Dossier & Stats. DM decisions (2026-10-10, from the R4 mockup): a
    character header (portrait, handle, name, specialties, live chips for
    Injuries / Stress / Adversity / Shield / DR) over four tabs: PROFILE,
@@ -154,4 +155,68 @@ document.addEventListener('change', live);
 window.onHook('dossier-rendered', 'crew-v2', render);
 window.onHook('term-tab-switched', 'crew-v2', (tab) => { if (tab === 'stats') render(); });
 document.addEventListener('darkforest:features-changed', render);
+/* ---------- R4b: Arsenal ----------
+   DM decision (2026-10-10, R4 mockup): loadout beside a dice console. Left:
+   the page's own Active Arsenal section (weapon rows unchanged: ROLL /
+   attack / edit / delete / reorder) with its add form behind + ADD WEAPON,
+   then the initiative tracker. Right: the pool roller (attribute and skill
+   tick boxes shown as chips, same inputs) and the live dice feed. The real
+   SAVE COMBAT DATA button moves into the header. Moves, never rewrites. */
+const AV = window.__av = window.__av || { form: false };
+const avMoved = [];
+function avBorrow(node, slot) {
+    if (!node || !slot || node.parentNode === slot) return;
+    if (!avMoved.some(m => m.node === node)) avMoved.push({ node, parent: node.parentNode, next: node.nextSibling });
+    slot.appendChild(node);
+}
+function avGiveBack() {
+    for (let i = avMoved.length - 1; i >= 0; i--) {
+        const m = avMoved[i];
+        m.parent.insertBefore(m.node, m.next && m.next.parentNode === m.parent ? m.next : null);
+    }
+    avMoved.length = 0;
+}
+const avForm = () => { const el = byId('new-wpn-name'); return el && el.parentNode ? el.parentNode.parentNode : null; };
+function avEnsureRoot() {
+    const panel = byId('term-panel-combat');
+    if (!panel) return null;
+    let root = byId('av-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'av-root';
+        root.className = 'vz-root av-root';
+        root.innerHTML = `<div class="dz-top"><h2 class="dz-h1">ARSENAL</h2><span class="dz-h1sub">// WEAPONS &amp; POWERS</span><span class="dz-grow"></span>
+                <button type="button" class="dz-btn" id="av-add" data-avact="add">+ ADD WEAPON</button><span class="cv-actions" id="av-actions"></span></div>
+            <div class="av-body"><div class="av-col" id="av-left"></div><div class="av-col av-right" id="av-right"></div></div>`;
+        panel.appendChild(root);
+    }
+    return root;
+}
+function renderArsenalView() {
+    const panel = byId('term-panel-combat');
+    if (!panel) return;
+    const on = window.crewRestyleOn();
+    panel.classList.toggle('vz-on', on);
+    if (!on) { const f = avForm(); if (f) f.classList.remove('vz-hidden-form'); avGiveBack(); return; }
+    if (!avEnsureRoot()) return;
+    avBorrow(section('arsenal-list-container'), byId('av-left'));
+    avBorrow(section('terminal-combat-body'), byId('av-left'));
+    avBorrow(section('dice-roller-stats'), byId('av-right'));
+    avBorrow(section('arsenal-dice-feed'), byId('av-right'));
+    avBorrow(document.querySelector('#term-panel-combat button[onclick^="window.saveTerminalProfile("]'), byId('av-actions'));
+    const f = avForm();
+    if (f) f.classList.toggle('vz-hidden-form', !AV.form);
+    const add = byId('av-add');
+    if (add) { add.textContent = AV.form ? '× CLOSE FORM' : '+ ADD WEAPON'; add.setAttribute('aria-expanded', String(!!AV.form)); }
+}
+window.renderCrewArsenal = renderArsenalView;
+document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('#av-root [data-avact="add"]') : null;
+    if (!b) return;
+    AV.form = !AV.form;
+    renderArsenalView();
+    if (AV.form) { const n = byId('new-wpn-name'); if (n) n.focus(); }
+});
+window.onHook('term-tab-switched', 'crew-v2-arsenal', (tab) => { if (tab === 'combat') renderArsenalView(); });
+document.addEventListener('darkforest:features-changed', renderArsenalView);
 })();
