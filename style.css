@@ -1947,3 +1947,14 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
     #vz-root #vessel-decks-container { grid-template-columns: 1fr; }
     .vz-tabs { flex-wrap: nowrap; overflow-x: auto; } .vz-tabs .df-subtab { flex: 0 0 auto; min-height: 44px; }
 }
+
+/* R3b: Colonies & Fleets */
+.cz-root :is(.dz-btn, .dz-ftab, .dz-row, .dz-back) { font-family: inherit; margin: 0; text-transform: none; }
+.cz-root :is(.dz-btn, .dz-ftab, .dz-back) { width: auto; }
+.cz-root .dz-row { width: 100%; }
+.cz-root .dz-btn.amber-btn { border-color: var(--df-amber); color: var(--df-amber); }
+.cz-slot .note-card { display: none; }
+.cz-slot .note-card.cz-sel { display: block; margin: 0; background: transparent !important; border: 0 !important; padding: 0; }
+.cz-slot > div[id$="-list-container"] { max-height: none !important; overflow: visible !important; }
+.cz-formslot .sheet-section { border: 0 !important; background: transparent !important; padding: 0; margin: 0; }
+.cz-formslot .sheet-section h4 { display: none; }

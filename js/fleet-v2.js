@@ -154,4 +154,133 @@ document.addEventListener('click', (e) => {
 window.onHook('vessel-deck-rendered', 'fleet-v2', render);
 window.onHook('term-tab-switched', 'fleet-v2', (tab) => { if (tab === 'vessel') render(); });
 document.addEventListener('darkforest:features-changed', render);
+
+/* ---------- R3b: Colonies & Fleets ----------
+   A list on the left (built here from coloniesList / fleetGroupsList, in the
+   same saved order), and on the right the page's OWN card for the picked
+   colony / task group, untouched (storage pick-up, builds, edit, delete,
+   reorder all still run colonies.js). The old card container moves into the
+   right pane and every card but the picked one is hidden. "+ FOUND COLONY" /
+   "+ COMMISSION TASK GROUP" show the existing forms in that pane. */
+const CZ = window.__cz = window.__cz || { tab: 'colonies', sel: {}, mode: 'view', view: 'list', known: null };
+const CZ_KINDS = {
+    colonies: { label: 'COLONIES', tone: 'amber', container: 'colonies-list-container', form: 'new-colony-name', newLabel: '+ FOUND COLONY', orderKey: 'colonies',
+        list: () => (typeof coloniesList !== 'undefined' ? coloniesList : []),
+        meta: (c) => `POP ${fmtPop(c.population)} · INFRASTRUCTURE ${c.infrastructure_level || 1}${c.has_manufacturing_facility ? ' · FACILITY' : ''}`,
+        chip: (c) => [String(c.morale || 'Stable').toUpperCase(), c.morale === 'Thriving' ? 'ok' : c.morale === 'Unrest' ? 'amber' : c.morale === 'Crisis' ? 'red' : 'gold'] },
+    fleets: { label: 'TASK GROUPS', tone: '', container: 'fleets-list-container', form: 'new-fleet-name', newLabel: '+ COMMISSION TASK GROUP', orderKey: 'fleet_groups',
+        list: () => (typeof fleetGroupsList !== 'undefined' ? fleetGroupsList : []),
+        meta: (f) => { const ship = (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).find(m => m.id === f.linked_ship_id); return ship ? `LINKED: ${String(ship.name).toUpperCase()}` : 'NO LINKED SHIP'; },
+        chip: (f) => [String(f.status || 'Standby').toUpperCase(), f.status === 'RTB' ? 'red' : f.status === 'Patrolling' ? 'ok' : f.status === 'Mining Operations' ? 'amber' : ''] }
+};
+function fmtPop(n) { n = Number(n) || 0; return n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n); }
+const czOrdered = (k) => (typeof window.applySavedOrder === 'function' ? window.applySavedOrder(CZ_KINDS[k].orderKey, CZ_KINDS[k].list()) : CZ_KINDS[k].list());
+const czForm = (k) => { const el = byId(CZ_KINDS[k].form); return el ? el.closest('.sheet-section') : null; };
+
+function czEnsureRoot() {
+    const panel = byId('term-panel-colonies');
+    if (!panel) return null;
+    let root = byId('cz-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'cz-root';
+        root.className = 'vz-root cz-root';
+        root.innerHTML = `<div class="dz-top"><h2 class="dz-h1">COLONIES &amp; FLEETS</h2><span class="dz-grow"></span>
+                <button type="button" class="dz-btn amber-btn" data-cznew="colonies">+ FOUND COLONY</button>
+                <button type="button" class="dz-btn" data-cznew="fleets">+ COMMISSION TASK GROUP</button></div>
+            <div class="dz-filters" id="cz-tabs" role="tablist" aria-label="Colonies or task groups"></div>
+            <div class="dz-body" id="cz-body">
+                <div class="dz-panel dz-list" id="cz-list"></div>
+                <div class="dz-panel dz-detail" id="cz-detail">
+                    <button type="button" class="dz-back" data-czact="back">← BACK TO LIST</button>
+                    <span class="dz-kicker" id="cz-kicker"></span>
+                    <div class="cz-slot" id="cz-slot-colonies"></div><div class="cz-slot" id="cz-slot-fleets"></div>
+                    <div class="cz-formslot" id="cz-formslot"></div>
+                    <div class="dz-actions" id="cz-formactions"><span class="dz-grow"></span><button type="button" class="dz-btn dim" data-czact="cancel">CANCEL</button></div>
+                </div>
+            </div>`;
+        panel.appendChild(root);
+    }
+    return root;
+}
+
+function renderColonies() {
+    const panel = byId('term-panel-colonies');
+    if (!panel) return;
+    const on = window.fleetRestyleOn();
+    panel.classList.toggle('vz-on', on);
+    if (!on) {
+        ['colonies', 'fleets'].forEach(k => { const c = byId(CZ_KINDS[k].container); if (c && c.closest('#cz-root')) czGiveBack(c); const f = czForm(k); if (f && f.closest('#cz-root')) czGiveBack(f); });
+        CZ.mode = 'view';
+        return;
+    }
+    const root = czEnsureRoot();
+    if (!root) return;
+    const k = CZ.tab, K = CZ_KINDS[k];
+    const items = czOrdered(k);
+    if (CZ.mode === 'new' && CZ.known && CZ.known.k === k) {
+        const fresh = items.find(x => !CZ.known.ids.has(x.id));
+        if (fresh) { CZ.sel[k] = fresh.id; CZ.mode = 'view'; CZ.view = 'detail'; }
+    }
+    if (!items.some(x => x.id === CZ.sel[k])) CZ.sel[k] = items.length ? items[0].id : null;
+    const sel = CZ.sel[k];
+
+    byId('cz-tabs').innerHTML = Object.keys(CZ_KINDS).map(key => `<button type="button" role="tab" class="dz-ftab${key === k ? ' on' : ''}" data-cztab="${key}" aria-selected="${key === k}">${CZ_KINDS[key].label} <b class="${CZ_KINDS[key].tone}">${CZ_KINDS[key].list().length}</b></button>`).join('');
+    const initials = (n) => { const w = String(n || '?').replace(/[^A-Za-z0-9 ]/g, ' ').split(' ').filter(Boolean); return ((w[0] || '?')[0] + (w[1] ? w[1][0] : (w[0] || '').slice(1, 2))).toUpperCase(); };
+    byId('cz-list').innerHTML = `<div class="dz-ttl"><span>${k === 'colonies' ? 'COLONIAL HOLDINGS' : 'TASK GROUPS'}</span><span class="dz-dim">${items.length}</span></div>` + (items.length ? items.map(x => {
+        const c = K.chip(x);
+        return `<button type="button" class="dz-row${x.id === sel && CZ.mode !== 'new' ? ' sel' : ''}" data-czsel="${esc(x.id)}"><span class="dz-thumb">${esc(initials(x.name))}</span>
+            <span class="dz-rowtext"><span class="dz-name">${esc(x.name)}</span><span class="dz-meta">${esc(K.meta(x))}</span></span><span class="dz-chip ${c[1]}">${esc(c[0])}</span></button>`;
+    }).join('') : `<div class="dz-empty">None yet. Use ${K.newLabel}.</div>`);
+
+    // Right pane: the old card container (only the picked card shows) or the creation form.
+    ['colonies', 'fleets'].forEach(key => czBorrow(byId(CZ_KINDS[key].container), byId('cz-slot-' + key)));
+    ['colonies', 'fleets'].forEach(key => { byId('cz-slot-' + key).style.display = (key === k && CZ.mode !== 'new') ? '' : 'none'; });
+    const container = byId(K.container);
+    if (container) {
+        const cards = Array.from(container.children).filter(n => n.classList && n.classList.contains('note-card'));
+        cards.forEach((card, i) => { const it = items[i]; if (it) card.dataset.czid = it.id; card.classList.toggle('cz-sel', !!it && it.id === sel); });
+    }
+    const form = czForm(k);
+    ['colonies', 'fleets'].forEach(key => { const f = czForm(key); if (f && key !== k && f.closest('#cz-root')) czGiveBack(f); });
+    if (CZ.mode === 'new' && form) czBorrow(form, byId('cz-formslot'));
+    else if (form && form.closest('#cz-root')) czGiveBack(form);
+    byId('cz-formactions').style.display = CZ.mode === 'new' ? '' : 'none';
+    byId('cz-kicker').textContent = CZ.mode === 'new' ? (k === 'colonies' ? 'NEW COLONY' : 'NEW TASK GROUP') : (k === 'colonies' ? 'COLONY' : 'TASK GROUP');
+    byId('cz-body').classList.toggle('dz-show-detail', CZ.view === 'detail');
+}
+window.renderFleetColonies = renderColonies;
+const czMoved = [];
+function czBorrow(node, slot) {
+    if (!node || !slot || node.parentNode === slot) return;
+    if (!czMoved.some(m => m.node === node)) czMoved.push({ node, parent: node.parentNode, next: node.nextSibling });
+    slot.appendChild(node);
+}
+function czGiveBack(node) {
+    const i = czMoved.findIndex(m => m.node === node);
+    if (i < 0) return;
+    const m = czMoved[i];
+    m.parent.insertBefore(node, m.next && m.next.parentNode === m.parent ? m.next : null);
+    czMoved.splice(i, 1);
+}
+document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('#cz-root button') : null;
+    if (!b || b.closest('#cz-formslot') || b.closest('.cz-slot')) return;
+    if (b.dataset.cztab) {
+        CZ.tab = b.dataset.cztab; CZ.mode = 'view';
+        if (typeof window.switchColoniesSubtab === 'function') window.switchColoniesSubtab(CZ.tab);
+    } else if (b.dataset.czsel) { CZ.sel[CZ.tab] = b.dataset.czsel; CZ.mode = 'view'; CZ.view = 'detail'; }
+    else if (b.dataset.cznew) {
+        CZ.tab = b.dataset.cznew; CZ.mode = 'new'; CZ.view = 'detail';
+        CZ.known = { k: CZ.tab, ids: new Set(CZ_KINDS[CZ.tab].list().map(x => x.id)) };
+        if (typeof window.switchColoniesSubtab === 'function') window.switchColoniesSubtab(CZ.tab);
+    } else if (b.dataset.czact === 'back') { CZ.view = 'list'; if (CZ.mode === 'new') CZ.mode = 'view'; }
+    else if (b.dataset.czact === 'cancel') { CZ.mode = 'view'; }
+    else return;
+    renderColonies();
+});
+window.onHook('colonies-rendered', 'fleet-v2', renderColonies);
+window.onHook('fleet-groups-rendered', 'fleet-v2', renderColonies);
+window.onHook('term-tab-switched', 'fleet-v2-colonies', (tab) => { if (tab === 'colonies') renderColonies(); });
+document.addEventListener('darkforest:features-changed', renderColonies);
 })();

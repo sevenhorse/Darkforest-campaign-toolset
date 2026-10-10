@@ -64,7 +64,8 @@ function canManage(asset) {
 
 /* --- COLONIES --- */
 
-window.renderColoniesPanel = function() {
+// Announces 'colonies-rendered' (js/fleet-v2.js redraws the restyled list on it).
+window.renderColoniesPanel = window.withAfterHooks('colonies-rendered', function() {
     const container = document.getElementById('colonies-list-container');
     if (container) {
         let html = '';
@@ -129,7 +130,7 @@ window.renderColoniesPanel = function() {
     }
     const badge = document.getElementById('badge-colonies');
     if (badge) badge.innerText = coloniesList.length + fleetGroupsList.length;
-};
+});
 // Renders one colony's stored items across all three buckets with a
 // per-item pick-up button, or an empty-storage placeholder. Escapes the
 // item name into the onclick attribute (names are free-text, DM-entered
@@ -365,7 +366,8 @@ window.locateFleetShip = function(shipId) {
     if (typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 };
 
-window.renderFleetGroupsPanel = function() {
+// Announces 'fleet-groups-rendered' (js/fleet-v2.js redraws the restyled list on it).
+window.renderFleetGroupsPanel = window.withAfterHooks('fleet-groups-rendered', function() {
     const container = document.getElementById('fleets-list-container');
     if (container) {
         let html = '';
@@ -444,7 +446,7 @@ window.renderFleetGroupsPanel = function() {
     }
     const badge = document.getElementById('badge-colonies');
     if (badge) badge.innerText = coloniesList.length + fleetGroupsList.length;
-};
+});
 window.moveFleetGroupOrder = function(id, direction) {
     window.moveListItem('fleet_groups', window.applySavedOrder('fleet_groups', fleetGroupsList), id, direction);
     window.renderFleetGroupsPanel();
