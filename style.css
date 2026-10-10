@@ -2175,3 +2175,18 @@ body.gc-on #dm-tools .hud-tab-btn.active { border-bottom-color: #ff6b6b !importa
 body.gc-on #comms-tabs-bar .comms-tab-btn { border-radius: 0; font-family: var(--df-font); letter-spacing: 0.08em; }
 body.gc-on #comms-tabs-bar .comms-tab-btn.active { border-color: var(--df-cyan) !important; color: var(--df-ink-hi) !important; background: rgba(0, 225, 255, 0.1) !important; }
 body.gc-on #mobile-nav-drawer-body :is(#hud-overlay, #bottom-right-presence)::before, body.gc-on #mobile-nav-drawer-body :is(#hud-overlay, #bottom-right-presence)::after { display: none; }
+
+/* ===== UI restyle R5c: galaxy map bottom dock (switch 'galaxy_chrome', body.gc-on) ===== */
+body.gc-on #bottom-toggle-bar { gap: 0; padding: 0; background: rgba(6, 14, 18, 0.95); border: 1px solid rgba(0, 225, 255, 0.3); border-radius: 0; box-shadow: 0 0 22px rgba(0, 0, 0, 0.6); }
+body.gc-on #bottom-toggle-bar button { height: 40px; margin: 0 !important; padding: 0 18px !important; font-family: var(--df-font); font-size: 11px !important; letter-spacing: 0.2em; text-transform: uppercase; background: transparent !important; border: 0 !important; border-radius: 0 !important; color: #9fb4bd !important; box-shadow: inset 0 -2px 0 var(--gc-acc, transparent); cursor: pointer; }
+body.gc-on #bottom-toggle-bar button:hover { color: var(--df-ink-hi) !important; background: rgba(0, 225, 255, 0.06) !important; }
+body.gc-on #bottom-toggle-bar button[onclick^="window.openFullCodexTerminal"] { --gc-acc: #ff4d4d; }
+body.gc-on #bottom-toggle-bar button[onclick^="window.toggleCombatTracker"] { --gc-acc: #ff8a8a; }
+body.gc-on #bottom-toggle-bar button[onclick^="window.toggleBattleMap"] { --gc-acc: #b07cff; }
+body.gc-on #bottom-toggle-bar button[onclick^="window.toggleSalvagePanel"] { --gc-acc: var(--df-gold); }
+body.gc-on #bottom-toggle-bar button[onclick^="window.resetUiLayout"] { color: var(--df-dim) !important; border-left: 1px solid rgba(0, 225, 255, 0.2) !important; letter-spacing: 0.14em; }
+body.gc-on #bottom-toggle-bar .gc-round { font-weight: 400; color: #ff8a8a; }
+@media screen and (max-width: 768px) {
+    body.gc-on #mobile-nav-drawer-body #bottom-toggle-bar { padding: 0 !important; gap: 0 !important; }
+    body.gc-on #mobile-nav-drawer-body #bottom-toggle-bar button { flex: 1 1 45%; min-height: 44px; border-bottom: 1px solid rgba(0, 225, 255, 0.08) !important; }
+}

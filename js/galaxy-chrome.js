@@ -2,6 +2,9 @@
    js/galaxy-chrome.js - Galaxy map chrome restyle (UI restyle R5, switch
    'galaxy_chrome')
    ==========================================================================
+   Parts: R5a top bar (below), R5b floating panel frames (CSS only, style.css),
+   R5c bottom dock (CSS + the live round on BATTLE MAP, end of this file).
+
    R5a top bar. DM decisions (2026-10-10, from the R5 mockup): grouped bar
    (brand · search · map tools · universe time · terminal · audio ·
    account menu); TUTORIAL, the role badge, link status and DISCONNECT fold
@@ -158,4 +161,19 @@ document.addEventListener('darkforest:features-changed', apply);
 const role = byId('user-role');
 if (role && typeof MutationObserver === 'function') new MutationObserver(refreshTools).observe(role, { childList: true, characterData: true, subtree: true });
 apply();
+// ---- R5c: bottom dock. The buttons are restyled in CSS (body.gc-on); here
+// BATTLE MAP gets the live round ("R3") while an encounter is running.
+function refreshDock() {
+    const btn = document.querySelector('#bottom-toggle-bar button[onclick^="window.toggleBattleMap("]');
+    if (!btn) return;
+    let b = btn.querySelector('.gc-round');
+    const enc = window.globalBattleEncounterCache;
+    if (!document.body.classList.contains('gc-on') || !enc) { if (b) b.remove(); return; }
+    if (!b) { b = document.createElement('b'); b.className = 'gc-round'; btn.appendChild(b); }
+    b.textContent = ' R' + (enc.round_number || 1);
+}
+window.refreshGalaxyDock = refreshDock;
+if (typeof window.onBattleMapRender === 'function') window.onBattleMapRender('galaxy-chrome', refreshDock, 60);
+document.addEventListener('darkforest:features-changed', refreshDock);
+refreshDock();
 })();
