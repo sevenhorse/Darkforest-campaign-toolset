@@ -2,7 +2,8 @@
    js/crew-v2.js - Character sheet restyle (UI restyle R4, switch
    'crew_restyle')
    ==========================================================================
-   Parts: R4a Dossier & Stats, R4b Arsenal, R4c Manifest (further down).
+   Parts: R4a Dossier & Stats, R4b Arsenal, R4c Manifest, R4d Crew Roster +
+   Intel & Ops (further down).
    R4a Dossier & Stats. DM decisions (2026-10-10, from the R4 mockup): a
    character header (portrait, handle, name, specialties, live chips for
    Injuries / Stress / Adversity / Shield / DR) over four tabs: PROFILE,
@@ -308,4 +309,116 @@ document.addEventListener('click', (e) => {
 window.onHook('cargo-deck-rendered', 'crew-v2', renderManifestView);
 window.onHook('term-tab-switched', 'crew-v2-manifest', (tab) => { if (tab === 'cargo') renderManifestView(); });
 document.addEventListener('darkforest:features-changed', renderManifestView);
+/* ---------- R4d: Crew Roster + Intel & Ops ----------
+   Roster: list on the left (portrait/initials, name, handle, injuries /
+   stress / shield), and on the right the page's OWN card for the picked
+   commander (the DM's edit fields, EDIT SHEET and LOCATE VESSEL all still
+   run ui.js), the same pattern as Colonies & Fleets. Intel & Ops:
+   OBJECTIVES / INTEL NOTES tabs with counts; the existing create forms sit
+   behind + ADD OBJECTIVE / + NEW NOTE (a note's Edit opens the form). */
+const RZ = window.__rz = window.__rz || { sel: null, view: 'list' };
+const IZ = window.__iz = window.__iz || { tab: 'objectives', form: false };
+const rzMoved = [];
+function rzBorrow(node, slot) {
+    if (!node || !slot || node.parentNode === slot) return;
+    if (!rzMoved.some(m => m.node === node)) rzMoved.push({ node, parent: node.parentNode, next: node.nextSibling });
+    slot.appendChild(node);
+}
+function rzGiveBack(pred) {
+    for (let i = rzMoved.length - 1; i >= 0; i--) {
+        const m = rzMoved[i];
+        if (pred && !pred(m.node)) continue;
+        m.parent.insertBefore(m.node, m.next && m.next.parentNode === m.parent ? m.next : null);
+        rzMoved.splice(i, 1);
+    }
+}
+const initialsOf = (n) => { const w = String(n || '?').replace(/[^A-Za-z0-9 ]/g, ' ').split(' ').filter(Boolean); return ((w[0] || '?')[0] + (w[1] ? w[1][0] : (w[0] || '').slice(1, 2))).toUpperCase(); };
+
+function renderRosterView() {
+    const panel = byId('term-panel-roster');
+    if (!panel) return;
+    const on = window.crewRestyleOn();
+    panel.classList.toggle('vz-on', on);
+    const box = byId('crew-roster-container');
+    if (!on) { rzGiveBack(n => n === box); if (box) Array.from(box.children).forEach(c => c.classList.remove('rz-sel')); return; }
+    let root = byId('rz-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'rz-root';
+        root.className = 'vz-root rz-root';
+        root.innerHTML = `<div class="dz-top"><h2 class="dz-h1">CREW ROSTER</h2><span class="dz-h1sub">// ACTIVE TASK FORCE</span></div>
+            <div class="dz-body" id="rz-body"><div class="dz-panel dz-list" id="rz-list"></div>
+            <div class="dz-panel dz-detail" id="rz-detail"><button type="button" class="dz-back" data-rzact="back">← BACK TO LIST</button><span class="dz-kicker">COMMANDER</span><div class="rz-slot" id="rz-slot"></div></div></div>`;
+        panel.appendChild(root);
+    }
+    rzBorrow(box, byId('rz-slot'));
+    const people = typeof allProfiles !== 'undefined' ? allProfiles : [];
+    if (!people.some(p => p.id === RZ.sel)) RZ.sel = (people.find(p => typeof currentUserId !== 'undefined' && p.id === currentUserId) || people[0] || {}).id || null;
+    byId('rz-list').innerHTML = `<div class="dz-ttl"><span>TASK FORCE</span><span class="dz-dim">${people.length}</span></div>` + (people.length ? people.map(p => {
+        const c = p.character || {};
+        const name = c.name || p.username || 'Unknown';
+        const thumb = p.avatar_url ? `<span class="dz-thumb dz-thumbimg"><img src="${esc(p.avatar_url)}" alt=""></span>` : `<span class="dz-thumb">${esc(initialsOf(name))}</span>`;
+        const meta = `${p.username ? '@' + p.username + ' · ' : ''}INJ ${c.vitality || 0} · STRESS ${c.stress || 0} · SHIELD ${c.shield_current || 0}/${c.shield_max || 0}`;
+        const chip = p.role === 'dm' ? '<span class="dz-chip red">DM</span>' : (p.id === currentUserId ? '<span class="dz-chip ok">YOU</span>' : '');
+        return `<button type="button" class="dz-row${p.id === RZ.sel ? ' sel' : ''}" data-rzsel="${esc(p.id)}">${thumb}<span class="dz-rowtext"><span class="dz-name">${esc(name)}</span><span class="dz-meta">${esc(meta.toUpperCase())}</span></span>${chip}</button>`;
+    }).join('') : '<div class="dz-empty">No commanders yet.</div>');
+    if (box) Array.from(box.children).forEach((card, i) => { const p = people[i]; card.classList.toggle('rz-sel', !!p && p.id === RZ.sel); });
+    byId('rz-body').classList.toggle('dz-show-detail', RZ.view === 'detail');
+}
+window.renderCrewRosterView = renderRosterView;
+
+const IZ_TABS = { objectives: { label: 'OBJECTIVES', list: 'objectives-list-container', form: 'new-obj-title', btn: '+ ADD OBJECTIVE', count: () => (typeof campaignObjectivesList !== 'undefined' ? campaignObjectivesList.filter(o => !o.completed).length : 0) },
+    notes: { label: 'INTEL NOTES', list: 'term-notes-list-container', form: 'term-note-title', btn: '+ NEW NOTE', count: () => (typeof playerNotesList !== 'undefined' ? playerNotesList.filter(n => !(n.author_id !== currentUserId && n.share_scope === 'private' && currentUserRole !== 'dm')).length : 0) } };
+const izForm = (k) => { const el = byId(IZ_TABS[k].form); return el ? el.parentNode : null; };
+function renderIntelView() {
+    const panel = byId('term-panel-notes');
+    if (!panel) return;
+    const on = window.crewRestyleOn();
+    panel.classList.toggle('vz-on', on);
+    if (!on) { Object.keys(IZ_TABS).forEach(k => { const f = izForm(k); if (f) f.classList.remove('vz-hidden-form'); }); rzGiveBack(n => !!(n.closest && n.closest('#term-panel-notes'))); return; }
+    let root = byId('iz-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'iz-root';
+        root.className = 'vz-root iz-root';
+        root.innerHTML = `<div class="dz-top"><h2 class="dz-h1">INTEL &amp; OPS</h2><span class="dz-h1sub">// OBJECTIVES &amp; NOTES</span><span class="dz-grow"></span><button type="button" class="dz-btn" id="iz-add" data-izact="add"></button></div>
+            <div class="df-subtabs vz-tabs" id="iz-tabs" role="tablist" aria-label="Intel sections"></div>
+            <div class="iz-pane" id="iz-pane-objectives"></div><div class="iz-pane" id="iz-pane-notes"></div>`;
+        panel.appendChild(root);
+    }
+    rzBorrow(section('objectives-list-container'), byId('iz-pane-objectives'));
+    rzBorrow(section('term-notes-list-container'), byId('iz-pane-notes'));
+    if (!IZ_TABS[IZ.tab]) IZ.tab = 'objectives';
+    byId('iz-tabs').innerHTML = Object.keys(IZ_TABS).map(k => { const n = IZ_TABS[k].count(); return `<button type="button" role="tab" class="df-subtab${IZ.tab === k ? ' on' : ''}" data-iztab="${k}" aria-selected="${IZ.tab === k}">${IZ_TABS[k].label}${n ? ` <b>${n}</b>` : ''}</button>`; }).join('');
+    Object.keys(IZ_TABS).forEach(k => {
+        byId('iz-pane-' + k).style.display = IZ.tab === k ? '' : 'none';
+        const f = izForm(k); if (f) f.classList.toggle('vz-hidden-form', !(IZ.form && IZ.tab === k));
+    });
+    const add = byId('iz-add');
+    add.textContent = IZ.form ? '× CLOSE FORM' : IZ_TABS[IZ.tab].btn;
+    add.setAttribute('aria-expanded', String(!!IZ.form));
+}
+window.renderCrewIntelView = renderIntelView;
+
+document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const r = t.closest('#rz-root [data-rzsel], #rz-root [data-rzact]');
+    if (r) { if (r.dataset.rzsel) { RZ.sel = r.dataset.rzsel; RZ.view = 'detail'; } else RZ.view = 'list'; renderRosterView(); return; }
+    const i = t.closest('#iz-root [data-iztab], #iz-root [data-izact]');
+    if (i) {
+        if (i.dataset.iztab) { IZ.tab = i.dataset.iztab; IZ.form = false; }
+        else { IZ.form = !IZ.form; }
+        renderIntelView();
+        if (IZ.form) { const f = byId(IZ_TABS[IZ.tab].form); if (f) f.focus(); }
+        return;
+    }
+    // A note's Edit fills the existing form; show it.
+    if (t.closest('#iz-root button[onclick^="window.editNote("]')) { IZ.tab = 'notes'; IZ.form = true; setTimeout(renderIntelView, 0); }
+});
+window.onHook('roster-rendered', 'crew-v2', renderRosterView);
+window.onHook('objectives-rendered', 'crew-v2', renderIntelView);
+window.onHook('notes-rendered', 'crew-v2', renderIntelView);
+window.onHook('term-tab-switched', 'crew-v2-roster', (tab) => { if (tab === 'roster') renderRosterView(); else if (tab === 'notes') renderIntelView(); });
+document.addEventListener('darkforest:features-changed', () => { renderRosterView(); renderIntelView(); });
 })();

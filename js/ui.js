@@ -1431,6 +1431,7 @@ window.renderCrewRoster = function() {
     });
     container.innerHTML = html;
 };
+window.renderCrewRoster = window.withAfterHooks('roster-rendered', window.renderCrewRoster); // js/crew-v2.js (R4d) redraws on this
 
 window.dmUpdatePlayerStats = async function(profileId) {
     if (currentUserRole !== 'dm') return;
@@ -1958,6 +1959,7 @@ window.renderCampaignObjectives = function() {
     });
     container.innerHTML = html;
 };
+window.renderCampaignObjectives = window.withAfterHooks('objectives-rendered', window.renderCampaignObjectives); // js/crew-v2.js (R4d) redraws on this
 window.moveObjectiveOrder = function(id, direction) {
     window.moveListItem('objectives', window.applySavedOrder('objectives', campaignObjectivesList), id, direction);
     window.renderCampaignObjectives();
@@ -2010,6 +2012,7 @@ window.renderTerminalNotes = function() {
     });
     container.innerHTML = html || '<span style="font-size:10px; color:#6b826a;">No notes recorded.</span>';
 };
+window.renderTerminalNotes = window.withAfterHooks('notes-rendered', window.renderTerminalNotes); // js/crew-v2.js (R4d) redraws on this
 window.moveNoteOrder = function(id, direction) {
     const visibleNotes = playerNotesList.filter(n => !(n.author_id !== currentUserId && n.share_scope === 'private' && currentUserRole !== 'dm'));
     window.moveListItem('notes', window.applySavedOrder('notes', visibleNotes), id, direction);

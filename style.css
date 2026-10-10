@@ -2127,3 +2127,19 @@ body.gc-on #gc-bar { display: flex; align-items: center; gap: 12px; flex: 1 1 au
     #mf-tabs { flex-wrap: nowrap; overflow-x: auto; } #mf-tabs .df-subtab { flex: 0 0 auto; min-height: 44px; }
 }
 #mf-root #terminal-cargo-items-container > div:first-child strong { white-space: nowrap; }
+
+/* ===== UI restyle R4d: Crew Roster + Intel & Ops (js/crew-v2.js, switch 'crew_restyle') ===== */
+:is(.rz-root, .iz-root) :is(.dz-btn, .dz-ftab, .dz-row, .dz-back) { font-family: inherit; margin: 0; text-transform: none; }
+:is(.rz-root, .iz-root) :is(.dz-btn, .dz-ftab, .dz-back) { width: auto; }
+.rz-root .dz-row { width: 100%; }
+.rz-slot .note-card { display: none; }
+.rz-slot .note-card.rz-sel { display: block; margin: 0; background: transparent !important; border: 0 !important; padding: 0 !important; }
+.rz-slot #crew-roster-container { max-height: none !important; overflow: visible !important; }
+.iz-pane { display: flex; flex-direction: column; gap: 12px; }
+#iz-root :is(#objectives-list-container, #term-notes-list-container) { max-height: none !important; display: flex; flex-direction: column; }
+#iz-root :is(#objectives-list-container, #term-notes-list-container) .note-card { background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important; border-radius: 0 !important; margin: 0 !important; padding: 12px 4px !important; }
+#iz-root :is(#objectives-list-container, #term-notes-list-container) .note-card strong { color: var(--df-ink-hi) !important; font-family: var(--df-font); font-size: 13px !important; font-weight: 600; }
+#iz-root :is(#objectives-list-container, #term-notes-list-container) .note-card p { font-size: 12px !important; color: #c7d6dc !important; line-height: 1.5; max-height: none !important; }
+#iz-root .sheet-section > div:not([id]) { margin-bottom: 12px; }
+@media screen and (max-width: 768px) { #iz-add { flex: 1 1 100%; min-height: 44px; } #iz-tabs { flex-wrap: nowrap; overflow-x: auto; } #iz-tabs .df-subtab { flex: 0 0 auto; min-height: 44px; } }
+.rz-slot img:not([src]), .rz-slot img[src=""] { visibility: hidden; }
