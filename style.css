@@ -2107,3 +2107,23 @@ body.gc-on #gc-bar { display: flex; align-items: center; gap: 12px; flex: 1 1 au
 #av-root .sheet-section > div:first-child { border-bottom-color: rgba(0, 225, 255, 0.18) !important; }
 #av-root #dice-roller-stats, #av-root #dice-roller-skills { max-height: none !important; overflow: visible !important; }
 #av-root #dice-roller-stats label, #av-root #dice-roller-skills label { width: auto !important; flex: 0 0 auto; margin: 0 !important; }
+
+/* ===== UI restyle R4c: Manifest (js/crew-v2.js, switch 'crew_restyle') ===== */
+.mf-root .dz-btn { font-family: inherit; margin: 0; width: auto; text-transform: none; }
+.mf-vessel > div { display: flex; align-items: center; gap: 8px; margin: 0 !important; }
+.mf-vessel label { font-size: 10px !important; letter-spacing: 0.16em; color: var(--df-dim) !important; margin: 0 !important; white-space: nowrap; }
+.mf-broadcast button { height: 34px; width: auto !important; margin: 0 !important; padding: 0 14px !important; font-family: var(--df-font); font-size: 10px !important; letter-spacing: 0.14em; background: transparent !important; border: 1px solid var(--df-cyan) !important; border-radius: 0 !important; color: var(--df-cyan) !important; box-shadow: none; white-space: nowrap; }
+.mf-dmtab { --acc: #ff6b6b; }
+.mf-body { display: flex; flex-direction: column; gap: 14px; }
+#mf-root #terminal-cargo-items-container { max-height: none !important; }
+#mf-root #terminal-cargo-items-container .note-card { background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important; border-radius: 0 !important; margin: 0 !important; padding: 10px 4px !important; }
+#mf-root #terminal-cargo-items-container .note-card strong { color: var(--df-ink-hi) !important; font-family: var(--df-font); font-size: 13px !important; font-weight: 600; }
+#mf-root #cargo-catalog-dm-editor { margin: 0 !important; background: rgba(6, 14, 18, 0.86) !important; border: 1px solid rgba(255, 77, 77, 0.45) !important; border-radius: 0 !important; clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); padding: 14px 16px !important; }
+#mf-root #cargo-catalog-dm-editor > h4 { font-family: var(--df-font); font-size: 10px !important; font-weight: 400; letter-spacing: 0.22em; text-transform: uppercase; color: #ff8a8a !important; border-bottom: 1px solid rgba(255, 77, 77, 0.3) !important; padding-bottom: 8px !important; margin: 0 0 12px 0 !important; }
+#mf-form .sheet-section { max-width: 640px; }
+@media screen and (max-width: 768px) {
+    .mf-vessel { flex: 1 1 100%; } .mf-vessel > div { width: 100%; } .mf-vessel select { flex: 1; width: 100% !important; }
+    #mf-add, .mf-broadcast { flex: 1 1 100%; } #mf-add { min-height: 44px; } .mf-broadcast button { width: 100% !important; box-sizing: border-box; min-height: 44px; }
+    #mf-tabs { flex-wrap: nowrap; overflow-x: auto; } #mf-tabs .df-subtab { flex: 0 0 auto; min-height: 44px; }
+}
+#mf-root #terminal-cargo-items-container > div:first-child strong { white-space: nowrap; }

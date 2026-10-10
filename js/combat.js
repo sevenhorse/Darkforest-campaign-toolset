@@ -257,6 +257,8 @@ window.renderTerminalCargoDeck = function() {
     }
     container.innerHTML = html;
 };
+// The Manifest restyle (js/crew-v2.js) refreshes its tabs and counts on this.
+window.renderTerminalCargoDeck = window.withAfterHooks('cargo-deck-rendered', window.renderTerminalCargoDeck);
 
 window.executeSynthesis = async function(vesselId) {
     let vessel = globalShipMarkersCache.find(m => m.id === vesselId);

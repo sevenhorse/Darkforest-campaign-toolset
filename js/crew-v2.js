@@ -2,7 +2,7 @@
    js/crew-v2.js - Character sheet restyle (UI restyle R4, switch
    'crew_restyle')
    ==========================================================================
-   Parts: R4a Dossier & Stats, R4b Arsenal (further down).
+   Parts: R4a Dossier & Stats, R4b Arsenal, R4c Manifest (further down).
    R4a Dossier & Stats. DM decisions (2026-10-10, from the R4 mockup): a
    character header (portrait, handle, name, specialties, live chips for
    Injuries / Stress / Adversity / Shield / DR) over four tabs: PROFILE,
@@ -219,4 +219,93 @@ document.addEventListener('click', (e) => {
 });
 window.onHook('term-tab-switched', 'crew-v2-arsenal', (tab) => { if (tab === 'combat') renderArsenalView(); });
 document.addEventListener('darkforest:features-changed', renderArsenalView);
+/* ---------- R4c: Manifest ----------
+   Roadmap R4c: vessel picker header + PERISHABLES / EXPENDABLES / MISC tabs
+   with counts; cargo rows as they are (synthesizer, food days, +/- qty,
+   reorder, delete all unchanged); the add form behind + STORE CARGO; the DM
+   catalogue editor behind a DM-only CATALOG tab. Tabs call the existing
+   switchCargoSubtab. Moves the real picker, BROADCAST button and sections. */
+const MF = window.__mf = window.__mf || { form: false, catalog: false };
+const mfMoved = [];
+function mfBorrow(node, slot) {
+    if (!node || !slot || node.parentNode === slot) return;
+    if (!mfMoved.some(m => m.node === node)) mfMoved.push({ node, parent: node.parentNode, next: node.nextSibling });
+    slot.appendChild(node);
+}
+function mfGiveBack() {
+    for (let i = mfMoved.length - 1; i >= 0; i--) {
+        const m = mfMoved[i];
+        m.parent.insertBefore(m.node, m.next && m.next.parentNode === m.parent ? m.next : null);
+    }
+    mfMoved.length = 0;
+}
+const MF_CATS = [['perishables', 'PERISHABLES'], ['expendables', 'EXPENDABLES'], ['misc', 'MISC']];
+function mfEnsureRoot() {
+    const panel = byId('term-panel-cargo');
+    if (!panel) return null;
+    let root = byId('mf-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'mf-root';
+        root.className = 'vz-root mf-root';
+        root.innerHTML = `<div class="dz-top"><h2 class="dz-h1">MANIFEST</h2><span class="dz-h1sub">// CARGO HOLD</span>
+                <span class="mf-vessel vz-pick" id="mf-vessel"></span><span class="dz-grow"></span>
+                <button type="button" class="dz-btn" id="mf-add" data-mfact="add">+ STORE CARGO</button><span class="mf-broadcast" id="mf-broadcast"></span></div>
+            <div class="df-subtabs vz-tabs" id="mf-tabs" role="tablist" aria-label="Cargo categories"></div>
+            <div class="mf-body"><div class="mf-slot" id="mf-form"></div><div class="mf-slot" id="mf-list"></div><div class="mf-slot" id="mf-catalog"></div></div>`;
+        panel.appendChild(root);
+    }
+    return root;
+}
+function mfCounts() {
+    const sel = byId('cargo-vessel-select');
+    const v = sel && typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache.find(m => m.id === sel.value) : null;
+    if (!v || (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(v)) || typeof window.sanitizeCargo !== 'function') return {};
+    const c = window.sanitizeCargo(v.cargo_inventory);
+    return { perishables: (c.perishables || []).length, expendables: (c.expendables || []).length, misc: (c.misc || []).length };
+}
+function renderManifestView() {
+    const panel = byId('term-panel-cargo');
+    if (!panel) return;
+    const on = window.crewRestyleOn();
+    panel.classList.toggle('vz-on', on);
+    if (!on) { mfGiveBack(); return; }
+    if (!mfEnsureRoot()) return;
+    const sel = byId('cargo-vessel-select');
+    mfBorrow(sel ? sel.parentNode : null, byId('mf-vessel'));
+    mfBorrow(document.querySelector('#term-panel-cargo button[onclick^="window.broadcastTerminalCargoManifest("]'), byId('mf-broadcast'));
+    mfBorrow(section('new-cargo-name'), byId('mf-form'));
+    mfBorrow(section('terminal-cargo-items-container'), byId('mf-list'));
+    mfBorrow(byId('cargo-catalog-dm-editor'), byId('mf-catalog'));
+    const dm = typeof currentUserRole !== 'undefined' && currentUserRole === 'dm';
+    if (!dm) MF.catalog = false;
+    const cur = typeof activeCargoSubtab !== 'undefined' ? activeCargoSubtab : 'perishables';
+    const n = mfCounts();
+    byId('mf-tabs').innerHTML = MF_CATS.map(([k, label]) => `<button type="button" role="tab" class="df-subtab${!MF.catalog && cur === k ? ' on' : ''}" data-mfcat="${k}" aria-selected="${!MF.catalog && cur === k}">${label}${n[k] ? ` <b>${n[k]}</b>` : ''}</button>`).join('') +
+        (dm ? `<button type="button" role="tab" class="df-subtab mf-dmtab${MF.catalog ? ' on' : ''}" data-mfcat="catalog" aria-selected="${!!MF.catalog}">CATALOG <i>DM</i></button>` : '');
+    byId('mf-form').style.display = MF.form && !MF.catalog ? '' : 'none';
+    byId('mf-list').style.display = MF.catalog ? 'none' : '';
+    byId('mf-catalog').style.display = MF.catalog ? '' : 'none';
+    const add = byId('mf-add');
+    if (add) { add.textContent = MF.form ? '× CLOSE FORM' : '+ STORE CARGO'; add.setAttribute('aria-expanded', String(!!MF.form)); add.style.display = MF.catalog ? 'none' : ''; }
+}
+window.renderCrewManifest = renderManifestView;
+document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('#mf-root [data-mfcat], #mf-root [data-mfact]') : null;
+    if (!b) return;
+    if (b.dataset.mfact === 'add') {
+        MF.form = !MF.form;
+        if (MF.form) { const c = byId('new-cargo-category'); if (c && typeof activeCargoSubtab !== 'undefined') c.value = activeCargoSubtab; }
+        renderManifestView();
+        if (MF.form) { const n = byId('new-cargo-name'); if (n) n.focus(); }
+        return;
+    }
+    if (b.dataset.mfcat === 'catalog') { MF.catalog = true; renderManifestView(); return; }
+    MF.catalog = false;
+    if (typeof window.switchCargoSubtab === 'function') window.switchCargoSubtab(b.dataset.mfcat); // redraws the list; 'cargo-deck-rendered' redraws the tabs
+    else renderManifestView();
+});
+window.onHook('cargo-deck-rendered', 'crew-v2', renderManifestView);
+window.onHook('term-tab-switched', 'crew-v2-manifest', (tab) => { if (tab === 'cargo') renderManifestView(); });
+document.addEventListener('darkforest:features-changed', renderManifestView);
 })();
