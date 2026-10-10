@@ -911,6 +911,8 @@ window.renderCharacterTerminalData = function() {
     if (typeof window.renderAugmentSlots === 'function') window.renderAugmentSlots();
     if (typeof window.renderGearLoadout === 'function') window.renderGearLoadout();
 };
+// The Dossier restyle (js/crew-v2.js) refreshes its character header on this.
+window.renderCharacterTerminalData = window.withAfterHooks('dossier-rendered', window.renderCharacterTerminalData);
 
 // Shield Max and DR are player-set base values (representing raw equipment,
 // same philosophy as manually-tracked skills), with any perk bonuses (e.g.

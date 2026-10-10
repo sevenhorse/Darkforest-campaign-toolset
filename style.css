@@ -2040,3 +2040,38 @@ body.gc-on #gc-bar { display: flex; align-items: center; gap: 12px; flex: 1 1 au
     body.gc-on #mobile-nav-drawer-body #gc-audio button { width: 100% !important; min-height: 44px; }
 }
 .gc-count { font-weight: 400; color: var(--df-amber); }
+
+/* ===== UI restyle R4a: Dossier & Stats (js/crew-v2.js, switch 'crew_restyle') ===== */
+.cv-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.cv-avatar { width: 64px; height: 64px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; color: #9fe9f5; background: linear-gradient(135deg, #0e2228, #071014); border: 1px solid rgba(0, 225, 255, 0.4); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); overflow: hidden; }
+.cv-avatar.cv-hasimg img { width: 64px; height: 64px; object-fit: cover; }
+.cv-id { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cv-spec { font-size: 10px; letter-spacing: 0.16em; color: var(--df-dim); }
+.cv-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.cv-chip { display: flex; flex-direction: column; gap: 3px; padding: 7px 12px; background: #071216; border: 1px solid var(--df-line); min-width: 84px; }
+.cv-chip span { font-size: 8px; letter-spacing: 0.18em; color: var(--df-dim); }
+.cv-chip b { font-size: 15px; font-weight: 600; color: var(--df-ink-hi); }
+.cv-chip b.cv-red { color: #ff8a8a; } .cv-chip b.cv-amber { color: var(--df-amber); } .cv-chip b.cv-cyan { color: var(--df-cyan); }
+.cv-tabbar { display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid rgba(0, 225, 255, 0.12); flex-wrap: wrap; }
+.cv-tabbar .vz-tabs { border-bottom: 0; padding-left: 0; }
+.cv-actions { display: flex; gap: 8px; padding-bottom: 6px; }
+.cv-actions button { height: 34px; width: auto !important; margin: 0 !important; padding: 0 14px !important; font-family: var(--df-font); font-size: 10px !important; letter-spacing: 0.14em; background: transparent !important; border: 1px solid var(--df-cyan) !important; border-radius: 0 !important; color: var(--df-cyan) !important; box-shadow: none; white-space: nowrap; }
+.cv-actions button[onclick^="window.saveTerminalProfile"] { border-color: #00e5a3 !important; color: #00e5a3 !important; }
+#cv-pane-attributes { display: grid; grid-template-columns: minmax(380px, 460px) minmax(0, 1fr); gap: 16px; align-items: start; }
+#cv-pane-perks, #cv-pane-profile { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+#cv-pane-attributes[style*="none"], #cv-pane-perks[style*="none"], #cv-pane-profile[style*="none"] { display: none !important; }
+#cv-root .skill-grid { grid-template-columns: 1fr !important; gap: 0 !important; }
+#cv-root #skills-input-container > div { background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important; border-radius: 0 !important; gap: 12px; padding: 7px 4px !important; }
+#cv-root #skills-input-container > div > span:first-child { flex: 0 0 150px; font-size: 12px !important; color: var(--df-ink) !important; }
+.cv-bar { flex: 1 1 auto; height: 6px; background: #0a1418; position: relative; }
+.cv-bar em { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: rgba(255, 255, 255, 0.25); }
+.cv-bar i { position: absolute; top: 0; bottom: 0; background: var(--df-cyan); }
+.cv-bar i.neg { background: #ff8a8a; }
+#cv-root #skills-input-container input { width: 64px !important; text-align: center !important; padding: 4px !important; }
+@media screen and (max-width: 768px) {
+    .cv-chips { flex: 1 1 100%; } .cv-chip { flex: 1 1 28%; min-width: 0; }
+    .cv-tabbar { flex-direction: column; flex-wrap: nowrap; align-items: stretch; } .cv-tabbar .vz-tabs { flex-wrap: nowrap; overflow-x: auto; } .cv-tabbar .df-subtab { flex: 0 0 auto; min-height: 44px; }
+    .cv-actions { flex-direction: column; padding-bottom: 8px; } .cv-actions button { width: 100% !important; box-sizing: border-box; min-height: 44px; white-space: normal; }
+    #cv-pane-attributes, #cv-pane-perks, #cv-pane-profile { grid-template-columns: minmax(0, 1fr); }
+    #cv-root #skills-input-container > div > span:first-child { flex-basis: 110px; }
+}
