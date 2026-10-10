@@ -71,7 +71,8 @@ function findStrikeCraftTemplate(id) {
     return window.globalStrikeCraftTemplatesList.find(t => t.id === id);
 }
 
-window.renderStrikeCraftDesignerPanel = function() {
+// Announces 'strikecraft-designer-rendered' (js/designers-v2.js redraws the restyled view).
+window.renderStrikeCraftDesignerPanel = window.withAfterHooks('strikecraft-designer-rendered', function() {
     const container = document.getElementById('strikecraft-list-container');
     if (!container) return;
     const searchEl = document.getElementById('strikecraft-designer-search');
@@ -92,7 +93,7 @@ window.renderStrikeCraftDesignerPanel = function() {
                 <button class="layer-edit" onclick="window.openStrikeCraftEditor('${t.id}')" style="padding:3px 6px; font-size:9px; border-color:#00e1ff; color:#00e1ff;">OPEN &#9656;</button>
             </div>
         </div>`).join('');
-};
+});
 
 window.addStrikeCraftChassis = async function() {
     const nameInput = document.getElementById('new-strikecraft-name');

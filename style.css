@@ -1826,8 +1826,8 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 }
 
 /* ===== UI restyle R2: designers (js/designers-v2.js, switch 'designers_restyle') ===== */
-.term-panel-content.dz-on > :not(.dz-root) { display: none !important; }
-.term-panel-content:not(.dz-on) > .dz-root { display: none; }
+.dz-on > :not(.dz-root) { display: none !important; }
+:not(.dz-on) > .dz-root { display: none; }
 .dz-root { font-family: var(--df-font); color: var(--df-ink); display: flex; flex-direction: column; gap: 12px; }
 .dz-root button { font-family: inherit; width: auto; margin: 0; text-transform: none; }
 .dz-sr { position: absolute; left: -9999px; }
@@ -1888,3 +1888,27 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
     .dz-ftab, .dz-btn { min-height: 44px; }
     .dz-search { flex: 1 1 100%; }
 }
+
+/* R2b: template pages (Ship Designer, Secret Repository, Strike Craft) */
+.dz-chip.gold { border-color: var(--df-gold); color: var(--df-gold); } .dz-chip.red { border-color: #ff4d4d; color: #ff8a8a; }
+.dz-titlerow .dz-chip { font-size: 9px; padding: 3px 8px; }
+.dz-thumbimg { padding: 0; overflow: hidden; } .dz-thumbimg img { width: 40px !important; height: 40px !important; border: 0 !important; }
+.dz-line { font-size: 11px; letter-spacing: 0.12em; color: #9fb4bd; text-transform: uppercase; }
+.dz-shiptop { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+.dz-pic { flex: 0 0 260px; height: 180px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--df-line); overflow: hidden; }
+.dz-pic img { width: 260px !important; height: 180px !important; border: 0 !important; }
+.dz-nopic { background: repeating-linear-gradient(135deg, #0a181d 0 6px, #071014 6px 12px); color: var(--df-dim); font-size: 10px; letter-spacing: 0.16em; }
+.dz-stats { flex: 1 1 300px; }
+.dz-stats .dz-fact { flex: 1 1 110px; min-width: 100px; }
+.dz-sub { display: flex; flex-direction: column; background: #071216; border: 1px solid rgba(0, 225, 255, 0.2); }
+.dz-subttl { font-size: 10px; letter-spacing: 0.18em; color: var(--df-cyan); padding: 8px 12px; border-bottom: 1px solid rgba(0, 225, 255, 0.18); }
+.dz-lrow { display: flex; gap: 12px; align-items: baseline; padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); flex-wrap: wrap; }
+.dz-lname { font-size: 12px; font-weight: 600; color: var(--df-ink-hi); min-width: 160px; }
+.dz-lmeta { font-size: 10px; letter-spacing: 0.08em; color: var(--df-dim); }
+.dz-init { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.12em; color: var(--df-dim); }
+.dz-init input { width: 70px; margin: 0; text-align: center; }
+.dz-formslot .sheet-section { border: 0 !important; background: transparent !important; padding: 0; margin: 0; }
+.dz-formslot .sheet-section h4 { display: none; }
+.dz-extra:empty { display: none; }
+.dz-extra .sheet-section { margin-top: 4px !important; border-color: var(--df-line) !important; background: rgba(6, 14, 18, 0.86) !important; }
+@media screen and (max-width: 768px) { .dz-pic { flex: 1 1 100%; } .dz-pic img { width: 100% !important; } .dz-nopic { display: none; } }

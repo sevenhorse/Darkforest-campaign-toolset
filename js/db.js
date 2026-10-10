@@ -399,7 +399,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-10.01';
+window.DARKFOREST_BUILD = '2026-10-10.02';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];

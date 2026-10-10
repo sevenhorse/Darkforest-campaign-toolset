@@ -52,7 +52,8 @@ window.renderIffBadge = function(iff) {
     return `<span style="font-size:8px; color:${color}; border:1px solid ${color}; border-radius:2px; padding:1px 4px; margin-left:6px;">${window.IFF_LABELS[iff]}</span>`;
 };
 
-window.renderShipDesignerPanel = function() {
+// Announces 'ship-designer-rendered' (js/designers-v2.js redraws the restyled view).
+window.renderShipDesignerPanel = window.withAfterHooks('ship-designer-rendered', function() {
     const container = document.getElementById('ship-templates-list-container');
     if (!container) return;
     let html = '';
@@ -111,7 +112,7 @@ window.renderShipDesignerPanel = function() {
             <option value="sublight">Sublight Thrusters</option>`;
         driveSel.dataset.populated = 'true';
     }
-};
+});
 window.moveShipTemplateOrder = function(id, direction) {
     window.moveListItem('ship_templates', window.applySavedOrder('ship_templates', shipTemplatesList), id, direction);
     window.renderShipDesignerPanel();
@@ -639,7 +640,8 @@ window.deployShipTemplate = async function(id, opts) {
    the RLS policy on the table (real enforcement) and by living inside the
    DM Tools panel (already DM-only in the UI). Reuses the same edit/loadout/
    deploy machinery as the public Ship Designer above via findAnyTemplateById. */
-window.renderSecretRepositoryPanel = function() {
+// Announces 'secretrepo-rendered' (js/designers-v2.js redraws the restyled view).
+window.renderSecretRepositoryPanel = window.withAfterHooks('secretrepo-rendered', function() {
     if (currentUserRole !== 'dm') return;
     const container = document.getElementById('secret-templates-list-container');
     if (!container) return;
@@ -692,7 +694,7 @@ window.renderSecretRepositoryPanel = function() {
             <option value="sublight">Sublight Thrusters</option>`;
         driveSel.dataset.populated = 'true';
     }
-};
+});
 
 window.saveNewSecretTemplate = async function() {
     if (currentUserRole !== 'dm') return;
