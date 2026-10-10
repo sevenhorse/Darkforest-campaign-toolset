@@ -274,6 +274,21 @@ function describeBlueprintCost(bp) {
     return costs.map(c => `${c.qty}x ${c.name} (${c.unit || 'Units'})`).join(', ');
 }
 
+/* Where an order is being built and whether this user may cancel it. Same
+   rule as cancelManufacturingOrder: DM, or owner of the source vessel/colony
+   (not a colony order's delivery vessel). Shared with js/fleet-v2.js. */
+window.manufacturingOrderSource = function(o) {
+    const vessel = (typeof globalShipMarkersCache !== 'undefined') ? globalShipMarkersCache.find(m => m.id === o.vessel_id) : null;
+    let canCancel = currentUserRole === 'dm';
+    if (o.source_type === 'colony') {
+        const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === o.source_colony_id) : null;
+        if (colony && colony.owner_id === currentUserId) canCancel = true;
+        return { isColony: true, canCancel, label: `${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}` };
+    }
+    if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true;
+    return { isColony: false, canCancel, label: vessel ? vessel.name : 'Vessel' };
+};
+
 window.renderManufacturingPanel = function() {
     const bpContainer = document.getElementById('manufacturing-blueprints-container');
     const ordContainer = document.getElementById('manufacturing-orders-container');
@@ -364,19 +379,9 @@ window.renderManufacturingPanel = function() {
         orders.forEach(o => {
             const readyAt = (o.started_at_hours || 0) + (o.duration_hours || 0);
             const remaining = Math.max(0, readyAt - (window.universeTimeHours || 0));
-            const vessel = (typeof globalShipMarkersCache !== 'undefined') ? globalShipMarkersCache.find(m => m.id === o.vessel_id) : null;
-            // Same rule as cancelManufacturingOrder: DM, or owner of the source
-            // vessel/colony (not a colony order's delivery vessel).
-            let canCancel = currentUserRole === 'dm';
-            let sourceLabel;
-            if (o.source_type === 'colony') {
-                const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === o.source_colony_id) : null;
-                if (colony && colony.owner_id === currentUserId) canCancel = true;
-                sourceLabel = `🏛 ${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}`;
-            } else {
-                if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true;
-                sourceLabel = `🚀 ${vessel ? vessel.name : 'Vessel'}`;
-            }
+            const src = window.manufacturingOrderSource(o);
+            const canCancel = src.canCancel;
+            const sourceLabel = `${src.isColony ? '🏛' : '🚀'} ${src.label}`;
             html += `
             <div class="note-card">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -1352,6 +1357,8 @@ window.processManufacturingOrders = async function(newHours) {
 
 // A cancel frees a line (or a queue slot): start whatever is waiting right away.
 window.cancelManufacturingOrder = window.withAfterHooks('manufacturing-order-cancelled', window.cancelManufacturingOrder);
+// The Manufacturing page restyle (js/fleet-v2.js) redraws on this.
+window.renderManufacturingPanel = window.withAfterHooks('manufacturing-rendered', window.renderManufacturingPanel);
 window.onHook('manufacturing-order-cancelled', 'start-queued', async () => {
     try { await window.processManufacturingOrders(window.universeTimeHours || 0); } catch (e) { console.error('manufacturing: queue refresh after cancel failed', e); }
 });

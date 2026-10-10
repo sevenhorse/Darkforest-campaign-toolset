@@ -1,5 +1,5 @@
 /* ==========================================================================
-   js/fleet-v2.js - Fleet pages restyle, part 1: Vessel Deck
+   js/fleet-v2.js - Fleet pages restyle: Vessel Deck, Colonies & Fleets, Manufacturing
    (UI restyle R3, switch 'fleet_restyle')
    ==========================================================================
    DM decisions (2026-10-10, from the R3 mockup): four tabs (STATUS /
@@ -283,4 +283,224 @@ window.onHook('colonies-rendered', 'fleet-v2', renderColonies);
 window.onHook('fleet-groups-rendered', 'fleet-v2', renderColonies);
 window.onHook('term-tab-switched', 'fleet-v2-colonies', (tab) => { if (tab === 'colonies') renderColonies(); });
 document.addEventListener('darkforest:features-changed', renderColonies);
+/* ---------- R3c: Manufacturing ----------
+   DM decisions (2026-10-10, R3 mockup): gold accents kept; catalogue tabs
+   ALL / CARGO ITEMS / ARSENAL WEAPONS / INFRASTRUCTURE / PENDING; list +
+   detail with build time and ingredients; BUILD AT picker + START BUILD;
+   in-progress builds with CANCEL underneath.
+   Unlike the other fleet pages this one is drawn from the data (the old page
+   is a read-only catalogue, nothing live to move). Every action calls the
+   existing manufacturing.js function: approveBlueprint, openEditBlueprintModal,
+   deleteManufacturingBlueprint, openNewBlueprintModal, cancelManufacturingOrder,
+   and START BUILD calls startVesselManufacturingOrder /
+   startColonyManufacturingOrder after the same computeManufacturingPreview
+   check the build popups use. A colony build's delivery vessel is read by
+   startColonyManufacturingOrder from the colony card's own select, so DELIVER
+   TO sets that select first. Redraws on 'manufacturing-rendered'. */
+const MZ = window.__mz = window.__mz || { tab: 'all', q: '', sel: null, view: 'list', at: '', to: '' };
+const MZ_TABS = [['all', 'ALL'], ['cargo_item', 'CARGO ITEMS'], ['arsenal_weapon', 'ARSENAL WEAPONS'], ['colony_infrastructure', 'INFRASTRUCTURE'], ['pending', 'PENDING']];
+const MZ_TYPE = { cargo_item: 'CARGO ITEM', arsenal_weapon: 'ARSENAL WEAPON', colony_infrastructure: 'INFRASTRUCTURE' };
+const mzBlueprints = () => (typeof manufacturingBlueprintsList !== 'undefined' ? manufacturingBlueprintsList : []);
+const mzCall = (name, ...a) => (typeof window[name] === 'function' ? window[name](...a) : undefined);
+const mzBare = (fn, ...a) => { try { return fn(...a); } catch (e) { return null; } };
+const mzHours = (h) => { h = Number(h) || 0; return (Math.round(h * 10) / 10) + (h === 1 ? ' HOUR' : ' HOURS'); };
+
+function mzEnsureRoot() {
+    const panel = byId('term-panel-manufacturing');
+    if (!panel) return null;
+    let root = byId('mz-root');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'mz-root';
+        root.className = 'vz-root mz-root';
+        root.innerHTML = `<div class="dz-top"><h2 class="dz-h1">MANUFACTURING</h2><span class="dz-h1sub mz-goldtxt">// BLUEPRINT CATALOG</span><span class="dz-grow"></span>
+                <label class="dz-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+                    <span class="dz-sr">Search blueprints</span><input type="text" id="mz-search" placeholder="Search blueprints"></label>
+                <button type="button" class="dz-btn" data-mzact="propose">+ PROPOSE BLUEPRINT</button></div>
+            <div class="dz-filters" id="mz-tabs" role="tablist" aria-label="Blueprint type"></div>
+            <div class="mz-body" id="mz-body">
+                <div class="dz-panel dz-list mz-list" id="mz-list"></div>
+                <div class="dz-panel dz-detail mz-detail" id="mz-detail"></div>
+                <div class="mz-builds" id="mz-builds"></div>
+            </div>`;
+        panel.appendChild(root);
+        byId('mz-search').addEventListener('input', (e) => { MZ.q = e.target.value.trim().toLowerCase(); renderMfg(); });
+        root.addEventListener('change', (e) => {
+            if (e.target.id === 'mz-at') { MZ.at = e.target.value; renderMfg(); }
+            else if (e.target.id === 'mz-to') { MZ.to = e.target.value; renderMfg(); }
+        });
+    }
+    return root;
+}
+
+// Places this user can build: vessels with a Manufacturing deck they own
+// (DM: all), and their colonies (DM: all). Infrastructure is colony-only.
+function mzPlaces(bp) {
+    const dm = typeof currentUserRole !== 'undefined' && currentUserRole === 'dm';
+    const me = typeof currentUserId !== 'undefined' ? currentUserId : null;
+    const out = [];
+    if (bp.output_type !== 'colony_infrastructure') {
+        (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).forEach(v => {
+            const deck = (v.ship_decks || []).find(d => d.type === 'manufacturing');
+            if (!deck || !(dm || (typeof window.vesselHasOwner === 'function' && window.vesselHasOwner(v, me)))) return;
+            out.push({ key: 'v:' + v.id, label: `${v.name} · Manufacturing ${deck.hp}/${deck.max_hp}`, vessel: v });
+        });
+    }
+    (typeof coloniesList !== 'undefined' ? coloniesList : []).forEach(c => {
+        if (dm || c.owner_id === me) out.push({ key: 'c:' + c.id, label: `${c.name} (colony)`, colony: c });
+    });
+    return out;
+}
+function mzDeliveryVessels() {
+    return (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).filter(m => typeof window.canAccessVesselDeck !== 'function' || window.canAccessVesselDeck(m));
+}
+
+function mzVisible() {
+    const q = MZ.q;
+    return mzBlueprints().filter(bp => {
+        if (MZ.tab === 'pending' ? bp.status !== 'draft' : (MZ.tab !== 'all' && bp.output_type !== MZ.tab)) return false;
+        return !q || (bp.name || '').toLowerCase().includes(q) || (bp.description || '').toLowerCase().includes(q);
+    }).sort((a, b) => (a.status === 'draft') - (b.status === 'draft') || String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+function mzDetailHtml(bp) {
+    if (!bp) return `<div class="dz-empty">${mzBlueprints().length ? 'Pick a blueprint from the list.' : 'No blueprints exist yet. Use + PROPOSE BLUEPRINT.'}</div>`;
+    const draft = bp.status === 'draft';
+    const tier = typeof computeBlueprintTier === 'function' ? mzBare(computeBlueprintTier, bp) : null;
+    const tierTxt = tier == null ? '' : (typeof formatBlueprintTier === 'function' ? mzBare(formatBlueprintTier, tier) : 'Tier ' + tier);
+    const editable = typeof canManageBlueprint === 'function' ? !!mzBare(canManageBlueprint, bp) : false;
+    const dm = typeof currentUserRole !== 'undefined' && currentUserRole === 'dm';
+    const proposer = (draft && typeof allProfiles !== 'undefined') ? allProfiles.find(a => a.id === bp.created_by) : null;
+
+    // Build target + live preview (approved blueprints only).
+    let preview = null, places = [], place = null, buildHtml = '';
+    if (!draft) {
+        places = mzPlaces(bp);
+        place = places.find(p => p.key === MZ.at) || places[0] || null;
+        if (place && typeof window.computeManufacturingPreview === 'function') preview = window.computeManufacturingPreview(bp, place.vessel ? { vessel: place.vessel } : { colony: place.colony });
+    }
+    const rows = preview ? preview.costRows : (bp.resource_cost || []).map(c => ({ name: c.name, unit: c.unit || 'Units', qty: c.qty, have: null, sufficient: null }));
+    const time = preview && preview.timeHours != null ? preview.timeHours : bp.time_cost_hours;
+    const facts = `<div class="dz-facts"><div class="dz-fact"><span>BUILD TIME</span><b>${esc(mzHours(time))}</b></div>` + rows.map(r =>
+        `<div class="dz-fact"><span>${esc(String(r.name).toUpperCase())}</span><b class="${r.sufficient === false ? 'mz-short' : 'mz-goldtxt'}">${esc(r.qty)} ${esc(r.unit)}</b>${r.have != null ? `<span class="${r.sufficient ? 'mz-ok' : 'mz-short'}">HAVE ${esc(r.have)}</span>` : ''}</div>`).join('') +
+        (rows.length ? '' : `<div class="dz-fact"><span>MATERIALS</span><b class="mz-goldtxt">NONE (TIME ONLY)</b></div>`) + `</div>`;
+    const output = typeof describeBlueprintOutput === 'function' ? mzBare(describeBlueprintOutput, bp) : '';
+    const infraNote = (bp.output_type !== 'colony_infrastructure' && tier != null && tier !== Infinity && tier > 1) ? `Needs Colony Infrastructure Level ${tier} to build at a colony.` : '';
+
+    if (!draft) {
+        const needsTo = !!(place && place.colony && bp.output_type !== 'colony_infrastructure');
+        let toHtml = '', missingTo = false;
+        if (needsTo) {
+            const vs = mzDeliveryVessels();
+            const cardSel = byId('colony-deliver-vessel-' + place.colony.id);
+            if (!vs.some(v => v.id === MZ.to)) MZ.to = (cardSel && vs.some(v => v.id === cardSel.value)) ? cardSel.value : (vs[0] ? vs[0].id : '');
+            missingTo = !MZ.to;
+            toHtml = `<label class="mz-pick">DELIVER TO <select id="mz-to" aria-label="Deliver to">${vs.length ? vs.map(v => `<option value="${esc(v.id)}"${v.id === MZ.to ? ' selected' : ''}>${esc(v.name)}</option>`).join('') : '<option value="">No accessible vessels</option>'}</select></label>`;
+        }
+        const blocking = preview ? preview.blocking.slice() : [];
+        if (missingTo) blocking.push('No delivery vessel you can access.');
+        const can = !!place && !!preview && blocking.length === 0;
+        const status = !place ? `<span class="mz-short">Nowhere to build this: needs ${bp.output_type === 'colony_infrastructure' ? 'one of your colonies' : 'a vessel of yours with a Manufacturing deck, or one of your colonies'}.</span>`
+            : blocking.length ? `<span class="mz-short">✕ ${esc(blocking.join(' · '))}</span>`
+            : `<span class="mz-ok">✓ READY TO BUILD</span>`;
+        const notes = preview && preview.notes.length ? `<p class="mz-note">${esc(preview.notes.join(' · '))}${preview.discountPct ? ` · ${esc(preview.discountPct)}% perk discount applied` : ''}</p>` : (preview && preview.discountPct ? `<p class="mz-note">${esc(preview.discountPct)}% perk discount applied</p>` : '');
+        buildHtml = `<div class="mz-build">
+            <label class="mz-pick">BUILD AT <select id="mz-at" aria-label="Build at"${places.length ? '' : ' disabled'}>${places.length ? places.map(p => `<option value="${esc(p.key)}"${place && p.key === place.key ? ' selected' : ''}>${esc(p.label)}</option>`).join('') : '<option value="">Nowhere available</option>'}</select></label>
+            ${toHtml}<span class="mz-status">${status}</span><span class="dz-grow"></span>
+            <button type="button" class="dz-btn ok" data-mzact="build"${can ? '' : ' disabled'}>START BUILD</button></div>${notes}`;
+        if (place) MZ.at = place.key;
+    }
+
+    const actions = [];
+    if (dm && draft) actions.push(`<button type="button" class="dz-btn ok" data-mzact="approve">✓ APPROVE</button>`);
+    if (editable) actions.push(`<button type="button" class="dz-btn dim" data-mzact="edit">✎ EDIT</button>`, `<button type="button" class="dz-btn red" data-mzact="delete">✕ DELETE</button>`);
+    return `<button type="button" class="dz-back" data-mzact="back">← BACK TO LIST</button>
+        <span class="dz-kicker mz-goldtxt">BLUEPRINT · ${esc(MZ_TYPE[bp.output_type] || 'ITEM')}</span>
+        <div class="dz-titlerow"><h3 class="dz-title">${esc(bp.name)}</h3>${draft ? '<span class="dz-chip amber">PENDING REVIEW</span>' : ''}${tierTxt ? `<span class="dz-chip ${tier === Infinity ? 'red' : 'gold'}">${esc(String(tierTxt).toUpperCase())}</span>` : ''}</div>
+        ${bp.description ? `<p class="dz-desc">${esc(bp.description)}</p>` : ''}
+        ${facts}
+        ${output ? `<p class="mz-note">${esc(output)}</p>` : ''}${infraNote ? `<p class="mz-note">${esc(infraNote)}</p>` : ''}
+        ${proposer ? `<span class="dz-by">PROPOSED BY ${esc(String(proposer.username || 'Commander').toUpperCase())}</span>` : ''}
+        ${buildHtml}
+        ${actions.length ? `<div class="dz-actions"><span class="dz-grow"></span>${actions.join('')}</div>` : ''}`;
+}
+
+function mzBuildsHtml() {
+    const orders = window.globalManufacturingOrdersCache || [];
+    const now = window.universeTimeHours || 0;
+    return `<div class="dz-ttl"><span>IN-PROGRESS BUILDS · ALL VESSELS &amp; COLONIES</span><span class="dz-dim">${orders.length}</span></div>` + (orders.length ? orders.map(o => {
+        const src = typeof window.manufacturingOrderSource === 'function' ? window.manufacturingOrderSource(o) : { label: '', canCancel: false };
+        const queued = o.status === 'queued';
+        const dur = Number(o.duration_hours) || 0;
+        const pct = queued || !dur ? 0 : Math.max(0, Math.min(100, ((now - (o.started_at_hours || 0)) / dur) * 100));
+        const status = String(typeof window.manufacturingOrderStatus === 'function' ? window.manufacturingOrderStatus(o) : '').replace(/^\S+\s/, '');
+        return `<div class="mz-order"><span class="mz-otext"><span class="mz-oname">${esc(o.blueprint_name || 'Unknown Blueprint')} · ${esc(src.label)}${o.discount_pct ? ` · ${esc(o.discount_pct)}% discount` : ''}</span>
+            <span class="mz-bar${queued ? ' queued' : ''}"><span style="width:${pct.toFixed(1)}%"></span></span></span>
+            <span class="mz-otime">${esc(status.toUpperCase())}</span>
+            ${src.canCancel ? `<button type="button" class="dz-btn red" data-mzcancel="${esc(o.id)}" title="Cancel this build and refund any deducted resources">CANCEL</button>` : ''}</div>`;
+    }).join('') : '<div class="dz-empty">No builds in progress.</div>');
+}
+
+function renderMfg() {
+    const panel = byId('term-panel-manufacturing');
+    if (!panel) return;
+    const on = window.fleetRestyleOn();
+    panel.classList.toggle('vz-on', on);
+    if (!on) return;
+    const root = mzEnsureRoot();
+    if (!root) return;
+    const all = mzBlueprints();
+    const pending = all.filter(bp => bp.status === 'draft').length;
+    byId('mz-tabs').innerHTML = MZ_TABS.map(([k, label]) => {
+        const n = k === 'all' ? all.length : k === 'pending' ? pending : all.filter(bp => bp.output_type === k).length;
+        return `<button type="button" role="tab" class="dz-ftab${MZ.tab === k ? ' on' : ''}" data-mztab="${k}" aria-selected="${MZ.tab === k}">${label} <b class="${k === 'pending' ? 'amber' : ''}">${n}</b></button>`;
+    }).join('');
+    const search = byId('mz-search');
+    if (search && document.activeElement !== search && search.value.trim().toLowerCase() !== MZ.q) search.value = MZ.q;
+    const items = mzVisible();
+    if (!items.some(bp => bp.id === MZ.sel)) MZ.sel = items.length ? items[0].id : null;
+    byId('mz-list').innerHTML = `<div class="dz-ttl"><span>BLUEPRINTS</span><span class="dz-dim">${items.length} SHOWN</span></div>` + (items.length ? items.map(bp =>
+        `<button type="button" class="dz-row${bp.id === MZ.sel ? ' sel' : ''}" data-mzsel="${esc(bp.id)}"><span class="dz-rowtext"><span class="dz-name">${esc(bp.name)}</span><span class="dz-meta">${esc(MZ_TYPE[bp.output_type] || 'ITEM')}</span></span>${bp.status === 'draft' ? '<span class="dz-chip amber">PENDING</span>' : ''}<span class="mz-time">${esc(Math.round((Number(bp.time_cost_hours) || 0) * 10) / 10)} H</span></button>`).join('')
+        : `<div class="dz-empty">${all.length ? 'No blueprints match.' : 'No blueprints exist yet.'}</div>`);
+    byId('mz-detail').innerHTML = mzDetailHtml(all.find(bp => bp.id === MZ.sel) || null);
+    byId('mz-builds').innerHTML = mzBuildsHtml();
+    byId('mz-body').classList.toggle('dz-show-detail', MZ.view === 'detail');
+}
+window.renderFleetManufacturing = renderMfg;
+
+async function mzStartBuild() {
+    const bp = mzBlueprints().find(b => b.id === MZ.sel);
+    if (!bp || !MZ.at) return;
+    const [kind, id] = [MZ.at.slice(0, 1), MZ.at.slice(2)];
+    if (kind === 'v') await mzCall('startVesselManufacturingOrder', id, bp.id);
+    else {
+        const sel = byId('colony-deliver-vessel-' + id);
+        if (sel && MZ.to && bp.output_type !== 'colony_infrastructure') {
+            if (!Array.from(sel.options).some(o => o.value === MZ.to)) { const o = document.createElement('option'); o.value = MZ.to; o.textContent = MZ.to; sel.appendChild(o); }
+            sel.value = MZ.to;
+        }
+        await mzCall('startColonyManufacturingOrder', id, bp.id);
+    }
+    renderMfg();
+}
+
+document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('#mz-root button') : null;
+    if (!b) return;
+    const bp = mzBlueprints().find(x => x.id === MZ.sel);
+    if (b.dataset.mztab) { MZ.tab = b.dataset.mztab; MZ.view = 'list'; }
+    else if (b.dataset.mzsel) { MZ.sel = b.dataset.mzsel; MZ.view = 'detail'; }
+    else if (b.dataset.mzcancel) { mzCall('cancelManufacturingOrder', b.dataset.mzcancel); return; }
+    else if (b.dataset.mzact === 'back') MZ.view = 'list';
+    else if (b.dataset.mzact === 'propose') { mzCall('openNewBlueprintModal'); return; }
+    else if (b.dataset.mzact === 'build') { mzStartBuild(); return; }
+    else if (bp && b.dataset.mzact === 'approve') { mzCall('approveBlueprint', bp.id); return; }
+    else if (bp && b.dataset.mzact === 'edit') { mzCall('openEditBlueprintModal', bp.id); return; }
+    else if (bp && b.dataset.mzact === 'delete') { mzCall('deleteManufacturingBlueprint', bp.id); return; }
+    else return;
+    renderMfg();
+});
+window.onHook('manufacturing-rendered', 'fleet-v2', renderMfg);
+window.onHook('term-tab-switched', 'fleet-v2-manufacturing', (tab) => { if (tab === 'manufacturing') renderMfg(); });
+document.addEventListener('darkforest:features-changed', renderMfg);
 })();

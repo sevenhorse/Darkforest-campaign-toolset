@@ -1949,12 +1949,46 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 }
 
 /* R3b: Colonies & Fleets */
-.cz-root :is(.dz-btn, .dz-ftab, .dz-row, .dz-back) { font-family: inherit; margin: 0; text-transform: none; }
-.cz-root :is(.dz-btn, .dz-ftab, .dz-back) { width: auto; }
-.cz-root .dz-row { width: 100%; }
+.cz-root :is(.dz-btn, .dz-ftab, .dz-row, .dz-back), .mz-root :is(.dz-btn, .dz-ftab, .dz-row, .dz-back) { font-family: inherit; margin: 0; text-transform: none; }
+.cz-root :is(.dz-btn, .dz-ftab, .dz-back), .mz-root :is(.dz-btn, .dz-ftab, .dz-back) { width: auto; }
+.cz-root .dz-row, .mz-root .dz-row { width: 100%; }
 .cz-root .dz-btn.amber-btn { border-color: var(--df-amber); color: var(--df-amber); }
 .cz-slot .note-card { display: none; }
 .cz-slot .note-card.cz-sel { display: block; margin: 0; background: transparent !important; border: 0 !important; padding: 0; }
 .cz-slot > div[id$="-list-container"] { max-height: none !important; overflow: visible !important; }
 .cz-formslot .sheet-section { border: 0 !important; background: transparent !important; padding: 0; margin: 0; }
 .cz-formslot .sheet-section h4 { display: none; }
+
+/* R3c: Manufacturing (gold accents; the builds panel stays cyan) */
+.mz-root > .dz-top, .mz-root > .dz-filters, .mz-list, .mz-detail { --df-cyan: var(--df-gold); --df-line: rgba(201, 150, 47, 0.35); }
+.mz-root > .dz-filters { border-bottom-color: rgba(201, 150, 47, 0.25); }
+.mz-list .dz-row:hover { background: rgba(201, 150, 47, 0.07); }
+.mz-list .dz-row.sel { background: linear-gradient(90deg, rgba(201, 150, 47, 0.18), rgba(201, 150, 47, 0.03)); outline-color: rgba(201, 150, 47, 0.6); }
+.mz-list .dz-ttl, .mz-detail .dz-ttl { border-bottom-color: rgba(201, 150, 47, 0.25); }
+.mz-goldtxt { color: var(--df-gold) !important; }
+.mz-ok { color: #00e5a3 !important; } .mz-short { color: #ff8a8a !important; }
+.mz-body { display: grid; grid-template-columns: 380px minmax(0, 1fr); grid-template-areas: "list detail" "list builds"; gap: 16px; align-items: start; }
+.mz-list { grid-area: list; max-width: none; } .mz-detail { grid-area: detail; min-height: 0; max-height: none; } .mz-builds { grid-area: builds; }
+.mz-time { flex-shrink: 0; font-size: 9px; letter-spacing: 0.12em; color: var(--df-dim); }
+.mz-note { margin: 0; font-size: 11px; line-height: 1.5; color: #9fb4bd; letter-spacing: 0.03em; }
+.mz-build { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid rgba(201, 150, 47, 0.2); padding-top: 12px; }
+.mz-pick { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.14em; color: var(--df-dim); }
+.mz-pick select { width: auto !important; max-width: 300px; height: 34px; margin: 0 !important; padding: 0 10px; background: rgba(6, 14, 18, 0.9) !important; border: 1px solid rgba(201, 150, 47, 0.4) !important; color: var(--df-ink) !important; font-family: var(--df-font); font-size: 12px !important; }
+.mz-status { font-size: 10px; letter-spacing: 0.1em; }
+.mz-builds { display: flex; flex-direction: column; background: rgba(6, 14, 18, 0.86); border: 1px solid var(--df-line); }
+.mz-order { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.mz-otext { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mz-oname { font-size: 12px; color: var(--df-ink-hi); }
+.mz-bar { height: 5px; background: #0a1418; } .mz-bar > span { display: block; height: 100%; background: var(--df-gold); }
+.mz-bar.queued { background: repeating-linear-gradient(135deg, #0a1418 0 6px, #11232a 6px 12px); }
+.mz-otime { flex-shrink: 0; font-size: 10px; letter-spacing: 0.1em; color: var(--df-dim); max-width: 260px; text-align: right; }
+.mz-order .dz-btn { height: 30px; }
+@media screen and (max-width: 768px) {
+    .mz-body { grid-template-columns: minmax(0, 1fr); grid-template-areas: "list" "detail" "builds"; }
+    .mz-body:not(.dz-show-detail) .mz-detail { display: none; }
+    .mz-body.dz-show-detail .mz-list { display: none; }
+    .mz-body.dz-show-detail .dz-back { display: inline-block; }
+    .mz-root > .dz-filters { flex-wrap: nowrap; } .mz-root .dz-ftab { flex: 0 0 auto; white-space: nowrap; }
+    .mz-pick { flex: 1 1 100%; } .mz-pick select { flex: 1; max-width: none; width: 100% !important; }
+    .mz-order { flex-wrap: wrap; } .mz-otime { max-width: none; text-align: left; }
+}
