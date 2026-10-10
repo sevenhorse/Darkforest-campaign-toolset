@@ -2143,3 +2143,35 @@ body.gc-on #gc-bar { display: flex; align-items: center; gap: 12px; flex: 1 1 au
 #iz-root .sheet-section > div:not([id]) { margin-bottom: 12px; }
 @media screen and (max-width: 768px) { #iz-add { flex: 1 1 100%; min-height: 44px; } #iz-tabs { flex-wrap: nowrap; overflow-x: auto; } #iz-tabs .df-subtab { flex: 0 0 auto; min-height: 44px; } }
 .rz-slot img:not([src]), .rz-slot img[src=""] { visibility: hidden; }
+
+/* ===== UI restyle R5b: galaxy map floating panels (switch 'galaxy_chrome', body.gc-on) =====
+   CSS only: drag, positions, show/hide and RESET UI are unchanged. Scoped to
+   the galaxy panels by id, so the Battle Map (its own look) is untouched. */
+body.gc-on :is(#hud-overlay, #comms-array-panel, #bottom-right-presence, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools) {
+    background: rgba(6, 14, 18, 0.94); border: 1px solid rgba(0, 225, 255, 0.3); border-radius: 0;
+    box-shadow: 0 0 22px rgba(0, 0, 0, 0.55), 0 0 1px rgba(0, 225, 255, 0.4); }
+body.gc-on :is(#hud-overlay, #comms-array-panel, #bottom-right-presence, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools)::before,
+body.gc-on :is(#hud-overlay, #comms-array-panel, #bottom-right-presence, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools)::after {
+    content: ''; position: absolute; width: 12px; height: 12px; pointer-events: none; }
+body.gc-on :is(#hud-overlay, #comms-array-panel, #bottom-right-presence, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools)::before { top: -1px; left: -1px; border-top: 2px solid var(--df-cyan); border-left: 2px solid var(--df-cyan); }
+body.gc-on :is(#hud-overlay, #comms-array-panel, #bottom-right-presence, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools)::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--df-cyan); border-right: 2px solid var(--df-cyan); }
+body.gc-on :is(#dm-tools, #dm-scratchpad-panel)::before, body.gc-on :is(#dm-tools, #dm-scratchpad-panel)::after { border-color: #ff6b6b; }
+body.gc-on :is(#salvage-panel)::before, body.gc-on :is(#salvage-panel)::after { border-color: var(--df-gold); }
+body.gc-on :is(#hud-overlay, #comms-array-panel, #bottom-right-presence, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools) .panel-header-drag {
+    border-bottom: 1px solid rgba(0, 225, 255, 0.18) !important; padding-bottom: 8px; margin-bottom: 10px; }
+body.gc-on :is(#hud-overlay, #comms-array-panel, #bottom-right-presence, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools) .panel-header-drag h4,
+body.gc-on #bottom-right-presence h4 {
+    font-family: var(--df-font) !important; font-size: 10px !important; font-weight: 400 !important; letter-spacing: 0.22em !important; text-transform: uppercase; color: var(--df-cyan) !important; border: 0 !important; }
+body.gc-on :is(#dm-tools, #dm-scratchpad-panel) .panel-header-drag h4 { color: #ff8a8a !important; }
+body.gc-on #salvage-panel .panel-header-drag h4 { color: var(--df-gold) !important; }
+body.gc-on :is(#hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools) .panel-header-drag > span {
+    font-family: var(--df-font); font-size: 0 !important; color: var(--df-dim) !important; }
+body.gc-on :is(#hud-overlay, #comms-array-panel, #combat-tracker-panel, #salvage-panel, #territory-control-panel, #calendar-control-panel, #dm-scratchpad-panel, #credits-panel, #dm-tools) .panel-header-drag > span::after { content: '⋮⋮'; font-size: 12px; letter-spacing: -2px; }
+body.gc-on :is(#hud-overlay, #dm-tools) .hud-tabs { gap: 0; border-bottom: 1px solid rgba(0, 225, 255, 0.12); padding-bottom: 0; }
+body.gc-on :is(#hud-overlay, #dm-tools) .hud-tab-btn { background: transparent !important; border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0; color: #7f98a2 !important; font-family: var(--df-font); font-size: 9px; letter-spacing: 0.16em; padding: 8px 6px; font-weight: 400; }
+body.gc-on :is(#hud-overlay, #dm-tools) .hud-tab-btn:hover { color: var(--df-ink) !important; }
+body.gc-on :is(#hud-overlay, #dm-tools) .hud-tab-btn.active { color: var(--df-ink-hi) !important; border-bottom-color: var(--df-cyan) !important; background: linear-gradient(180deg, transparent, rgba(0, 225, 255, 0.08)) !important; }
+body.gc-on #dm-tools .hud-tab-btn.active { border-bottom-color: #ff6b6b !important; }
+body.gc-on #comms-tabs-bar .comms-tab-btn { border-radius: 0; font-family: var(--df-font); letter-spacing: 0.08em; }
+body.gc-on #comms-tabs-bar .comms-tab-btn.active { border-color: var(--df-cyan) !important; color: var(--df-ink-hi) !important; background: rgba(0, 225, 255, 0.1) !important; }
+body.gc-on #mobile-nav-drawer-body :is(#hud-overlay, #bottom-right-presence)::before, body.gc-on #mobile-nav-drawer-body :is(#hud-overlay, #bottom-right-presence)::after { display: none; }
