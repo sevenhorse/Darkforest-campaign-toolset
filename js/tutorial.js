@@ -35,6 +35,8 @@ const TUTORIAL_SEEN_KEY = 'darkforest_tutorial_seen_v1';
 function tutorialQuery(sel) {
     const m = /^#term-tab-btn-([a-z]+)$/.exec(sel || '');
     if (m && typeof window.terminalTabTarget === 'function') { const t = window.terminalTabTarget(m[1]); if (t) return t; }
+    // Galaxy chrome restyle (js/galaxy-chrome.js): ? TUTORIAL sits in the account menu.
+    if (typeof window.galaxyChromeTarget === 'function') { const g = window.galaxyChromeTarget(sel); if (g) return g; }
     return document.querySelector(sel);
 }
 const TUTORIAL_STEPS = [

@@ -802,6 +802,8 @@ window.updateToolButtonStyles = function() {
     if(hBtn) { hBtn.style.borderColor = window.hyperlaneDrawActive ? '#00e1ff' : '#4a7ab5'; hBtn.style.color = window.hyperlaneDrawActive ? '#00e1ff' : '#a2c4f5'; }
     if(rBtn) { rBtn.style.borderColor = window.hyperlanesVisible ? '#00e1ff' : '#3c4e36'; rBtn.style.color = window.hyperlanesVisible ? '#00e1ff' : '#6b826a'; }
 };
+// The galaxy chrome restyle (js/galaxy-chrome.js) marks the active tool on this.
+window.updateToolButtonStyles = window.withAfterHooks('tool-buttons-updated', window.updateToolButtonStyles);
 
 /* --- MAP CENTERING: LOCK ON GALACTIC CORE ---
    Sagittarius Prime (the core black hole) is at world (0,0); camera (0,0)
@@ -820,6 +822,7 @@ function applyRadarSweepState() {
     if (overlay) overlay.classList.toggle('active', window.radarSweepActive);
     const btn = document.getElementById('radar-sweep-toggle-btn');
     if (btn) { btn.style.borderColor = window.radarSweepActive ? '#00e5a3' : '#3c4e36'; btn.style.color = window.radarSweepActive ? '#00e5a3' : '#6b826a'; }
+    if (typeof window.runHooks === 'function') window.runHooks('tool-buttons-updated');
 }
 window.toggleRadarSweep = function() {
     window.radarSweepActive = !window.radarSweepActive;

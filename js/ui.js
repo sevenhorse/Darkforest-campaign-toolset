@@ -2069,6 +2069,8 @@ window.renderCommsTabBar = function() {
     if (bar) bar.innerHTML = html;
     if (bmBar) bmBar.innerHTML = html;
 };
+// The galaxy chrome restyle (js/galaxy-chrome.js) shows the unread count on COMMS.
+window.renderCommsTabBar = window.withAfterHooks('comms-tabs-rendered', window.renderCommsTabBar);
 
 window.switchCommsTab = async function(tabKey) {
     window.activeCommsTab = tabKey;
