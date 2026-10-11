@@ -399,7 +399,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-10.13';
+window.DARKFOREST_BUILD = '2026-10-11.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -1293,6 +1293,7 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      'campaign_clock', 'saved_fleets', 'manufacturing_blueprints', 'strike_craft_templates', 'ship_templates',
      'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes',
      'cargo_item_catalog', // no table references it
+     'character_personal_log', // opt-in Dossier tracker; RLS = owner or DM (a DM backup sees every row)
      'app_settings', 'encounter_presets'],
     ['ship_markers', 'system_hazards'],
     // battle_tokens / battle_events (undo log) / battle_reinforcements are children of battle_encounters.
@@ -1303,6 +1304,7 @@ window.FULL_BACKUP_TABLE_GROUPS = [
 // row with `.not(pkCol, 'is', null)`, which works for any PK type.
 window.FULL_BACKUP_PK_COLUMN = {
     character_skills: 'character_id',
+    character_personal_log: 'profile_id',
     planetary_modifiers: 'body_id',
     system_ownership_overrides: 'system_id',
     app_settings: 'feature_key'

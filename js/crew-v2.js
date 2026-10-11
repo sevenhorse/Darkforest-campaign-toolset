@@ -21,7 +21,9 @@
 (function () {
 const byId = (id) => document.getElementById(id);
 const esc = (s) => (typeof window.escapeHtml === 'function' ? window.escapeHtml(s) : String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
-const TABS = [['profile', 'PROFILE'], ['attributes', 'ATTRIBUTES & SKILLS'], ['perks', 'PERKS & AUGMENTS'], ['gear', 'GEAR & ASSETS']];
+const TABS = [['profile', 'PROFILE'], ['attributes', 'ATTRIBUTES & SKILLS'], ['perks', 'PERKS & AUGMENTS'], ['gear', 'GEAR & ASSETS'], ['personal', 'PERSONAL LOG']];
+// PERSONAL LOG (js/personal-log.js) only shows for a player who opted in.
+const tabShown = (k) => k !== 'personal' || (typeof window.personalLogTabVisible === 'function' && window.personalLogTabVisible());
 const S = window.__cv = window.__cv || { tab: 'attributes' };
 const moved = []; // { node, parent, next }
 window.crewRestyleOn = function () { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('crew_restyle'); };
@@ -101,7 +103,7 @@ function renderHeader() {
         chip('SHIELD', `${sh} / ${shMax}`, 'cv-cyan') + chip('DR', String(dr));
     const nPerks = (p.perks || []).length + (p.augments || []).length, nGear = (p.gear || []).length;
     const count = { perks: nPerks, gear: nGear };
-    byId('cv-tabs').innerHTML = TABS.map(([k, label]) => `<button type="button" role="tab" class="df-subtab${S.tab === k ? ' on' : ''}" data-cvtab="${k}" aria-selected="${S.tab === k}">${label}${count[k] ? ` <b>${count[k]}</b>` : ''}</button>`).join('');
+    byId('cv-tabs').innerHTML = TABS.filter(([k]) => tabShown(k)).map(([k, label]) => `<button type="button" role="tab" class="df-subtab${S.tab === k ? ' on' : ''}" data-cvtab="${k}" aria-selected="${S.tab === k}">${label}${count[k] ? ` <b>${count[k]}</b>` : ''}</button>`).join('');
 }
 
 // Skill rows get a -100…+100 bar (new; the number input is the same one).
@@ -132,10 +134,11 @@ function render() {
     Object.keys(PLACES).forEach(k => PLACES[k].forEach(id => borrow(section(id), byId('cv-pane-' + k))));
     borrow(statsBtn('rechargeShield'), byId('cv-actions'));
     borrow(statsBtn('saveTerminalProfile'), byId('cv-actions'));
-    if (!PLACES[S.tab]) S.tab = 'attributes';
+    if (!PLACES[S.tab] && !(S.tab === 'personal' && tabShown('personal'))) S.tab = 'attributes';
     root.querySelectorAll('.cv-pane').forEach(p => { p.style.display = p.dataset.cvpane === S.tab ? '' : 'none'; });
     renderHeader();
     renderSkillBars();
+    if (typeof window.runHooks === 'function') window.runHooks('dossier-view-rendered', S.tab);
 }
 window.renderCrewDossier = render;
 
