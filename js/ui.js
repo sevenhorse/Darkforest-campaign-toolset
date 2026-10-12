@@ -1529,7 +1529,7 @@ window.renderCodexMatrix = function() {
         // wins regardless of scan state).
         if (e.is_hidden) return false;
         let linkMatch = (e.subtitle || '').match(/LINK:(.+)/);
-        if (linkMatch) { return window.scannedSystems && window.scannedSystems.includes(linkMatch[1].trim()); }
+        if (linkMatch) { return window.codexLinkUnlocked(linkMatch[1].trim()); }
         return true;
     });
 
@@ -1588,7 +1588,7 @@ window.moveCodexEntryOrder = function(id, direction) {
         // appear to do nothing from the player's point of view.
         if (e.is_hidden) return false;
         let linkMatch = (e.subtitle || '').match(/LINK:(.+)/);
-        if (linkMatch) { return window.scannedSystems && window.scannedSystems.includes(linkMatch[1].trim()); }
+        if (linkMatch) { return window.codexLinkUnlocked(linkMatch[1].trim()); }
         return true;
     });
     window.moveListItem(orderKey, window.applySavedOrder(orderKey, entries), id, direction);
@@ -1893,6 +1893,23 @@ window.removeCodexAttachmentFromForm = function() {
     document.getElementById('codex-current-doc-wrapper').style.display = 'none'; document.getElementById('codex-file-label').innerText = 'Click to upload / replace .txt, .md, .pdf, or image';
 };
 
+/* A Codex "| LINK:<system>" may name the system by id (proc-spiral-1717)
+   or by its map name (Arm Beta-2717) -- the DM types names. Scans record
+   ids, so a name is resolved to its id here (2026-10-11 fix: name links
+   never unlocked before). */
+window.codexLinkMatchesSystem = function(link, sys) {
+    if (!link || !sys) return false;
+    const l = String(link).trim().toLowerCase();
+    return String(sys.id).toLowerCase() === l || String(sys.name || '').trim().toLowerCase() === l;
+};
+window.codexLinkUnlocked = function(link) {
+    const scanned = window.scannedSystems || [];
+    if (!link) return false;
+    if (scanned.includes(link)) return true;
+    const all = (typeof globalDbSystemsCache !== 'undefined' ? globalDbSystemsCache : []).concat(typeof globalProceduralSystemsCache !== 'undefined' ? globalProceduralSystemsCache : []);
+    return all.some(sys => scanned.includes(sys.id) && window.codexLinkMatchesSystem(link, sys));
+};
+
 /* --- MODULE C: FOG OF WAR (DRADIS SCANNING) --- */
 window.executeDradisScan = async function(sysId) {
     let s = globalDbSystemsCache.find(x => x.id === sysId) || globalProceduralSystemsCache.find(x => x.id === sysId);
@@ -1928,7 +1945,8 @@ window.executeDradisScan = async function(sysId) {
 
     await db.from('chat_logs').insert({ sender_id: null, content: `📡 [DRADIS SWEEP] Task Force Black completed a deep scan of '${s.name}'. Operation took ${scanHours} hours. Orbital census uploaded to mainframe. [SYS_SCAN:${sysId}]`, message_type: 'system' });
     
-    let unlockedLore = globalCodexEntriesCache.filter(e => (e.subtitle || '').includes(`LINK:${sysId}`));
+    // Hidden entries don't count -- the scan shouldn't hint that DM-hidden intel exists.
+    let unlockedLore = globalCodexEntriesCache.filter(e => { const m = (e.subtitle || '').match(/LINK:(.+)/); return !e.is_hidden && !!m && window.codexLinkMatchesSystem(m[1].trim(), s); });
     if (unlockedLore.length > 0) {
         await db.from('chat_logs').insert({ sender_id: null, content: `📖 [INTEL DECRYPTED] DRADIS sweep recovered hidden data caches. New Codex entries unlocked.`, message_type: 'system' });
     }

@@ -41,7 +41,7 @@ function visibleToMe(e) {
     if (isDm()) return true;
     if (e.is_hidden) return false;
     const link = linkOf(e);
-    if (link) return !!(window.scannedSystems && window.scannedSystems.includes(link));
+    if (link) return typeof window.codexLinkUnlocked === 'function' ? window.codexLinkUnlocked(link) : !!(window.scannedSystems && window.scannedSystems.includes(link));
     return true;
 }
 function matchesSearch(e) {
