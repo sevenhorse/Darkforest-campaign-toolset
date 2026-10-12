@@ -295,7 +295,7 @@ window.manufacturingOrderSource = function(o) {
     let canCancel = currentUserRole === 'dm';
     if (o.source_type === 'colony') {
         const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === o.source_colony_id) : null;
-        if (colony && colony.owner_id === currentUserId) canCancel = true;
+        if (colony && window.canManageColony(colony)) canCancel = true;
         return { isColony: true, canCancel, label: `${colony ? colony.name : 'Colony'}${vessel ? ` → ${vessel.name}` : ''}` };
     }
     if (vessel && window.vesselHasOwner(vessel, currentUserId)) canCancel = true;
@@ -849,6 +849,25 @@ function addCargoStack(cargo, name, qty, unit, bucket) {
 }
 window.addCargoStack = addCargoStack;
 
+/* Shared build rules (the start functions and the preview all use these).
+   Cost rows are summed by name (case-insensitive) first, so duplicate rows
+   can't each pass against the same un-decremented cargo; the perk discount
+   and its minimum of 1 apply once per summed total. */
+function manufacturingRequirements(bp, discountPct) {
+    const totals = new Map();
+    (bp.resource_cost || []).forEach(c => {
+        const key = String(c.name || '').toLowerCase();
+        const existing = totals.get(key);
+        if (existing) existing.qty += c.qty;
+        else totals.set(key, { name: c.name, unit: c.unit || 'Units', qty: c.qty });
+    });
+    return Array.from(totals.values()).map(req => ({ ...req, qty: discountPct ? Math.max(1, Math.round(req.qty * (1 - discountPct / 100))) : req.qty }));
+}
+// A damaged Manufacturing deck slows builds (hp/max_hp), floored at 10%.
+function manufacturingDeckScale(deck) { return deck && deck.max_hp > 0 ? Math.max(0.1, deck.hp / deck.max_hp) : 1; }
+function manufacturingBuildHours(bp, discountPct, deckScale) { return Math.max(0.1, (bp.time_cost_hours * (1 - discountPct / 100)) / (deckScale || 1)); }
+window.manufacturingRequirements = manufacturingRequirements;
+
 window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
     if (!vessel) return;
@@ -872,7 +891,7 @@ window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     // A damaged Manufacturing deck lengthens build time (divided by hp/max_hp),
     // floored at 10% efficiency (at most 10x) so a 0-HP deck can still finish.
     // Applied after the perk discount.
-    const deckScale = mfgDeck.max_hp > 0 ? Math.max(0.1, mfgDeck.hp / mfgDeck.max_hp) : 1;
+    const deckScale = manufacturingDeckScale(mfgDeck);
 
     // Check every requirement before deducting anything.
     let cargo = window.sanitizeCargo(vessel.cargo_inventory);
@@ -880,17 +899,7 @@ window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     // each pass against the same un-decremented cargo. The discount and its
     // minimum of 1 apply once per summed total, so splitting a cost across
     // rows doesn't change the result.
-    const rawTotalsByName = new Map();
-    (bp.resource_cost || []).forEach(c => {
-        const key = c.name.toLowerCase();
-        const existing = rawTotalsByName.get(key);
-        if (existing) existing.qty += c.qty;
-        else rawTotalsByName.set(key, { name: c.name, unit: c.unit || 'Units', qty: c.qty });
-    });
-    const requirements = Array.from(rawTotalsByName.values()).map(req => ({
-        ...req,
-        qty: discountPct ? Math.max(1, Math.round(req.qty * (1 - discountPct / 100))) : req.qty
-    }));
+    const requirements = manufacturingRequirements(bp, discountPct);
     for (const req of requirements) {
         const found = findCargoItemAcrossBuckets(cargo, req.name);
         if (!found || found.item.qty < req.qty) {
@@ -910,7 +919,7 @@ window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     vessel.cargo_inventory = cargo;
     if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
 
-    const durationHours = Math.max(0.1, (bp.time_cost_hours * (1 - discountPct / 100)) / deckScale);
+    const durationHours = manufacturingBuildHours(bp, discountPct, deckScale);
     const queued = await sourceIsFull('vessel', vesselId);
     const { error } = await db.from('manufacturing_orders').insert({
         blueprint_id: bp.id, blueprint_name: bp.name, output_type: bp.output_type, output_payload: bp.output_payload,
@@ -943,7 +952,7 @@ window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
 window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
     const colony = coloniesList.find(c => c.id === colonyId);
     if (!colony) return;
-    if (!(currentUserRole === 'dm' || colony.owner_id === currentUserId)) return;
+    if (!window.canManageColony(colony)) return;
 
     // blueprintId comes from the build popup (openColonyBuildModal). The
     // delivery vessel select is on the colony card (shared with Storage pickup).
@@ -974,24 +983,14 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf || !myProf.character || !myProf.character.id) { alert('Please save your Dossier & Stats once first before starting a build.'); return; }
     const discountPct = window.getManufacturingDiscountPct(myProf.perks);
-    const durationHours = Math.max(0.1, bp.time_cost_hours * (1 - discountPct / 100));
+    const durationHours = manufacturingBuildHours(bp, discountPct, 1);
 
     let deductedSnapshot = null;
     let usedMaterials = false;
     if (colony.has_manufacturing_facility && (bp.resource_cost || []).length > 0) {
         let cargo = window.sanitizeColonyCargo(colony.cargo_inventory);
         // Same sum-by-name-then-discount sequence as the vessel path.
-        const rawTotalsByName = new Map();
-        bp.resource_cost.forEach(c => {
-            const key = c.name.toLowerCase();
-            const existing = rawTotalsByName.get(key);
-            if (existing) existing.qty += c.qty;
-            else rawTotalsByName.set(key, { name: c.name, unit: c.unit || 'Units', qty: c.qty });
-        });
-        const requirements = Array.from(rawTotalsByName.values()).map(req => ({
-            ...req,
-            qty: discountPct ? Math.max(1, Math.round(req.qty * (1 - discountPct / 100))) : req.qty
-        }));
+        const requirements = manufacturingRequirements(bp, discountPct);
         const allAvailable = requirements.every(req => {
             const found = findCargoItemAcrossBuckets(cargo, req.name);
             return found && found.item.qty >= req.qty;
@@ -1039,10 +1038,9 @@ window.startColonyManufacturingOrder = async function(colonyId, blueprintId) {
    (js/combat.js) and the colony box.
    computeManufacturingPreview(bp, opts) is DOM-independent (opts = {vessel}
    or {colony}).
-   Known limitation: it duplicates the gating/discount/deck-scale logic of
-   startVesselManufacturingOrder and startColonyManufacturingOrder instead of
-   sharing code. Change all three together, or the preview will disagree with
-   what BUILD actually does. */
+   The cost / discount / deck-scale / time rules are shared with the two
+   start functions (manufacturingRequirements, manufacturingDeckScale,
+   manufacturingBuildHours), so the preview can't disagree with BUILD. */
 function computeManufacturingPreview(bp, opts) {
     const myProf = (typeof allProfiles !== 'undefined' && typeof currentUserId !== 'undefined') ? allProfiles.find(p => p.id === currentUserId) : null;
     const discountPct = (myProf && typeof window.getManufacturingDiscountPct === 'function') ? window.getManufacturingDiscountPct(myProf.perks) : 0;
@@ -1051,26 +1049,16 @@ function computeManufacturingPreview(bp, opts) {
     const result = { tier, discountPct, isInfrastructure, blocking: [], notes: [], costRows: [], timeHours: null, needsVessel: false, canBuild: true };
 
     // Same sum-by-name-then-discount sequence as the start functions.
-    const rawTotalsByName = new Map();
-    (bp.resource_cost || []).forEach(c => {
-        const key = c.name.toLowerCase();
-        const existing = rawTotalsByName.get(key);
-        if (existing) existing.qty += c.qty;
-        else rawTotalsByName.set(key, { name: c.name, unit: c.unit || 'Units', qty: c.qty });
-    });
-    const requirements = Array.from(rawTotalsByName.values()).map(req => ({
-        ...req,
-        qty: discountPct ? Math.max(1, Math.round(req.qty * (1 - discountPct / 100))) : req.qty
-    }));
+    const requirements = manufacturingRequirements(bp, discountPct);
 
     if (opts && opts.vessel) {
         const vessel = opts.vessel;
         if (isInfrastructure) result.blocking.push('Infrastructure blueprints can only be built at a colony.');
         const mfgDeck = (vessel.ship_decks || []).find(d => d.type === 'manufacturing');
         if (!mfgDeck) result.blocking.push('No Manufacturing-type deck installed on this vessel.');
-        const deckScale = mfgDeck && mfgDeck.max_hp > 0 ? Math.max(0.1, mfgDeck.hp / mfgDeck.max_hp) : 1;
+        const deckScale = manufacturingDeckScale(mfgDeck);
         if (mfgDeck && deckScale < 1) result.notes.push(`Manufacturing deck at ${Math.round(deckScale * 100)}% HP — build will take ${(1 / deckScale).toFixed(1)}x longer.`);
-        result.timeHours = Math.max(0.1, (bp.time_cost_hours * (1 - discountPct / 100)) / deckScale);
+        result.timeHours = manufacturingBuildHours(bp, discountPct, deckScale);
 
         const cargo = window.sanitizeCargo(vessel.cargo_inventory);
         result.costRows = requirements.map(req => {
@@ -1089,7 +1077,7 @@ function computeManufacturingPreview(bp, opts) {
             }
             result.needsVessel = true;
         }
-        result.timeHours = Math.max(0.1, bp.time_cost_hours * (1 - discountPct / 100));
+        result.timeHours = manufacturingBuildHours(bp, discountPct, 1);
 
         if (requirements.length > 0) {
             if (colony.has_manufacturing_facility) {
@@ -1256,7 +1244,7 @@ window.cancelManufacturingOrder = async function(orderId) {
     let sourceName = 'Unknown source';
     if (!ownerOk && order.source_type === 'colony') {
         const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
-        if (colony) { ownerOk = colony.owner_id === currentUserId; sourceName = colony.name; }
+        if (colony) { ownerOk = window.canManageColony(colony); sourceName = colony.name; }
     } else if (!ownerOk && order.source_type === 'vessel') {
         const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
         if (vessel) { ownerOk = window.vesselHasOwner(vessel, currentUserId); sourceName = vessel.name; }

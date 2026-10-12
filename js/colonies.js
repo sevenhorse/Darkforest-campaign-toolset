@@ -61,6 +61,9 @@ window.switchColoniesSubtab = function(subtab) {
 function canManage(asset) {
     return currentUserRole === 'dm' || asset.owner_id === currentUserId;
 }
+// The one colony / fleet-group ownership rule (single owner_id; DM always),
+// shared with js/manufacturing.js and js/quartermaster.js.
+window.canManageColony = function(colony) { return !!colony && canManage(colony); };
 
 /* --- COLONIES --- */
 
@@ -198,7 +201,7 @@ window.deleteColony = async function(id) {
 window.pickupColonyStorageItem = async function(colonyId, bucket, itemName) {
     const colony = coloniesList.find(c => c.id === colonyId);
     if (!colony) return;
-    if (!(currentUserRole === 'dm' || colony.owner_id === currentUserId)) return;
+    if (!window.canManageColony(colony)) return;
     const select = document.getElementById(`colony-deliver-vessel-${colonyId}`);
     const vesselId = select ? select.value : null;
     if (!vesselId) { alert("Select a vessel to receive the shipment first."); return; }
@@ -235,7 +238,7 @@ window.pickupColonyStorageItem = async function(colonyId, bucket, itemName) {
 window.pickupAllColonyStorage = async function(colonyId) {
     const colony = coloniesList.find(c => c.id === colonyId);
     if (!colony) return;
-    if (!(currentUserRole === 'dm' || colony.owner_id === currentUserId)) return;
+    if (!window.canManageColony(colony)) return;
     const select = document.getElementById(`colony-deliver-vessel-${colonyId}`);
     const vesselId = select ? select.value : null;
     if (!vesselId) { alert("Select a vessel to receive the shipment first."); return; }

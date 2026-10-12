@@ -61,7 +61,7 @@ const holdKey = (h) => (isColony(h) ? 'colony:' : 'ship:') + h.id;
 function canUseHold(v) {
     if (!v) return false;
     if (isDm()) return true;
-    if (isColony(v)) return v.owner_id === myId();
+    if (isColony(v)) return typeof window.canManageColony === 'function' ? window.canManageColony(v) : v.owner_id === myId();
     return typeof window.vesselHasOwner === 'function' && window.vesselHasOwner(v, myId());
 }
 function myHolds() {

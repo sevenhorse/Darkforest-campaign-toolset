@@ -84,7 +84,7 @@ window.squadronEffectiveStance = function(sq) {
     return sq.ai_stance === 'auto' ? (sq.ai_auto_pick || 'attack_capitals') : (sq.ai_stance || '');
 };
 window.pickSquadronAutoStance = function(sq, sqShip, ctx) {
-    const db0 = (typeof STRIKE_CRAFT_DB !== 'undefined' && STRIKE_CRAFT_DB[sq.type]) || { weapons: [] };
+    const db0 = window.strikeCraftChassis(sq.type) || { weapons: [] };
     const roles = (db0.weapons || []).map(w => w.role);
     const hasPD = roles.includes('point_defense'), hasAF = roles.includes('anti_fighter');
     const tokens = ctx.tokens || [];
@@ -250,7 +250,7 @@ window.processBattleRoundAutomations = async function() {
             if ((sqShip.disabled_sensors_until || 0) > 0) return;
             const pos = window.getBattleTokenPosition(sqShip.id);
             if (!pos) return; // no grid token this round: can't range-check, skip (fails open)
-            const dbStats = STRIKE_CRAFT_DB[sq.type];
+            const dbStats = window.strikeCraftChassis(sq.type);
             if (!dbStats) return;
             let wpnIdx = dbStats.weapons.findIndex((w, i) => w.role === 'point_defense' && squadronWeaponCooldown(sq, i) === 0);
             if (wpnIdx < 0) wpnIdx = dbStats.weapons.findIndex((w, i) => squadronWeaponCooldown(sq, i) === 0);
@@ -371,9 +371,11 @@ window.processBattleRoundAutomations = async function() {
             // target takes the same rolled total (no PD roll for splash),
             // with each victim's own stance modifier. Applies per payload.
             if (salvo.aoe_radius > 0) {
-                const primaryTok = tokens.find(t => t.ship_marker_id === targetVessel.id);
+                // Live positions (anything moved earlier in this tick counts), not the start-of-tick snapshot.
+                const liveTokens = (window.globalBattleEncounterCache && Array.isArray(window.globalBattleEncounterCache.tokens) && window.globalBattleEncounterCache.tokens.length) ? window.globalBattleEncounterCache.tokens : tokens;
+                const primaryTok = liveTokens.find(t => t.ship_marker_id === targetVessel.id);
                 if (primaryTok) {
-                    for (const tok of tokens) {
+                    for (const tok of liveTokens) {
                         if (!tok || tok.ship_marker_id === targetVessel.id) continue;
                         const dx = tok.x - primaryTok.x, dy = tok.y - primaryTok.y;
                         if (Math.sqrt(dx * dx + dy * dy) > salvo.aoe_radius) continue;
@@ -531,7 +533,7 @@ window.processBattleRoundAutomations = async function() {
             let candidates = tokens
                 .map(tok => globalShipMarkersCache.find(m => m.id === tok.ship_marker_id))
                 .filter(Boolean)
-                .filter(m => m.id !== sqShip.id && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(sqShip)));
+                .filter(m => m.id !== sqShip.id && !m.is_hidden && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(sqShip))); // fog: hidden vessels aren't targets
 
             if (stance === 'attack_strike_craft') {
                 candidates = candidates.filter(m => m.is_strike_craft);
@@ -563,7 +565,7 @@ window.processBattleRoundAutomations = async function() {
             const movedSelfTok = movedTokens ? movedTokens.find(t => t.ship_marker_id === sqShip.id) : null;
             const newSelfPos = movedSelfTok ? { x: movedSelfTok.x, y: movedSelfTok.y } : selfPos;
 
-            const dbStats = STRIKE_CRAFT_DB[sq.type];
+            const dbStats = window.strikeCraftChassis(sq.type);
             if (!dbStats) continue;
             const desiredRole = stance === 'attack_strike_craft' ? 'anti_fighter' : 'anti_capital';
             // Weapon choice (all off cooldown for this squadron): anti-capital
@@ -620,7 +622,8 @@ window.processBattleRoundAutomations = async function() {
        retarget onto that attacker instead. Runs after the squadron passes,
        so a ship only acts if it survived this round's defensive fire.
          - Target scope (DM decision): any enemy vessel, strike craft included.
-           No Fog of War (is_hidden) exclusion.
+           Fog of War (DM, 2026-10-11): a vessel hidden by fog (is_hidden)
+           is not a target -- the AI can't see it (squadron stances too).
          - Target is recomputed every round; ai_current_target_id is written
            as an informational breadcrumb only.
          - PD weapons are excluded (they belong to the defensive PD pool).
@@ -642,7 +645,7 @@ window.processBattleRoundAutomations = async function() {
         const candidates = tokens
             .map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id))
             .filter(Boolean)
-            .filter(m => m.id !== v.id && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(v)));
+            .filter(m => m.id !== v.id && !m.is_hidden && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(v)));
 
         if (candidates.length === 0) {
             chatLines.push(`🤖 [AI CONTROLLED] ${v.name} has no eligible enemy target on the grid this round -- holds position.`);

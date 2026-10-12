@@ -88,7 +88,6 @@ function renderStrikeCraftCard(tok, isDm, profiles) {
     const accentColor = ownedByPlayer ? '#00e5a3' : '#ff3333';
     const canWithdraw = isDm || window.vesselHasOwner(vessel, currentUserId);
     const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : (vessel.tactical_speed ?? 160);
-    const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
     const ownerTag = ownerProfs.length ? ownerProfs.map(p => p.username || 'Commander').join('/') : (isDm ? 'Unowned' : 'Unknown');
     return `<div class="battle-ship-card" style="border-color:${accentColor};">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #3c4e36;">
@@ -98,7 +97,7 @@ function renderStrikeCraftCard(tok, isDm, profiles) {
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
                 ${vessel.is_hidden ? `<span style="font-size:9px; color:#c778dd;" title="Hidden from every non-DM viewer except this vessel's own player-owner">🫥 HIDDEN</span>` : ''}
-                <span style="font-size:9px; color:${moveColor};" title="Movement left this round (refills each round)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>
+                <span style="font-size:9px; color:#6b826a;" title="Movement left this round (refills each round)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>
                 ${canWithdraw ? `<button class="layer-del" onclick="window.removeBattleToken('${tok.token_id}')" style="font-size:8px; padding:2px 6px;">WITHDRAW</button>` : ''}
             </div>
         </div>
@@ -172,14 +171,13 @@ window.renderBattleShipCards = function(tokens) {
         const fullDetail = isDm || ownedByPlayer;
         const canWithdraw = isDm || window.vesselHasOwner(vessel, currentUserId);
         const moveRemaining = tok.move_remaining !== undefined ? tok.move_remaining : (vessel.tactical_speed ?? 160);
-        const moveColor = moveRemaining < 0 ? '#ff3333' : '#6b826a';
         const accentColor = fullDetail ? '#00e5a3' : '#ff3333';
         const ownerTag = ownerProfs.length ? ownerProfs.map(p => p.username || 'Commander').join('/') : (isDm ? 'Unowned' : 'Unknown');
         const expanded = battleMapExpandedCards.has(tok.token_id);
         // Stations never move, so show STATIONARY instead of a move readout.
         const moveLine = vessel.is_station
             ? `<span style="font-size:9px; color:#6b826a;" title="Stationary platform — no Battle Map movement">🛰 STATIONARY</span>`
-            : `<span style="font-size:9px; color:${moveColor};" title="Movement left this round (refills each round)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>`;
+            : `<span style="font-size:9px; color:#6b826a;" title="Movement left this round (refills each round)">Move ${moveRemaining}/${vessel.tactical_speed ?? 160}</span>`;
 
         // DM-only IFF dropdown for changing a ship's tag mid-battle. Mirrors
         // the Galaxy Map HUD's IFF box (js/map.js): same IFF_COLORS, options

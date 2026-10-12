@@ -2073,6 +2073,7 @@ window.renderCommsTabBar = function() {
     let html = '';
     html += `<button class="comms-tab-btn ${window.activeCommsTab === 'general' ? 'active' : ''} ${window.commsUnread['general'] ? 'unread' : ''}" onclick="window.switchCommsTab('general')">General</button>`;
     html += `<button class="comms-tab-btn ${window.activeCommsTab === 'dice' ? 'active' : ''} ${window.commsUnread['dice'] ? 'unread' : ''}" onclick="window.switchCommsTab('dice')">🎲 Dice Streamer</button>`;
+    html += `<button class="comms-tab-btn ${window.activeCommsTab === 'combat' ? 'active' : ''}" onclick="window.switchCommsTab('combat')" title="Battle messages only (from General and the Dice Streamer). Read-only.">⚔ Combat</button>`;
 
     window.pmPartnerIds.forEach(uid => {
         if (window.closedPmTabs.has(uid)) return;
@@ -2088,13 +2089,26 @@ window.renderCommsTabBar = function() {
 // The galaxy chrome restyle (js/galaxy-chrome.js) shows the unread count on COMMS.
 window.renderCommsTabBar = window.withAfterHooks('comms-tabs-rendered', window.renderCommsTabBar);
 
+// Combat filter tab (2026-10-11): a read-only view over General + Dice that
+// keeps only battle messages, recognised by the tags combat code already
+// writes ([AI STANCE], [ORDNANCE], [INITIATIVE] ...) and the FIRES / ATTACKS
+// roll titles. No new schema; it never gets its own unread badge.
+const COMBAT_LOG_RE = /\[(AI STANCE|AI CONTROLLED|AI AUTO|TACTICAL BATTLE MAP|TACTICAL|WEAPONS DISABLED|INITIATIVE|POINT DEFENSE|ORDNANCE|ORDNANCE IMPACT|AOE SPLASH|SYSTEM LOCKDOWN|OUT OF RANGE|OUT OF ARC|NO SHOT|NO LOCK|FLIGHT OPS|DECK DESTROYED|DECK FIGHT|DECK HAZARD|SQUADRON INTERCEPT|SQUADRON|SINGLE WARHEAD|BATTLE|ROUND|TERRAIN|DEBRIS|ION SURGE|ANTIMATTER|REACTIVE ARMOR|ABLATIVE ARMOR|KIA REPORT|FOG OF WAR|TACTICS|AIRLOCK VENT|RESUPPLY|RELOAD|REPAIR LOG|INSUFFICIENT AMMO|NO SUPPLY|NO RESERVE|MANUAL DICE|EMPTY)\]|BOARDING RESOLVED|\] FIRES |\] ATTACKS /;
+window.isCombatLog = function(log) { return !!log && !log.recipient_id && COMBAT_LOG_RE.test(String(log.content || '')); };
+function combatFeedSource() {
+    const seen = new Set();
+    return (chatLogsList || []).concat(window.diceLogsList || [])
+        .filter(l => window.isCombatLog(l) && (l.id === undefined || (!seen.has(l.id) && seen.add(l.id))))
+        .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+}
+
 window.switchCommsTab = async function(tabKey) {
     window.activeCommsTab = tabKey;
     window.commsUnread[tabKey] = false;
     window.renderCommsTabBar();
 
     // Lazy-load this channel's own history the first time it's opened.
-    if (tabKey === 'dice' && !window.diceLogsList) { await loadDiceLogs(); }
+    if ((tabKey === 'dice' || tabKey === 'combat') && !window.diceLogsList) { await loadDiceLogs(); }
     else if (tabKey.startsWith('pm:')) {
         const pid = tabKey.slice(3);
         if (!window.pmLogsCache[pid]) { await loadPmLogs(pid); }
@@ -2107,9 +2121,9 @@ window.switchCommsTab = async function(tabKey) {
     // Streamer's read-only state applies right now.
     [document.getElementById('comms-message-input'), document.getElementById('bm-comms-message-input')].forEach(input => {
         if (!input) return;
-        const isDice = tabKey === 'dice';
-        input.disabled = isDice;
-        input.placeholder = isDice ? 'Dice Streamer is a read-only log...' : 'Transmit message...';
+        const isDice = tabKey === 'dice', isCombat = tabKey === 'combat';
+        input.disabled = isDice || isCombat;
+        input.placeholder = isDice ? 'Dice Streamer is a read-only log...' : (isCombat ? 'Combat is a read-only filter...' : 'Transmit message...');
     });
 };
 
@@ -2156,7 +2170,7 @@ window.appendLocalChatLog = function(log) {
         if (!alreadyIn(chatLogsList)) { chatLogsList.push(log); window.checkSysScan(log); }
     }
 
-    if (tabKey === window.activeCommsTab) {
+    if (tabKey === window.activeCommsTab || (window.activeCommsTab === 'combat' && window.isCombatLog(log))) {
         window.renderChatFeed();
     } else {
         if (log.sender_id !== currentUserId) {
@@ -2191,7 +2205,7 @@ window.sendChatMessage = async function(inputId) {
     const input = document.getElementById(inputId || 'comms-message-input'); if (!input) return;
     const content = input.value.trim(); if (!content) return;
     const tab = window.activeCommsTab;
-    if (tab === 'dice') return; // read-only stream, not a chat room
+    if (tab === 'dice' || tab === 'combat') return; // read-only streams, not chat rooms
 
     const recipientId = tab.startsWith('pm:') ? tab.slice(3) : null;
     // Bug-hunt pass (2026-09-24): the chat feed renders message content as
@@ -2222,6 +2236,7 @@ window.renderChatFeed = function() {
     let source = [];
     if (tab === 'general') source = chatLogsList;
     else if (tab === 'dice') source = window.diceLogsList || [];
+    else if (tab === 'combat') source = combatFeedSource();
     else if (tab.startsWith('pm:')) source = window.pmLogsCache[tab.slice(3)] || [];
 
     let html = '';

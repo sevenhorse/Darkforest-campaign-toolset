@@ -56,13 +56,15 @@ const STRIKE_CRAFT_DB = {
 // not update tokens that already exist. There is no editor for a deployed
 // token's tactical_speed.
 const SQUADRON_TACTICAL_SPEED = 320;
+// One lookup for a chassis' stats (null for an unknown / deleted chassis).
+window.strikeCraftChassis = function(type) { return (type && typeof STRIKE_CRAFT_DB !== 'undefined' && STRIKE_CRAFT_DB[type]) || null; };
 
 // Safe STRIKE_CRAFT_DB lookup. An unknown chassis (deleted DM design, or
 // before loadStrikeCraftTemplates finishes at login) returns a placeholder
 // with no weapons instead of crashing the screens that list it. Never
 // mutates the catalog.
 window.getStrikeCraftStats = function(type) {
-    const stats = (typeof STRIKE_CRAFT_DB !== 'undefined') ? STRIKE_CRAFT_DB[type] : null;
+    const stats = window.strikeCraftChassis(type);
     if (stats) return stats;
     return { label: `${type || 'Unknown'} (chassis not in catalog)`, base_hp: 0, weapons: [], _missing: true };
 };
@@ -140,7 +142,7 @@ async function despawnSquadronToken(squadronId) {
    "3/4" label and the 30% break-off check. Dice scale with the current count. */
 window.squadronPerCraftHp = function(sq) {
     if (sq && sq.count > 0 && sq.max_hp > 0) return sq.max_hp / sq.count;
-    const chassis = sq && typeof STRIKE_CRAFT_DB !== 'undefined' ? STRIKE_CRAFT_DB[sq.type] : null;
+    const chassis = sq ? window.strikeCraftChassis(sq.type) : null;
     return chassis ? (chassis.base_hp || 0) : 0;
 };
 window.applySquadronLosses = function(sq) {
@@ -208,7 +210,7 @@ window.commissionSquadron = async function() {
     if (!name) { alert("Enter a callsign for this squadron."); return; }
 
     let hangar = vessel.ship_hangar || [];
-    let dbStats = STRIKE_CRAFT_DB[type];
+    let dbStats = window.strikeCraftChassis(type);
     if (!dbStats) { alert("Pick a valid chassis type first."); return; }
     
     let sqId = 'sq_' + Math.random().toString(36).substr(2, 9);
@@ -306,14 +308,14 @@ window.renderCompactHangarHtml = function(vessel) {
     let html = '<div style="margin-top:8px; padding-top:8px; border-top:1px dashed #3c4e36;">';
     html += '<div style="font-size:9px; color:#6b826a; margin-bottom:4px;">HANGAR BAY</div>';
     hangar.forEach((sq, idx) => {
-        const dbStats = STRIKE_CRAFT_DB[sq.type];
+        const dbStats = window.strikeCraftChassis(sq.type);
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:9px; color:#d4c5a9;">
             <span>${sq.name} <span style="color:#6b826a;">${dbStats ? dbStats.label : sq.type} x${window.squadronCountLabel(sq)}</span></span>
             <button class="layer-edit" onclick="window.launchSquadron('${vessel.id}', ${idx}, true)" style="padding:2px 8px; font-size:8px; border-color:#00e1ff; color:#00e1ff;">🚀 LAUNCH</button>
         </div>`;
     });
     deployed.forEach((sq, idx) => {
-        const dbStats = STRIKE_CRAFT_DB[sq.type];
+        const dbStats = window.strikeCraftChassis(sq.type);
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:9px; color:#ffaa00;">
             <span>🛫 ${sq.name} <span style="color:#6b826a;">${dbStats ? dbStats.label : sq.type} x${window.squadronCountLabel(sq)} · HP ${sq.hp}/${sq.max_hp}</span></span>
             <button class="layer-edit" onclick="window.recallSquadron('${vessel.id}', ${idx})" style="padding:2px 8px; font-size:8px; border-color:#00e5a3; color:#00e5a3;">RECALL</button>
@@ -375,7 +377,7 @@ window.updateSquadronTargetOptions = function(vesselId, sqIdx) {
     if (!vessel) return;
     let sq = (vessel.ship_deployed || [])[sqIdx];
     if (!sq) return;
-    let dbStats = STRIKE_CRAFT_DB[sq.type];
+    let dbStats = window.strikeCraftChassis(sq.type);
     const wpnSelect = document.getElementById(`sq-wpn-select-${vesselId}-${sqIdx}`);
     const targetSelect = document.getElementById(`sq-target-${vesselId}-${sqIdx}`);
     if (!wpnSelect || !targetSelect || !dbStats) return;
@@ -769,7 +771,7 @@ window.addSquadronToBattleMap = async function(carrierVessel, sq, markerId, tact
         ? clampToGrid(carrierPos.x + (Math.random() * 60 - 30), carrierPos.y + (Math.random() * 60 - 30))
         : staggeredTokenPos(tokens.length);
 
-    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: markerId, x: pos.x, y: pos.y, move_remaining: tacticalSpeed ?? 160 });
+    tokens.push({ token_id: genBattleTokenId(), ship_marker_id: markerId, x: pos.x, y: pos.y, move_remaining: tacticalSpeed ?? SQUADRON_TACTICAL_SPEED }); // squadrons move 320, not the 160 ship default
     await saveBattleTokens(tokens);
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
