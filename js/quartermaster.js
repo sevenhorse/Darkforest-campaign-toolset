@@ -45,20 +45,36 @@ const fmt = (n) => { const x = Number(n) || 0; return Number.isInteger(x) ? x.to
 
 window.quartermasterOn = function () { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('item_issue'); };
 
-/* ---------- holds ---------- */
+/* ---------- holds ----------
+   A hold is a ship's cargo or a colony's storage. Keys: 'ship:<id>' /
+   'colony:<id>' (a bare id means a ship). Players use ships they own
+   (owner_ids) and colonies they own (owner_id); the DM uses any. */
+const colonies = () => (typeof coloniesList !== 'undefined' ? coloniesList : []) || [];
+const isColony = (h) => !!(h && h.__colony);
+function resolveHold(key) {
+    const k = String(key || '');
+    if (k.startsWith('colony:')) { const c = colonies().find(x => x.id === k.slice(7)); if (c) c.__colony = true; return c || null; }
+    const id = k.startsWith('ship:') ? k.slice(5) : k;
+    return ships().find(x => x.id === id) || null;
+}
+const holdKey = (h) => (isColony(h) ? 'colony:' : 'ship:') + h.id;
 function canUseHold(v) {
     if (!v) return false;
     if (isDm()) return true;
+    if (isColony(v)) return v.owner_id === myId();
     return typeof window.vesselHasOwner === 'function' && window.vesselHasOwner(v, myId());
 }
-function myHolds() { return ships().filter(canUseHold).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))); }
-function cargoOf(v) { return window.sanitizeCargo(v.cargo_inventory); }
+function myHolds() {
+    const cs = colonies().map(c => { c.__colony = true; return c; });
+    return ships().concat(cs).filter(canUseHold).sort((a, b) => (isColony(a) - isColony(b)) || String(a.name || '').localeCompare(String(b.name || '')));
+}
+function cargoOf(v) { return isColony(v) ? window.sanitizeColonyCargo(v.cargo_inventory) : window.sanitizeCargo(v.cargo_inventory); }
 function stockOf(v, name) {
     const f = window.findCargoItemAcrossBuckets(cargoOf(v), name);
     return f ? Number(f.item.qty) || 0 : 0;
 }
 async function saveCargo(v, cargo) {
-    const { error } = await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', v.id);
+    const { error } = await db.from(isColony(v) ? 'colonies' : 'ship_markers').update({ cargo_inventory: cargo }).eq('id', v.id);
     if (error) throw new Error('hold update failed: ' + error.message);
     v.cargo_inventory = cargo;
 }
@@ -70,6 +86,7 @@ async function takeFromHold(v, name, qty) {
     const taken = Math.max(0, Math.min(have, qty));
     if (!taken) return 0;
     f.item.qty = +(have - taken).toFixed(4);
+    if (f.item.qty <= 0) cargo[f.bucket] = cargo[f.bucket].filter(i => i !== f.item); // no empty rows left behind
     await saveCargo(v, cargo);
     return taken;
 }
@@ -86,8 +103,28 @@ async function log(content) {
 async function refreshAll() {
     if (typeof loadAllProfiles === 'function') await loadAllProfiles();
     if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
+    if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
     if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
     if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();
+}
+// A thrown / self-fed weapon (grenades, claymores): its ammo is the item
+// itself, so ISSUE tops up one Arsenal row's count and RETURN gives back what
+// is carried -- no separate "weapon" unit sits on the sheet.
+function selfFed(c) {
+    const ws = (c && c.weapon_stats) || {};
+    if (!c || c.issue_kind !== 'weapon' || ws.max_ammo == null || ws.max_ammo === '') return false;
+    return String(ws.ammo_item || c.name).toLowerCase() === String(c.name).toLowerCase();
+}
+const isSelfFedRow = (w) => !!w && !!w.ammo_item && String(w.ammo_item).toLowerCase() === String(returnName(w) || '').toLowerCase();
+function selfFedRow(prof, c) {
+    return (prof.arsenal || []).find(w => w.catalog_item_id === c.id) || (prof.arsenal || []).find(w => String(w.ammo_item || '').toLowerCase() === c.name.toLowerCase() && !w.catalog_item_id && String(w.name).toLowerCase().replace(/[^a-z]/g, '') === c.name.toLowerCase().replace(/[^a-z]/g, '')) || null;
+}
+// Sealed kits that can go back to a hold (a part-used open kit stays with the character).
+function returnableQty(g) {
+    const have = Number(g.qty == null ? 1 : g.qty);
+    const def = gearDef(g.gear_definition_id);
+    const opened = def && def.max_uses && g.uses_left != null && Number(g.uses_left) < Number(def.max_uses);
+    return Math.max(0, opened ? have - 1 : have);
 }
 function charName(prof) { return (prof && prof.character && prof.character.name) || (prof && prof.username) || 'a character'; }
 
@@ -145,7 +182,7 @@ function holdSelect(id, itemName, needStock) {
     const list = myHolds().map(v => ({ v, n: itemName ? stockOf(v, itemName) : null })).filter(x => !needStock || x.n > 0);
     list.sort((a, b) => (b.n || 0) - (a.n || 0));
     if (!list.length) return '';
-    return `<select id="${id}" style="margin:0;">${list.map(x => `<option value="${x.v.id}">${esc(x.v.name)}${x.n != null ? ` — has ${fmt(x.n)}` : ''}</option>`).join('')}</select>`;
+    return `<select id="${id}" style="margin:0;">${list.map(x => `<option value="${holdKey(x.v)}">${isColony(x.v) ? '🏠 ' : ''}${esc(x.v.name)}${x.n != null ? ` — has ${fmt(x.n)}` : ''}</option>`).join('')}</select>`;
 }
 
 /* ---------- ISSUE (hold -> sheet) ---------- */
@@ -154,7 +191,7 @@ function issueTargets() {
         .sort((a, b) => charName(a).localeCompare(charName(b)));
 }
 window.openIssueModal = function (vesselId, cargoName) {
-    const v = ships().find(s => s.id === vesselId);
+    const v = resolveHold(vesselId);
     const c = catByName(cargoName);
     if (!v || !c || !c.issue_kind || !canUseHold(v)) return;
     const have = stockOf(v, c.name);
@@ -162,7 +199,10 @@ window.openIssueModal = function (vesselId, cargoName) {
     if (!targets.length) { alert('Save your Dossier & Stats once before drawing items.'); return; }
     const weapon = c.issue_kind === 'weapon';
     const ws = c.weapon_stats || {};
-    const maxQty = weapon ? Math.min(10, Math.floor(have)) : have;
+    const thrown = selfFed(c);
+    const me = targets.find(p => p.id === myId()) || targets[0];
+    const roomFor = (prof) => { const row = selfFedRow(prof, c); return Math.max(0, (parseInt(ws.max_ammo, 10) || 0) - Number(row ? row.ammo || 0 : 0)); };
+    const maxQty = thrown ? Math.min(Math.floor(have), roomFor(me)) : (weapon ? Math.min(10, Math.floor(have)) : have);
     const blurb = weapon
         ? `${esc(ws.dice || '1d6')} ${esc(ws.modifier || '+0')}${ws.damage_type ? ' · ' + esc(ws.damage_type) : ''}${ws.max_ammo != null ? ` · magazine ${ws.max_ammo}${ws.ammo_item ? ' (' + esc(ws.ammo_item) + ')' : ''} — arrives empty, RELOAD from a hold` : ''}`
         : (() => { const d = gearDef(c.gear_definition_id); return d ? esc(d.name) + (d.max_uses ? ` · ${d.max_uses} uses each` : (d.consumable ? ' · consumable' : '')) : 'Gear (a gear entry is created on first issue).'; })();
@@ -171,28 +211,39 @@ window.openIssueModal = function (vesselId, cargoName) {
         <p style="font-size:10px; color:#6b826a; margin:0;">${blurb}</p>
         ${fieldLbl('qm-target', 'Issue to')}
         <select id="qm-target" style="margin:0;">${targets.map(p => `<option value="${p.id}">${esc(charName(p))}</option>`).join('')}</select>
-        ${fieldLbl('qm-qty', weapon ? 'How many (each is its own Arsenal entry, max 10)' : 'Quantity')}
+        ${fieldLbl('qm-qty', thrown ? `How many to carry (room for ${roomFor(me)} more, carry limit ${ws.max_ammo})` : (weapon ? 'How many (each is its own Arsenal entry, max 10)' : 'Quantity'))}
         <input type="number" id="qm-qty" min="1" max="${maxQty}" value="1" step="${weapon ? 1 : 'any'}" style="margin:0; text-align:center;">`,
     'ISSUE', async () => {
         const qty = Number(byId('qm-qty').value);
         if (!(qty > 0)) return 'Enter a quantity above 0.';
         if (weapon && !Number.isInteger(qty)) return 'Weapons are issued in whole numbers.';
-        if (qty > maxQty) return `Only ${fmt(maxQty)} can be issued from this hold.`;
-        await window.issueItem(v.id, c.id, byId('qm-target').value, qty);
+        if (thrown) { const room = roomFor(targets.find(p => p.id === byId('qm-target').value)); if (qty > room) return `Room for ${room} more (carry limit ${ws.max_ammo}).`; if (qty > have) return `Only ${fmt(have)} in this hold.`; }
+        else if (qty > maxQty) return `Only ${fmt(maxQty)} can be issued from this hold.`;
+        await window.issueItem(holdKey(v), c.id, byId('qm-target').value, qty);
     });
 };
 // Core (also used by tests). Takes from the hold first; puts it back if the sheet write fails.
 window.issueItem = async function (vesselId, catalogId, profileId, qty) {
-    const v = ships().find(s => s.id === vesselId);
+    const v = resolveHold(vesselId);
     const c = catById(catalogId);
     const prof = profiles().find(p => p.id === profileId);
     if (!v || !c || !prof || !prof.character) throw new Error('Missing hold, item or character.');
     if (!canUseHold(v)) throw new Error('You can only draw from holds you own.');
     if (!isDm() && profileId !== myId()) throw new Error('Players can only issue to their own character.');
+    const thrown = selfFed(c);
+    const thrownRow = thrown ? selfFedRow(prof, c) : null;
+    if (thrown) {
+        const cap = parseInt(c.weapon_stats.max_ammo, 10) || 0;
+        const room = Math.max(0, cap - Number(thrownRow ? thrownRow.ammo || 0 : 0));
+        if (!Number.isInteger(qty) || qty > room) throw new Error(`Room for ${room} more ${c.name} (carry limit ${cap}).`);
+    }
     const taken = await takeFromHold(v, c.name, qty);
     if (taken < qty) { if (taken) await putInHold(v, c.name, taken); throw new Error(`${v.name} doesn't have ${fmt(qty)} ${c.name}.`); }
     try {
-        if (c.issue_kind === 'weapon') {
+        if (thrown && thrownRow) {
+            const { error } = await db.from('character_arsenal').update({ ammo: Number(thrownRow.ammo || 0) + qty, ammo_item: c.name, catalog_item_id: c.id }).eq('id', thrownRow.id);
+            if (error) throw new Error('Arsenal write failed: ' + error.message);
+        } else if (c.issue_kind === 'weapon') {
             const ws = c.weapon_stats || {};
             const hasMag = ws.max_ammo != null && ws.max_ammo !== '';
             const row = {
@@ -205,7 +256,8 @@ window.issueItem = async function (vesselId, catalogId, profileId, qty) {
                 range_long: ws.range_long != null && ws.range_long !== '' ? parseInt(ws.range_long, 10) : null,
                 catalog_item_id: c.id
             };
-            const { error } = await db.from('character_arsenal').insert(Array.from({ length: qty }, () => Object.assign({}, row)));
+            const rows = thrown ? [Object.assign({}, row, { ammo: qty })] : Array.from({ length: qty }, () => Object.assign({}, row));
+            const { error } = await db.from('character_arsenal').insert(rows);
             if (error) throw new Error('Arsenal write failed: ' + error.message);
         } else {
             let defId = c.gear_definition_id;
@@ -245,7 +297,8 @@ window.openReturnArsenalModal = function (arsenalId) {
     if (!w || !name) return;
     const sel = holdSelect('qm-hold', name, false);
     if (!sel) { alert('You have no ship hold to return this to.'); return; }
-    const rounds = Number(w.ammo) > 0 && w.ammo_item ? `<p style="font-size:10px; color:#6b826a; margin:6px 0 0 0;">The ${fmt(w.ammo)} loaded round(s) go back as ${esc(w.ammo_item)}.</p>` : '';
+    const rounds = isSelfFedRow(w) ? `<p style="font-size:10px; color:#6b826a; margin:6px 0 0 0;">All ${fmt(w.ammo || 0)} carried go back.</p>`
+        : (Number(w.ammo) > 0 && w.ammo_item ? `<p style="font-size:10px; color:#6b826a; margin:6px 0 0 0;">The ${fmt(w.ammo)} loaded round(s) go back as ${esc(w.ammo_item)}.</p>` : '');
     openModal(`RETURN ${w.name}`, `${fieldLbl('qm-hold', 'Return to')}${sel}${rounds}`, 'RETURN', async () => {
         await window.returnArsenalItem(arsenalId, byId('qm-hold').value);
     });
@@ -253,17 +306,18 @@ window.openReturnArsenalModal = function (arsenalId) {
 window.returnArsenalItem = async function (arsenalId, vesselId) {
     const prof = myProfileFor(p => (p.arsenal || []).some(w => w.id === arsenalId));
     const w = prof && prof.arsenal.find(x => x.id === arsenalId);
-    const v = ships().find(s => s.id === vesselId);
+    const v = resolveHold(vesselId);
     const name = w && returnName(w);
     if (!w || !v || !name) throw new Error('Missing weapon or hold.');
     if (!canUseHold(v)) throw new Error('You can only return to holds you own.');
     if (!isDm() && prof.id !== myId()) throw new Error('Not your weapon.');
     const { error } = await db.from('character_arsenal').delete().eq('id', w.id);
     if (error) throw new Error('Arsenal update failed: ' + error.message);
-    await putInHold(v, name, 1);
+    const thrown = isSelfFedRow(w);
+    if (!thrown) await putInHold(v, name, 1);
     const rounds = Number(w.ammo) > 0 && w.ammo_item ? Number(w.ammo) : 0;
     if (rounds) await putInHold(v, w.ammo_item, rounds);
-    await log(`📦 [QUARTERMASTER] ${charName(prof)} returned ${name}${rounds ? ` (+${fmt(rounds)} ${w.ammo_item})` : ''} to ${v.name}.`);
+    await log(thrown ? `📦 [QUARTERMASTER] ${charName(prof)} returned ${fmt(rounds)}x ${name} to ${v.name}.` : `📦 [QUARTERMASTER] ${charName(prof)} returned ${name}${rounds ? ` (+${fmt(rounds)} ${w.ammo_item})` : ''} to ${v.name}.`);
     await refreshAll();
 };
 window.openReturnGearModal = function (gearId) {
@@ -273,9 +327,11 @@ window.openReturnGearModal = function (gearId) {
     if (!g || !name) return;
     const sel = holdSelect('qm-hold', name, false);
     if (!sel) { alert('You have no ship hold to return this to.'); return; }
-    const have = Number(g.qty == null ? 1 : g.qty);
+    const have = returnableQty(g);
+    if (!(have > 0)) { alert(`Your only ${name} is open (part-used) -- use it up before returning it.`); return; }
+    const keepNote = have < Number(g.qty == null ? 1 : g.qty) ? ' — the open, part-used one stays with you' : '';
     openModal(`RETURN ${name}`, `${fieldLbl('qm-hold', 'Return to')}${sel}
-        ${fieldLbl('qm-qty', `Quantity (you carry ${fmt(have)})`)}
+        ${fieldLbl('qm-qty', `Quantity (${fmt(have)} can go back${keepNote})`)}
         <input type="number" id="qm-qty" min="0" max="${have}" step="any" value="${have}" style="margin:0; text-align:center;">`, 'RETURN', async () => {
         const n = Number(byId('qm-qty').value);
         if (!(n > 0) || n > have) return `Enter a quantity between 0 and ${fmt(have)}.`;
@@ -285,13 +341,14 @@ window.openReturnGearModal = function (gearId) {
 window.returnGearItem = async function (gearId, vesselId, qty) {
     const prof = myProfileFor(p => (p.gear || []).some(g => g.id === gearId));
     const g = prof && prof.gear.find(x => x.id === gearId);
-    const v = ships().find(s => s.id === vesselId);
+    const v = resolveHold(vesselId);
     const name = g && returnName(g);
     if (!g || !v || !name) throw new Error('Missing gear or hold.');
     if (!canUseHold(v)) throw new Error('You can only return to holds you own.');
     if (!isDm() && prof.id !== myId()) throw new Error('Not your gear.');
     const have = Number(g.qty == null ? 1 : g.qty);
-    const n = Math.min(have, qty);
+    const n = Math.min(returnableQty(g), qty);
+    if (!(n > 0)) throw new Error('Only the open, part-used kit is left -- use it up first.');
     const left = +(have - n).toFixed(4);
     const { error } = left > 0
         ? await db.from('character_gear').update({ qty: left }).eq('id', g.id)
@@ -318,7 +375,7 @@ window.openReloadModal = function (arsenalId) {
 window.reloadArsenalWeapon = async function (arsenalId, vesselId) {
     const prof = myProfileFor(p => (p.arsenal || []).some(w => w.id === arsenalId));
     const w = prof && prof.arsenal.find(x => x.id === arsenalId);
-    const v = ships().find(s => s.id === vesselId);
+    const v = resolveHold(vesselId);
     if (!w || !v || !w.ammo_item || w.max_ammo == null) throw new Error('Missing weapon or hold.');
     if (!canUseHold(v)) throw new Error('You can only draw from holds you own.');
     if (!isDm() && prof.id !== myId()) throw new Error('Not your weapon.');
@@ -414,7 +471,18 @@ function decorateGear() {
         }
     });
 }
-window.refreshQuartermasterButtons = function () { decorateCargo(); decorateArsenal(); decorateGear(); };
+function decorateColonies() {
+    document.querySelectorAll('.colony-cargo-row .qm-btn').forEach(b => b.remove());
+    if (!window.quartermasterOn()) return;
+    document.querySelectorAll('.colony-cargo-row[data-colony-id]').forEach(row => {
+        const col = resolveHold('colony:' + row.dataset.colonyId);
+        const c = catByName(row.dataset.cargoName);
+        if (!col || !canUseHold(col) || !c || !c.issue_kind) return;
+        row.lastElementChild.insertAdjacentHTML('beforebegin', btn('ISSUE', `window.openIssueModal('colony:${col.id}', this.closest('.colony-cargo-row').dataset.cargoName)`, `Issue to a character's ${c.issue_kind === 'weapon' ? 'Arsenal' : 'Gear'}`, '#c9962f'));
+    });
+}
+window.refreshQuartermasterButtons = function () { decorateCargo(); decorateArsenal(); decorateGear(); decorateColonies(); };
+window.onHook('colonies-rendered', 'quartermaster', decorateColonies);
 window.onHook('cargo-deck-rendered', 'quartermaster', decorateCargo);
 window.onHook('arsenal-rendered', 'quartermaster', decorateArsenal);
 window.onHook('gear-rendered', 'quartermaster', decorateGear);
@@ -422,6 +490,7 @@ document.addEventListener('darkforest:features-changed', () => {
     if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
     if (typeof window.renderArsenal === 'function') window.renderArsenal();
     if (typeof window.renderGearLoadout === 'function') window.renderGearLoadout();
+    decorateColonies();
 });
 
 /* ---------- DM: how a catalogue item is issued ---------- */

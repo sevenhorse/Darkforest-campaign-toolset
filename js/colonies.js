@@ -141,7 +141,7 @@ window.renderColonyStorageList = function(colonyId, cargo) {
     ['expendables', 'perishables', 'misc'].forEach(bucket => {
         (cargo[bucket] || []).forEach(item => {
             const safeName = (item.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            rows.push(`<div style="display:flex; justify-content:space-between; align-items:center; font-size:9px; padding:2px 0;">
+            rows.push(`<div class="colony-cargo-row" data-colony-id="${colonyId}" data-cargo-name="${String(item.name || '').replace(/"/g, '&quot;')}" style="display:flex; justify-content:space-between; align-items:center; gap:4px; font-size:9px; padding:2px 0;">
                 <span style="color:#d4c5a9;">${item.qty}x ${item.name} <span style="color:#6b826a;">(${item.unit || 'Units'})</span></span>
                 <button class="layer-edit" onclick="window.pickupColonyStorageItem('${colonyId}', '${bucket}', '${safeName}')" style="padding:1px 5px; font-size:8px;" title="Pick up this stack to the selected vessel">↑ PICK UP</button>
             </div>`);

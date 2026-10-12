@@ -603,7 +603,7 @@ window.approveBlueprint = async function(id) {
             <label for="bp-output-type" style="font-size:9px; color:#6b826a; margin-top:8px; display:block;">Produces</label>
             <select id="bp-output-type" onchange="window.syncBlueprintOutputFieldsPublic()" style="border-color:#c9962f;">
                 <option value="cargo_item">A named cargo item (delivered to a vessel's hold)</option>
-                <option value="arsenal_weapon">An Arsenal weapon (delivered to the crafting character)</option>
+                <option value="arsenal_weapon">An Arsenal weapon (legacy -- delivered to the crafting character)</option>
                 <option value="colony_infrastructure">Colony Infrastructure (raises a colony's Infrastructure Level -- colony builds only)</option>
             </select>
 
@@ -721,6 +721,12 @@ window.approveBlueprint = async function(id) {
         });
     }
 
+    // Personal weapons are now cargo items issued from the hold (js/quartermaster.js),
+    // so the old "Arsenal weapon" output is only shown when editing a blueprint that uses it.
+    function setLegacyWeaponOption(show) {
+        const opt = document.querySelector('#bp-output-type option[value="arsenal_weapon"]');
+        if (opt) { opt.hidden = !show; opt.disabled = !show; }
+    }
     // Output catalog picker (filled each time the modal opens).
     function fillOutputCatalogPick() {
         const sel = document.getElementById('bp-out-cargo-pick');
@@ -755,6 +761,7 @@ window.approveBlueprint = async function(id) {
         document.getElementById('bp-edit-desc').value = '';
         document.getElementById('bp-edit-hours').value = 24;
         document.getElementById('bp-output-type').value = 'cargo_item';
+        setLegacyWeaponOption(false);
         document.getElementById('bp-out-cargo-name').value = '';
         document.getElementById('bp-out-cargo-qty').value = 1;
         document.getElementById('bp-out-cargo-unit').value = 'Units';
@@ -785,6 +792,7 @@ window.approveBlueprint = async function(id) {
         document.getElementById('bp-edit-name').value = bp.name || '';
         document.getElementById('bp-edit-desc').value = bp.description || '';
         document.getElementById('bp-edit-hours').value = bp.time_cost_hours || 24;
+        setLegacyWeaponOption(bp.output_type === 'arsenal_weapon');
         document.getElementById('bp-output-type').value = bp.output_type || 'cargo_item';
         const p = bp.output_payload || {};
         document.getElementById('bp-out-cargo-name').value = bp.output_type === 'cargo_item' ? (p.name || '') : '';
