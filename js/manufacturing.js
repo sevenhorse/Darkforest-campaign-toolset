@@ -134,7 +134,20 @@ async function loadManufacturingBlueprints() {
         if (typeof window.renderManufacturingPanel === 'function') window.renderManufacturingPanel();
         if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
         if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
+        if (typeof window.renderCargoCatalogDmList === 'function') window.renderCargoCatalogDmList(); // "no blueprint" tags
     }
+}
+
+// A cargo-item output that isn't in the cargo catalog yet gets added once
+// the blueprint is approved, so manufacturing can't invent names the rest of
+// the app (pickers, ISSUE, ammo types) doesn't know. DM only.
+async function ensureCatalogEntryForOutput(bp) {
+    if (!bp || bp.output_type !== 'cargo_item' || typeof currentUserRole === 'undefined' || currentUserRole !== 'dm') return;
+    const p = bp.output_payload || {};
+    if (!p.name || (typeof window.catalogItemByName === 'function' && window.catalogItemByName(p.name))) return;
+    const { error } = await db.from('cargo_item_catalog').insert({ name: p.name, unit: p.unit || 'Units', category: MANUFACTURING_CARGO_BUCKETS.includes(p.cargo_bucket) ? p.cargo_bucket : 'expendables', manifest_section: 'Other', notes: 'Added from blueprint "' + bp.name + '".' });
+    if (error) { console.error('ensureCatalogEntryForOutput', error); return; }
+    if (typeof window.loadCargoItemCatalog === 'function') window.loadCargoItemCatalog();
 }
 
 async function loadManufacturingOrders() {
@@ -452,6 +465,7 @@ window.approveBlueprint = async function(id) {
     if (!bp) return;
     const { error } = await db.from('manufacturing_blueprints').update({ status: 'approved' }).eq('id', id);
     if (error) { alert('Failed to approve blueprint: ' + error.message); return; }
+    await ensureCatalogEntryForOutput(bp);
     await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `📋 [OVERSEER] Blueprint "${bp.name}" approved and added to the active manufacturing catalog.` });
     loadManufacturingBlueprints();
 };
@@ -594,11 +608,14 @@ window.approveBlueprint = async function(id) {
             </select>
 
             <div id="bp-output-cargo-fields" style="margin-top:6px;">
+                <label for="bp-out-cargo-pick" style="font-size:8px; color:#6b826a; display:block;">Catalog item -- fills name, unit and category. Or type a new name below (it joins the catalog when approved).</label>
+                <select id="bp-out-cargo-pick" onchange="window.applyBlueprintOutputCatalogPick(this.value)" style="margin:0 0 5px 0; font-size:9px; border-color:#c9962f;"></select>
                 <div style="display:flex; gap:6px;">
-                    <input type="text" id="bp-out-cargo-name" placeholder="Item name" style="flex:2; margin:0; font-size:9px; border-color:#c9962f;">
+                    <input type="text" id="bp-out-cargo-name" list="cargo-catalog-names" oninput="window.updateBlueprintOutputCatalogHint()" placeholder="Item name" style="flex:2; margin:0; font-size:9px; border-color:#c9962f;">
                     <input type="number" id="bp-out-cargo-qty" placeholder="Qty" min="1" value="1" style="flex:1; margin:0; font-size:9px; text-align:center; border-color:#c9962f;">
                     <input type="text" id="bp-out-cargo-unit" placeholder="Unit" value="Units" style="flex:1; margin:0; font-size:9px; border-color:#c9962f;">
                 </div>
+                <div id="bp-out-cargo-hint" style="font-size:8px; color:#c9962f; margin-top:3px; min-height:10px;"></div>
                 <label for="bp-out-cargo-bucket" style="font-size:8px; color:#6b826a; margin-top:5px; display:block;">Cargo Category -- which hold this lands in on delivery. Perishables is what the daily rations/starvation check reads from; defaults to Expendables.</label>
                 <select id="bp-out-cargo-bucket" style="margin:0; font-size:9px; border-color:#c9962f;">
                     <option value="expendables">Expendables (default)</option>
@@ -669,6 +686,10 @@ window.approveBlueprint = async function(id) {
                     unit: document.getElementById('bp-out-cargo-unit').value.trim() || 'Units',
                     cargo_bucket: document.getElementById('bp-out-cargo-bucket').value || 'expendables'
                 };
+                // A catalog item keeps the catalog's spelling, unit and category,
+                // so the build stacks onto existing stock instead of a near-duplicate.
+                const cat = typeof window.catalogItemByName === 'function' ? window.catalogItemByName(itemName) : null;
+                if (cat) Object.assign(outputPayload, { name: cat.name, unit: cat.unit || outputPayload.unit, cargo_bucket: cat.category || outputPayload.cargo_bucket });
             }
 
             const payload = {
@@ -692,10 +713,37 @@ window.approveBlueprint = async function(id) {
                 const { error } = await db.from('manufacturing_blueprints').insert(payload);
                 if (error) { alert('Failed to create blueprint: ' + error.message); return; }
             }
+            if (payload.status === 'approved' || (currentId && (manufacturingBlueprintsList.find(b => b.id === currentId) || {}).status !== 'draft')) {
+                await ensureCatalogEntryForOutput(Object.assign({}, payload));
+            }
             overlay.style.display = 'none';
             loadManufacturingBlueprints();
         });
     }
+
+    // Output catalog picker (filled each time the modal opens).
+    function fillOutputCatalogPick() {
+        const sel = document.getElementById('bp-out-cargo-pick');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">-- Pick from the cargo catalog --</option>' + (typeof window.renderCargoCatalogOptionsHtml === 'function' ? window.renderCargoCatalogOptionsHtml() : '');
+        sel.value = '';
+    }
+    window.applyBlueprintOutputCatalogPick = function(catalogId) {
+        const list = typeof window.getCargoCatalog === 'function' ? window.getCargoCatalog() : [];
+        const item = list.find(c => c.id === catalogId);
+        if (!item) return;
+        document.getElementById('bp-out-cargo-name').value = item.name;
+        document.getElementById('bp-out-cargo-unit').value = item.unit || 'Units';
+        document.getElementById('bp-out-cargo-bucket').value = item.category || 'expendables';
+        window.updateBlueprintOutputCatalogHint();
+    };
+    window.updateBlueprintOutputCatalogHint = function() {
+        const hint = document.getElementById('bp-out-cargo-hint');
+        const name = (document.getElementById('bp-out-cargo-name') || {}).value || '';
+        if (!hint) return;
+        const cat = typeof window.catalogItemByName === 'function' ? window.catalogItemByName(name) : null;
+        hint.textContent = !name.trim() ? '' : (cat ? `✓ Catalog item (${cat.category}, ${cat.unit || 'Units'}) -- saved with the catalog's spelling, unit and category.` : '+ New item -- added to the cargo catalog when this blueprint is approved.');
+    };
 
     window.openNewBlueprintModal = function() {
         // No permission gate: anyone can propose. Status is set on save.
@@ -720,6 +768,8 @@ window.approveBlueprint = async function(id) {
         syncOutputFields();
         populateCostInputDropdown();
         renderCostList();
+        fillOutputCatalogPick();
+        window.updateBlueprintOutputCatalogHint();
         overlay.style.display = 'flex';
     };
 
@@ -751,6 +801,8 @@ window.approveBlueprint = async function(id) {
         syncOutputFields();
         populateCostInputDropdown();
         renderCostList();
+        fillOutputCatalogPick();
+        window.updateBlueprintOutputCatalogHint();
         overlay.style.display = 'flex';
     };
 })();
@@ -769,11 +821,25 @@ const MANUFACTURING_CARGO_BUCKETS = ['expendables', 'perishables', 'misc'];
 function findCargoItemAcrossBuckets(cargo, name) {
     const lower = (name || '').toLowerCase();
     for (const bucket of MANUFACTURING_CARGO_BUCKETS) {
-        const item = (cargo[bucket] || []).find(i => i.name.toLowerCase() === lower);
+        const item = (cargo[bucket] || []).find(i => (i.name || '').toLowerCase() === lower);
         if (item) return { item, bucket };
     }
     return null;
 }
+window.findCargoItemAcrossBuckets = findCargoItemAcrossBuckets;
+// Adds qty of an item to a 3-bin cargo object (mutates it). Stacks onto an
+// existing row in ANY bin first, so a blueprint or refund whose bin differs
+// from where the stock already sits can't split it into two rows; only a
+// new item goes into `bucket` (default expendables). Returns the bin used.
+function addCargoStack(cargo, name, qty, unit, bucket) {
+    const found = findCargoItemAcrossBuckets(cargo, name);
+    if (found) { found.item.qty += qty; return found.bucket; }
+    const b = MANUFACTURING_CARGO_BUCKETS.includes(bucket) ? bucket : 'expendables';
+    if (!Array.isArray(cargo[b])) cargo[b] = [];
+    cargo[b].push({ name, qty, unit: unit || 'Units' });
+    return b;
+}
+window.addCargoStack = addCargoStack;
 
 window.startVesselManufacturingOrder = async function(vesselId, blueprintId) {
     const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
@@ -1208,12 +1274,7 @@ window.cancelManufacturingOrder = async function(orderId) {
             const colony = (typeof coloniesList !== 'undefined') ? coloniesList.find(c => c.id === order.source_colony_id) : null;
             if (colony) {
                 let cargo = window.sanitizeColonyCargo(colony.cargo_inventory);
-                order.resource_cost_snapshot.forEach(r => {
-                    const bucket = MANUFACTURING_CARGO_BUCKETS.includes(r.bucket) ? r.bucket : 'expendables';
-                    const existing = (cargo[bucket] || []).find(i => i.name.toLowerCase() === r.name.toLowerCase());
-                    if (existing) existing.qty += r.qty;
-                    else cargo[bucket].push({ name: r.name, qty: r.qty, unit: r.unit || 'Units' });
-                });
+                order.resource_cost_snapshot.forEach(r => addCargoStack(cargo, r.name, r.qty, r.unit, r.bucket));
                 await db.from('colonies').update({ cargo_inventory: cargo }).eq('id', colony.id);
                 colony.cargo_inventory = cargo;
                 if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
@@ -1222,12 +1283,7 @@ window.cancelManufacturingOrder = async function(orderId) {
             const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
             if (vessel) {
                 let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-                order.resource_cost_snapshot.forEach(r => {
-                    const bucket = MANUFACTURING_CARGO_BUCKETS.includes(r.bucket) ? r.bucket : 'expendables';
-                    const existing = (cargo[bucket] || []).find(i => i.name.toLowerCase() === r.name.toLowerCase());
-                    if (existing) existing.qty += r.qty;
-                    else cargo[bucket].push({ name: r.name, qty: r.qty, unit: r.unit || 'Units' });
-                });
+                order.resource_cost_snapshot.forEach(r => addCargoStack(cargo, r.name, r.qty, r.unit, r.bucket));
                 await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
                 vessel.cargo_inventory = cargo;
                 if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
@@ -1289,11 +1345,9 @@ async function completeManufacturingOrder(order) {
             if (!vessel) return true; // target vessel no longer exists -- fizzle (order was already removed by the claim above)
             const p = order.output_payload || {};
             let cargo = window.sanitizeCargo(vessel.cargo_inventory);
-            // Deliver into the output's cargo_bucket; missing = expendables.
-            const bucket = MANUFACTURING_CARGO_BUCKETS.includes(p.cargo_bucket) ? p.cargo_bucket : 'expendables';
-            let existing = (cargo[bucket] || []).find(i => (i.name || '').toLowerCase() === (p.name || '').toLowerCase());
-            if (existing) existing.qty += (p.qty || 0);
-            else cargo[bucket].push({ name: p.name, qty: p.qty || 0, unit: p.unit || 'Units' });
+            // Stacks onto the item wherever it already sits; a new item goes
+            // into the output's cargo_bucket (missing = expendables).
+            const bucket = addCargoStack(cargo, p.name, p.qty || 0, p.unit, p.cargo_bucket);
             const { error: cargoErr } = await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
             if (cargoErr) throw new Error('cargo delivery failed: ' + cargoErr.message);
             vessel.cargo_inventory = cargo;

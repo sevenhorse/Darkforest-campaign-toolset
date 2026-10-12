@@ -1250,9 +1250,12 @@ window.renderGearLoadout = function() {
     gear.forEach(cg => {
         const def = typeof window.findGearDefinition === 'function' ? window.findGearDefinition(cg.gear_definition_id) : null;
         const title = def ? def.name : (cg.notes ? '(uncatalogued)' : 'Unknown');
-        installedHtml += `<div style="background:#030403; padding:5px 6px; border:1px solid ${cg.equipped ? '#3c4e36' : '#6b826a'}; border-radius:2px; margin-bottom:3px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px; ${cg.equipped ? '' : 'opacity:0.6;'}">
+        // Quantity (2026-10-11): a real column now ("x12" notes were migrated into it).
+        const qty = cg.qty == null ? 1 : Number(cg.qty);
+        const qtyHtml = qty !== 1 ? ` <span class="gear-qty" style="font-size:10px; color:#d4c5a9;">×${+qty.toFixed(2)}</span>` : '';
+        installedHtml += `<div class="gear-row" data-gear-id="${cg.id}" style="background:#030403; padding:5px 6px; border:1px solid ${cg.equipped ? '#3c4e36' : '#6b826a'}; border-radius:2px; margin-bottom:3px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px; ${cg.equipped ? '' : 'opacity:0.6;'}">
             <div style="flex:1;">
-                ${def ? `<strong style="color:#00e5a3; font-size:10px;">${def.name}</strong>` : `<strong style="color:#6b826a; font-size:10px;">${title}</strong>`}
+                ${def ? `<strong style="color:#00e5a3; font-size:10px;">${def.name}</strong>` : `<strong style="color:#6b826a; font-size:10px;">${title}</strong>`}${qtyHtml}
                 ${!cg.equipped ? '<span style="font-size:8px; color:#6b826a;"> (stowed — not contributing bonuses)</span>' : ''}
                 ${cg.notes ? `<div style="font-size:9px; color:#d4c5a9;">${cg.notes}</div>` : ''}
             </div>
@@ -1272,9 +1275,14 @@ window.renderGearLoadout = function() {
         <div style="display:flex; gap:4px; margin-top:3px;">
             <label for="gear-loadout-notes" style="display:none;">Notes</label>
             <input type="text" id="gear-loadout-notes" placeholder="Notes (optional flavor)" style="flex:1; margin:0; font-size:10px;">
+            <label for="gear-loadout-qty" style="display:none;">Quantity</label>
+            <input type="number" id="gear-loadout-qty" min="0" step="any" value="1" title="Quantity" style="width:52px; flex:0 0 52px; margin:0; font-size:10px; text-align:center;">
             <button class="btn-deploy" onclick="window.addCharacterGear()" style="width:auto; margin:0; padding:4px 8px; font-size:9px;">+ ADD</button>
         </div>`;
 };
+
+// js/quartermaster.js adds USE / RETURN and kit charges on this.
+window.renderGearLoadout = window.withAfterHooks('gear-rendered', window.renderGearLoadout);
 
 window.addCharacterGear = async function() {
     const myProf = allProfiles.find(p => p.id === currentUserId);
@@ -1284,12 +1292,15 @@ window.addCharacterGear = async function() {
     const gearDefId = picker && picker.value ? picker.value : null;
     const notes = notesInput ? notesInput.value.trim() : '';
     if (!gearDefId && !notes) { alert("Pick a gear item from the catalog and/or enter a note — can't add a completely empty entry."); return; }
-    const { data, error } = await db.from('character_gear').insert({ character_id: myProf.character.id, gear_definition_id: gearDefId, notes: notes || null, equipped: true }).select().single();
+    const qtyInput = document.getElementById('gear-loadout-qty');
+    const qty = qtyInput && qtyInput.value.trim() !== '' ? Math.max(0, Number(qtyInput.value) || 0) : 1;
+    const { data, error } = await db.from('character_gear').insert({ character_id: myProf.character.id, gear_definition_id: gearDefId, notes: notes || null, equipped: true, qty: qty || 1 }).select().single();
     if (error) { alert("Failed to add gear: " + error.message); return; }
     myProf.gear = myProf.gear || [];
     myProf.gear.push(data);
     if (picker) picker.value = '';
     if (notesInput) notesInput.value = '';
+    if (qtyInput) qtyInput.value = '1';
     if (typeof window.renderGearLoadout === 'function') window.renderGearLoadout();
     if (typeof window.updateShieldDisplay === 'function') window.updateShieldDisplay();
     if (typeof window.updateInjuryMax === 'function') window.updateInjuryMax();

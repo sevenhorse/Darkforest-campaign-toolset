@@ -129,6 +129,7 @@
                     <input type="number" id="dmse-arsenal-ammo" min="0" placeholder="Ammo (blank=∞)" style="flex:1; margin:0; text-align:center;">
                     <input type="number" id="dmse-arsenal-maxammo" min="0" placeholder="Max Ammo" style="flex:1; margin:0; text-align:center;">
                 </div>
+                <input type="text" id="dmse-arsenal-ammoitem" list="cargo-catalog-names" placeholder="Reloads from (hold item, optional)" title="RELOAD refills the magazine from this item in a ship hold" style="margin-top:4px;">
                 <select id="dmse-arsenal-dmgtype" style="margin-top:4px;"><option value="">No Damage Type</option></select>
                 <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:4px;">
                     <input type="checkbox" id="dmse-arsenal-explodes" style="margin:0;"> Exploding Dice
@@ -307,7 +308,7 @@
             const def = typeof window.findGearDefinition === 'function' ? window.findGearDefinition(cg.gear_definition_id) : null;
             const title = def ? def.name : (cg.notes ? '(uncatalogued)' : 'Unknown');
             return `<div style="background:#030403; padding:4px 6px; border:1px solid ${cg.equipped ? '#3c4e36' : '#6b826a'}; border-radius:2px; margin-bottom:3px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px; ${cg.equipped ? '' : 'opacity:0.6;'}">
-                <div style="flex:1;">${def ? `<strong style="color:#00e5a3; font-size:10px;">${def.name}</strong>` : `<strong style="color:#6b826a; font-size:10px;">${title}</strong>`}${!cg.equipped ? '<span style="font-size:8px; color:#6b826a;"> (stowed)</span>' : ''}${cg.notes ? `<div style="font-size:9px; color:#d4c5a9;">${cg.notes}</div>` : ''}</div>
+                <div style="flex:1;">${def ? `<strong style="color:#00e5a3; font-size:10px;">${def.name}</strong>` : `<strong style="color:#6b826a; font-size:10px;">${title}</strong>`}${(cg.qty != null && Number(cg.qty) !== 1) ? ` <span style="font-size:10px; color:#d4c5a9;">×${+Number(cg.qty).toFixed(2)}</span>` : ''}${cg.uses_left != null ? ` <span style="font-size:9px; color:#9fe9f5;">(${cg.uses_left} uses left)</span>` : ''}${!cg.equipped ? '<span style="font-size:8px; color:#6b826a;"> (stowed)</span>' : ''}${cg.notes ? `<div style="font-size:9px; color:#d4c5a9;">${cg.notes}</div>` : ''}</div>
                 <div style="display:flex; gap:3px; flex-shrink:0;">
                     <button onclick="window.dmToggleCharacterGearEquipped('${cg.id}', '${targetProfileId}')" style="width:auto; margin:0; padding:2px 6px; font-size:9px;">${cg.equipped ? 'STOW' : 'EQUIP'}</button>
                     <button onclick="window.dmRemoveCharacterGear('${cg.id}', '${targetProfileId}')" style="width:auto; margin:0; padding:2px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">✕</button>
@@ -380,6 +381,7 @@
         document.getElementById('dmse-arsenal-mod').value = '';
         document.getElementById('dmse-arsenal-ammo').value = '';
         document.getElementById('dmse-arsenal-maxammo').value = '';
+        document.getElementById('dmse-arsenal-ammoitem').value = '';
         document.getElementById('dmse-arsenal-dmgtype').value = '';
         document.getElementById('dmse-arsenal-explodes').checked = false;
         document.getElementById('dmse-arsenal-save-btn').innerText = '+ ADD WEAPON';
@@ -396,6 +398,7 @@
         document.getElementById('dmse-arsenal-mod').value = w.modifier || '+0';
         document.getElementById('dmse-arsenal-ammo').value = (w.ammo === null || w.ammo === undefined) ? '' : w.ammo;
         document.getElementById('dmse-arsenal-maxammo').value = (w.max_ammo === null || w.max_ammo === undefined) ? '' : w.max_ammo;
+        document.getElementById('dmse-arsenal-ammoitem').value = w.ammo_item || '';
         document.getElementById('dmse-arsenal-dmgtype').value = w.damage_type || '';
         document.getElementById('dmse-arsenal-explodes').checked = !!w.explodes;
         document.getElementById('dmse-arsenal-save-btn').innerText = 'SAVE CHANGES';
@@ -419,7 +422,8 @@
             name, dice, modifier: mod,
             explodes: document.getElementById('dmse-arsenal-explodes').checked,
             damage_type: document.getElementById('dmse-arsenal-dmgtype').value || null,
-            ammo: ammoVal, max_ammo: maxAmmoVal
+            ammo: ammoVal, max_ammo: maxAmmoVal,
+            ammo_item: (typeof window.snapToCatalogName === 'function' ? window.snapToCatalogName(document.getElementById('dmse-arsenal-ammoitem').value) : document.getElementById('dmse-arsenal-ammoitem').value.trim()) || null
         };
 
         if (editingArsenalId) {

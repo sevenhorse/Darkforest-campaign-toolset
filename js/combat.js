@@ -18,11 +18,29 @@
    Anyone can read; only the DM sees the add/remove editor (gated in
    js/db.js handleLogin). */
 let cargoItemCatalogList = [];
+window.getCargoCatalog = function() { return cargoItemCatalogList; };
+// Catalog spelling for a typed name (case-insensitive match), or the name as typed.
+window.catalogItemByName = function(name) {
+    const lower = String(name || '').trim().toLowerCase();
+    return lower ? (cargoItemCatalogList.find(c => (c.name || '').toLowerCase() === lower) || null) : null;
+};
+window.snapToCatalogName = function(name) {
+    const c = window.catalogItemByName(name);
+    return c ? c.name : String(name || '').trim();
+};
+// One shared <datalist id="cargo-catalog-names"> so any free-text item field
+// (ammo types, blueprint outputs) suggests catalog names; typing is still allowed.
+window.refreshCatalogDatalist = function() {
+    let dl = document.getElementById('cargo-catalog-names');
+    if (!dl) { dl = document.createElement('datalist'); dl.id = 'cargo-catalog-names'; document.body.appendChild(dl); }
+    dl.innerHTML = cargoItemCatalogList.map(c => `<option value="${String(c.name || '').replace(/"/g, '&quot;')}"></option>`).join('');
+};
 
 window.loadCargoItemCatalog = async function() {
     const { data, error } = await db.from('cargo_item_catalog').select('*').order('manifest_section', { ascending: true }).order('name', { ascending: true });
     if (error) { console.error('Failed to load cargo item catalog:', error.message); return; }
     cargoItemCatalogList = data || [];
+    window.refreshCatalogDatalist();
     if (typeof window.renderCargoCatalogPickers === 'function') window.renderCargoCatalogPickers();
     if (typeof window.renderCargoCatalogDmList === 'function') window.renderCargoCatalogDmList();
 };
@@ -98,7 +116,12 @@ window.renderCargoCatalogDmList = function() {
     const container = document.getElementById('cargo-catalog-dm-list');
     if (!container) return;
     if (!cargoItemCatalogList.length) { container.innerHTML = '<div style="font-size:9px; color:#6b826a;">No catalog items yet.</div>'; return; }
-    container.innerHTML = cargoItemCatalogList.map(c => `<div style="display:flex; justify-content:space-between; align-items:center; font-size:9px; padding:3px 0; border-bottom:1px solid #1c261a;"><span>${c.name} <span style="color:#6b826a;">(${c.category}${c.unit ? ', ' + c.unit : ''})</span></span><button onclick="window.deleteCargoCatalogItem('${c.id}')" style="font-size:8px; padding:1px 5px;">✕</button></div>`).join('');
+    // "no blueprint" = nothing in the manufacturing catalog builds this item.
+    const built = new Set(((typeof manufacturingBlueprintsList !== 'undefined' && manufacturingBlueprintsList) || [])
+        .filter(b => b.output_type === 'cargo_item').map(b => String((b.output_payload && b.output_payload.name) || '').toLowerCase()));
+    const kindTag = (c) => c.issue_kind === 'weapon' ? ' <span style="color:#ffaa00;" title="Issued to a character\'s Arsenal">· weapon</span>'
+        : (c.issue_kind === 'gear' ? ' <span style="color:#9fe9f5;" title="Issued to a character\'s Gear">· gear</span>' : '');
+    container.innerHTML = cargoItemCatalogList.map(c => `<div class="catalog-dm-row" data-catalog-id="${c.id}" style="display:flex; justify-content:space-between; align-items:center; gap:4px; font-size:9px; padding:3px 0; border-bottom:1px solid #1c261a;"><span style="flex:1;">${c.name} <span style="color:#6b826a;">(${c.category}${c.unit ? ', ' + c.unit : ''})</span>${kindTag(c)}${built.has(String(c.name || '').toLowerCase()) ? '' : ' <span style="color:#c9962f;" title="No manufacturing blueprint builds this item">· no blueprint</span>'}</span>${typeof window.openCatalogItemEditor === 'function' ? `<button onclick="window.openCatalogItemEditor('${c.id}')" title="Edit how this item is issued to characters" style="font-size:8px; padding:1px 5px; width:auto; margin:0;">⚙</button>` : ''}<button onclick="window.deleteCargoCatalogItem('${c.id}')" style="font-size:8px; padding:1px 5px; width:auto; margin:0;">✕</button></div>`).join('');
 };
 
 window.sanitizeCargo = function(inv) {
@@ -235,7 +258,7 @@ window.renderTerminalCargoDeck = function() {
             const upDisabled = index === 0 ? 'disabled' : '';
             const downDisabled = index === currentCategoryItems.length - 1 ? 'disabled' : '';
             html += `
-                <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403;">
+                <div class="note-card cargo-row" data-cargo-idx="${index}" data-cargo-name="${String(item.name || '').replace(/"/g, '&quot;')}" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403;">
                     <div style="flex:2;">
                         <strong style="color:#00e5a3; font-size:12px;">${item.name}</strong>
                         <div style="font-size:10px; color:#6b826a;">Unit Type: ${item.unit || 'units'}</div>
@@ -2359,7 +2382,7 @@ window.addShipWeapon = async function() {
     let standbyMaxInput = document.getElementById('new-ship-wpn-standby-max');
     let standbyMax = (standbyMaxInput && parseInt(standbyMaxInput.value) > 0) ? parseInt(standbyMaxInput.value) : 0;
     let ammoTypeInput = document.getElementById('new-ship-wpn-ammotype');
-    let ammoType = (ammoTypeInput && ammoTypeInput.value.trim()) ? ammoTypeInput.value.trim() : 'Kinetic Rounds';
+    let ammoType = (ammoTypeInput && ammoTypeInput.value.trim()) ? window.snapToCatalogName(ammoTypeInput.value) : 'Kinetic Rounds';
     // RELOAD (Standby -> Ready) costs a round by setting the weapon's cooldown.
     // Default 1 round is a placeholder, DM-tunable.
     let reloadCdInput = document.getElementById('new-ship-wpn-reloadcd');
@@ -2479,7 +2502,7 @@ window.deleteShipWeapon = async function(vesselId, idx) {
                 <div style="flex:1;"><label for="wpn-edit-standbymax" style="font-size:9px; color:#ffaaaa;">Standby Max</label><input type="number" id="wpn-edit-standbymax" min="0" style="border-color:#ff9d4d; text-align:center;"></div>
             </div>
             <label for="wpn-edit-ammotype" style="font-size:9px; color:#ffaaaa;" title="Which cargo expendable RESUPPLY draws from (Deep Reserves).">Ammo Type (Deep Reserves cargo item name)</label>
-            <input type="text" id="wpn-edit-ammotype" placeholder="Kinetic Rounds" style="border-color:#ff9d4d;">
+            <input type="text" id="wpn-edit-ammotype" list="cargo-catalog-names" placeholder="Kinetic Rounds" style="border-color:#ff9d4d;">
             <label for="wpn-edit-reloadcd" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;" title="RELOAD (Standby -> Ready) sets this weapon's Cooldown to this many rounds, same field firing uses.">Reload Cooldown (rounds)</label>
             <input type="number" id="wpn-edit-reloadcd" min="0" style="border-color:#ff9d4d; text-align:center;">
             <label for="wpn-edit-ordpattern" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;" title="Only relevant for Ordnance-class weapons.">Ordnance Pattern (Ordnance weapons only)</label>
@@ -2534,7 +2557,7 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             // Base Stats).
             wpn.max_standby_ammo = Math.max(0, parseInt(document.getElementById('wpn-edit-standbymax').value) || 0);
             wpn.standby_ammo = Math.max(0, Math.min(wpn.max_standby_ammo, parseInt(document.getElementById('wpn-edit-standby').value) || 0));
-            wpn.ammo_type = document.getElementById('wpn-edit-ammotype').value.trim() || 'Kinetic Rounds';
+            wpn.ammo_type = window.snapToCatalogName(document.getElementById('wpn-edit-ammotype').value) || 'Kinetic Rounds';
             wpn.reload_cooldown_period = Math.max(0, parseInt(document.getElementById('wpn-edit-reloadcd').value) || 0);
             wpn.ordnance_pattern = document.getElementById('wpn-edit-ordpattern').value === 'single' ? 'single' : 'multi';
 
@@ -2638,7 +2661,7 @@ window.renderArsenal = function() {
                 ammoLabel += `<div style="font-size:9px; color:#6b826a;" title="Deck fights: past short = -2 to hit, past long = no shot">Range: ${rs}/${rl} sq</div>`;
             }
             html += `
-                <div class="arsenal-row">
+                <div class="arsenal-row" data-arsenal-id="${w.id}">
                     <div><strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>${ammoLabel}</div>
                     <span style="font-size:13px; font-weight:bold; color:#d4c5a9; text-align:center;">${w.dice}</span>
                     <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.modifier}</span>
@@ -2660,6 +2683,8 @@ window.renderArsenal = function() {
     const badgeCombat = document.getElementById('badge-combat');
     if (badgeCombat) badgeCombat.innerText = arsenal.length;
 };
+// js/quartermaster.js adds RELOAD / RETURN to each row on this.
+window.renderArsenal = window.withAfterHooks('arsenal-rendered', window.renderArsenal);
 window.moveArsenalOrder = function(id, direction) {
     const myProf = allProfiles.find(p => p.id === currentUserId);
     if (!myProf) return;
@@ -2758,6 +2783,8 @@ window.deleteArsenalItem = async function(id) {
                 <div style="flex:1;"><label for="arsenal-edit-rshort" style="font-size:9px; color:#6b826a;" title="Deck plans only: past this many squares = -2 to hit">Short range (squares, blank=∞)</label><input type="number" id="arsenal-edit-rshort" min="0" style="border-color:#ffaa00; text-align:center;"></div>
                 <div style="flex:1;"><label for="arsenal-edit-rlong" style="font-size:9px; color:#6b826a;" title="Deck plans only: past this many squares the shot is refused">Long range (squares, blank=∞)</label><input type="number" id="arsenal-edit-rlong" min="0" style="border-color:#ffaa00; text-align:center;"></div>
             </div>
+            <label for="arsenal-edit-ammoitem" style="font-size:9px; color:#6b826a;" title="RELOAD refills the magazine from this item in a ship hold you own">Reloads from (hold item, optional)</label>
+            <input type="text" id="arsenal-edit-ammoitem" list="cargo-catalog-names" placeholder="e.g. Plasma Cells" style="border-color:#ffaa00;">
             <label for="arsenal-edit-dmgtype" style="font-size:9px; color:#6b826a;">Damage Type (optional)</label>
             <select id="arsenal-edit-dmgtype" style="border-color:#ffaa00;"><option value="">None</option></select>
             <label for="arsenal-edit-explodes" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;">
@@ -2786,7 +2813,8 @@ window.deleteArsenalItem = async function(id) {
                 ammo: ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0),
                 max_ammo: maxAmmoStr === '' ? (ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0)) : Math.max(0, parseInt(maxAmmoStr) || 0),
                 range_short: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-rshort').value.trim()),
-                range_long: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-rlong').value.trim())
+                range_long: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-rlong').value.trim()),
+                ammo_item: window.snapToCatalogName(document.getElementById('arsenal-edit-ammoitem').value) || null
             };
             const { error } = await db.from('character_arsenal').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -2809,6 +2837,7 @@ window.deleteArsenalItem = async function(id) {
         document.getElementById('arsenal-edit-explodes').checked = !!wpn.explodes;
         document.getElementById('arsenal-edit-rshort').value = (wpn.range_short === null || wpn.range_short === undefined) ? '' : wpn.range_short;
         document.getElementById('arsenal-edit-rlong').value = (wpn.range_long === null || wpn.range_long === undefined) ? '' : wpn.range_long;
+        document.getElementById('arsenal-edit-ammoitem').value = wpn.ammo_item || '';
         overlay.style.display = 'flex';
     };
 })();

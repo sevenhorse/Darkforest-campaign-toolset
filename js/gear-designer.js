@@ -118,6 +118,7 @@ window.renderGearDesignerPanel = window.withAfterHooks('gear-designer-rendered',
                 g.injury_max_bonus ? `<span style="color:#ff6b6b;">Injury Max ${g.injury_max_bonus >= 0 ? '+' : ''}${g.injury_max_bonus}</span>` : '',
                 (g.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ')
               ].filter(Boolean).join(' · ') || '<span style="color:#6b826a;">No effects configured.</span>';
+        if (g.consumable || g.max_uses) effectsLine += ` <span style="color:#9fe9f5;">· ${g.max_uses ? `${g.max_uses} uses per item` : 'consumable'}</span>`;
         return `
             <div class="note-card" style="border-left: 3px solid ${g.status === 'draft' ? '#ffaa00' : '#00e5a3'};">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -239,6 +240,11 @@ window.deleteGearDefinition = async function(id) {
             <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;">
                 <input type="checkbox" id="gear-edit-flavoronly" style="margin:0;"> Flavor Only (no automatic mechanical effect — cosmetic/narrative item)
             </label>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+                <label for="gear-edit-consumable" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer;" title="USE spends one (MREs, water, painkillers)"><input type="checkbox" id="gear-edit-consumable" style="margin:0;"> Consumable</label>
+                <label for="gear-edit-maxuses" style="font-size:9px; color:#6b826a; margin-left:auto;" title="Kits: USE spends a charge; when the last charge goes, one kit is used up. Blank = no charges.">Uses per item</label>
+                <input type="number" id="gear-edit-maxuses" min="1" placeholder="—" style="width:60px; margin:0; text-align:center; border-color:#c778dd;">
+            </div>
 
             <div id="gear-mechanical-section">
                 <div style="display:flex; gap:6px; margin-top:6px;">
@@ -285,7 +291,9 @@ window.deleteGearDefinition = async function(id) {
                 shield_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('gear-edit-shieldbonus').value) || 0),
                 dr_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('gear-edit-drbonus').value) || 0),
                 injury_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('gear-edit-injurybonus').value) || 0),
-                effects: flavorOnly ? [] : workingEffects
+                effects: flavorOnly ? [] : workingEffects,
+                consumable: document.getElementById('gear-edit-consumable').checked,
+                max_uses: (v => v > 0 ? v : null)(parseInt(document.getElementById('gear-edit-maxuses').value, 10))
             };
 
             if (currentId) {
@@ -317,6 +325,8 @@ window.deleteGearDefinition = async function(id) {
         document.getElementById('gear-edit-shieldbonus').value = '0';
         document.getElementById('gear-edit-drbonus').value = '0';
         document.getElementById('gear-edit-injurybonus').value = '0';
+        document.getElementById('gear-edit-consumable').checked = false;
+        document.getElementById('gear-edit-maxuses').value = '';
         renderEffectsList();
         overlay.style.display = 'flex';
     };
@@ -335,6 +345,8 @@ window.deleteGearDefinition = async function(id) {
         document.getElementById('gear-edit-shieldbonus').value = g.shield_max_bonus || 0;
         document.getElementById('gear-edit-drbonus').value = g.dr_bonus || 0;
         document.getElementById('gear-edit-injurybonus').value = g.injury_max_bonus || 0;
+        document.getElementById('gear-edit-consumable').checked = !!g.consumable;
+        document.getElementById('gear-edit-maxuses').value = g.max_uses || '';
         renderEffectsList();
         overlay.style.display = 'flex';
     };

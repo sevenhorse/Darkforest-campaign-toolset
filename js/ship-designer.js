@@ -1146,7 +1146,7 @@ window.renderSecretRepoEditorPanel = function() {
                     <summary style="font-size:9px; color:#ff9d4d; cursor:pointer;">Tiered Ammo / Ordnance (optional)</summary>
                     <div style="display:flex; gap:6px; margin-top:4px;">
                         <div style="flex:1;"><label for="repo-wpn-standbymax" style="font-size:8px; color:#ff9d4d;" title="0 = not used, hides RESUPPLY/RELOAD once deployed">Standby Max</label><input type="number" id="repo-wpn-standbymax" min="0" placeholder="0" style="text-align:center;"></div>
-                        <div style="flex:1;"><label for="repo-wpn-ammotype" style="font-size:8px; color:#ff9d4d;">Ammo Type</label><input type="text" id="repo-wpn-ammotype" placeholder="Kinetic Rounds"></div>
+                        <div style="flex:1;"><label for="repo-wpn-ammotype" style="font-size:8px; color:#ff9d4d;">Ammo Type</label><input type="text" id="repo-wpn-ammotype" list="cargo-catalog-names" placeholder="Kinetic Rounds"></div>
                         <div style="flex:1;"><label for="repo-wpn-reloadcd" style="font-size:8px; color:#ff9d4d;" title="RELOAD sets Cooldown to this many rounds">Reload CD</label><input type="number" id="repo-wpn-reloadcd" min="0" placeholder="1" style="text-align:center;"></div>
                     </div>
                     <select id="repo-wpn-ordpattern" style="margin-top:4px;">
@@ -1294,7 +1294,7 @@ window.addSecretRepoWeapon = async function() {
     const ammoStr = document.getElementById('repo-wpn-ammo').value.trim();
     const ammoVal = ammoStr === '' ? -1 : Math.max(0, parseInt(ammoStr) || 0);
     const standbyMax = Math.max(0, parseInt(document.getElementById('repo-wpn-standbymax').value) || 0);
-    const ammoType = document.getElementById('repo-wpn-ammotype').value.trim() || 'Kinetic Rounds';
+    const ammoType = (typeof window.snapToCatalogName === 'function' ? window.snapToCatalogName(document.getElementById('repo-wpn-ammotype').value) : document.getElementById('repo-wpn-ammotype').value.trim()) || 'Kinetic Rounds';
     const reloadCdInput = document.getElementById('repo-wpn-reloadcd').value.trim();
     const reloadCooldownPeriod = reloadCdInput !== '' ? Math.max(0, parseInt(reloadCdInput) || 0) : 1;
     const ordnancePattern = document.getElementById('repo-wpn-ordpattern').value === 'single' ? 'single' : 'multi';
@@ -1502,7 +1502,7 @@ window.updateSecretRepoSynthCapacity = async function(val) {
                 <div style="flex:1;"><label for="rwe-standbymax" style="font-size:9px; color:#ffaaaa;">Standby Max</label><input type="number" id="rwe-standbymax" min="0" style="border-color:#ff9d4d; text-align:center;"></div>
             </div>
             <label for="rwe-ammotype" style="font-size:9px; color:#ffaaaa;">Ammo Type</label>
-            <input type="text" id="rwe-ammotype" placeholder="Kinetic Rounds" style="border-color:#ff9d4d;">
+            <input type="text" id="rwe-ammotype" list="cargo-catalog-names" placeholder="Kinetic Rounds" style="border-color:#ff9d4d;">
             <label for="rwe-reloadcd" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Reload Cooldown (rounds)</label>
             <input type="number" id="rwe-reloadcd" min="0" style="border-color:#ff9d4d; text-align:center;">
             <label for="rwe-ordpattern" style="font-size:9px; color:#ffaaaa; margin-top:8px; display:block;">Ordnance Pattern (ordnance weapons only)</label>
@@ -1556,7 +1556,7 @@ window.updateSecretRepoSynthCapacity = async function(val) {
 
             wpn.max_standby_ammo = Math.max(0, parseInt(document.getElementById('rwe-standbymax').value) || 0);
             wpn.standby_ammo = Math.max(0, Math.min(wpn.max_standby_ammo, parseInt(document.getElementById('rwe-standby').value) || 0));
-            wpn.ammo_type = document.getElementById('rwe-ammotype').value.trim() || 'Kinetic Rounds';
+            wpn.ammo_type = (typeof window.snapToCatalogName === 'function' ? window.snapToCatalogName(document.getElementById('rwe-ammotype').value) : document.getElementById('rwe-ammotype').value.trim()) || 'Kinetic Rounds';
             wpn.reload_cooldown_period = Math.max(0, parseInt(document.getElementById('rwe-reloadcd').value) || 0);
             wpn.ordnance_pattern = document.getElementById('rwe-ordpattern').value === 'single' ? 'single' : 'multi';
 
