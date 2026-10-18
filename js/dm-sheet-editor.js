@@ -129,6 +129,10 @@
                     <input type="number" id="dmse-arsenal-ammo" min="0" placeholder="Ammo (blank=∞)" style="flex:1; margin:0; text-align:center;">
                     <input type="number" id="dmse-arsenal-maxammo" min="0" placeholder="Max Ammo" style="flex:1; margin:0; text-align:center;">
                 </div>
+                <div class="pap-field" style="display:flex; gap:4px; margin-top:4px;">
+                    <input type="number" id="dmse-arsenal-apcost" min="0" placeholder="AP per attack (blank=1)" title="Action Points one attack spends" style="flex:1; margin:0; text-align:center;">
+                    <input type="number" id="dmse-arsenal-apbonus" placeholder="Bonus AP/turn" title="Extra Action Points per turn while carried" style="flex:1; margin:0; text-align:center;">
+                </div>
                 <input type="text" id="dmse-arsenal-ammoitem" list="cargo-catalog-names" placeholder="Reloads from (hold item, optional)" title="RELOAD refills the magazine from this item in a ship hold" style="margin-top:4px;">
                 <select id="dmse-arsenal-dmgtype" style="margin-top:4px;"><option value="">No Damage Type</option></select>
                 <label style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:4px;">
@@ -382,6 +386,8 @@
         document.getElementById('dmse-arsenal-ammo').value = '';
         document.getElementById('dmse-arsenal-maxammo').value = '';
         document.getElementById('dmse-arsenal-ammoitem').value = '';
+        document.getElementById('dmse-arsenal-apcost').value = '';
+        document.getElementById('dmse-arsenal-apbonus').value = '';
         document.getElementById('dmse-arsenal-dmgtype').value = '';
         document.getElementById('dmse-arsenal-explodes').checked = false;
         document.getElementById('dmse-arsenal-save-btn').innerText = '+ ADD WEAPON';
@@ -399,6 +405,8 @@
         document.getElementById('dmse-arsenal-ammo').value = (w.ammo === null || w.ammo === undefined) ? '' : w.ammo;
         document.getElementById('dmse-arsenal-maxammo').value = (w.max_ammo === null || w.max_ammo === undefined) ? '' : w.max_ammo;
         document.getElementById('dmse-arsenal-ammoitem').value = w.ammo_item || '';
+        document.getElementById('dmse-arsenal-apcost').value = (w.ap_cost === null || w.ap_cost === undefined) ? '' : w.ap_cost;
+        document.getElementById('dmse-arsenal-apbonus').value = w.ap_bonus || '';
         document.getElementById('dmse-arsenal-dmgtype').value = w.damage_type || '';
         document.getElementById('dmse-arsenal-explodes').checked = !!w.explodes;
         document.getElementById('dmse-arsenal-save-btn').innerText = 'SAVE CHANGES';
@@ -423,6 +431,8 @@
             explodes: document.getElementById('dmse-arsenal-explodes').checked,
             damage_type: document.getElementById('dmse-arsenal-dmgtype').value || null,
             ammo: ammoVal, max_ammo: maxAmmoVal,
+            ap_cost: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('dmse-arsenal-apcost').value.trim()),
+            ap_bonus: parseInt(document.getElementById('dmse-arsenal-apbonus').value) || 0,
             ammo_item: (typeof window.snapToCatalogName === 'function' ? window.snapToCatalogName(document.getElementById('dmse-arsenal-ammoitem').value) : document.getElementById('dmse-arsenal-ammoitem').value.trim()) || null
         };
 

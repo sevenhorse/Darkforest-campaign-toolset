@@ -1047,6 +1047,10 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
                         <label for="sq-ai-stance-${vessel.id}-${idx}" style="font-size:9px; color:#c778dd; white-space:nowrap;">AI STANCE:</label>
                         <select id="sq-ai-stance-${vessel.id}-${idx}" onchange="window.setSquadronAIStance('${vessel.id}', ${idx}, this.value)" style="flex:1; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#c778dd; border:1px solid #3c4e36;">${stanceOptions}</select>
                     </div>
+                    ${typeof window.commanderOptionsHtml === 'function' ? `<div class="pap-field" style="margin-top:6px; display:flex; align-items:center; gap:6px;">
+                        <label for="sq-commander-${vessel.id}-${idx}" style="font-size:9px; color:#c9962f; white-space:nowrap;" title="This character's ship-AP perks and augments add to the squadron's AP">COMMANDER:</label>
+                        <select id="sq-commander-${vessel.id}-${idx}" onchange="window.setSquadronCommander('${vessel.id}', ${idx}, this.value)" style="flex:1; height:22px; font-size:9px; margin:0; padding:2px; background:#0a1410; color:#c9962f; border:1px solid #3c4e36;">${window.commanderOptionsHtml(sq.commander_profile_id || '')}</select>
+                    </div>` : ''}
                     ${manualControlsOrStatus}
                 </div>`;
             });
@@ -1276,6 +1280,7 @@ window.resetShipStats = async function(vesselId) {
                 <div style="flex:1;"><label for="maxstats-ablative" style="font-size:9px; color:#6b826a;">Ablative</label><input type="number" id="maxstats-ablative" min="0" style="border-color:#c9962f; text-align:center;"></div>
                 <div style="flex:1;"><label for="maxstats-hardened" style="font-size:9px; color:#6b826a;">Hardened</label><input type="number" id="maxstats-hardened" min="0" style="border-color:#c9962f; text-align:center;"></div>
             </div>
+            <div class="pap-field"><label for="maxstats-commander" style="font-size:9px; color:#c9962f;" title="Action Points: this character's ship-AP perks and augments add to this vessel's AP in space battles">Commander (adds their ship AP bonus)</label><select id="maxstats-commander" style="border-color:#c9962f;"></select></div>
             <div><label for="maxstats-crew" style="font-size:9px; color:#c9962f;" title="People aboard -- they eat this many crew-days of food a day. Blank = the default crew.">Crew aboard (blank = default)</label><input type="number" id="maxstats-crew" min="0" style="border-color:#c9962f; text-align:center;"></div>
             <div>
                 <label for="maxstats-vesselclass" style="font-size:9px; color:#c9962f;" title="Used by squadron AI Stances (Attack Capital Ships / Attack Escorts) to tell targets apart -- otherwise cosmetic.">Vessel Classification</label>
@@ -1330,7 +1335,9 @@ window.resetShipStats = async function(vesselId) {
                 ai_controlled: document.getElementById('maxstats-ai-controlled').checked,
                 // Same read-back-unchanged rule as the fields above.
                 hide_from_galaxy_map: !document.getElementById('maxstats-galaxy-visible').checked,
-                image_url: window.getMediaPickerValue('maxstats')
+                image_url: window.getMediaPickerValue('maxstats'),
+                // Pre-filled from the vessel, so a save with the AP switch off keeps it.
+                commander_profile_id: document.getElementById('maxstats-commander').value || null
             };
             const clamped = {
                 integrity_shields: Math.min(vessel.integrity_shields !== undefined ? vessel.integrity_shields : newMax.max_shields, newMax.max_shields),
@@ -1376,6 +1383,9 @@ window.resetShipStats = async function(vesselId) {
         if (typeof window.ensureArmorSideInputs === 'function') { const usesSides = window.vesselUsesArmorSides(vessel); window.ensureArmorSideInputs('maxstats-hardened', 'maxstats', usesSides ? window.getArmorSides(vessel).max : null, usesSides); }
         document.getElementById('maxstats-vesselclass').value = vessel.vessel_class || '';
         document.getElementById('maxstats-crew').value = (vessel.crew === null || vessel.crew === undefined) ? '' : vessel.crew;
+        const cmdSel = document.getElementById('maxstats-commander');
+        cmdSel.innerHTML = typeof window.commanderOptionsHtml === 'function' ? window.commanderOptionsHtml(vessel.commander_profile_id || '') : '<option value="">-- No commander --</option>';
+        if (vessel.commander_profile_id && !cmdSel.value) cmdSel.insertAdjacentHTML('beforeend', `<option value="${vessel.commander_profile_id}" selected>(unknown character)</option>`);
         document.getElementById('maxstats-iff').value = vessel.iff || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
@@ -2660,6 +2670,10 @@ window.renderArsenal = function() {
                 const rl = (w.range_long === null || w.range_long === undefined) ? '∞' : w.range_long;
                 ammoLabel += `<div style="font-size:9px; color:#6b826a;" title="Deck fights: past short = -2 to hit, past long = no shot">Range: ${rs}/${rl} sq</div>`;
             }
+            if (typeof window.weaponApCost === 'function') {
+                const apc = window.weaponApCost(w), apb = parseInt(w.ap_bonus) || 0;
+                ammoLabel += `<div class="pap-field" style="font-size:9px; color:#c9962f;" title="Action Points: cost per attack${apb ? ', and the bonus this weapon adds to your AP each turn' : ''}">AP ${apc}${apb ? ` · ${apb > 0 ? '+' : ''}${apb} AP/turn` : ''}</div>`;
+            }
             html += `
                 <div class="arsenal-row" data-arsenal-id="${w.id}">
                     <div><strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>${ammoLabel}</div>
@@ -2783,6 +2797,10 @@ window.deleteArsenalItem = async function(id) {
                 <div style="flex:1;"><label for="arsenal-edit-rshort" style="font-size:9px; color:#6b826a;" title="Deck plans only: past this many squares = -2 to hit">Short range (squares, blank=∞)</label><input type="number" id="arsenal-edit-rshort" min="0" style="border-color:#ffaa00; text-align:center;"></div>
                 <div style="flex:1;"><label for="arsenal-edit-rlong" style="font-size:9px; color:#6b826a;" title="Deck plans only: past this many squares the shot is refused">Long range (squares, blank=∞)</label><input type="number" id="arsenal-edit-rlong" min="0" style="border-color:#ffaa00; text-align:center;"></div>
             </div>
+            <div class="pap-field" style="display:flex; gap:6px;">
+                <div style="flex:1;"><label for="arsenal-edit-apcost" style="font-size:9px; color:#c9962f;" title="Action Points one attack with this weapon spends (blank = 1, 0 = free)">AP per attack (blank = 1)</label><input type="number" id="arsenal-edit-apcost" min="0" style="border-color:#c9962f; text-align:center;"></div>
+                <div style="flex:1;"><label for="arsenal-edit-apbonus" style="font-size:9px; color:#c9962f;" title="Extra Action Points per turn while this weapon is in your Arsenal">Bonus AP per turn</label><input type="number" id="arsenal-edit-apbonus" style="border-color:#c9962f; text-align:center;"></div>
+            </div>
             <label for="arsenal-edit-ammoitem" style="font-size:9px; color:#6b826a;" title="RELOAD refills the magazine from this item in a ship hold you own">Reloads from (hold item, optional)</label>
             <input type="text" id="arsenal-edit-ammoitem" list="cargo-catalog-names" placeholder="e.g. Plasma Cells" style="border-color:#ffaa00;">
             <label for="arsenal-edit-dmgtype" style="font-size:9px; color:#6b826a;">Damage Type (optional)</label>
@@ -2814,7 +2832,10 @@ window.deleteArsenalItem = async function(id) {
                 max_ammo: maxAmmoStr === '' ? (ammoStr === '' ? null : Math.max(0, parseInt(ammoStr) || 0)) : Math.max(0, parseInt(maxAmmoStr) || 0),
                 range_short: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-rshort').value.trim()),
                 range_long: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-rlong').value.trim()),
-                ammo_item: window.snapToCatalogName(document.getElementById('arsenal-edit-ammoitem').value) || null
+                ammo_item: window.snapToCatalogName(document.getElementById('arsenal-edit-ammoitem').value) || null,
+                // Pre-filled from the weapon, so a save with the AP switch off writes them back unchanged.
+                ap_cost: (v => v === '' ? null : Math.max(0, parseInt(v) || 0))(document.getElementById('arsenal-edit-apcost').value.trim()),
+                ap_bonus: parseInt(document.getElementById('arsenal-edit-apbonus').value) || 0
             };
             const { error } = await db.from('character_arsenal').update(updates).eq('id', currentId);
             if (error) { alert("Failed to save changes: " + error.message); return; }
@@ -2838,6 +2859,8 @@ window.deleteArsenalItem = async function(id) {
         document.getElementById('arsenal-edit-rshort').value = (wpn.range_short === null || wpn.range_short === undefined) ? '' : wpn.range_short;
         document.getElementById('arsenal-edit-rlong').value = (wpn.range_long === null || wpn.range_long === undefined) ? '' : wpn.range_long;
         document.getElementById('arsenal-edit-ammoitem').value = wpn.ammo_item || '';
+        document.getElementById('arsenal-edit-apcost').value = (wpn.ap_cost === null || wpn.ap_cost === undefined) ? '' : wpn.ap_cost;
+        document.getElementById('arsenal-edit-apbonus').value = wpn.ap_bonus || 0;
         overlay.style.display = 'flex';
     };
 })();
@@ -3177,6 +3200,9 @@ window.resolveArsenalAttack = async function(weaponId) {
             </div>`;
     }
 
+    // Personal Action Points (js/action-points.js): tracked only, never refuses.
+    if (typeof window.spendPersonalAp === 'function') resultHtml += await window.spendPersonalAp(wpn);
+
     if (window.AudioEngine) window.AudioEngine.playShoot();
     if (typeof window.closeArsenalAttackModal === 'function') window.closeArsenalAttackModal();
 
@@ -3351,7 +3377,7 @@ window.renderCombatTracker = function() {
                 </div>
             `;
         }
-        html += '<div style="max-height:220px; overflow-y:auto;">';
+        html += '<div class="ct-list" style="max-height:220px; overflow-y:auto;">';
         combatantsList.forEach(c => {
             const canRemove = currentUserRole === 'dm' || c.owner_id === currentUserId;
             let fuelBadge = '';
@@ -3363,7 +3389,7 @@ window.renderCombatTracker = function() {
                 fuelBadge = ` <span style="color:${fuelColor}; font-weight:bold;">[⛽ ${loiter}/4]</span>`;
             }
             html += `
-                <div class="note-card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:6px;">
+                <div class="note-card ct-row" data-combatant-id="${c.id}" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:6px;">
                     <div>
                         <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${c.name}${fuelBadge}</strong>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">HP/Status: ${c.hp}</p>

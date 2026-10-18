@@ -96,6 +96,8 @@ window.renderPerkDesignerPanel = window.withAfterHooks('perk-designer-rendered',
                 p.shield_max_bonus ? `<span style="color:#00e1ff;">Shield Max ${p.shield_max_bonus >= 0 ? '+' : ''}${p.shield_max_bonus}</span>` : '',
                 p.dr_bonus ? `<span style="color:#c9962f;">DR ${p.dr_bonus >= 0 ? '+' : ''}${p.dr_bonus}</span>` : '',
                 p.injury_max_bonus ? `<span style="color:#ff6b6b;">Injury Max ${p.injury_max_bonus >= 0 ? '+' : ''}${p.injury_max_bonus}</span>` : '',
+                p.personal_ap_bonus ? `<span class="pap-field" style="color:#c9962f;">AP ${p.personal_ap_bonus >= 0 ? '+' : ''}${p.personal_ap_bonus}</span>` : '',
+                p.ship_ap_bonus ? `<span class="pap-field" style="color:#c9962f;">Ship AP ${p.ship_ap_bonus >= 0 ? '+' : ''}${p.ship_ap_bonus} (as Commander)</span>` : '',
                 (p.effects || []).map(e => `${e.name} ${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join(', ')
               ].filter(Boolean).join(' · ') || '<span style="color:#6b826a;">No effects configured.</span>';
         return `
@@ -240,6 +242,10 @@ window.deletePerkDefinition = async function(id) {
                     <div style="flex:1;"><label for="perk-edit-drbonus" style="font-size:9px; color:#c9962f;">DR Bonus:</label><input type="number" id="perk-edit-drbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
                     <div style="flex:1;"><label for="perk-edit-injurybonus" style="font-size:9px; color:#ff6b6b;">Injury Max Bonus:</label><input type="number" id="perk-edit-injurybonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
                 </div>
+                <div class="pap-field" style="display:flex; gap:6px; margin-top:6px;">
+                    <div style="flex:1;"><label for="perk-edit-papbonus" style="font-size:9px; color:#c9962f;" title="Extra Action Points per turn in ground and deck fights">Personal AP Bonus:</label><input type="number" id="perk-edit-papbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
+                    <div style="flex:1;"><label for="perk-edit-sapbonus" style="font-size:9px; color:#c9962f;" title="Extra Action Points for a ship or squadron this character commands">Ship AP Bonus (as Commander):</label><input type="number" id="perk-edit-sapbonus" value="0" style="border-color:#c778dd; text-align:center;"></div>
+                </div>
 
                 <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Stat/Skill Effects (auto-applied to the roller):</label>
                 <div id="perk-effects-list" style="margin-bottom:6px;"></div>
@@ -281,6 +287,8 @@ window.deletePerkDefinition = async function(id) {
                 shield_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-shieldbonus').value) || 0),
                 dr_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-drbonus').value) || 0),
                 injury_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-injurybonus').value) || 0),
+                personal_ap_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-papbonus').value) || 0),
+                ship_ap_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('perk-edit-sapbonus').value) || 0),
                 effects: flavorOnly ? [] : workingEffects
             };
 
@@ -314,6 +322,8 @@ window.deletePerkDefinition = async function(id) {
         document.getElementById('perk-edit-shieldbonus').value = '0';
         document.getElementById('perk-edit-drbonus').value = '0';
         document.getElementById('perk-edit-injurybonus').value = '0';
+        document.getElementById('perk-edit-papbonus').value = '0';
+        document.getElementById('perk-edit-sapbonus').value = '0';
         renderEffectsList();
         overlay.style.display = 'flex';
     };
@@ -334,6 +344,8 @@ window.deletePerkDefinition = async function(id) {
         document.getElementById('perk-edit-shieldbonus').value = p.shield_max_bonus || 0;
         document.getElementById('perk-edit-drbonus').value = p.dr_bonus || 0;
         document.getElementById('perk-edit-injurybonus').value = p.injury_max_bonus || 0;
+        document.getElementById('perk-edit-papbonus').value = p.personal_ap_bonus || 0;
+        document.getElementById('perk-edit-sapbonus').value = p.ship_ap_bonus || 0;
         renderEffectsList();
         overlay.style.display = 'flex';
     };

@@ -37,6 +37,9 @@ function catalogFacts(x) {
     if (x.shield_max_bonus) out.push({ k: 'SHIELD MAX', v: signed(x.shield_max_bonus), c: '#00e1ff' });
     if (x.dr_bonus) out.push({ k: 'DR', v: signed(x.dr_bonus), c: '#c9962f' });
     if (x.injury_max_bonus) out.push({ k: 'INJURY MAX', v: signed(x.injury_max_bonus), c: '#ff6b6b' });
+    const apOn = typeof window.personalApOn === 'function' && window.personalApOn();
+    if (apOn && x.personal_ap_bonus) out.push({ k: 'ACTION POINTS', v: signed(x.personal_ap_bonus), c: '#c9962f' });
+    if (apOn && x.ship_ap_bonus) out.push({ k: 'SHIP AP (COMMANDER)', v: signed(x.ship_ap_bonus), c: '#c9962f' });
     (x.effects || []).forEach(e => { if (e && e.name) out.push({ k: String(e.name).toUpperCase(), v: typeof e.bonus === 'number' ? signed(e.bonus) : '—', c: e.bonus < 0 ? '#ff6b6b' : '#00e5a3' }); });
     return out;
 }

@@ -17,7 +17,8 @@
        item. A row that reaches 0 is removed, so its bonus stops with it.
      - Names come from the cargo catalogue (cargo_item_catalog). A catalogue
        item marked issue_kind 'weapon' carries weapon_stats {dice, modifier,
-       explodes, damage_type, max_ammo, ammo_item, range_short, range_long};
+       explodes, damage_type, max_ammo, ammo_item, range_short, range_long,
+       ap_cost, ap_bonus};
        'gear' links a gear definition (created on first ISSUE if missing).
 
    Holds: a player may draw from / return to ships they own (owner_ids); the
@@ -254,6 +255,8 @@ window.issueItem = async function (vesselId, catalogId, profileId, qty) {
                 ammo_item: hasMag ? (ws.ammo_item || c.name) : null,
                 range_short: ws.range_short != null && ws.range_short !== '' ? parseInt(ws.range_short, 10) : null,
                 range_long: ws.range_long != null && ws.range_long !== '' ? parseInt(ws.range_long, 10) : null,
+                ap_cost: ws.ap_cost != null && ws.ap_cost !== '' ? parseInt(ws.ap_cost, 10) : null,
+                ap_bonus: parseInt(ws.ap_bonus, 10) || 0,
                 catalog_item_id: c.id
             };
             const rows = thrown ? [Object.assign({}, row, { ammo: qty })] : Array.from({ length: qty }, () => Object.assign({}, row));
@@ -516,6 +519,7 @@ window.openCatalogItemEditor = function (catalogId) {
             ${fieldLbl('qm-dmg', 'Damage type')}<select id="qm-dmg" style="margin:0;"><option value="">None</option>${dmg}</select>
             <div style="display:flex; gap:6px;">${inp('qm-mag', 'Magazine (blank = no ammo)', ws.max_ammo, 'inputmode="numeric"')}${inp('qm-ammo', 'Reloads from (blank = itself)', ws.ammo_item, 'list="cargo-catalog-names"')}</div>
             <div style="display:flex; gap:6px;">${inp('qm-rs', 'Short range (sq)', ws.range_short, 'inputmode="numeric"')}${inp('qm-rl', 'Long range (sq)', ws.range_long, 'inputmode="numeric"')}</div>
+            <div class="pap-field" style="display:flex; gap:6px;">${inp('qm-apc', 'AP per attack (blank = 1)', ws.ap_cost, 'inputmode="numeric"')}${inp('qm-apb', 'Bonus AP per turn', ws.ap_bonus || '', 'inputmode="numeric"')}</div>
             <label for="qm-exp" style="font-size:10px; color:#d4c5a9; display:flex; align-items:center; gap:4px; margin-top:6px;"><input type="checkbox" id="qm-exp" style="margin:0;"${ws.explodes ? ' checked' : ''}> Exploding dice</label>
         </div>
         <div id="qm-g" style="${c.issue_kind === 'gear' ? '' : 'display:none;'}">
@@ -539,7 +543,9 @@ window.openCatalogItemEditor = function (catalogId) {
                 damage_type: byId('qm-dmg').value || null, explodes: byId('qm-exp').checked,
                 max_ammo: numOrNull('qm-mag'),
                 ammo_item: ammoTyped ? window.snapToCatalogName(ammoTyped) : null,
-                range_short: numOrNull('qm-rs'), range_long: numOrNull('qm-rl')
+                range_short: numOrNull('qm-rs'), range_long: numOrNull('qm-rl'),
+                // Action Points (js/action-points.js); pre-filled, so kept when the switch is off.
+                ap_cost: numOrNull('qm-apc'), ap_bonus: parseInt(byId('qm-apb').value, 10) || 0
             };
         } else if (kind === 'gear') {
             upd.gear_definition_id = byId('qm-def').value || null;

@@ -41,15 +41,18 @@ function getSquadronRecordForToken(vessel) {
    can take a non-fire action (Withdraw, etc.). */
 window.getTokenApMax = function(vessel) {
     if (!vessel) return 1;
-    let weaponCount;
+    let weaponCount, rec = null;
     if (vessel.is_strike_craft) {
-        const rec = getSquadronRecordForToken(vessel);
+        rec = getSquadronRecordForToken(vessel);
         const dbStats = rec && typeof STRIKE_CRAFT_DB !== 'undefined' ? STRIKE_CRAFT_DB[rec.sq.type] : null;
         weaponCount = dbStats ? (dbStats.weapons || []).length : 1;
     } else {
         weaponCount = (vessel.ship_weapons || []).length;
     }
-    return 1 + Math.floor(weaponCount / 2);
+    // Action Points (js/action-points.js): the named Commander's ship-AP perks
+    // and augments add on top. Never below 1.
+    const cmd = typeof window.commanderShipApBonus === 'function' ? window.commanderShipApBonus(vessel, rec ? rec.sq : null) : 0;
+    return Math.max(1, 1 + Math.floor(weaponCount / 2) + cmd);
 };
 
 /* A token gets an initiative slot only if it isn't AI-controlled: ships
