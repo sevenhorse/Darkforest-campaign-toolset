@@ -2309,3 +2309,35 @@ body:not(.pap-on) .pap-field { display: none !important; }
 .pap-bar button.pap-btn { padding: 3px 10px !important; font-size: 9px !important; border: 1px solid #c9962f !important; color: #c9962f !important; background: rgba(201,150,47,.08) !important; }
 .pap-bar button.pap-btn.dim { border-color: #3c4e36 !important; color: #8fa7b0 !important; background: transparent !important; }
 .pap-row button.pap-mini { padding: 0 6px !important; height: 16px !important; line-height: 14px !important; font-size: 10px !important; border: 1px solid #3c4e36 !important; color: #d4c5a9 !important; background: #0a1410 !important; }
+
+/* ---------- First-person bridge (js/bridge-walk.js) ---------- */
+#bridge-walk { display: none; position: fixed; inset: 0; z-index: 6000; background: #02050a; font-family: 'Oxanium', 'Segoe UI', sans-serif; }
+#bw-canvas-host { position: absolute; inset: 0; touch-action: none; }
+#bw-canvas-host canvas { display: block; }
+#bridge-walk .bw-top { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; pointer-events: none; }
+#bridge-walk .bw-top > * { pointer-events: auto; }
+#bridge-walk .bw-title { background: rgba(5,15,22,.88); border: 1px solid #123c4a; padding: 6px 12px; color: #cfe9f0; }
+#bridge-walk .bw-title b { color: #c9962f; letter-spacing: .14em; margin-right: 10px; font-size: 13px; }
+#bridge-walk .bw-title span { font-size: 12px; letter-spacing: .08em; color: #7fe8ff; }
+#bridge-walk .bw-actions { display: flex; gap: 8px; }
+#bridge-walk .bw-btn, #bw-back { width: auto !important; margin: 0 !important; padding: 7px 12px !important; font-size: 11px !important; letter-spacing: .1em; background: rgba(5,15,22,.9) !important; border: 1px solid #123c4a !important; color: #cfe9f0 !important; cursor: pointer; }
+#bridge-walk .bw-btn:hover { border-color: #00e1ff !important; color: #00e1ff !important; }
+#bridge-walk .bw-gold, #bw-back { color: #c9962f !important; border-color: rgba(201,150,47,.6) !important; }
+#bridge-walk .bw-hint { position: absolute; left: 12px; bottom: 12px; max-width: 520px; background: rgba(5,15,22,.88); border: 1px solid #123c4a; border-left: 3px solid #00e1ff; padding: 8px 12px; color: #cfe9f0; font-size: 11.5px; line-height: 1.5; }
+#bridge-walk .bw-tip { position: absolute; pointer-events: none; transform: translate(14px, 14px); background: rgba(5,15,22,.92); border: 1px solid #00e1ff; color: #00e1ff; padding: 4px 8px; font-size: 11px; letter-spacing: .08em; white-space: nowrap; }
+#bridge-walk .bw-toast { position: absolute; left: 50%; bottom: 70px; transform: translateX(-50%); background: rgba(5,15,22,.92); border: 1px solid #c9962f; color: #cfe9f0; padding: 8px 14px; font-size: 12px; }
+#bridge-walk .bw-loading { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(2,5,10,.92); }
+#bridge-walk .bw-load-card { width: min(460px, calc(100% - 32px)); background: rgba(5,15,22,.95); border: 1px solid #123c4a; border-top: 2px solid #00e1ff; padding: 16px 18px; color: #cfe9f0; display: grid; gap: 8px; font-size: 12px; }
+#bridge-walk .bw-load-card b { color: #c9962f; letter-spacing: .14em; }
+#bridge-walk .bw-load-track { height: 6px; background: #0c2630; }
+#bw-progress-bar { height: 100%; width: 0; background: #00e1ff; transition: width .2s; }
+#bridge-walk .bw-setup-card label { font-size: 10px; letter-spacing: .1em; color: #7f9aa3; text-transform: uppercase; }
+#bridge-walk .bw-setup-card input, #bridge-walk .bw-setup-card select { margin: 0; }
+#bridge-walk .bw-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+#bridge-walk .bw-err { color: #ff7a85; }
+#bridge-walk [hidden] { display: none !important; }
+#bw-back { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 5990; }
+#bw-back[hidden] { display: none !important; }
+#bottom-toggle-bar .bw-bar-btn { width: auto; margin: 0; padding: 4px 10px; background: #040605; border: 1px solid #3c4e36; color: #6b826a; font-size: 10px; }
+#bottom-toggle-bar .bw-bar-btn.on { border-color: #00e1ff; color: #00e1ff; }
+#bottom-toggle-bar .bw-enter { border-color: #c9962f; color: #c9962f; }
