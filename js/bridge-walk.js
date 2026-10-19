@@ -122,13 +122,13 @@ window.bridgeBuildNav = function (nav) {
         return best;
     };
     // nearest walkable cell to a point (searching outwards), preferring heights near y
-    N.nearest = (x, z, y, maxR) => {
-        const [cx, cz] = N.cellOf(x, z); const R = maxR || 12;
+    N.nearest = (x, z, y, maxR, maxDy) => {
+        const [cx, cz] = N.cellOf(x, z); const R = maxR || 12; const DY = maxDy || Infinity; // maxDy skips floors on other decks
         let best = null;
         for (let r = 0; r <= R && !best; r++) for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
             if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
             const hs = cells.get((cx + dx) + ',' + (cz + dz)); if (!hs) continue;
-            for (const h of hs) { const score = Math.hypot(dx, dz) * N.res + Math.abs(h - y) * 2; if (!best || score < best.score) best = { ix: cx + dx, iz: cz + dz, y: h, score }; }
+            for (const h of hs) { if (Math.abs(h - y) > DY) continue; const score = Math.hypot(dx, dz) * N.res + Math.abs(h - y) * 2; if (!best || score < best.score) best = { ix: cx + dx, iz: cz + dz, y: h, score }; }
         }
         return best;
     };
@@ -255,6 +255,7 @@ function ensureOverlay() {
             <div class="bw-title"><b>BRIDGE</b><span id="bw-sub">First-person view</span></div>
             <div class="bw-actions">
                 <button id="bw-stand" class="bw-btn" hidden>STAND UP</button>
+                <button id="bw-setup-btn" class="bw-btn" hidden>SETUP</button>
                 <button id="bw-help-btn" class="bw-btn">HELP</button>
                 <button id="bw-exit" class="bw-btn bw-gold">EXIT BRIDGE</button>
             </div>
@@ -274,6 +275,7 @@ function ensureOverlay() {
     BW.el = el;
     el.querySelector('#bw-exit').onclick = () => window.closeBridge();
     el.querySelector('#bw-stand').onclick = () => standUp();
+    el.querySelector('#bw-setup-btn').onclick = () => { stopLoop(); showSetup(); };
     el.querySelector('#bw-help-btn').onclick = () => { const h = el.querySelector('#bw-hint'); h.hidden = !h.hidden; };
     const host = el.querySelector('#bw-canvas-host');
     host.addEventListener('pointerdown', onDown);
@@ -292,6 +294,7 @@ window.openBridge = async function () {
     ensureOverlay();
     BW.el.style.display = 'block'; BW.open = true; BW.away = false;
     document.body.classList.add('bw-open');
+    BW.el.querySelector('#bw-setup-btn').hidden = !isDm();
     hideBackButton();
     const cfg = window.bridgeConfig();
     if (!cfg) { showSetup(); return; }
@@ -477,13 +480,13 @@ function click(x, y) {
     const rc = rayAt(x, y); const sh = sceneHit(rc); const zh = zoneHit(rc, sh ? sh.distance + 1.2 : 40);
     if (zh) return useZone(zh.z);
     if (!sh) return;
-    const p = sh.point; const cell = BW.nav.nearest(p.x, p.z, p.y, 6);
+    const p = sh.point; const cell = BW.nav.nearest(p.x, p.z, p.y, 6, 1.2);
     if (!cell || Math.abs(cell.y - p.y) > 1.2) { toast("You can't walk there."); return; }
     walkTo(cell, null);
 }
 function walkTo(cell, onArrive) {
     const N = BW.nav; const [ix, iz] = N.cellOf(BW.pos.x, BW.pos.z);
-    const from = N.nearest(BW.pos.x, BW.pos.z, BW.pos.y, 4); if (!from) return false;
+    const from = N.nearest(BW.pos.x, BW.pos.z, BW.pos.y, 4, 0.6); if (!from) return false;
     const path = window.bridgeFindPath(N, { ix: from.ix, iz: from.iz, y: from.y }, cell);
     if (!path) { toast('No way through to there.'); return false; }
     BW.path = path.slice(1).map(n => { const [x, z] = N.center(n.ix, n.iz); return { x, z, y: n.y }; });
@@ -494,7 +497,7 @@ function walkTo(cell, onArrive) {
 function faceThen(target, cb) { BW.turnTo = { yaw: Math.atan2(-(target.x - BW.pos.x), -(target.z - BW.pos.z)), cb }; }
 function useZone(z) {
     const m = z.m;
-    const near = BW.nav.nearest(m.pos.x, m.pos.z, m.pos.y - 0.6, 10);
+    const near = BW.nav.nearest(m.pos.x, m.pos.z, m.pos.y - 0.6, 16, 1.6) || BW.nav.nearest(m.pos.x, m.pos.z, m.pos.y - 0.6, 10);
     const go = (cb) => { if (near && Math.hypot(BW.pos.x - m.pos.x, BW.pos.z - m.pos.z) > (z.kind === 'holo' ? 2.4 : 1.4)) walkTo({ ix: near.ix, iz: near.iz, y: near.y }, () => faceThen(m.pos, cb)); else faceThen(m.pos, cb); };
     if (z.kind === 'holo') return go(() => leanOver(m));
     if (z.kind === 'chair') return go(() => sit(m));
@@ -508,7 +511,7 @@ function tweenCam(toPos, toYaw, toPitch, dur, cb) {
 }
 function sit(chair) {
     const seat = BW.markers.find(m => m.kind === 'seat' && m.key === chair.key) || null; // SEAT_captain pairs with CHAIR_captain only
-    const floor = BW.nav.nearest(chair.pos.x, chair.pos.z, chair.pos.y - 0.6, 6);
+    const floor = BW.nav.nearest(chair.pos.x, chair.pos.z, chair.pos.y - 0.6, 6, 1.6);
     const eye = seat ? seat.pos.clone() : new BW.THREE.Vector3(chair.pos.x, (floor ? floor.y : chair.pos.y - 0.8) + SEAT_EYE, chair.pos.z);
     const yaw = (seat && seat.rotated) ? seat.yaw : (chair.rotated ? chair.yaw : BW.yaw);
     BW.seated = { chair, back: BW.pos.clone() };
@@ -629,9 +632,10 @@ function showSetup(msg) {
         <input type="text" id="bw-title" value="${esc((cfg && cfg.title) || 'Intrepid Horizon')}">
         <label for="bw-ship">Ship the helm plots jumps for</label>
         <select id="bw-ship"><option value="">-- none (players pick on the map) --</option>${ships.map(s => `<option value="${s.id}"${cfg && cfg.ship_id === s.id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
-        <div class="bw-row"><button class="bw-btn" onclick="window.closeBridge()">CLOSE</button>${cfg ? '<button class="bw-btn" id="bw-save-meta">SAVE NAME / SHIP</button>' : ''}<button class="bw-btn bw-gold" id="bw-upload">UPLOAD</button></div>
+        <div class="bw-row"><button class="bw-btn" id="bw-setup-close">${BW.scene ? 'BACK TO BRIDGE' : 'CLOSE'}</button>${cfg ? '<button class="bw-btn" id="bw-save-meta">SAVE NAME / SHIP</button>' : ''}<button class="bw-btn bw-gold" id="bw-upload">UPLOAD</button></div>
         <div id="bw-up-status"></div>
     </div>`;
+    box.querySelector('#bw-setup-close').onclick = () => { box.hidden = true; if (BW.scene) startLoop(); else window.closeBridge(); };
     box.querySelector('#bw-upload').onclick = () => window.uploadBridgeFiles(Array.from(box.querySelector('#bw-files').files || []), box.querySelector('#bw-title').value.trim(), box.querySelector('#bw-ship').value || null);
     const sm = box.querySelector('#bw-save-meta');
     if (sm) sm.onclick = () => saveConfig(Object.assign({}, cfg, { title: box.querySelector('#bw-title').value.trim() || cfg.title, ship_id: box.querySelector('#bw-ship').value || null })).then(() => { box.querySelector('#bw-up-status').textContent = 'Saved.'; });
@@ -668,7 +672,10 @@ window.uploadBridgeFiles = async function (files, title, shipId) {
         const navPath = `${version}/nav.json`;
         const { error: ne } = await db.storage.from(BUCKET).upload(navPath, byName[pick.nav], { contentType: 'application/json', upsert: false });
         if (ne) throw new Error('Walkable floor: ' + ne.message);
+        const old = window.bridgeConfig();
         await saveConfig({ version, parts, nav: navPath, bytes, title: title || 'Intrepid Horizon', ship_id: shipId || null, uploaded_at: new Date().toISOString() });
+        // the previous version's files are no longer used: free the space (best effort)
+        if (old && old.version !== version) { try { await db.storage.from(BUCKET).remove([...(old.parts || []), old.nav].filter(Boolean)); } catch (e) {} }
         say('Done. Opening the bridge…');
         BW.loaded = null; BW.scene = null;
         setTimeout(() => window.openBridge(), 300);
