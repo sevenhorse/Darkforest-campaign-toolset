@@ -162,6 +162,28 @@ window.bridgeFindPath = function (N, from, to, limit) {
     }
     return null;
 };
+// Straighten a grid path: from each kept point, skip ahead to the farthest point still reachable in a
+// straight line over walkable floor (sampled every ~8 cm, no jump bigger than a step). pts = [{x,z,y}].
+window.bridgeSmoothPath = function (N, pts) {
+    if (pts.length < 3) return pts.slice();
+    const clear = (a, b) => {
+        const d = Math.hypot(b.x - a.x, b.z - a.z); const n = Math.max(1, Math.ceil(d / (N.res / 3)));
+        let y = a.y;
+        for (let i = 1; i <= n; i++) {
+            const t = i / n; const h = N.heightAt(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, y);
+            if (h === null || Math.abs(h - y) > N.step * 0.6) return false;
+            y = h;
+        }
+        return Math.abs(y - b.y) <= N.step;
+    };
+    const out = [pts[0]]; let i = 0;
+    while (i < pts.length - 1) {
+        let j = pts.length - 1;
+        while (j > i + 1 && !clear(pts[i], pts[j])) j--;
+        out.push(pts[j]); i = j;
+    }
+    return out;
+};
 // Which way to face at a spot: the direction with the longest open walk (used when
 // the spawn marker was never rotated).
 window.bridgeOpenYaw = function (N, x, z, y) {
@@ -489,7 +511,8 @@ function walkTo(cell, onArrive) {
     const from = N.nearest(BW.pos.x, BW.pos.z, BW.pos.y, 4, 0.6); if (!from) return false;
     const path = window.bridgeFindPath(N, { ix: from.ix, iz: from.iz, y: from.y }, cell);
     if (!path) { toast('No way through to there.'); return false; }
-    BW.path = path.slice(1).map(n => { const [x, z] = N.center(n.ix, n.iz); return { x, z, y: n.y }; });
+    const pts = [{ x: BW.pos.x, z: BW.pos.z, y: from.y }].concat(path.slice(1).map(n => { const [x, z] = N.center(n.ix, n.iz); return { x, z, y: n.y }; }));
+    BW.path = window.bridgeSmoothPath(N, pts).slice(1); BW.walkV = 0; BW.floorY = from.y;
     BW.onArrive = onArrive || null;
     if (!BW.path.length) { BW.path = null; onArrive && onArrive(); }
     return true;
@@ -588,11 +611,24 @@ function step(dt, noRender) {
             const tryMove = (x, z) => { const h = BW.nav.heightAt(x, z, BW.pos.y); if (h === null) return false; BW.pos.x = x; BW.pos.z = z; BW.pos.y += (h - BW.pos.y) * Math.min(1, dt * 12); return true; };
             if (!tryMove(nx, nz)) { tryMove(nx, BW.pos.z) || tryMove(BW.pos.x, nz); }
         } else if (BW.path) {
-            const tg = BW.path[0]; const dx = tg.x - BW.pos.x, dz = tg.z - BW.pos.z, d = Math.hypot(dx, dz), st = WALK * dt;
-            if (d > 0.05) BW.yaw = lerpAngle(BW.yaw, Math.atan2(-dx, -dz), 1 - Math.exp(-6 * dt));
-            if (d <= st) { BW.pos.x = tg.x; BW.pos.z = tg.z; BW.path.shift(); if (!BW.path.length) { BW.path = null; const f = BW.onArrive; BW.onArrive = null; f && f(); } }
-            else { BW.pos.x += dx / d * st; BW.pos.z += dz / d * st; }
-            BW.pos.y += (tg.y - BW.pos.y) * Math.min(1, dt * 10);
+            // remaining distance + a look-ahead point ~1.5 m along the route (rounds corners instead of snapping)
+            let left = 0, px = BW.pos.x, pz = BW.pos.z, look = null, LA = 1.5;
+            for (const q of BW.path) { const sl = Math.hypot(q.x - px, q.z - pz); if (!look && left + sl >= LA) { const t = (LA - left) / (sl || 1); look = { x: px + (q.x - px) * t, z: pz + (q.z - pz) * t }; } left += sl; px = q.x; pz = q.z; }
+            look = look || BW.path[BW.path.length - 1];
+            BW.walkV = Math.min(WALK, (BW.walkV || 0) + WALK * 4 * dt, Math.max(0.6, left * 2.2)); // ease in, slow down on arrival
+            const lx = look.x - BW.pos.x, lz = look.z - BW.pos.z;
+            if (Math.hypot(lx, lz) > 0.2) BW.yaw = lerpAngle(BW.yaw, Math.atan2(-lx, -lz), 1 - Math.exp(-5 * dt));
+            let st = BW.walkV * dt;
+            while (BW.path && st > 0) {
+                const tg = BW.path[0]; const dx = tg.x - BW.pos.x, dz = tg.z - BW.pos.z, d = Math.hypot(dx, dz);
+                if (d <= st) { BW.pos.x = tg.x; BW.pos.z = tg.z; st -= d; BW.path.shift(); if (!BW.path.length) { BW.path = null; const f = BW.onArrive; BW.onArrive = null; f && f(); } }
+                else { BW.pos.x += dx / d * st; BW.pos.z += dz / d * st; st = 0; }
+            }
+            // follow the floor with an unsmoothed height (so steep stairs never lose it), then ease the camera toward it
+            if (BW.floorY == null) BW.floorY = BW.pos.y;
+            const fh = BW.nav.heightAt(BW.pos.x, BW.pos.z, BW.floorY); if (fh !== null) BW.floorY = fh;
+            BW.pos.y += (BW.floorY - BW.pos.y) * Math.min(1, dt * 12);
+            if (!BW.path) { BW.pos.y = BW.floorY; BW.floorY = null; }
         } else if (BW.turnTo) {
             BW.yaw = lerpAngle(BW.yaw, BW.turnTo.yaw, 1 - Math.exp(-8 * dt));
             if (Math.abs(((BW.turnTo.yaw - BW.yaw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI) < 0.03) { const cb = BW.turnTo.cb; BW.turnTo = null; cb && cb(); }
@@ -605,6 +641,7 @@ function step(dt, noRender) {
 }
 // Test hook: advance time without the render loop (software GL is too slow for 60 fps).
 BW.tick = (dt, render) => step(dt, !render);
+BW.walkTo = (cell, cb) => walkTo(cell, cb); // test hook
 document.addEventListener('keydown', (e) => {
     if (!BW.open || BW.away) return;
     if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
