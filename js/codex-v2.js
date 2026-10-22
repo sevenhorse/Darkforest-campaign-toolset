@@ -27,8 +27,11 @@ const CATS = [
     { key: 'factions', tab: 'FACTIONS', title: 'FACTIONS & POWERS', icon: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"></path>' },
     { key: 'lore', tab: 'SECTOR LORE', title: 'SECTOR LORE & INTEL', icon: '<circle cx="12" cy="12" r="3"></circle><ellipse cx="12" cy="12" rx="10" ry="4"></ellipse>' },
     { key: 'npcs', tab: 'KEY NPCS', title: 'KEY NPCS & CONTACTS', icon: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21c1-4 4-6 8-6s7 2 8 6"></path>' },
-    { key: 'docs', tab: 'DOCUMENTS', title: 'DOCUMENTS & LOGS', icon: '<path d="M6 3h9l4 4v14H6z"></path><path d="M14 3v5h5"></path>' }
+    { key: 'docs', tab: 'DOCUMENTS', title: 'DOCUMENTS & LOGS', icon: '<path d="M6 3h9l4 4v14H6z"></path><path d="M14 3v5h5"></path>' },
+    // DM's own planning notes: the tab only exists for the DM (entries stay is_hidden as well).
+    { key: 'prep', tab: 'SESSION PREP', title: 'SESSION PREP (DM ONLY)', dmOnly: true, icon: '<rect x="5" y="4" width="14" height="17"></rect><path d="M9 4V2h6v2"></path><path d="M8 10h8M8 14h8M8 18h5"></path>' }
 ];
+const catsForMe = () => CATS.filter(c => !c.dmOnly || isDm());
 const S = window.__cx2 = window.__cx2 || { selected: {}, view: 'list', editing: false, editTab: 'write', charts: [], pendingSelect: null };
 const esc = (v) => window.escapeHtml(v == null ? '' : String(v));
 const isDm = () => typeof currentUserRole !== 'undefined' && currentUserRole === 'dm';
@@ -227,7 +230,7 @@ function renderV2() {
     if (!root) return;
     document.getElementById('term-panel-codex').classList.add('cx2-on');
     const dm = isDm();
-    const cat = CATS.some(c => c.key === window.activeCodexCategory) ? window.activeCodexCategory : 'factions';
+    const cat = catsForMe().some(c => c.key === window.activeCodexCategory) ? window.activeCodexCategory : 'factions';
     window.activeCodexCategory = cat;
 
     const clear = document.getElementById('cx2-clear');
@@ -237,7 +240,7 @@ function renderV2() {
     const search = document.getElementById('cx2-search');
     if (search && document.activeElement !== search) search.value = window.codexSearchFilter || '';
 
-    document.getElementById('cx2-tabs').innerHTML = CATS.map(c => {
+    document.getElementById('cx2-tabs').innerHTML = catsForMe().map(c => {
         const on = c.key === cat;
         return `<button type="button" role="tab" aria-selected="${on}" class="cx2-tab${on ? ' on' : ''}" onclick="window.cx2Category('${c.key}')">${svg(c.icon)}<span>${c.tab}</span><b>${entriesFor(c.key).length}</b></button>`;
     }).join('');
