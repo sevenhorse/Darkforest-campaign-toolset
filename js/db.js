@@ -399,7 +399,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-19.02';
+window.DARKFOREST_BUILD = '2026-10-22.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -1294,10 +1294,12 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes',
      'cargo_item_catalog', // no table references it
      'character_personal_log', // opt-in Dossier tracker; RLS = owner or DM (a DM backup sees every row)
-     'app_settings', 'encounter_presets'],
+     'app_settings', 'encounter_presets',
+     'scene_maps'], // Scene Map scenes (marks live inside the row)
     ['ship_markers', 'system_hazards'],
     // battle_tokens / battle_events (undo log) / battle_reinforcements are children of battle_encounters.
-    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events', 'battle_reinforcements'],
+    // scene_tokens are children of scene_maps.
+    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events', 'battle_reinforcements', 'scene_tokens'],
     ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
 ];
 // Primary key column per table (default 'id'). The wipe step deletes every

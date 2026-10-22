@@ -2341,3 +2341,91 @@ body:not(.pap-on) .pap-field { display: none !important; }
 #bottom-toggle-bar .bw-bar-btn { width: auto; margin: 0; padding: 4px 10px; background: #040605; border: 1px solid #3c4e36; color: #6b826a; font-size: 10px; }
 #bottom-toggle-bar .bw-bar-btn.on { border-color: #00e1ff; color: #00e1ff; }
 #bottom-toggle-bar .bw-enter { border-color: #c9962f; color: #c9962f; }
+
+/* ---------- Scene Map (js/scene-maps.js): non-combat scene view ---------- */
+.scv { position: fixed; inset: 0; z-index: 4040; background: #02060a; color: #d4e4ea; overflow: auto; padding: 12px; box-sizing: border-box; font-family: 'Oxanium', 'Rajdhani', 'Segoe UI', system-ui, sans-serif; }
+.scv button, .scv select, .scv input, .scv textarea { font-family: inherit; margin: 0; border-radius: 0; }
+.scv button { width: auto; }
+.scv-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 12px; background: rgba(6, 14, 18, 0.9); border: 1px solid rgba(0, 225, 255, 0.4); clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+.scv-titlebox { min-width: 0; }
+.scv-kicker { font-size: 9px; letter-spacing: 0.22em; color: #00e1ff; display: block; }
+.scv-title { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: 0.12em; color: #f2fbfd; border: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; }
+.scv-chip { font-size: 10px; letter-spacing: 0.16em; padding: 4px 8px; border: 1px solid rgba(0, 225, 255, 0.5); color: #9fe9f5; }
+.scv-live { border-color: #00e5a3; color: #00e5a3; }
+.scv-grow { flex: 1 1 10px; }
+.scv-btn { height: 32px; padding: 0 12px; font-size: 10px; letter-spacing: 0.14em; background: transparent; border: 1px solid #00e1ff; color: #00e1ff; cursor: pointer; }
+.scv-btn:disabled { opacity: 0.4; cursor: default; }
+/* the app-wide button:hover (green fill, dark text) is replaced inside the scene view */
+.scv-btn:hover:not(:disabled) { background: rgba(0, 225, 255, 0.12); color: #e8f6fa; border-color: #00e1ff; box-shadow: none; }
+.scv-btn:disabled:hover { background: transparent; color: #00e1ff; border-color: #00e1ff; box-shadow: none; }
+.scv-green { border-color: #00e5a3; color: #00e5a3; }
+.scv-gold { border-color: #ffd700; color: #ffd700; }
+.scv-red { border-color: #ff4d4d; color: #ff8a8a; background: #2a0808; }
+.scv-green:hover:not(:disabled) { background: rgba(0, 229, 163, 0.14); border-color: #00e5a3; color: #e8fff7; }
+.scv-gold:hover:not(:disabled) { background: rgba(255, 215, 0, 0.12); border-color: #ffd700; color: #fff6cc; }
+.scv-red:hover:not(:disabled) { background: #3a0c0c; border-color: #ff4d4d; color: #ffd0d0; }
+.scv-select { height: 32px; max-width: 220px; background: #050b0e; border: 1px solid rgba(0, 225, 255, 0.4); color: #d4e4ea; padding: 0 8px; font-size: 11px; }
+.scv-empty { max-width: 560px; margin: 40px auto; font-size: 12px; line-height: 1.6; color: #8fa7b0; text-align: center; }
+.scv-empty b { color: #00e1ff; font-weight: 600; }
+.scv-body { display: flex; gap: 12px; align-items: flex-start; }
+.scv-main { flex: 1 1 auto; min-width: 0; overflow: auto; }
+.scv-side { flex: 0 0 300px; background: rgba(6, 14, 18, 0.86); border: 1px solid rgba(0, 225, 255, 0.3); padding: 10px; box-sizing: border-box; max-height: calc(100vh - 110px); overflow-y: auto; clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.scv-board { position: relative; border: 1px solid #12404a; user-select: none; -webkit-user-select: none; touch-action: pan-x pan-y; overflow: hidden; }
+.scv-board canvas { position: absolute; left: 0; top: 0; }
+.scv-area { position: absolute; box-sizing: border-box; border: 1px solid; z-index: 1; }
+.scv-area.dm { cursor: move; touch-action: none; }
+.scv-area.sel, .scv-text.sel { outline: 2px dashed #ffffff; outline-offset: 2px; }
+.scv-area-lab { position: absolute; left: 6px; top: 4px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; pointer-events: none; text-shadow: 0 0 4px #000; }
+.scv-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; background: #ffffff; border: 2px solid #02060a; cursor: nwse-resize; touch-action: none; }
+.scv-text { position: absolute; transform: translate(-50%, -50%); font-weight: 700; letter-spacing: 0.1em; white-space: nowrap; z-index: 1; text-shadow: 0 0 4px #000, 0 0 2px #000; }
+.scv-text.dm { cursor: move; touch-action: none; }
+.scv-tok { position: absolute; box-sizing: border-box; border-radius: 50%; border: 2px solid; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #f2fbfd; cursor: pointer; z-index: 2; text-shadow: 0 0 3px #000; }
+.scv-tok.drag { cursor: grab; touch-action: none; }
+.scv-tok.mine { box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.85), 0 0 12px rgba(255, 215, 0, 0.5); }
+.scv-tok.sel { outline: 2px dashed #ffffff; outline-offset: 3px; z-index: 3; }
+.scv-tok.hid { opacity: 0.45; border-style: dashed; }
+.scv-tok.appear { animation: scv-appear 1.6s ease-out; }
+@keyframes scv-appear { 0% { opacity: 0; transform: scale(2.2); box-shadow: 0 0 40px 18px rgba(255, 255, 255, 0.7); } 60% { opacity: 1; transform: scale(1); } 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); } }
+.scv-tokname { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 2px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; white-space: nowrap; color: #e8f6fa; pointer-events: none; }
+.scv-help { font-size: 10px; letter-spacing: 0.06em; color: #6b8590; margin-top: 8px; }
+.scv-ttl { font-size: 10px; letter-spacing: 0.18em; color: #00e1ff; padding-bottom: 6px; border-bottom: 1px solid rgba(0, 225, 255, 0.2); margin-bottom: 6px; }
+.scv-ttl2 { margin-top: 12px; }
+.scv-roster { display: flex; flex-direction: column; gap: 3px; max-height: 38vh; overflow-y: auto; }
+.scv-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid rgba(255, 255, 255, 0.05); }
+.scv-row.sel { outline: 1px solid rgba(0, 225, 255, 0.6); outline-offset: -1px; }
+.scv-row.hid .scv-rowname { color: #8fa7b0; font-style: italic; }
+.scv-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.scv-rowname { flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; color: #e8f6fa; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; display: flex; flex-direction: column; padding: 2px 0; }
+.scv-rowname small { font-size: 9px; font-weight: 400; color: #6b8590; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scv-mini { height: 24px; padding: 0 7px; font-size: 9px; letter-spacing: 0.1em; background: transparent; border: 1px solid #6b8590; color: #9fb4bd; cursor: pointer; }
+.scv-mini.gold { border-color: #ffd700; color: #ffd700; }
+.scv-mini:hover { background: rgba(255, 255, 255, 0.06); color: #e8f6fa; border-color: #9fb4bd; box-shadow: none; }
+.scv-mini.gold:hover { color: #fff6cc; border-color: #ffd700; }
+.scv-rowname:hover { background: rgba(0, 225, 255, 0.06); color: #ffffff; border: 0; box-shadow: none; }
+.scv-pill:hover { background: rgba(4, 30, 26, 0.98); color: #c8fff0; border-color: #00e5a3; box-shadow: none; }
+.scv-none { font-size: 10px; color: #6b8590; padding: 6px 0; }
+.scv-note { font-size: 12px; line-height: 1.5; color: #d4e4ea; white-space: pre-wrap; }
+.scv-lab { display: block; font-size: 9px; letter-spacing: 0.14em; color: #6b8590; margin: 6px 0 3px; }
+.scv-in { width: 100%; box-sizing: border-box; background: #050b0e; border: 1px solid rgba(0, 225, 255, 0.3); color: #d4e4ea; padding: 6px 8px; font-size: 11px; }
+.scv-color { height: 32px; padding: 2px; }
+.scv-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
+.scv-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.scv-addrow { display: flex; gap: 6px; margin-top: 8px; }
+.scv-addrow .scv-in { flex: 1; min-width: 0; }
+.scv-addpc { margin-top: 8px; }
+.scv-check { display: flex; align-items: center; gap: 6px; font-size: 9px; letter-spacing: 0.1em; color: #8fa7b0; margin: 8px 0 0; cursor: pointer; }
+.scv-check input { width: auto; margin: 0; accent-color: #ffd700; }
+.scv-pill { position: fixed; left: 12px; bottom: 60px; z-index: 3900; height: 40px; padding: 0 14px; width: auto !important; margin: 0; font-family: 'Oxanium', sans-serif; font-size: 11px; letter-spacing: 0.14em; background: rgba(2, 16, 14, 0.95); border: 1px solid #00e5a3; color: #7ff0cf; cursor: pointer; }
+#bottom-toggle-bar .scv-bar-btn { width: auto; margin: 0; padding: 4px 10px; background: #040605; border: 1px solid #2f8f7a; color: #4fd1b0; font-size: 10px; }
+#bottom-toggle-bar .scv-bar-btn.live { border-color: #00e5a3; color: #00e5a3; }
+@media screen and (max-width: 768px) {
+    .scv { padding: 8px; }
+    .scv-body { flex-direction: column; }
+    .scv-side { flex: 1 1 auto; width: 100%; max-height: none; }
+    .scv-btn { height: 40px; }
+    .scv-title { font-size: 15px; }
+    .scv-pill { left: 8px; right: 8px; bottom: 64px; }
+    /* a whole room on a phone is small: short names, full name on your own / the tapped token */
+    .scv-tokname { font-size: 8.5px; max-width: 72px; overflow: hidden; text-overflow: ellipsis; }
+    .scv-tok.mine .scv-tokname, .scv-tok.sel .scv-tokname { max-width: none; z-index: 4; }
+}
