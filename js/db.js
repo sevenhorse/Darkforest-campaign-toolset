@@ -399,7 +399,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-22.01';
+window.DARKFOREST_BUILD = '2026-10-22.02';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -1295,7 +1295,8 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      'cargo_item_catalog', // no table references it
      'character_personal_log', // opt-in Dossier tracker; RLS = owner or DM (a DM backup sees every row)
      'app_settings', 'encounter_presets',
-     'scene_maps'], // Scene Map scenes (marks live inside the row)
+     'scene_maps', // Scene Map scenes (marks live inside the row)
+     'scene_object_presets'], // the DM's saved Scene Map objects
     ['ship_markers', 'system_hazards'],
     // battle_tokens / battle_events (undo log) / battle_reinforcements are children of battle_encounters.
     // scene_tokens are children of scene_maps.

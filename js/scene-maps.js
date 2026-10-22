@@ -33,7 +33,8 @@ const KIND_COLOR = { pc: '#00e1ff', npc: '#ff6b6b', object: '#c9962f' };
 const TOKEN_BASE = 44; // token diameter in map units at size 1
 const S = window.__scene = {
     list: [], tokens: [], viewId: null, view: false, sel: null, drag: null,
-    scale: 1, lastLive: undefined, known: {}, appear: new Set(), pending: false, loaded: false
+    scale: 1, lastLive: undefined, known: {}, appear: new Set(), pending: false, loaded: false,
+    presets: [], presetsLoaded: false
 };
 
 /* --- Pure helpers (tested) --- */
@@ -56,6 +57,36 @@ window.sceneCanDrag = function (tok, scene) {
     if (!tok || !scene) return false;
     if (isDm()) return true;
     return !!(scene.is_active && !tok.is_hidden && tok.profile_id && tok.profile_id === me());
+};
+/* --- Object library ---
+   Built-in starter presets (DM decision: real shapes, plus the DM's own saved
+   presets in scene_object_presets). Sizes are map units; a person token is 44
+   across, so roughly 40 units = 1 m. Objects are rectangles centred on x/y,
+   turned in 90 degree steps, resized by the corner handle. */
+const OBJECT_LIBRARY = [
+    ['Furniture', [['Table', 80, 80, '#7f8c99'], ['Long table', 200, 70, '#7f8c99'], ['Bar counter', 240, 50, '#8a7a66'], ['Chair', 30, 30, '#6b7f8a'], ['Bench', 120, 30, '#6b7f8a'], ['Bed / med cot', 50, 100, '#9fd3e0']]],
+    ['Tech', [['Console', 80, 40, '#00e1ff'], ['Wall screen', 160, 14, '#7fe8ff'], ['Holotable', 160, 120, '#ffd700'], ['Terminal', 40, 30, '#00e5a3'], ['Server rack', 50, 90, '#4fc3f7']]],
+    ['Storage', [['Crate', 40, 40, '#c9962f'], ['Cargo container', 240, 100, '#d98c3a'], ['Locker', 40, 60, '#9fb4bd'], ['Weapons rack', 120, 30, '#ff6b6b']]],
+    ['Structure', [['Door', 80, 14, '#ffaa00'], ['Airlock', 100, 100, '#1f8cbe'], ['Wall segment', 240, 20, '#566a72'], ['Barricade / cover', 120, 30, '#5a6e4a'], ['Lift / ladder', 80, 80, '#9fb4bd'], ['Pillar', 50, 50, '#8fa7b0']]]
+].map(([category, items]) => ({ category, items: items.map(([name, w, h, color]) => ({ id: 'b:' + name, builtin: true, name, category, kind: 'object', shape: 'rect', w, h, size: 1, color, note: '' })) }));
+window.SCENE_OBJECT_LIBRARY = OBJECT_LIBRARY;
+const isRect = (t) => !!(t && t.shape === 'rect');
+const normRot = (r) => ((Math.round((Number(r) || 0) / 90) * 90) % 360 + 360) % 360;
+window.sceneNormRot = normRot;
+// Screen box of a rectangle object (unrotated box; CSS `rotate` turns it about its centre).
+window.sceneRectBox = function (t, s) {
+    const w = Math.max(4, (Number(t.w) || 40) * s), h = Math.max(4, (Number(t.h) || 40) * s);
+    return { left: t.x * s - w / 2, top: t.y * s - h / 2, width: w, height: h };
+};
+// Corner-handle resize of a turned rectangle: the drag (map units) is read in the
+// object's own frame, the opposite corner stays put, so the centre shifts by half the growth.
+window.sceneResizeRect = function (t, dx, dy) {
+    const r = normRot(t.rot) * Math.PI / 180, c = Math.cos(r), sn = Math.sin(r);
+    const lx = dx * c + dy * sn, ly = -dx * sn + dy * c;
+    const ow = Number(t.w) || 40, oh = Number(t.h) || 40;
+    const w = Math.max(10, Math.round(ow + lx)), h = Math.max(10, Math.round(oh + ly));
+    const hx = (w - ow) / 2, hy = (h - oh) / 2;
+    return { w, h, x: Math.round(t.x + hx * c - hy * sn), y: Math.round(t.y + hx * sn + hy * c) };
 };
 function hexToRgba(hex, a) {
     const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
@@ -95,6 +126,10 @@ window.loadSceneMaps = async function () {
     if (S.loaded && !dm && liveId && liveId !== S.lastLive) S.view = true;
     if (!liveId && !dm) S.view = false;
     S.lastLive = liveId; S.loaded = true;
+    if (dm && !S.presetsLoaded) {
+        const pr = await db.from('scene_object_presets').select('*').order('created_at', { ascending: true });
+        if (!pr.error) { S.presets = pr.data || []; S.presetsLoaded = true; }
+    }
     await loadTokens();
     renderFromRemote();
 };
@@ -236,11 +271,50 @@ window.sceneTokenField = async function (id, field, value) {
     else if (field === 'kind') upd.kind = ['pc', 'npc', 'object'].includes(value) ? value : tok.kind;
     else if (field === 'profile_id') upd.profile_id = value || null;
     else if (field === 'is_hidden') upd.is_hidden = !!value;
+    else if (field === 'w' || field === 'h') { const n = parseFloat(value); upd[field] = isFinite(n) ? Math.max(10, Math.min(field === 'w' ? sc.width : sc.height, Math.round(n))) : tok[field]; }
+    else if (field === 'rot') upd.rot = normRot(value);
     else return;
     Object.assign(tok, upd);
     const { error } = await db.from('scene_tokens').update(Object.assign({ updated_at: new Date().toISOString() }, upd)).eq('id', id);
     if (error) { toast('Could not save the token: ' + error.message); return; }
     await touchScene(sc);
+    renderScene();
+};
+// Object library: built-in starter (id 'b:<name>') or one of the DM's saved presets.
+function findPreset(id) {
+    for (const g of OBJECT_LIBRARY) { const it = g.items.find(i => i.id === id); if (it) return it; }
+    return (S.presets || []).find(p => p.id === id) || null;
+}
+window.sceneAddPreset = async function (id) {
+    const sc = viewedScene(), p = findPreset(id); if (!isDm() || !sc || !p) return;
+    const hidden = !!(document.getElementById('scv-add-hidden') || {}).checked;
+    const row = { name: p.name, kind: p.kind || 'object', shape: p.shape || 'rect', color: p.color || null, note: p.note || '', size: p.size || 1, is_hidden: hidden };
+    if (row.shape === 'rect') { row.w = Math.min(sc.width, Number(p.w) || 40); row.h = Math.min(sc.height, Number(p.h) || 40); row.rot = 0; }
+    await insertTokens([row]);
+};
+window.sceneRotate = (id) => { const t = S.tokens.find(x => x.id === id); if (t) return window.sceneTokenField(id, 'rot', (t.rot || 0) + 90); };
+async function commitGeometry(tok, fields) {
+    const sc = viewedScene(); if (!isDm() || !sc || !tok) return;
+    Object.assign(tok, fields);
+    const { error } = await db.from('scene_tokens').update(Object.assign({ updated_at: new Date().toISOString() }, fields)).eq('id', tok.id);
+    if (error) { toast('Could not resize: ' + error.message); return; }
+    await touchScene(sc);
+}
+window.sceneSaveAsPreset = async function (id) {
+    const t = S.tokens.find(x => x.id === id); if (!isDm() || !t) return;
+    const row = { name: t.name, category: 'My presets', kind: t.kind, shape: isRect(t) ? 'rect' : 'circle', w: isRect(t) ? t.w : null, h: isRect(t) ? t.h : null, size: t.size || 1, color: t.color || null, note: t.note || '', created_by: me() };
+    const { data, error } = await db.from('scene_object_presets').insert(row).select().single();
+    if (error) { toast('Could not save the preset: ' + error.message); return; }
+    S.presets.push(data);
+    toast(`Saved "${t.name}" to the library (MY PRESETS).`);
+    renderScene();
+};
+window.sceneDeletePreset = async function (id) {
+    const p = (S.presets || []).find(x => x.id === id); if (!isDm() || !p) return;
+    if (!(await window.showConfirmModal(`Remove "${p.name}" from your presets? Objects already placed stay.`))) return;
+    const { error } = await db.from('scene_object_presets').delete().eq('id', id);
+    if (error) { toast('Could not remove: ' + error.message); return; }
+    S.presets = S.presets.filter(x => x.id !== id);
     renderScene();
 };
 // Notes save as you type (the app-wide textarea popup sends 'input', not 'change').
@@ -393,11 +467,18 @@ function renderScene() {
         }
         return `<div class="scv-text${sel ? ' sel' : ''}${dm ? ' dm' : ''}" data-mark="${esc(m.id)}" style="left:${m.x * s}px; top:${m.y * s}px; color:${esc(m.color)}; font-size:${Math.max(9, Math.round((m.size || 22) * s))}px;">${esc(m.text)}</div>`;
     }).join('');
-    const tokHtml = S.tokens.map(t => {
+    // Objects (rectangles) sit under people.
+    const drawOrder = S.tokens.filter(isRect).concat(S.tokens.filter(t => !isRect(t)));
+    const tokHtml = drawOrder.map(t => {
         const d = window.sceneTokenPx(s, t.size), col = t.color || KIND_COLOR[t.kind] || KIND_COLOR.npc;
         const sel = S.sel && S.sel.type === 'tok' && S.sel.id === t.id;
         const mine = !dm && t.profile_id && t.profile_id === me();
-        const cls = ['scv-tok', t.kind, sel ? 'sel' : '', mine ? 'mine' : '', t.is_hidden ? 'hid' : '', S.appear.has(t.id) ? 'appear' : '', window.sceneCanDrag(t, sc) ? 'drag' : ''].filter(Boolean).join(' ');
+        const cls = ['scv-tok', t.kind, isRect(t) ? 'scv-obj' : '', sel ? 'sel' : '', mine ? 'mine' : '', t.is_hidden ? 'hid' : '', S.appear.has(t.id) ? 'appear' : '', window.sceneCanDrag(t, sc) ? 'drag' : ''].filter(Boolean).join(' ');
+        if (isRect(t)) {
+            const b = window.sceneRectBox(t, s), inside = b.width >= 44 && b.height >= 14;
+            const label = `${esc(t.name)}${t.is_hidden ? ' · HIDDEN' : ''}`;
+            return `<div class="${cls}" data-tok="${esc(t.id)}" title="${esc(t.name)}${t.note ? ' — ' + esc(t.note) : ''}" style="left:${b.left}px; top:${b.top}px; width:${b.width}px; height:${b.height}px; rotate:${normRot(t.rot)}deg; border-color:${esc(col)}; background:${hexToRgba(col, 0.3)};">${inside ? `<span class="scv-objname" style="font-size:${Math.max(8, Math.min(13, Math.round(b.height * 0.42)))}px;">${label}</span>` : (sel ? `<span class="scv-tokname">${label}</span>` : '')}${dm && sel ? `<span class="scv-handle" data-rhandle="${esc(t.id)}"></span>` : ''}</div>`;
+        }
         return `<div class="${cls}" data-tok="${esc(t.id)}" title="${esc(t.name)}${t.note ? ' — ' + esc(t.note) : ''}" style="left:${t.x * s - d / 2}px; top:${t.y * s - d / 2}px; width:${d}px; height:${d}px; border-color:${esc(col)}; background:${hexToRgba(col, 0.32)}; font-size:${Math.max(9, Math.round(d * 0.36))}px;">${esc(initials(t.name))}<span class="scv-tokname">${esc(t.name)}${t.is_hidden ? ' · HIDDEN' : ''}</span></div>`;
     }).join('');
     v.innerHTML = head + `
@@ -420,7 +501,7 @@ function sidePanel(sc, dm) {
     const selTok = S.sel && S.sel.type === 'tok' ? S.tokens.find(t => t.id === S.sel.id) : null;
     const selMark = S.sel && S.sel.type === 'mark' ? (sc.marks || []).find(m => m.id === S.sel.id) : null;
     const order = { pc: 0, npc: 1, object: 2 };
-    const rows = S.tokens.slice().sort((a, b) => (order[a.kind] - order[b.kind]) || String(a.name).localeCompare(String(b.name))).map(t => {
+    const rows = S.tokens.filter(t => dm || t.kind !== 'object' || t.note).sort((a, b) => (order[a.kind] - order[b.kind]) || String(a.name).localeCompare(String(b.name))).map(t => {
         const col = t.color || KIND_COLOR[t.kind] || KIND_COLOR.npc;
         const sel = selTok && selTok.id === t.id;
         return `<div class="scv-row${sel ? ' sel' : ''}${t.is_hidden ? ' hid' : ''}">
@@ -442,12 +523,17 @@ function sidePanel(sc, dm) {
             <label class="scv-lab">NOTE (players see this)</label><textarea class="scv-in" rows="3" oninput="window.sceneNoteInput('${selTok.id}',this.value)">${esc(selTok.note || '')}</textarea>
             <div class="scv-grid2">
                 <div><label class="scv-lab">COLOUR</label><input type="color" class="scv-in scv-color" value="${esc(selTok.color || KIND_COLOR[selTok.kind] || '#ff6b6b')}" onchange="window.sceneTokenField('${selTok.id}','color',this.value)"></div>
-                <div><label class="scv-lab">SIZE</label><input type="number" class="scv-in" min="0.4" max="4" step="0.1" value="${esc(selTok.size || 1)}" onchange="window.sceneTokenField('${selTok.id}','size',this.value)"></div>
+                ${isRect(selTok)
+                    ? `<div><label class="scv-lab">WIDTH</label><input type="number" class="scv-in" min="10" step="10" value="${esc(selTok.w)}" onchange="window.sceneTokenField('${selTok.id}','w',this.value)"></div>
+                       <div><label class="scv-lab">HEIGHT</label><input type="number" class="scv-in" min="10" step="10" value="${esc(selTok.h)}" onchange="window.sceneTokenField('${selTok.id}','h',this.value)"></div>`
+                    : `<div><label class="scv-lab">SIZE</label><input type="number" class="scv-in" min="0.4" max="4" step="0.1" value="${esc(selTok.size || 1)}" onchange="window.sceneTokenField('${selTok.id}','size',this.value)"></div>`}
                 <div><label class="scv-lab">TYPE</label><select class="scv-in" onchange="window.sceneTokenField('${selTok.id}','kind',this.value)">${['pc', 'npc', 'object'].map(k => `<option value="${k}"${selTok.kind === k ? ' selected' : ''}>${k.toUpperCase()}</option>`).join('')}</select></div>
                 <div><label class="scv-lab">MOVED BY</label><select class="scv-in" onchange="window.sceneTokenField('${selTok.id}','profile_id',this.value)"><option value="">DM only</option>${players.map(p => `<option value="${esc(p.id)}"${selTok.profile_id === p.id ? ' selected' : ''}>${esc(profileName(p.id))}</option>`).join('')}</select></div>
             </div>
             <div class="scv-acts">
                 <button type="button" class="scv-btn${selTok.is_hidden ? ' scv-gold' : ''}" onclick="window.sceneToggleHidden('${selTok.id}')">${selTok.is_hidden ? '👁 REVEAL' : 'HIDE'}</button>
+                ${isRect(selTok) ? `<button type="button" class="scv-btn" onclick="window.sceneRotate('${selTok.id}')" title="Turn 90°">⟳ ROTATE</button>` : ''}
+                <button type="button" class="scv-btn" onclick="window.sceneSaveAsPreset('${selTok.id}')" title="Keep this (name, colour, size, note) in the library for any scene">SAVE AS PRESET</button>
                 <button type="button" class="scv-btn scv-red" onclick="window.sceneRemoveToken('${selTok.id}')">REMOVE</button>
             </div>`;
     } else if (selMark) {
@@ -472,7 +558,13 @@ function sidePanel(sc, dm) {
         <div class="scv-addrow"><input id="scv-add-name" class="scv-in" placeholder="NPC or object name" maxlength="60">
             <button type="button" class="scv-btn" onclick="window.sceneAddToken('npc')">+ NPC</button>
             <button type="button" class="scv-btn" onclick="window.sceneAddToken('object')">+ OBJECT</button></div>
+        <select class="scv-in scv-lib" aria-label="Object library" onchange="const v=this.value; this.value=''; window.sceneAddPreset(v);">
+            <option value="">+ OBJECT LIBRARY…</option>
+            ${(S.presets || []).length ? `<optgroup label="MY PRESETS">${S.presets.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` : ''}
+            ${OBJECT_LIBRARY.map(g => `<optgroup label="${esc(g.category.toUpperCase())}">${g.items.map(i => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('')}</optgroup>`).join('')}
+        </select>
         <label class="scv-check"><input type="checkbox" id="scv-add-hidden"> add it HIDDEN (reveal later)</label>
+        ${(S.presets || []).length ? `<details class="scv-presets"><summary>MY PRESETS (${S.presets.length})</summary>${S.presets.map(p => `<div class="scv-row"><span class="scv-dot" style="background:${esc(p.color || KIND_COLOR[p.kind] || '#c9962f')}"></span><span class="scv-rowname">${esc(p.name)}</span><button type="button" class="scv-mini" onclick="window.sceneDeletePreset('${esc(p.id)}')" title="Remove from your presets">✕</button></div>`).join('')}</details>` : ''}
         <div class="scv-ttl scv-ttl2">ON SCENE</div><div class="scv-roster">${rows}</div>
         ${sel}
         <div class="scv-ttl scv-ttl2">SCENE</div>
@@ -518,9 +610,13 @@ function onDown(ev) {
     const sc = viewedScene(); if (!sc) return;
     const t = ev.target && ev.target.closest ? ev.target : null;
     const handle = t && t.closest('[data-handle]');
+    const rhandle = t && t.closest('[data-rhandle]');
     const tokEl = t && t.closest('[data-tok]');
     const markEl = t && t.closest('[data-mark]');
-    if (handle && isDm()) {
+    if (rhandle && isDm()) {
+        const tok = S.tokens.find(x => x.id === rhandle.getAttribute('data-rhandle')); if (!tok) return;
+        S.drag = { kind: 'rresize', id: tok.id, el: rhandle.parentNode, sx: ev.clientX, sy: ev.clientY, base: { x: tok.x, y: tok.y, w: tok.w, h: tok.h, rot: tok.rot }, moved: false };
+    } else if (handle && isDm()) {
         const m = (sc.marks || []).find(x => x.id === handle.getAttribute('data-handle')); if (!m) return;
         S.drag = { kind: 'resize', id: m.id, el: handle.parentNode, sx: ev.clientX, sy: ev.clientY, ow: m.w, oh: m.h, moved: false };
     } else if (tokEl) {
@@ -544,6 +640,12 @@ function onMove(ev) {
     if (!d.moved && Math.abs(ev.clientX - d.sx) + Math.abs(ev.clientY - d.sy) < 4) return;
     d.moved = true;
     const sc = viewedScene(); if (!sc) return;
+    if (d.kind === 'rresize') {
+        d.geo = window.sceneResizeRect(d.base, dx, dy);
+        const b = window.sceneRectBox(Object.assign({}, d.base, d.geo), s);
+        Object.assign(d.el.style, { left: b.left + 'px', top: b.top + 'px', width: b.width + 'px', height: b.height + 'px' });
+        return;
+    }
     if (d.kind === 'resize') {
         d.w = Math.max(20, Math.round(d.ow + dx)); d.h = Math.max(20, Math.round(d.oh + dy));
         d.el.style.width = d.w * s + 'px'; d.el.style.height = d.h * s + 'px';
@@ -551,7 +653,7 @@ function onMove(ev) {
     }
     const [x, y] = window.sceneClamp(sc, d.ox + dx, d.oy + dy);
     d.x = x; d.y = y;
-    if (d.kind === 'tok') { const half = d.el.offsetWidth / 2 || 0; d.el.style.left = (x * s - half) + 'px'; d.el.style.top = (y * s - half) + 'px'; }
+    if (d.kind === 'tok') { d.el.style.left = (x * s - (d.el.offsetWidth / 2 || 0)) + 'px'; d.el.style.top = (y * s - (d.el.offsetHeight / 2 || 0)) + 'px'; }
     else { d.el.style.left = x * s + 'px'; d.el.style.top = y * s + 'px'; }
 }
 async function onUp() {
@@ -559,6 +661,7 @@ async function onUp() {
     if (!d) return;
     if (!d.moved) {
         if (d.kind === 'tok') window.sceneSelect('tok', d.id);
+        else if (d.kind === 'rresize') { S.sel = { type: 'tok', id: d.id }; renderScene(); }
         else if (d.kind === 'mark') window.sceneSelect('mark', d.id);
         else renderScene();
         return;
@@ -568,6 +671,7 @@ async function onUp() {
         if (tok) { S.sel = { type: 'tok', id: tok.id }; await commitTokenMove(tok, d.x, d.y); }
     } else if (d.kind === 'mark') { S.sel = { type: 'mark', id: d.id }; await commitMark(d.id, { x: d.x, y: d.y }); }
     else if (d.kind === 'resize') await commitMark(d.id, { w: d.w, h: d.h });
+    else if (d.kind === 'rresize' && d.geo) { S.sel = { type: 'tok', id: d.id }; await commitGeometry(S.tokens.find(x => x.id === d.id), d.geo); }
     renderScene();
 }
 function wireBoard() {

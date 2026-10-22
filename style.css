@@ -2386,6 +2386,13 @@ body:not(.pap-on) .pap-field { display: none !important; }
 .scv-tok.hid { opacity: 0.45; border-style: dashed; }
 .scv-tok.appear { animation: scv-appear 1.6s ease-out; }
 @keyframes scv-appear { 0% { opacity: 0; transform: scale(2.2); box-shadow: 0 0 40px 18px rgba(255, 255, 255, 0.7); } 60% { opacity: 1; transform: scale(1); } 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); } }
+.scv-tok.scv-obj { border-radius: 2px; border-width: 1.5px; z-index: 1; color: #e8f6fa; text-shadow: 0 0 3px #000; }
+.scv-tok.scv-obj.sel { z-index: 3; }
+.scv-objname { max-width: 100%; padding: 0 3px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; pointer-events: none; }
+.scv-lib { margin-top: 8px; }
+.scv-presets summary { cursor: pointer; font-size: 9px; letter-spacing: 0.14em; color: #8fa7b0; margin-top: 8px; }
+.scv-presets .scv-row { margin-top: 3px; }
+.scv-presets .scv-rowname { cursor: default; }
 .scv-tokname { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 2px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; white-space: nowrap; color: #e8f6fa; pointer-events: none; }
 .scv-help { font-size: 10px; letter-spacing: 0.06em; color: #6b8590; margin-top: 8px; }
 .scv-ttl { font-size: 10px; letter-spacing: 0.18em; color: #00e1ff; padding-bottom: 6px; border-bottom: 1px solid rgba(0, 225, 255, 0.2); margin-bottom: 6px; }
