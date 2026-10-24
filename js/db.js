@@ -399,7 +399,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-22.02';
+window.DARKFOREST_BUILD = '2026-10-24.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -937,7 +937,24 @@ async function checkAnomalyProximity(ship) {
 window.myPresenceProfile = { username: '', role: '', avatar_url: '' };
 window.myCurrentActivity = 'Monitoring DRADIS';
 
-async function trackMyPresence() {
+// Supabase allows each client only 5 presence updates per 30 s (track and untrack both count);
+// going over CLOSES the channel, which drops you off everyone's Active Commanders list. So sends
+// are spaced at least PRESENCE_GAP_MS apart and a burst (fast tab switching, the tutorial) is
+// coalesced into one trailing send that carries the latest activity.
+const PRESENCE_GAP_MS = 7000;
+let presenceLastSent = 0, presenceTimer = null;
+function trackMyPresence() {
+    if (!presenceChannel) return Promise.resolve();
+    const wait = presenceLastSent + PRESENCE_GAP_MS - Date.now();
+    if (wait > 0) {
+        if (!presenceTimer) presenceTimer = setTimeout(() => { presenceTimer = null; trackMyPresence(); }, wait);
+        return Promise.resolve();
+    }
+    presenceLastSent = Date.now();
+    return sendMyPresence();
+}
+window.__presenceThrottle = { gap: PRESENCE_GAP_MS, reset() { presenceLastSent = 0; if (presenceTimer) { clearTimeout(presenceTimer); presenceTimer = null; } } }; // test hook
+async function sendMyPresence() {
     if (!presenceChannel) return;
     await presenceChannel.track({
         online_at: new Date().toISOString(),
@@ -951,7 +968,7 @@ async function trackMyPresence() {
 function initPresenceChannel(userProfile) {
     if (presenceChannel) { try { presenceChannel.unsubscribe(); } catch (e) {} } // defends against duplicate channels if this ever gets called twice
     window.myPresenceProfile = { username: userProfile.username, role: userProfile.role, avatar_url: userProfile.avatar_url };
-    presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
+    const ch = presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
     realtimeChannel = presenceChannel;
     presenceChannel.on('presence', { event: 'sync' }, () => { 
         onlineUsersMap = presenceChannel.presenceState(); 
@@ -962,9 +979,16 @@ function initPresenceChannel(userProfile) {
         if (window.AudioEngine) window.AudioEngine.playPing();
         if (typeof loadChatLogs === 'function') loadChatLogs();
     }).subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') { await trackMyPresence(); }
+        if (status === 'SUBSCRIBED') { presenceRetry = 0; await trackMyPresence(); }
+        // The server closed the channel (rate limit, network drop, server restart): rejoin after a
+        // pause instead of staying invisible until a reload. Backs off up to a minute.
+        else if ((status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && !presenceLeaving && ch === presenceChannel) {
+            const delay = Math.min(60000, 5000 * Math.pow(2, presenceRetry++));
+            setTimeout(() => { if (!presenceLeaving && ch === presenceChannel) initPresenceChannel(window.myPresenceProfile); }, delay);
+        }
     });
 }
+let presenceRetry = 0, presenceLeaving = false;
 
 // Re-track presence with fresh profile data (e.g. after a display handle change)
 // so the Active Commanders ticker updates immediately instead of only on reload.
@@ -1469,6 +1493,7 @@ async function restoreOneTable(table, rows) {
 }
 
 window.handleLogout = async function() {
+    presenceLeaving = true;
     if (presenceChannel) await presenceChannel.untrack();
     await db.auth.signOut();
     location.reload();
