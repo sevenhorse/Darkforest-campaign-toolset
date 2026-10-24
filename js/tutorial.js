@@ -42,8 +42,8 @@ function tutorialQuery(sel) {
 const TUTORIAL_STEPS = [
     {
         title: 'Welcome aboard, Commander',
-        body: 'This quick tour shows you the main controls of the Intrepid Horizon mainframe. It takes about two minutes. Use NEXT and BACK to move through it, or SKIP to close it. You can replay it anytime with the <b>? TUTORIAL</b> button in the top bar.',
-        mobileBody: 'This quick tour shows you the main controls of the Intrepid Horizon mainframe. It takes about two minutes. Use NEXT and BACK to move through it, or SKIP to close it. You can replay it anytime from the <b>? TUTORIAL</b> button in the ☰ menu (top right).'
+        body: 'This quick tour shows you the main controls of the Intrepid Horizon mainframe. It takes about three minutes. Use NEXT and BACK to move through it, or SKIP to close it. You can replay it anytime with the <b>? TUTORIAL</b> button in the top bar.',
+        mobileBody: 'This quick tour shows you the main controls of the Intrepid Horizon mainframe. It takes about three minutes. Use NEXT and BACK to move through it, or SKIP to close it. You can replay it anytime from the <b>? TUTORIAL</b> button in the ☰ menu (top right).'
     },
     {
         title: 'The galaxy map (DRADIS)',
@@ -54,8 +54,8 @@ const TUTORIAL_STEPS = [
     {
         title: 'Telemetry panel',
         target: '#hud-overlay',
-        body: 'Whatever you select shows up here: class, ownership, hazards and actions. <b>Bookmarks</b> saves places you care about and <b>Recents</b> lists what you looked at last. The <b>🚀 JUMP</b> button snaps the camera to your own vessel.',
-        mobileBody: 'Whatever you select shows up here, inside the ☰ menu. A small red dot on the ☰ button means you selected something new. <b>Bookmarks</b> saves places you care about and <b>Recents</b> lists what you looked at last. The <b>🚀 JUMP</b> button snaps the camera to your own vessel.'
+        body: 'Whatever you select shows up here: class, ownership, hazards and actions. <b>Bookmarks</b> saves places you care about and <b>Recents</b> lists what you looked at last. The <b>🚀 JUMP</b> button snaps the camera to your own vessel. A system\'s <b>📝 Personal Label</b> box renames it on your screen only. On a ship you control, <b>DOCK</b> carries another of your vessels inside it (it travels with the master and shows as a 🔗 count) until you <b>DETACH</b> it.',
+        mobileBody: 'Whatever you select shows up here, inside the ☰ menu. A small red dot on the ☰ button means you selected something new. <b>Bookmarks</b> saves places you care about and <b>Recents</b> lists what you looked at last. The <b>🚀 JUMP</b> button snaps the camera to your own vessel. A system\'s <b>📝 Personal Label</b> box renames it on your screen only. On a ship you control, <b>DOCK</b> carries another of your vessels inside it (it travels with the master and shows as a 🔗 count) until you <b>DETACH</b> it.'
     },
     {
         title: 'Sensor range and DRADIS scans',
@@ -88,19 +88,19 @@ const TUTORIAL_STEPS = [
         title: 'Your Dossier',
         target: '#term-tab-btn-stats',
         before: () => tutorialOpenTerminalTab('stats'),
-        body: 'The <b>DOSSIER</b> button opens your character terminal. Fill in your character sheet here: stats, skills, injuries, stress and shield. Save it once before you add perks, augments, gear or weapons, because those attach to your saved character.'
+        body: 'The <b>DOSSIER</b> button opens your character terminal. Your character sheet is split into tabs: <b>PROFILE</b>, <b>ATTRIBUTES & SKILLS</b>, <b>PERKS & AUGMENTS</b> and <b>GEAR & ASSETS</b>, with stats, skills, injuries, stress and shield. Save it once before you add perks, augments, gear or weapons, because those attach to your saved character. A tick box on PROFILE turns on an optional <b>PERSONAL LOG</b> tab that only you and the Overseer can read.'
     },
     {
         title: 'Arsenal and dice',
         target: '#term-tab-btn-combat',
         before: () => tutorialOpenTerminalTab('combat'),
-        body: 'Add your personal weapons and powers here. <b>ROLL</b> rolls damage, and <b>⚔</b> resolves a full attack against someone in the initiative tracker. The <b>dice roller</b> lets you tick stats and skills (plus Advantage) and roll them together. Your perks, augments and gear are added automatically, and every roll is posted to the <b>Dice Streamer</b> for the whole crew.'
+        body: 'Add your personal weapons and powers here. <b>ROLL</b> rolls damage, and <b>⚔</b> resolves a full attack against someone in the initiative tracker. The <b>dice roller</b> lets you tick stats and skills (plus Advantage) and roll them together. Your perks, augments and gear are added automatically, and every roll is posted to the <b>Dice Streamer</b> for the whole crew. Weapons issued from a ship\'s hold arrive empty: <b>RELOAD</b> fills the magazine from ammo in a hold you own, and <b>RETURN</b> puts the weapon back. Each weapon shows its <b>AP</b> cost per attack (usually 1).'
     },
     {
         title: 'Cargo',
         target: '#term-tab-btn-cargo',
         before: () => tutorialOpenTerminalTab('cargo'),
-        body: 'Pick one of your ships to see its hold: Perishables, Expendables and Misc. Rations are eaten daily, <b>Energy Cores</b> are jump fuel and <b>Hull Plates</b> repair hull damage. The <b>Synthesizer</b> converts up to 10 tons a day into whatever you name.'
+        body: 'Pick one of your ships to see its hold: Perishables, Expendables and Misc. Rations are eaten daily, <b>Energy Cores</b> are jump fuel and <b>Hull Plates</b> repair hull damage. The <b>Synthesizer</b> converts up to 10 tons a day into whatever you name. Personal weapons and kit live in the hold too: <b>ISSUE</b> on an issuable cargo row hands one to a character\'s Arsenal or Gear, and consumables or kits with charges get a <b>USE</b> button on the Dossier\'s GEAR & ASSETS tab.'
     },
     {
         title: 'Vessel Deck',
@@ -163,8 +163,25 @@ const TUTORIAL_STEPS = [
         title: 'Combat and the Battle Map',
         target: () => tutorialFindButton('#bottom-toggle-bar', 'BATTLE MAP'),
         before: () => tutorialHidePanel('comms-array-panel'),
-        body: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then click the grid to put it there. <b>Drag</b> your token to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: each action costs 1 <b>AP</b> (Action Point), and <b>END TURN</b> passes to the next unit. <b>COMBAT</b> opens the initiative tracker for personal fights. The Battle Map has its own tour: <b>? TUTORIAL</b> in its header while a battle is running.',
-        mobileBody: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then tap the grid to put it there. <b>Drag</b> your token with a finger to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: each action costs 1 <b>AP</b> (Action Point), and <b>END TURN</b> passes to the next unit. <b>COMBAT</b> opens the initiative tracker for personal fights. The Battle Map has its own tour: <b>? TUTORIAL</b> in its header while a battle is running.'
+        body: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then click the grid to put it there. <b>Drag</b> your token to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: every shot or launch costs 1 <b>AP</b> (Action Point), moving and turning are free, and <b>END TURN</b> passes to the next unit. The Battle Map has its own tour: <b>? TUTORIAL</b> in its header while a battle is running.',
+        mobileBody: 'When the Overseer starts an engagement, open <b>BATTLE MAP</b>. Use <b>+ PLACE</b> on your ship, then tap the grid to put it there. <b>Drag</b> your token with a finger to move it; each ship has a movement allowance per round. Fire from your ship\'s card. If initiative has been rolled, you act on <b>your turn</b>: every shot or launch costs 1 <b>AP</b> (Action Point), moving and turning are free, and <b>END TURN</b> passes to the next unit. The Battle Map has its own tour: <b>? TUTORIAL</b> in its header while a battle is running.'
+    },
+    {
+        title: 'Personal fights and turns',
+        target: () => tutorialFindButton('#bottom-toggle-bar', 'COMBAT'),
+        body: '<b>COMBAT</b> opens the <b>Initiative Tracker</b> for fights on foot. Press <b>+ JOIN INITIATIVE</b> to add your character. Once the Overseer starts turns, the bar shows the round and whose turn it is. Your row shows your <b>AP pips</b>: 2 per turn plus any AP bonuses from perks, augments and weapons, refilled at the start of your turn. A ⚔ attack spends its weapon\'s AP cost. When you\'re done, press <b>⏭ NEXT TURN</b> to hand over. The Overseer rules what AP buys at the table, so the pips track it but don\'t block you.'
+    },
+    {
+        title: 'Deck fights (boarding)',
+        target: '#deck-view-pill',
+        body: 'When the Overseer starts a fight inside a ship or station, a <b>🚪 DECK FIGHT</b> button appears; press it to open the <b>Deck View</b>. Each square is 1.5 m. Turns follow the Initiative Tracker. On your turn, drag your own token; the highlighted squares are how far you can go (4 to 8 squares, set by your Dexterity die). Walls and cover block movement; walls and closed doors block sight. Click a door next to you to open or close it, and use <b>👁 LOS</b> to check line of sight. With fog of war on (the default), you only see what the party can see. Ending your turn on a hazard square rolls damage.',
+        mobileBody: 'When the Overseer starts a fight inside a ship or station, a <b>🚪 DECK FIGHT</b> button appears; tap it to open the <b>Deck View</b>. Each square is 1.5 m. Turns follow the Initiative Tracker. On your turn, drag your own token; the highlighted squares are how far you can go (4 to 8 squares, set by your Dexterity die). Walls and cover block movement; walls and closed doors block sight. Tap a door next to you to open or close it, and use <b>👁 LOS</b> to check line of sight. With fog of war on (the default), you only see what the party can see. Ending your turn on a hazard square rolls damage.'
+    },
+    {
+        title: 'Scene Map',
+        target: '#scene-view-pill',
+        body: 'For scenes that aren\'t fights (a briefing, a social event, exploring a place), the Overseer can put a <b>Scene Map</b> on screen. It opens by itself when a new scene goes live; if you close it, the <b>🎭 SCENE</b> button reopens it. Your own token has a <b>gold ring</b>: drag it anywhere, with no turns or movement limits. Click anyone to read their note. More people and objects may appear as the scene goes on.',
+        mobileBody: 'For scenes that aren\'t fights (a briefing, a social event, exploring a place), the Overseer can put a <b>Scene Map</b> on screen. It opens by itself when a new scene goes live; if you close it, the <b>🎭 SCENE</b> button reopens it. Your own token has a <b>gold ring</b>: drag it anywhere with a finger, with no turns or movement limits. Tap anyone to read their note. More people and objects may appear as the scene goes on.'
     },
     {
         title: 'Salvage',

@@ -71,7 +71,7 @@ const BATTLE_TUTORIAL_STEPS = [
     {
         title: 'Turns and Action Points',
         target: '#battle-map-turn-bar',
-        body: 'Once the Overseer rolls initiative, this bar shows whose turn it is. On your turn your ship gets <b>AP</b> (Action Points): every shot costs 1 AP. Moving doesn\'t cost AP. Press <b>END TURN</b> to pass to the next unit. Ships marked <b>AI</b> and squadrons on an AI stance act on their own at the end of each round. Before initiative is rolled, you can act freely.'
+        body: 'Once the Overseer rolls initiative, this bar shows whose turn it is. On your turn your ship gets <b>AP</b> (Action Points): every shot or launch costs 1 AP (guns, missiles, torpedoes and squadron fire), and so does <b>WITHDRAW</b>. Moving and turning are free. Press <b>END TURN</b> to pass to the next unit. Ships marked <b>AI</b> and squadrons on an AI stance act on their own at the end of each round. Before initiative is rolled, you can act freely.'
     },
     {
         title: 'Placing your ship',
