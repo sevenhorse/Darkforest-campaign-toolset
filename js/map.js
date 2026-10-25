@@ -1372,6 +1372,69 @@ window.deleteShipToken = async function(id) {
 };
 
 /* --- THE CANVAS ENGINE --- */
+/* --- Galaxy map performance (DM-approved 2026-10-25) ---
+   1. galaxyIsCovered (in initGalaxyEngine): no redraw under any full-screen view.
+   2. Window not focused (e.g. on a second monitor while you're in Discord): ~10 redraws/s.
+   3. Switch 'map_idle_cap': ~30 redraws/s once nobody has touched the page for 1.5 s;
+      full speed again on the next mouse move, click, wheel, key or touch.
+   4. Switch 'map_glow_cache': star glows are drawn once into small cached sprites
+      and reused, instead of a canvas shadowBlur per star per frame (pixel-compared:
+      same look). Whether this is faster depends on the GPU (it could not be
+      measured in Claude's software-GL test browser), so it has its own switch.
+   While the 3D bridge is open its holotable copies the galaxy canvas every 500 ms,
+   so the map keeps drawing there, at ~4/s. */
+const mapFeatureOn = (k) => typeof window.isFeatureOn === 'function' && window.isFeatureOn(k);
+function mapIdleCapOn() { return mapFeatureOn('map_idle_cap'); }
+function mapGlowCacheOn() { return mapFeatureOn('map_glow_cache'); }
+let galaxyLastInputAt = (typeof performance !== 'undefined' ? performance.now() : 0);
+['pointermove', 'pointerdown', 'wheel', 'keydown', 'touchstart'].forEach(ev => window.addEventListener(ev, () => { galaxyLastInputAt = performance.now(); }, { passive: true, capture: true }));
+window.galaxyFrameInterval = function () {
+    if (document.body && document.body.classList.contains('bw-open')) return 250;
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return 100;
+    if (mapIdleCapOn() && performance.now() - galaxyLastInputAt > 1500) return 33;
+    return 0;
+};
+// Star glow sprites, keyed by fill | glow colour | radius and blur in device pixels.
+const glowSprites = new Map();
+function glowSprite(rDev, fill, glow, blur) {
+    // Fine radius steps while small (0.05 px under 4 px), so sizes don't jump.
+    const r = rDev < 4 ? Math.round(rDev * 20) / 20 : Math.round(rDev * 4) / 4, bl = Math.round(blur);
+    const key = fill + '|' + glow + '|' + r + '|' + bl;
+    let c = glowSprites.get(key);
+    if (c) return c;
+    if (glowSprites.size > 600) glowSprites.clear();
+    // Odd size: the circle sits on a pixel centre, like an arc drawn at an arbitrary spot.
+    const pad = Math.ceil(bl * 1.5) + 2, size = 2 * Math.ceil(r + pad) + 1;
+    // An ImageBitmap where possible: a small plain canvas can stay in software and be
+    // re-uploaded to the GPU on every draw, which would cost more than the shadow did.
+    const oc = typeof OffscreenCanvas === 'function';
+    c = oc ? new OffscreenCanvas(size, size) : document.createElement('canvas');
+    if (!oc) { c.width = c.height = size; }
+    // Glow only: the circle is drawn far off the sprite and only its shadow lands
+    // on it. The star's core is drawn straight onto the map, so it stays crisp.
+    const g = c.getContext('2d'), off = 4 * size + 1000;
+    g.fillStyle = fill; g.shadowColor = glow; g.shadowBlur = bl; g.shadowOffsetX = off;
+    g.beginPath(); g.arc(size / 2 - off, size / 2, r, 0, Math.PI * 2); g.fill();
+    if (oc && typeof c.transferToImageBitmap === 'function') c = c.transferToImageBitmap();
+    glowSprites.set(key, c);
+    return c;
+}
+window.galaxyGlowSpriteCount = () => glowSprites.size; // tests
+// A glowing star at world (x, y), world radius rWorld: same as fill + shadowBlur
+// (canvas shadow blur is in device pixels, so the sprite is built in device pixels).
+function drawGlowStar(ctx, x, y, rWorld, fill, glow, blur) {
+    const zoom = window.camera.zoom, dpr = window.devicePixelRatio || 1;
+    const rDev = rWorld * zoom * dpr;
+    const sp = glowSprite(rDev, fill, glow, blur);
+    // Land the sprite on whole device pixels (drawn 1:1, no resampling blur).
+    const k = zoom * dpr, half = sp.width / 2;
+    const left = Math.round(dpr * (glowOrigin.tx + zoom * x) - half), top = Math.round(dpr * (glowOrigin.ty + zoom * y) - half);
+    ctx.drawImage(sp, (left / dpr - glowOrigin.tx) / zoom, (top / dpr - glowOrigin.ty) / zoom, sp.width / k, sp.width / k);
+    ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x, y, rWorld, 0, Math.PI * 2); ctx.fill();
+}
+// The map's screen-space translate for this frame (set at the top of render()).
+const glowOrigin = { tx: 0, ty: 0 };
+
 window.initGalaxyEngine = function() {
     const canvas = document.getElementById('galaxyCanvas'); if (!canvas) return;
     const ctx = canvas.getContext('2d'); const container = document.getElementById('canvas-container');
@@ -1902,6 +1965,8 @@ window.initGalaxyEngine = function() {
         if (window.camera.zoom < 0.8) { let coreGrd = ctx.createRadialGradient(0, 0, 100, 0, 0, 1800); coreGrd.addColorStop(0, 'rgba(118, 148, 255, 0.12)'); coreGrd.addColorStop(0.5, 'rgba(0, 229, 163, 0.04)'); coreGrd.addColorStop(1, 'rgba(0, 0, 0, 0)'); ctx.fillStyle = coreGrd; ctx.beginPath(); ctx.arc(0, 0, 1800, 0, Math.PI * 2); ctx.fill(); }
 
         let allSystems = proceduralSystems.concat(globalDbSystemsCache);
+        const useGlowSprites = mapGlowCacheOn();
+        glowOrigin.tx = cssWidth / 2 + window.camera.x; glowOrigin.ty = cssHeight / 2 + window.camera.y;
 
         if (window.hyperlanesVisible) {
             updateHyperlaneDiscovery();
@@ -2017,6 +2082,8 @@ window.initGalaxyEngine = function() {
                     ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(s.x, s.y, s.size * 1.8, 0, Math.PI * 2); ctx.fill();
                 } else if (s.type === 'Black Hole') {
                     ctx.fillStyle = '#000000'; ctx.shadowColor = `rgba(100, 50, 255, 0.9)`; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+                } else if (useGlowSprites) {
+                    drawGlowStar(ctx, s.x, s.y, s.size / (s.isCustom ? window.camera.zoom : 1), s.color, s.hazard === 'Pulsar' ? '#ff3366' : s.color, s.hazard === 'Pulsar' ? (12 + Math.sin(time * 0.01) * 6) : 8);
                 } else {
                     ctx.fillStyle = s.color; ctx.shadowColor = s.hazard === 'Pulsar' ? '#ff3366' : s.color; ctx.shadowBlur = s.hazard === 'Pulsar' ? (12 + Math.sin(time * 0.01) * 6) : 8;
                     ctx.beginPath(); ctx.arc(s.x, s.y, s.size / (s.isCustom ? window.camera.zoom : 1), 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
@@ -2138,14 +2205,25 @@ window.initGalaxyEngine = function() {
     // tab is hidden (the full redraw starved touch handling on phones).
     // Nothing time-critical lives in render(): the campaign clock runs on its
     // own interval (js/ui.js), and hyperlane discovery catches up when visible.
+    // Performance pass (DM-approved 2026-10-25): also skip it while any other
+    // full-screen view covers the map, and redraw less often when nobody is
+    // looking closely (see galaxyFrameInterval above initGalaxyEngine).
     const battleMapPanelEl = document.getElementById('battle-map-panel');
+    const COVER_IDS = ['character-terminal', 'scene-view', 'codex-fullscreen-reader', 'deck-view', 'battle-map-editor', 'encounter-stager', 'deck-plan-editor'];
+    const isShown = (el) => !!el && el.style.display !== 'none' && el.style.display !== '';
     function galaxyIsCovered() {
         if (document.hidden) return true;
-        return !!(battleMapPanelEl && battleMapPanelEl.style.display === 'block');
+        if (battleMapPanelEl && battleMapPanelEl.style.display === 'block') return true;
+        // Looked up each frame (cheap): some of these are created, removed or re-created later.
+        for (const id of COVER_IDS) if (isShown(document.getElementById(id))) return true;
+        return false;
     }
-    function renderLoop() {
+    window.galaxyIsCovered = galaxyIsCovered; // tests
+    let lastFrameAt = -Infinity;
+    function renderLoop(now) {
+        now = now || performance.now();
         try {
-            if (!galaxyIsCovered()) render();
+            if (!galaxyIsCovered() && now - lastFrameAt >= window.galaxyFrameInterval() - 1) { lastFrameAt = now; window.galaxyFrames = (window.galaxyFrames || 0) + 1; render(); }
         } catch (err) {
             if (Date.now() - lastRenderErrorAt > 5000) console.error('Galaxy map frame failed (map keeps running):', err);
             lastRenderErrorAt = Date.now();
