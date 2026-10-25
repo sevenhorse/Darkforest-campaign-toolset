@@ -421,6 +421,22 @@ window.cx2ToggleHidden = async function (id) {
     renderV2();
 };
 
+/* --- Shared with the Codex quick look (js/screen-switcher.js) --- */
+window.codexV2Api = { cats: catsForMe, visible: visibleToMe, cleanTag, initials, readMinutes, body: bodyHtml, linkOf };
+// Open one entry in the Codex tab's reading pane (the quick look's OPEN IN CODEX).
+window.codexOpenEntry = function (id) {
+    const e = (globalCodexEntriesCache || []).find(x => x.id === id);
+    if (!e) return;
+    if (!window.codexRestyleOn()) { window.openFullCodexTerminal(); window.openCodexFullscreen(id); return; }
+    if (!S.editing) {
+        if (window.codexSearchFilter && !matchesSearch(e)) window.codexSearchFilter = '';
+        window.activeCodexCategory = e.category;
+        S.selected[e.category] = id;
+        S.view = 'read';
+    }
+    window.openFullCodexTerminal();
+};
+
 /* --- Hooks into the existing Codex (ui.js announces these; see window.onHook in js/db.js) --- */
 // Take over the draw while the switch is on; otherwise tidy up and let ui.js draw the classic list.
 window.onHook('codex-render', 'codex-v2', () => {

@@ -439,7 +439,7 @@ function fitCanvas() {
     const wrap = document.getElementById('bme-wrap'), c = document.getElementById('bme-canvas');
     if (!wrap || !c || !E.map) return;
     const { w, h } = window.battleMapDims(E.map);
-    const scale = Math.min(1, (wrap.clientWidth || w) / w, ((window.innerHeight || 900) - 190) / h);
+    const scale = Math.min(1, (wrap.clientWidth || w) / w, ((window.innerHeight || 900) - 190 - (window.ssBandPx ? window.ssBandPx() : 0)) / h);
     E.scale = scale > 0.05 ? scale : 1;
     c.style.transform = `scale(${E.scale})`;
     wrap.style.height = Math.ceil(h * E.scale) + 'px';

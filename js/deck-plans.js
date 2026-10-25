@@ -618,7 +618,7 @@ function renderDeckView() {
     // before the reload lands).
     const shownToks = (!dm && fog) ? F.tokens.filter(t => isPcTok(t) || vis.has(t.y * plan.cols + t.x)) : F.tokens;
     const availW = Math.max(300, (window.innerWidth || 1200) - (window.innerWidth > 900 ? 340 : 40));
-    const availH = Math.max(260, (window.innerHeight || 800) - 150);
+    const availH = Math.max(260, (window.innerHeight || 800) - 150 - (window.ssBandPx ? window.ssBandPx() : 0));
     // Phones: keep squares big enough to drag (the board scrolls sideways instead).
     const minCell = (window.innerWidth || 1200) <= 768 ? 20 : 12;
     F.cell = Math.max(minCell, Math.min(36, Math.floor(Math.min(availW / plan.cols, availH / plan.rows))));
@@ -888,7 +888,7 @@ function renderEditor() {
     const ov = ensureEditor();
     if (ov.style.display === 'none') return;
     const p = P.plan;
-    const cell = Math.max(10, Math.min(26, Math.floor(Math.min(((window.innerWidth || 1400) - 600) / p.cols, ((window.innerHeight || 900) - 200) / p.rows))));
+    const cell = Math.max(10, Math.min(26, Math.floor(Math.min(((window.innerWidth || 1400) - 600) / p.cols, ((window.innerHeight || 900) - 200 - (window.ssBandPx ? window.ssBandPx() : 0)) / p.rows))));
     P.cell = cell;
     const list = (window.deckPlansList || []).map(x => `<button type="button" class="bme-li${x.id === p.id ? ' on' : ''}" onclick="window.dpePick('${esc(x.id)}')"><span>${esc(x.name)}</span><small>${x.cols} × ${x.rows} SQUARES</small></button>`).join('') || '<div class="bme-empty">No deck plans yet.</div>';
     const brushes = ['f', 'w', 'd', 'c', 'h', 'a', '.'].map(k => `<button type="button" class="bme-kind dpe-brush${P.brush === k ? ' on' : ''}" onclick="window.dpeBrush('${k}')"><i class="dkv-sw dkv-sw-${k === '.' ? 'v' : k}"></i>${k === '.' ? 'ERASE' : TILES[k].name.toUpperCase()}</button>`).join('');

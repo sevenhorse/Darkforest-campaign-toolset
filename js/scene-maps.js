@@ -456,7 +456,7 @@ function renderScene() {
     }
     const W = sc.width || 1200, H = sc.height || 800;
     const availW = phone ? (window.innerWidth || 360) - 26 : Math.max(320, (window.innerWidth || 1200) - 360);
-    const availH = phone ? Math.max(260, (window.innerHeight || 700) * 0.6) : Math.max(300, (window.innerHeight || 800) - 130);
+    const availH = phone ? Math.max(260, (window.innerHeight || 700) * 0.6) : Math.max(300, (window.innerHeight || 800) - 130 - (window.ssBandPx ? window.ssBandPx() : 0));
     const s = S.scale = window.sceneFitScale(W, H, availW, availH, phone);
     const marksHtml = (sc.marks || []).map(m => {
         const sel = S.sel && S.sel.type === 'mark' && S.sel.id === m.id;
