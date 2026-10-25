@@ -152,32 +152,97 @@ window.getFowTier = function(system) {
 
 /* --- HYPERLANE DISCOVERY (persistent Fog of War for trade routes) ---
    Unlike hazards/tier-2 systems (live sensor range only), route nodes stay
-   revealed once discovered, like scanned systems. Discovery is automatic:
-   the first render pass where a node is within sensor range marks it.
-   Stored per browser in localStorage, not DB-synced. */
+   revealed once discovered, like scanned systems. A segment draws for players
+   once BOTH of its endpoint nodes are revealed. A node is revealed by:
+   1. FLYING: the first render pass where it is within a player's sensor
+      range. Kept in this browser's localStorage AND shared with the whole
+      crew through hyperlane_discovery (DM decision 2026-10-24: one player's
+      discovery shows for every player, on every device).
+   2. SCANNING (DM decision 2026-10-24): a DRADIS-scanned system reveals the
+      routes that start or end there (the whole route); a route that only
+      passes through it reveals the segments touching it. Derived at render
+      time from scannedSystems (already crew-wide via the chat log).
+   hyperlane_discovery rows carry the FOW reset epoch; a DM reset bumps the
+   epoch and every client ignores older rows (nothing is deleted). */
 window.discoveredHyperlaneNodes = new Set(window.safeJsonParse(window.safeLocalGet('odyssey_discovered_hyperlane_nodes', '[]'), []));
+window.sharedHyperlaneNodes = new Set();
+window.fowEpoch = null; // known once initHyperlaneDiscoverySync runs
+const hyperlaneUploadQueue = new Set();
+let hyperlaneUploadTimer = 0;
 // Nodes normally carry a stable id (genHyperlaneNodeId). Legacy deep-space
 // nodes may not; they fall back to a route+index key, which breaks if the
 // route is reordered. Re-saving a route via startEditHyperlane assigns real ids.
 function hyperlaneNodeKey(route, node, index) { return node.id || (route.id + '-n' + index); }
+window.hyperlaneNodeKey = hyperlaneNodeKey;
+function queueHyperlaneUpload(keys) {
+    if (currentUserRole === 'dm' || typeof db === 'undefined') return;
+    keys.forEach(k => hyperlaneUploadQueue.add(k));
+    if (window.fowEpoch === null || hyperlaneUploadTimer) return; // flushed once the epoch is known
+    hyperlaneUploadTimer = setTimeout(flushHyperlaneUploads, 800);
+}
+async function flushHyperlaneUploads() {
+    hyperlaneUploadTimer = 0;
+    if (window.fowEpoch === null || !hyperlaneUploadQueue.size) return;
+    const keys = [...hyperlaneUploadQueue].filter(k => !window.sharedHyperlaneNodes.has(k));
+    hyperlaneUploadQueue.clear();
+    if (!keys.length) return;
+    const epoch = window.fowEpoch;
+    const { error } = await db.from('hyperlane_discovery').upsert(keys.map(k => ({ node_key: k, epoch, discovered_by: currentUserId })), { onConflict: 'node_key,epoch', ignoreDuplicates: true });
+    if (error) { console.warn('Route discovery not shared yet:', error.message); keys.forEach(k => hyperlaneUploadQueue.add(k)); return; }
+    if (epoch === window.fowEpoch) keys.forEach(k => window.sharedHyperlaneNodes.add(k));
+}
+window.flushHyperlaneUploads = flushHyperlaneUploads;
 function updateHyperlaneDiscovery() {
     // Skipped for the DM: isPositionSensorVisible is always true for the DM,
     // so running this would mark every node discovered in this browser's
-    // localStorage, leaking to any player later using the same browser.
-    // DM omniscience is handled on the read side in render().
+    // localStorage (and now for the whole crew). DM omniscience is handled on
+    // the read side in render().
     if (currentUserRole === 'dm') return;
-    let changed = false;
+    const found = [];
     globalHyperlanesCache.forEach(route => {
         (route.nodes || []).forEach((node, idx) => {
             const key = hyperlaneNodeKey(route, node, idx);
             if (!window.discoveredHyperlaneNodes.has(key) && window.isPositionSensorVisible(node.x, node.y)) {
                 window.discoveredHyperlaneNodes.add(key);
-                changed = true;
+                found.push(key);
             }
         });
     });
-    if (changed) window.safeLocalSet('odyssey_discovered_hyperlane_nodes', JSON.stringify([...window.discoveredHyperlaneNodes]));
+    if (found.length) {
+        window.safeLocalSet('odyssey_discovered_hyperlane_nodes', JSON.stringify([...window.discoveredHyperlaneNodes]));
+        queueHyperlaneUpload(found);
+    }
 }
+// Load the crew's shared discoveries for this FOW epoch, share anything this
+// browser found earlier (including finds from before sharing existed), and
+// follow new finds live. Called by initFowResetSync once the epoch is known.
+window.initHyperlaneDiscoverySync = async function(epoch) {
+    window.fowEpoch = epoch || 0;
+    try {
+        const { data } = await db.from('hyperlane_discovery').select('node_key').eq('epoch', window.fowEpoch);
+        (data || []).forEach(r => window.sharedHyperlaneNodes.add(r.node_key));
+    } catch (e) { /* unreachable this load; local finds still draw */ }
+    if (currentUserRole !== 'dm' && window.discoveredHyperlaneNodes.size) queueHyperlaneUpload([...window.discoveredHyperlaneNodes]);
+    db.channel('hyperlane_discovery_stream')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'hyperlane_discovery' }, (payload) => {
+            const r = payload.new;
+            if (r && r.epoch === window.fowEpoch) window.sharedHyperlaneNodes.add(r.node_key);
+        })
+        .subscribe();
+};
+// Per-route list of which nodes a player can see (see the header above).
+// scannedPts: the scanned systems' {id, x, y}; a node counts as AT a scanned
+// system when it is snapped to it (node id = system id) or within 50 units.
+window.hyperlaneRevealedNodes = function(route, scannedIds, scannedPts) {
+    const nodes = route.nodes || [];
+    const atScan = nodes.map(n => !!(n && ((n.id && scannedIds.has(n.id)) || scannedPts.some(p => Math.hypot(p.x - n.x, p.y - n.y) <= 50))));
+    if (nodes.length && (atScan[0] || atScan[nodes.length - 1])) return nodes.map(() => true);
+    return nodes.map((n, i) => {
+        const key = hyperlaneNodeKey(route, n, i);
+        return window.discoveredHyperlaneNodes.has(key) || window.sharedHyperlaneNodes.has(key)
+            || atScan[i] || (i > 0 && atScan[i - 1]) || (i < nodes.length - 1 && atScan[i + 1]);
+    });
+};
 
 /* --- FOW RESET SYNC (DM Maintenance panel) ---
    Scanned systems and discovered hyperlane nodes live only in each
@@ -193,6 +258,8 @@ window.applyFowResetIfNewer = function(serverEpoch) {
     if (!(serverEpoch > localEpoch)) return;
     window.scannedSystems = [];
     window.discoveredHyperlaneNodes = new Set();
+    window.sharedHyperlaneNodes = new Set(); // older epochs' shared finds no longer count
+    if (window.fowEpoch !== null) window.fowEpoch = serverEpoch;
     window.safeLocalSet('odyssey_scanned', '[]');
     window.safeLocalSet('odyssey_discovered_hyperlane_nodes', '[]');
     window.safeLocalSet('odyssey_fow_reset_epoch', String(serverEpoch));
@@ -203,6 +270,7 @@ window.initFowResetSync = async function() {
     try {
         const { data } = await db.from('fow_reset_state').select('reset_epoch').eq('id', 1).maybeSingle();
         if (data) window.applyFowResetIfNewer(data.reset_epoch);
+        window.initHyperlaneDiscoverySync(data ? data.reset_epoch : 0);
     } catch (e) { /* table unreachable this load -- next login/realtime message catches up */ }
 
     db.channel('fow_reset_state_stream')
@@ -1837,14 +1905,18 @@ window.initGalaxyEngine = function() {
 
         if (window.hyperlanesVisible) {
             updateHyperlaneDiscovery();
+            const dmView = currentUserRole === 'dm';
+            const scannedIds = new Set(window.scannedSystems || []);
+            const scannedPts = dmView ? [] : allSystems.filter(sy => scannedIds.has(sy.id));
             globalHyperlanesCache.forEach(route => {
                 if (!route.nodes || route.nodes.length < 2) return;
                 // A segment draws only once BOTH endpoint nodes are
-                // discovered, so a partly explored route draws partly.
+                // revealed, so a partly explored route draws partly.
+                // The DM sees every segment.
+                const seen = dmView ? null : window.hyperlaneRevealedNodes(route, scannedIds, scannedPts);
                 for (let k = 0; k < route.nodes.length - 1; k++) {
                     const a = route.nodes[k], b = route.nodes[k + 1];
-                    // The DM sees every segment; the discovered set is for players only.
-                    if (currentUserRole !== 'dm' && (!window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, a, k)) || !window.discoveredHyperlaneNodes.has(hyperlaneNodeKey(route, b, k + 1)))) continue;
+                    if (seen && !(seen[k] && seen[k + 1])) continue;
                     ctx.save(); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
                     ctx.strokeStyle = route.color || '#00e1ff'; ctx.lineWidth = 3 / window.camera.zoom; ctx.shadowColor = route.color || '#00e1ff'; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0; ctx.restore();
                 }
