@@ -405,8 +405,15 @@ function ensureView() {
     if (!v) { v = document.createElement('div'); v.id = 'scene-view'; v.className = 'scv'; v.style.display = 'none'; document.body.appendChild(v); }
     let pill = document.getElementById('scene-view-pill');
     if (!pill) {
+        // The reopen button lives in a small box with a header (js/panel-controls.js adds
+        // drag / collapse / hide there while 'panel_controls' is on; otherwise only the button shows).
+        const box = document.createElement('div'); box.id = 'scv-box'; box.className = 'scv-box'; box.style.display = 'none';
+        box.innerHTML = '<div id="scv-box-head" class="scv-box-head panel-header-drag"><h4>🎭 SCENE LIVE</h4><span class="scv-box-drag">DRAG</span></div>';
         pill = document.createElement('button'); pill.id = 'scene-view-pill'; pill.type = 'button'; pill.className = 'scv-pill';
-        pill.onclick = () => window.openSceneView(); pill.style.display = 'none'; document.body.appendChild(pill);
+        pill.onclick = () => window.openSceneView(); pill.style.display = 'none';
+        box.appendChild(pill); document.body.appendChild(box);
+        if (typeof makePanelDraggable === 'function') makePanelDraggable('scv-box', 'scv-box-head', 'odyssey_scenebox_pos'); if (box.style.top) box.style.bottom = 'auto';
+        if (typeof window.panelControlsRegister === 'function') window.panelControlsRegister('scenebox');
     }
     return v;
 }
@@ -429,6 +436,7 @@ function renderScene() {
     const live = liveScene(), dm = isDm();
     pill.textContent = live ? `🎭 SCENE: ${String(live.name).toUpperCase()} — OPEN` : '';
     pill.style.display = live && !S.view ? '' : 'none';
+    const box = document.getElementById('scv-box'); if (box) { box.style.display = pill.style.display; box.dataset.scene = live ? live.id : ''; }
     renderBarButton();
     if (!S.view) { v.style.display = 'none'; return; }
     if (!dm && !live) { v.style.display = 'none'; S.view = false; return; }
