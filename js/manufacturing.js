@@ -1322,7 +1322,7 @@ async function completeManufacturingOrder(order) {
                 ammo: p.ammo, max_ammo: p.max_ammo
             });
             if (arsenalErr) throw new Error('arsenal delivery failed: ' + arsenalErr.message);
-            await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.name} added to ${charRow.name || 'the crafting character'}'s Arsenal.` });
+            await window.postSystemLog(`✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.name} added to ${charRow.name || 'the crafting character'}'s Arsenal.`);
         } else if (order.output_type === 'colony_infrastructure') {
             // Raises the building colony's level (vessel_id is null on these
             // orders). Never lowers it; the order is consumed either way.
@@ -1334,7 +1334,7 @@ async function completeManufacturingOrder(order) {
             const { error: infraErr } = await db.from('colonies').update({ infrastructure_level: newLevel }).eq('id', colony.id);
             if (infraErr) throw new Error('infrastructure delivery failed: ' + infraErr.message);
             colony.infrastructure_level = newLevel;
-            await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${colony.name}'s Infrastructure reached Level ${newLevel}.` });
+            await window.postSystemLog(`✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${colony.name}'s Infrastructure reached Level ${newLevel}.`);
             if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
         } else {
             const vessel = globalShipMarkersCache.find(m => m.id === order.vessel_id);
@@ -1348,7 +1348,7 @@ async function completeManufacturingOrder(order) {
             if (cargoErr) throw new Error('cargo delivery failed: ' + cargoErr.message);
             vessel.cargo_inventory = cargo;
             const bucketLabel = bucket === 'perishables' ? 'perishables' : (bucket === 'misc' ? 'misc cargo' : 'expendables');
-            await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.qty || 0}x ${p.name} delivered to ${vessel.name}'s ${bucketLabel} hold.` });
+            await window.postSystemLog(`✅ [MANUFACTURING] "${order.blueprint_name}" complete — ${p.qty || 0}x ${p.name} delivered to ${vessel.name}'s ${bucketLabel} hold.`);
         }
         return true;
     } catch (err) {
@@ -1363,7 +1363,7 @@ async function startQueuedOrder(order, atHours) {
     const { data, error } = await db.from('manufacturing_orders').update({ status: 'in_progress', started_at_hours: atHours }).eq('id', order.id).eq('status', 'queued').select();
     if (error || !data || !data.length) return false;
     Object.assign(order, { status: 'in_progress', started_at_hours: atHours });
-    try { await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content: `🏭 [MANUFACTURING] A production line freed up — "${order.blueprint_name}" started (${(order.duration_hours || 0).toFixed(1)}h).` }); } catch (e) {}
+    try { await window.postSystemLog(`🏭 [MANUFACTURING] A production line freed up — "${order.blueprint_name}" started (${(order.duration_hours || 0).toFixed(1)}h).`); } catch (e) {}
     return true;
 }
 // Runs every source's lines forward to `newHours`: finishes due orders in

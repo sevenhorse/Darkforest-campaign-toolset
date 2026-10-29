@@ -2761,7 +2761,7 @@ window.renderArsenalDiceFeed = function() {
         const senderName = sender ? (sender.username || 'Commander') : 'Unknown';
         html += `<div style="background:rgba(6,9,7,0.6); padding:6px; border-left:2px solid #ff6b6b; border-radius:2px; margin-bottom:4px;">
             <div style="font-size:9px; color:#ff6b6b; margin-bottom:2px;">🎲 <strong>${senderName}</strong></div>
-            <div style="font-size:10px; color:#d4c5a9;"><strong>${log.content}</strong>${log.roll_data ? `<br><span style="font-size:9px; color:#6b826a;">${log.roll_data.breakdown}</span>` : ''}</div>
+            <div style="font-size:10px; color:#d4c5a9;"><strong>${window.chatContentHtml(log)}</strong>${log.roll_data ? `<br><span style="font-size:9px; color:#6b826a;">${window.chatBreakdownHtml(log.roll_data.breakdown)}</span>` : ''}</div>
         </div>`;
     });
     container.innerHTML = html;

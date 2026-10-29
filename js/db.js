@@ -104,6 +104,29 @@ window.serializeAsync = function(fn, label) {
         return run;
     };
 };
+/* System chat messages. Automated lines (rations, production, builds,
+   salvage) go through postSystemLog. While a time advancement runs
+   (withSystemLogBatch, js/ui.js processTimeAdvancement) routine lines are
+   collected and posted as ONE message at the end, so a jump makes one chat
+   line and one sound instead of a burst. { critical: true } (starvation)
+   posts at once, outside the batch. */
+window.__sysLogBatch = null;
+window.postSystemLog = async function(content, opts) {
+    const text = String(content == null ? '' : content);
+    if (window.__sysLogBatch && !(opts && opts.critical)) { window.__sysLogBatch.push(text); return; }
+    const { error } = await db.from('chat_logs').insert({ sender_id: null, content: text, message_type: 'system' });
+    if (error) console.error('postSystemLog: insert failed', error);
+};
+window.withSystemLogBatch = async function(fn) {
+    if (window.__sysLogBatch) return fn(); // already inside a batch: the outer one posts
+    window.__sysLogBatch = [];
+    try { return await fn(); }
+    finally {
+        const lines = window.__sysLogBatch; window.__sysLogBatch = null;
+        if (lines.length === 1) await window.postSystemLog(lines[0]);
+        else if (lines.length > 1) await window.postSystemLog(`🗓️ [TIME ADVANCE REPORT] ${lines.length} updates:\n` + lines.map(l => '• ' + l).join('\n'));
+    }
+};
 window.preserveFormState = function(container, render, selector) {
     if (!container) { render(); return; }
     const saved = [];
@@ -399,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-29.01';
+window.DARKFOREST_BUILD = '2026-10-29.02';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -925,7 +948,7 @@ async function checkAnomalyProximity(ship) {
             anomaly.luminosity = 'Revealed Anomaly'; anomaly.color = '#ff3333';
             await db.from('star_systems').update({ luminosity: 'Revealed Anomaly', color: '#ff3333' }).eq('id', anomaly.id);
             await db.from('chat_logs').insert({ sender_id: null, content: `🚨 [DRADIS ALERT] Vessel '${ship.name}' detected a subspace anomaly at X:${Math.round(anomaly.x)} Y:${Math.round(anomaly.y)}.`, message_type: 'system' });
-            if (window.AudioEngine) window.AudioEngine.playKlaxon();
+            if (window.AudioEngine && window.AudioEngine.notifyOn('alert')) window.AudioEngine.playKlaxon();
         }
     }
 }

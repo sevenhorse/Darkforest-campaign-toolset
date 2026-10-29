@@ -38,7 +38,14 @@
      channel codex_sync; every client reloads the Codex, so a reveal (or a
      re-hide) reaches players without a page reload. Broadcast, not
      postgres_changes: RLS means a player never gets an event for a row
-     going hidden, so a re-hide would otherwise linger on their screen. */
+     going hidden, so a re-hide would otherwise linger on their screen.
+
+   NEW badges (switch 'codex_new_badges', players only): codex_reads holds
+   one row per (player, entry) they have opened (RLS: own rows). An entry a
+   player can see but has no row for shows NEW, and each tab counts them.
+   Opening an entry in the reader marks it read. The first load with no
+   rows at all marks everything already visible as read, so only entries
+   revealed (or scan-unlocked) after that show as NEW. */
 (function () {
 const CATS = [
     { key: 'factions', tab: 'FACTIONS', title: 'FACTIONS & POWERS', icon: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"></path>' },
@@ -49,7 +56,7 @@ const CATS = [
     { key: 'prep', tab: 'SESSION PREP', title: 'SESSION PREP (DM ONLY)', dmOnly: true, icon: '<rect x="5" y="4" width="14" height="17"></rect><path d="M9 4V2h6v2"></path><path d="M8 10h8M8 14h8M8 18h5"></path>' }
 ];
 const catsForMe = () => CATS.filter(c => !c.dmOnly || isDm());
-const S = window.__cx2 = window.__cx2 || { selected: {}, view: 'list', editing: false, editTab: 'write', charts: [], pendingSelect: null, links: [], notes: {}, notesEditing: null, notesDraft: '' };
+const S = window.__cx2 = window.__cx2 || { selected: {}, view: 'list', editing: false, editTab: 'write', charts: [], pendingSelect: null, links: [], notes: {}, notesEditing: null, notesDraft: '', reads: null };
 const esc = (v) => window.escapeHtml(v == null ? '' : String(v));
 const isDm = () => typeof currentUserRole !== 'undefined' && currentUserRole === 'dm';
 window.codexRestyleOn = function () { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('codex_restyle'); };
@@ -259,7 +266,8 @@ function renderV2() {
 
     document.getElementById('cx2-tabs').innerHTML = catsForMe().map(c => {
         const on = c.key === cat;
-        return `<button type="button" role="tab" aria-selected="${on}" class="cx2-tab${on ? ' on' : ''}" onclick="window.cx2Category('${c.key}')">${svg(c.icon)}<span>${c.tab}</span><b>${entriesFor(c.key).length}</b></button>`;
+        const fresh = badgesOn() ? entriesFor(c.key).filter(isUnread).length : 0;
+        return `<button type="button" role="tab" aria-selected="${on}" class="cx2-tab${on ? ' on' : ''}" onclick="window.cx2Category('${c.key}')">${svg(c.icon)}<span>${c.tab}</span><b>${entriesFor(c.key).length}</b>${fresh ? `<i class="cx2-newcount" title="${fresh} new">${fresh} NEW</i>` : ''}</button>`;
     }).join('');
 
     const list = entriesFor(cat);
@@ -282,7 +290,7 @@ function renderV2() {
                 <button type="button" class="cx2-rowbtn" onclick="window.cx2Select('${e.id}')" aria-current="${sel}">
                     <span class="cx2-thumb">${img ? `<img data-media-ref="${esc(img)}" alt="">` : esc(initials(e.title))}</span>
                     <span class="cx2-rowtxt"><span class="cx2-rowtitle">${esc(e.title || 'Untitled')}</span>
-                    <span class="cx2-rowmeta">${tag ? `<span class="cx2-chip cx2-k-${kind}">${esc(tag.toUpperCase())}</span>` : ''}${dm && e.is_hidden ? '<span class="cx2-chip cx2-k-hostile">HIDDEN</span>' : ''}${dm && linkOf(e) ? '<span class="cx2-chip cx2-k-other">SCAN-LOCKED</span>' : ''}${linksOn() && childrenOf(e.id).length ? `<span class="cx2-chip cx2-k-part">${childrenOf(e.id).length} LINKED</span>` : ''}<span class="cx2-dim">${readMinutes(e)} MIN</span></span></span>
+                    <span class="cx2-rowmeta">${tag ? `<span class="cx2-chip cx2-k-${kind}">${esc(tag.toUpperCase())}</span>` : ''}${dm && e.is_hidden ? '<span class="cx2-chip cx2-k-hostile">HIDDEN</span>' : ''}${dm && linkOf(e) ? '<span class="cx2-chip cx2-k-other">SCAN-LOCKED</span>' : ''}${badgesOn() && isUnread(e) ? '<span class="cx2-chip cx2-k-new">NEW</span>' : ''}${linksOn() && childrenOf(e.id).length ? `<span class="cx2-chip cx2-k-part">${childrenOf(e.id).length} LINKED</span>` : ''}<span class="cx2-dim">${readMinutes(e)} MIN</span></span></span>
                 </button>
                 ${sel ? `<span class="cx2-reorder">${window.renderReorderArrows(orderKey, list, e.id, 'moveCodexEntryOrder')}</span>` : ''}
             </div>`;
@@ -359,6 +367,7 @@ function renderReader(list, selId, catInfo) {
         return;
     }
     const dm = isDm();
+    if (badgesOn() && isUnread(e) && readerOnScreen()) markRead(e.id);
     const tag = cleanTag(e), kind = window.codexTagKind(tag);
     const author = (allProfiles || []).find(p => p.id === e.created_by);
     const img = window.codexDisplayImageRef(e);
@@ -443,6 +452,46 @@ window.cx2ToggleHidden = async function (id) {
     renderV2();
     window.codexAnnounceChange();
 };
+
+/* --- NEW badges (switch 'codex_new_badges'; see the header) --- */
+function badgesOn() { return !isDm() && S.reads instanceof Set && window.codexRestyleOn() && typeof window.isFeatureOn === 'function' && window.isFeatureOn('codex_new_badges'); }
+function isUnread(e) { return !!e && S.reads instanceof Set && !S.reads.has(e.id); }
+// Phones show the list OR the reader; only count it as opened when the reader is showing.
+function readerOnScreen() { const phone = window.matchMedia && window.matchMedia('(max-width: 768px)').matches; return !phone || S.view === 'read'; }
+function markRead(id) {
+    if (!(S.reads instanceof Set) || S.reads.has(id)) return;
+    S.reads.add(id);
+    db.from('codex_reads').upsert({ user_id: currentUserId, entry_id: id }, { onConflict: 'user_id,entry_id', ignoreDuplicates: true })
+        .then(({ error }) => { if (error) console.error('codex NEW badges: could not mark read', error); });
+    // the tab/list counts drop on the next draw (not mid-render)
+    setTimeout(() => { const panel = document.getElementById('term-panel-codex'); if (panel && panel.classList.contains('cx2-on') && !S.editing) renderV2(); }, 0);
+}
+let readsLoading = null;
+const realEntry = (e) => /^[0-9a-f-]{36}$/i.test(String(e.id)); // not the offline placeholder
+async function loadReads() {
+    if (readsLoading) return readsLoading; // the switch event and codex-loaded can both ask at startup
+    readsLoading = loadReadsOnce().finally(() => { readsLoading = null; });
+    return readsLoading;
+}
+async function loadReadsOnce() {
+    if (isDm() || !window.isFeatureOn || !window.isFeatureOn('codex_new_badges') || typeof currentUserId === 'undefined' || !currentUserId) { S.reads = null; return; }
+    // Wait for the real Codex: a baseline taken from an empty cache would mark everything NEW.
+    if (!(globalCodexEntriesCache || []).some(realEntry)) { S.reads = null; return; }
+    const { data, error } = await db.from('codex_reads').select('entry_id').eq('user_id', currentUserId);
+    if (error) { S.reads = null; return; }
+    const reads = new Set((data || []).map(r => r.entry_id));
+    if (!data || !data.length) {
+        // First load: everything already visible counts as read.
+        const seen = (globalCodexEntriesCache || []).filter(e => realEntry(e) && visibleToMe(e)).map(e => e.id);
+        seen.forEach(id => reads.add(id));
+        if (seen.length) { const { error: bErr } = await db.from('codex_reads').upsert(seen.map(id => ({ user_id: currentUserId, entry_id: id })), { onConflict: 'user_id,entry_id', ignoreDuplicates: true }); if (bErr) console.error('codex NEW badges: baseline failed', bErr); }
+    }
+    S.reads = reads;
+    const panel = document.getElementById('term-panel-codex');
+    if (window.codexRestyleOn() && panel && panel.classList.contains('cx2-on') && !S.editing) renderV2();
+}
+window.codexLoadReads = loadReads;
+window.codexIsUnread = (id) => badgesOn() && isUnread(byId(id)); // tests
 
 /* --- Linked files + DM notes (switch 'codex_links'; see the header) --- */
 const byId = (id) => (globalCodexEntriesCache || []).find(x => x.id === id);
@@ -681,7 +730,7 @@ window.onHook('codex-entry-deleted', 'codex-v2', (id) => {
     if (window.codexRestyleOn()) { Object.keys(S.selected).forEach(k => { if (S.selected[k] === id) delete S.selected[k]; }); }
 });
 // Links/notes + live sync: db.js loadCodexEntries announces codex-loaded.
-window.onHook('codex-loaded', 'codex-v2', () => { ensureSync(); if (isDm()) loadLinkData(); });
+window.onHook('codex-loaded', 'codex-v2', () => { ensureSync(); if (isDm()) loadLinkData(); else if (!(S.reads instanceof Set)) loadReads(); });
 window.onHook('codex-entry-saved', 'codex-v2-sync', () => window.codexAnnounceChange(), 60);
 window.onHook('codex-entry-deleted', 'codex-v2-sync', () => window.codexAnnounceChange(), 60);
 window.onHook('codex-fullscreen-closed', 'codex-v2', () => {
@@ -689,6 +738,7 @@ window.onHook('codex-fullscreen-closed', 'codex-v2', () => {
 });
 // The switch flipping while the Codex is open re-draws it.
 document.addEventListener('darkforest:features-changed', () => {
+    if (!isDm() && !(S.reads instanceof Set) && window.isFeatureOn && window.isFeatureOn('codex_new_badges')) loadReads();
     const panel = document.getElementById('term-panel-codex');
     if (panel && (panel.classList.contains('active') || panel.classList.contains('cx2-on'))) window.renderCodexMatrix();
 });

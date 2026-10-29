@@ -12,7 +12,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono&display=swap">
-    <link rel="stylesheet" href="style.css?v=3.80">
+    <link rel="stylesheet" href="style.css?v=3.81">
     <!-- Phase 6c: lets the Three.js model loaders (GLTFLoader/DRACOLoader,
          loaded on demand by js/ship-models.js) resolve their bare 'three'
          import to the SAME pinned r170 build js/battle-3d.js uses. Nothing
@@ -1041,6 +1041,17 @@
                         </label>
                         <label for="sfx-volume-slider" style="font-size: 9px; color: #6b826a; display: block; margin-bottom: 2px;">Effects Volume</label>
                         <input type="range" id="sfx-volume-slider" min="0" max="100" value="100" oninput="window.AudioEngine.setSfxVolume(this.value / 100)" style="width: 100%; margin: 0;">
+                        <!-- Notification sounds, per device (js/audio.js NOTIFY_KEYS) -->
+                        <div style="font-size: 9px; color: #6b826a; margin: 10px 0 4px 0; padding-top: 8px; border-top: 1px dashed #3c4e36;">Message sounds</div>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; color: #6b826a; cursor: pointer; margin-bottom: 4px;">
+                            <input type="checkbox" id="snd-chat-toggle" checked onchange="window.AudioEngine.setNotifyOn('chat', this.checked)" style="margin: 0; width: auto;"> Chat from players
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; color: #6b826a; cursor: pointer; margin-bottom: 4px;">
+                            <input type="checkbox" id="snd-system-toggle" checked onchange="window.AudioEngine.setNotifyOn('system', this.checked)" style="margin: 0; width: auto;"> System updates
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 10px; color: #6b826a; cursor: pointer;">
+                            <input type="checkbox" id="snd-alert-toggle" checked onchange="window.AudioEngine.setNotifyOn('alert', this.checked)" style="margin: 0; width: auto;"> Alerts
+                        </label>
                         <button onclick="window.AudioEngine.skipTrack()" style="width: 100%; margin-top: 8px; padding: 4px 8px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 9px;">⏭ SKIP TRACK</button>
                     </div>
                 </div>
@@ -1633,13 +1644,13 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.89"></script>
-    <script src="js/audio.js?v=3.20"></script>
-    <script src="js/ui.js?v=3.58"></script>
-    <script src="js/combat.js?v=3.84"></script>
+    <script src="js/db.js?v=3.90"></script>
+    <script src="js/audio.js?v=3.21"></script>
+    <script src="js/ui.js?v=3.59"></script>
+    <script src="js/combat.js?v=3.85"></script>
     <script src="js/squadrons.js?v=1.14"></script>
     <script src="js/strike-craft-designer.js?v=1.2"></script>
-    <script src="js/colonies.js?v=3.23"></script>
+    <script src="js/colonies.js?v=3.24"></script>
     <script src="js/ship-designer.js?v=3.43"></script>
     <script src="js/perk-designer.js?v=3.19"></script>
     <script src="js/augment-designer.js?v=1.7"></script>
@@ -1651,7 +1662,7 @@
     <script src="js/battle-turns.js?v=1.3"></script>
     <script src="js/battle-automation.js?v=1.3"></script>
     <script src="js/battle-ordnance.js?v=1.1"></script>
-    <script src="js/battle-salvage.js?v=1.0"></script>
+    <script src="js/battle-salvage.js?v=1.1"></script>
     <script src="js/battle-fx.js?v=1.2"></script>
     <script src="js/battle-cards.js?v=1.3"></script>
     <script src="js/battle-undo.js?v=1.0"></script>
@@ -1663,7 +1674,7 @@
     <script src="js/tactical-hud.js?v=1.2"></script>
     <script src="js/battle-3d.js?v=1.10"></script>
     <script src="js/ship-models.js?v=1.3"></script>
-    <script src="js/codex-v2.js?v=1.6"></script>
+    <script src="js/codex-v2.js?v=1.7"></script>
     <script src="js/terminal-tabs.js?v=1.0"></script>
     <script src="js/designers-v2.js?v=1.2"></script>
     <script src="js/fleet-v2.js?v=1.2"></script>
@@ -1676,7 +1687,7 @@
     <script src="js/terrain-rules.js?v=1.1"></script>
     <script src="js/deck-plans.js?v=1.4"></script>
     <script src="js/battle-mobile.js?v=1.3"></script>
-    <script src="js/manufacturing.js?v=1.23"></script>
+    <script src="js/manufacturing.js?v=1.24"></script>
     <script src="js/quartermaster.js?v=1.3"></script>
     <script src="js/action-points.js?v=1.0"></script>
     <script src="js/bridge-walk.js?v=1.2"></script>

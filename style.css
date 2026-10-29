@@ -1524,6 +1524,9 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .cx2-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 24px; border-top: 1px solid rgba(0, 225, 255, 0.14); font-size: 10px; letter-spacing: 0.14em; }
 /* Linked files + DM notes (js/codex-v2.js, switch 'codex_links', DM only) */
 .cx2-k-part { color: #ffc861; border-color: rgba(255, 200, 97, 0.6); }
+/* NEW badges (js/codex-v2.js, switch 'codex_new_badges', players) */
+.cx2-k-new { color: #04110c; background: #00e5a3; border-color: #00e5a3; font-weight: 700; }
+.cx2-newcount { font-style: normal; font-size: 8.5px; letter-spacing: 0.12em; padding: 1px 5px; color: #04110c; background: #00e5a3; }
 .cx2-move select { height: 32px; margin: 0; padding: 0 8px; font-family: inherit; font-size: 10px; letter-spacing: 0.12em; background: #061015; color: #9fe9f5; border: 1px solid rgba(0, 225, 255, 0.4); cursor: pointer; }
 .cx2-dmbox { margin: 0 24px 18px; border: 1px solid rgba(255, 170, 0, 0.35); background: rgba(255, 170, 0, 0.03); }
 .cx2-dmbox .cx2-ttl { position: static; background: rgba(20, 14, 4, 0.6); align-items: center; }

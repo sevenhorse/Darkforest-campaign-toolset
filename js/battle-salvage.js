@@ -102,7 +102,7 @@ window.processSalvageGatherCompletion = async function(newHours) {
             continue;
         }
         ship.cargo_inventory = cargo;
-        await db.from('chat_logs').insert({ sender_id: null, content: `📦 [SALVAGE] ${ship.name} recovered ${rec.qty}x ${rec.resource_name}.`, message_type: 'system' });
+        await window.postSystemLog(`📦 [SALVAGE] ${ship.name} recovered ${rec.qty}x ${rec.resource_name}.`);
         any = true;
     }
     if (any) {
@@ -110,7 +110,7 @@ window.processSalvageGatherCompletion = async function(newHours) {
         // has no chime hookup" — reusing playChime, the same SFX the Daily
         // Logistics 24-hour-cycle completion already uses for "something
         // finished" (js/ui.js), rather than inventing a new sound for this.
-        if (window.AudioEngine) window.AudioEngine.playChime();
+        if (window.AudioEngine) window.AudioEngine.notify('system');
         loadBattlefieldSalvage();
         if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
     }
@@ -146,11 +146,7 @@ window.processSalvageConversion = async function(daysPassed) {
 
             await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
             vessel.cargo_inventory = cargo;
-            await db.from('chat_logs').insert({
-                sender_id: null,
-                content: `⚙ [SALVAGE PROCESSING] ${vessel.name} refined ${consumed}x Unprocessed Wreckage Salvage into ${consumed}x ${vessel.salvage_processing_output}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''}.`,
-                message_type: 'system'
-            });
+            await window.postSystemLog(`⚙ [SALVAGE PROCESSING] ${vessel.name} refined ${consumed}x Unprocessed Wreckage Salvage into ${consumed}x ${vessel.salvage_processing_output}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''}.`);
         } catch (err) {
             console.error(`processSalvageConversion: failed for vessel "${vessel.name}" (${vessel.id})`, err);
         }

@@ -317,8 +317,8 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
                 const fed = window.consumeShipFood(vessel, cargo, daysPassed);
                 if (fed.changed) { changed = true; rationsLogged = true; }
                 if (fed.hadFood && fed.shortCrewDays > 0) {
-                    await db.from('chat_logs').insert({ sender_id: null, content: `⚠️ [CRITICAL] Vessel '${vessel.name}' has run out of food (${fed.shortCrewDays} crew-days short for a crew of ${window.vesselCrew(vessel)}). Starvation protocols active.`, message_type: 'system' });
-                    if (window.AudioEngine) window.AudioEngine.playError();
+                    await window.postSystemLog(`⚠️ [CRITICAL] Vessel '${vessel.name}' has run out of food (${fed.shortCrewDays} crew-days short for a crew of ${window.vesselCrew(vessel)}). Starvation protocols active.`, { critical: true });
+                    if (window.AudioEngine) window.AudioEngine.notify('alert');
                 }
             }
             if (changed) { await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id); anyUpdated = true; }
@@ -326,8 +326,8 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
         
         if (anyUpdated) {
             let rationText = rationsLogged ? " Rations consumed." : "";
-            await db.from('chat_logs').insert({ sender_id: null, content: `✨ [DAILY LOGISTICS] 24-hour cycle complete. Elder E-M Synthesizers recharged.${rationText}`, message_type: 'system' });
-            if (window.AudioEngine) window.AudioEngine.playChime();
+            await window.postSystemLog(`✨ [DAILY LOGISTICS] ${daysPassed > 1 ? daysPassed + ' days' : '24-hour cycle'} complete. Elder E-M Synthesizers recharged.${rationText}`);
+            if (window.AudioEngine) window.AudioEngine.notify('system');
             if (typeof window.renderTerminalCargoDeck === 'function') window.renderTerminalCargoDeck();
         }
 
@@ -380,7 +380,10 @@ window.processTimeAdvancement = async function(oldHours, newHours) {
 // Every call now waits for the previous one to finish (same arguments,
 // same behavior, just one at a time). Callers that `await` it still wait
 // for their own run to complete.
-window.processTimeAdvancement = window.serializeAsync(window.processTimeAdvancement, 'processTimeAdvancement');
+// Every run also batches its routine system messages into one chat line
+// (window.withSystemLogBatch, js/db.js).
+const runTimeAdvancement = window.processTimeAdvancement;
+window.processTimeAdvancement = window.serializeAsync((oldHours, newHours) => window.withSystemLogBatch(() => runTimeAdvancement(oldHours, newHours)), 'processTimeAdvancement');
 
 function syncTimeFlowButton() {
     const btn = document.getElementById('time-flow-btn');
@@ -2193,7 +2196,9 @@ window.appendLocalChatLog = function(log) {
     } else {
         if (log.sender_id !== currentUserId) {
             window.commsUnread[tabKey] = true;
-            if (window.AudioEngine) window.AudioEngine.playPing();
+            // The unread ping is for people's messages only; automated
+            // lines already made their one (coalesced) sound on arrival.
+            if (window.AudioEngine && window.chatSoundKind(log) === 'chat' && window.AudioEngine.notifyOn('chat')) window.AudioEngine.playPing();
         }
         window.renderCommsTabBar();
     }
@@ -2209,8 +2214,29 @@ window.handleIncomingChatLog = function(newLog) {
     // realtime handler also fires for the sender's own INSERT (echoed back
     // by Supabase), and sendChatMessage() already appends it locally
     // without a sound, so chirping here too would double-fire on send.
-    if (window.AudioEngine && newLog.sender_id !== currentUserId) window.AudioEngine.playChirp();
+    if (window.AudioEngine && newLog.sender_id !== currentUserId) window.AudioEngine.notify(window.chatSoundKind(newLog));
     window.appendLocalChatLog(newLog);
+};
+// Which notification sound a chat row makes (js/audio.js notify): people's
+// messages = 'chat'; automated rows (no sender) = 'alert' for critical
+// warnings, else 'system'.
+window.chatSoundKind = function(log) {
+    if (!log || log.sender_id) return 'chat';
+    return /⚠️|🚨|\[CRITICAL\]|DRADIS ALERT/.test(String(log.content || '')) ? 'alert' : 'system';
+};
+// Chat text -> safe HTML. Rows with a sender are typed by people: escaped,
+// never HTML. Automated rows may carry a little markup (vessel diagnostics
+// uses spans), so they are cleaned with DOMPurify, or escaped if it failed
+// to load. Without this a typed <img onerror> ran in every reader's browser.
+window.chatContentHtml = function(log) {
+    const raw = String((log && log.content) || '');
+    if (log && !log.sender_id && window.DOMPurify) return window.DOMPurify.sanitize(raw);
+    return window.escapeHtml(raw);
+};
+// Roll breakdowns are app-built HTML (bold totals, line breaks): cleaned, not escaped.
+window.chatBreakdownHtml = function(html) {
+    const raw = String(html == null ? '' : html);
+    return window.DOMPurify ? window.DOMPurify.sanitize(raw) : window.escapeHtml(raw);
 };
 
 // inputId (added this session, Battle Map dock build): defaults to the
@@ -2259,15 +2285,15 @@ window.renderChatFeed = function() {
 
     let html = '';
     source.forEach(log => {
-        const sender = allProfiles.find(p => p.id === log.sender_id); const senderName = sender ? (sender.username || 'Commander') : 'Unknown';
+        const sender = allProfiles.find(p => p.id === log.sender_id); const senderName = window.escapeHtml(sender ? (sender.username || 'Commander') : 'Unknown');
         const isDM = !!log.recipient_id; let headerColor = isDM ? '#c778dd' : '#00e5a3'; let prefix = isDM ? '🔒 [PRIVATE]' : '🌐';
         if (log.message_type === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
         if (log.message_type === 'roll') { headerColor = '#ff6b6b'; prefix = '🎲 [ROLL]'; }
         if (log.message_type === 'ping') { headerColor = '#00e1ff'; prefix = '📍 [PING]'; }
-        let contentHTML = log.content;
-        if (log.message_type === 'roll' && log.roll_data) { contentHTML = `<strong style="font-size:12px;">${log.content}</strong><br><span style="font-size:9px; color:#6b826a;">${log.roll_data.breakdown}</span>`; }
-        if (log.message_type === 'ping' && log.roll_data) { contentHTML = `${log.content} <button class="layer-edit" onclick="window.jumpToPingLocation(${log.roll_data.x}, ${log.roll_data.y})" style="padding:2px 8px; font-size:9px; margin-left:6px;">JUMP TO LOCATION</button>`; }
-        html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.message_type === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;">${contentHTML}</div></div>`;
+        let contentHTML = window.chatContentHtml(log);
+        if (log.message_type === 'roll' && log.roll_data) { contentHTML = `<strong style="font-size:12px;">${contentHTML}</strong><br><span style="font-size:9px; color:#6b826a;">${window.chatBreakdownHtml(log.roll_data.breakdown)}</span>`; }
+        if (log.message_type === 'ping' && log.roll_data) { contentHTML = `${contentHTML} <button class="layer-edit" onclick="window.jumpToPingLocation(${Number(log.roll_data.x) || 0}, ${Number(log.roll_data.y) || 0})" style="padding:2px 8px; font-size:9px; margin-left:6px;">JUMP TO LOCATION</button>`; }
+        html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.message_type === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;${log.message_type === 'system' ? ' white-space: pre-line;' : ''}">${contentHTML}</div></div>`;
     });
     const finalHtml = html || '<span style="font-size:10px; color:#6b826a;">No messages in this channel yet.</span>';
     if (feed) { feed.innerHTML = finalHtml; feed.scrollTop = feed.scrollHeight; }

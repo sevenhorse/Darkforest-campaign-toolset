@@ -46,6 +46,22 @@ window.AudioEngine = (function() {
         try { localStorage.setItem('darkforest_sfx_muted', sfxMuted ? 'true' : 'false'); } catch (e) {}
         if (sfxGainNode) sfxGainNode.gain.value = sfxMuted ? 0 : sfxVolume;
     }
+    // Notification sounds by kind, each with its own per-device switch in
+    // the AUDIO menu (all on by default): 'chat' (messages from people),
+    // 'system' (automated logistics/production lines), 'alert' (critical
+    // warnings: starvation, DRADIS anomaly). System and alert sounds play at
+    // most once per 2.5 s, so a burst of messages makes one sound.
+    const NOTIFY_KEYS = { chat: 'darkforest_snd_chat', system: 'darkforest_snd_system', alert: 'darkforest_snd_alert' };
+    const NOTIFY_GAP_MS = 2500;
+    const lastNotify = { system: 0, alert: 0 };
+    function notifyOn(kind) {
+        const key = NOTIFY_KEYS[kind]; if (!key) return true;
+        try { return localStorage.getItem(key) !== 'off'; } catch (e) { return true; }
+    }
+    function setNotifyOn(kind, on) {
+        const key = NOTIFY_KEYS[kind]; if (!key) return;
+        try { localStorage.setItem(key, on ? 'on' : 'off'); } catch (e) {}
+    }
     // Small synth helpers: a pitch-swept tone and a filtered noise burst.
     // t0/dur are seconds from now.
     function tone(type, f0, f1, t0, dur, vol) {
@@ -324,6 +340,7 @@ window.AudioEngine = (function() {
         const sfxSld = document.getElementById('sfx-volume-slider');
         if (sfxChk) sfxChk.checked = sfxMuted;
         if (sfxSld) sfxSld.value = Math.round(sfxVolume * 100);
+        Object.keys(NOTIFY_KEYS).forEach(k => { const c = document.getElementById('snd-' + k + '-toggle'); if (c) c.checked = notifyOn(k); });
     }
     document.addEventListener('DOMContentLoaded', syncControlsUI);
 
@@ -585,6 +602,19 @@ window.AudioEngine = (function() {
         setSfxMuted: function(b) { setSfxMuted(b); },
         isSfxMuted: function() { return sfxMuted; },
         getSfxVolume: function() { return sfxVolume; },
+        // Notification sounds (see NOTIFY_KEYS): chat = chirp; system = chime
+        // and alert = error tone, each at most once per NOTIFY_GAP_MS.
+        notify: function(kind) {
+            if (!notifyOn(kind)) return false;
+            if (kind === 'chat') { this.playChirp(); return true; }
+            const now = Date.now();
+            if (now - (lastNotify[kind] || 0) < NOTIFY_GAP_MS) return false;
+            lastNotify[kind] = now;
+            if (kind === 'alert') this.playError(); else this.playChime();
+            return true;
+        },
+        notifyOn: notifyOn,
+        setNotifyOn: function(kind, on) { setNotifyOn(kind, on); },
 
         // --- Music beds ---
         startAmbient: startAmbient,

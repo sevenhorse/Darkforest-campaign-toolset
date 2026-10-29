@@ -605,11 +605,7 @@ window.processFleetGroupProduction = async function(daysPassed) {
             await db.from('ship_markers').update({ cargo_inventory: cargo }).eq('id', vessel.id);
             vessel.cargo_inventory = cargo;
 
-            await db.from('chat_logs').insert({
-                sender_id: null,
-                content: `⚙ [PRODUCTION] ${f.name} produced ${output}x ${f.production_resource_type}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''} — delivered to ${vessel.name}'s expendables hold.`,
-                message_type: 'system'
-            });
+            await window.postSystemLog(`⚙ [PRODUCTION] ${f.name} produced ${output}x ${f.production_resource_type}${mfgDeck ? ` (Manufacturing deck at ${Math.round(scale * 100)}%)` : ''} — delivered to ${vessel.name}'s expendables hold.`);
         } catch (err) {
             console.error(`processFleetGroupProduction: failed for fleet group "${f.name}" (${f.id})`, err);
         }
@@ -657,10 +653,7 @@ window.processColonyProduction = async function(daysPassed) {
     // more colonies than fleet groups, and a multi-day time jump would
     // otherwise flood chat with a line per colony per tick).
     if (producedLines.length > 0) {
-        await db.from('chat_logs').insert({
-            sender_id: null, message_type: 'system',
-            content: `🏗 [COLONY PRODUCTION] ${producedLines.join(' · ')} — accumulated in colony storage, awaiting pickup.`
-        });
+        await window.postSystemLog(`🏗 [COLONY PRODUCTION] ${producedLines.join(' · ')} — accumulated in colony storage, awaiting pickup.`);
     }
     if (typeof window.renderColoniesPanel === 'function') window.renderColoniesPanel();
 };
