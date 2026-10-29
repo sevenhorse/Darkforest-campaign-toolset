@@ -21,7 +21,24 @@
 
    Visibility rules match renderCodexMatrix: the DM sees everything; players
    never see is_hidden entries, and an entry with "| LINK:<system>" in its
-   subtitle only after that system has been DRADIS-scanned. */
+   subtitle only after that system has been DRADIS-scanned. Since 2026-10-29
+   the database enforces the hidden part too: codex_entries RLS returns
+   is_hidden rows to the DM only, and only the DM may insert/update/delete.
+
+   Linked files + DM notes (switch 'codex_links', DM only to start):
+   - A tab says what an entry IS, is_hidden says who sees it, and links say
+     which story it belongs to. Links live in codex_links (child_id,
+     master_id; many-to-many, so one file can belong to several masters).
+   - A master shows LINKED FILES (each with SHOW/HIDE); a child shows a
+     PART OF chip per master. MOVE TO changes the tab (moving into Session
+     Prep also hides it).
+   - DM notes live in codex_dm_notes, never in the entry text, so revealing
+     an entry never reveals them. Both tables are DM-only by RLS.
+   - Live sync: after a DM change the DM's browser broadcasts 'changed' on
+     channel codex_sync; every client reloads the Codex, so a reveal (or a
+     re-hide) reaches players without a page reload. Broadcast, not
+     postgres_changes: RLS means a player never gets an event for a row
+     going hidden, so a re-hide would otherwise linger on their screen. */
 (function () {
 const CATS = [
     { key: 'factions', tab: 'FACTIONS', title: 'FACTIONS & POWERS', icon: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"></path>' },
@@ -32,7 +49,7 @@ const CATS = [
     { key: 'prep', tab: 'SESSION PREP', title: 'SESSION PREP (DM ONLY)', dmOnly: true, icon: '<rect x="5" y="4" width="14" height="17"></rect><path d="M9 4V2h6v2"></path><path d="M8 10h8M8 14h8M8 18h5"></path>' }
 ];
 const catsForMe = () => CATS.filter(c => !c.dmOnly || isDm());
-const S = window.__cx2 = window.__cx2 || { selected: {}, view: 'list', editing: false, editTab: 'write', charts: [], pendingSelect: null };
+const S = window.__cx2 = window.__cx2 || { selected: {}, view: 'list', editing: false, editTab: 'write', charts: [], pendingSelect: null, links: [], notes: {}, notesEditing: null, notesDraft: '' };
 const esc = (v) => window.escapeHtml(v == null ? '' : String(v));
 const isDm = () => typeof currentUserRole !== 'undefined' && currentUserRole === 'dm';
 window.codexRestyleOn = function () { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('codex_restyle'); };
@@ -265,7 +282,7 @@ function renderV2() {
                 <button type="button" class="cx2-rowbtn" onclick="window.cx2Select('${e.id}')" aria-current="${sel}">
                     <span class="cx2-thumb">${img ? `<img data-media-ref="${esc(img)}" alt="">` : esc(initials(e.title))}</span>
                     <span class="cx2-rowtxt"><span class="cx2-rowtitle">${esc(e.title || 'Untitled')}</span>
-                    <span class="cx2-rowmeta">${tag ? `<span class="cx2-chip cx2-k-${kind}">${esc(tag.toUpperCase())}</span>` : ''}${dm && e.is_hidden ? '<span class="cx2-chip cx2-k-hostile">HIDDEN</span>' : ''}${dm && linkOf(e) ? '<span class="cx2-chip cx2-k-other">SCAN-LOCKED</span>' : ''}<span class="cx2-dim">${readMinutes(e)} MIN</span></span></span>
+                    <span class="cx2-rowmeta">${tag ? `<span class="cx2-chip cx2-k-${kind}">${esc(tag.toUpperCase())}</span>` : ''}${dm && e.is_hidden ? '<span class="cx2-chip cx2-k-hostile">HIDDEN</span>' : ''}${dm && linkOf(e) ? '<span class="cx2-chip cx2-k-other">SCAN-LOCKED</span>' : ''}${linksOn() && childrenOf(e.id).length ? `<span class="cx2-chip cx2-k-part">${childrenOf(e.id).length} LINKED</span>` : ''}<span class="cx2-dim">${readMinutes(e)} MIN</span></span></span>
                 </button>
                 ${sel ? `<span class="cx2-reorder">${window.renderReorderArrows(orderKey, list, e.id, 'moveCodexEntryOrder')}</span>` : ''}
             </div>`;
@@ -357,17 +374,19 @@ function renderReader(list, selId, catInfo) {
             <div class="cx2-headtxt">
                 ${body.kicker ? `<div class="cx2-kicker">${esc(body.kicker.toUpperCase())}</div>` : `<div class="cx2-kicker">${catInfo.title}</div>`}
                 <h2 class="cx2-title">${esc(e.title || 'Untitled')}</h2>
-                <div class="cx2-chips">${tag ? `<span class="cx2-chip cx2-k-${kind}">${esc(tag.toUpperCase())}</span>` : ''}<span class="cx2-chip cx2-k-cat">${catInfo.tab}</span>${dm && e.is_hidden ? '<span class="cx2-chip cx2-k-hostile">HIDDEN FROM PLAYERS</span>' : ''}${dm && link ? `<span class="cx2-chip cx2-k-other" title="Players see this after scanning that system">UNLOCKS ON SCAN: ${esc(link)}</span>` : ''}</div>
+                <div class="cx2-chips">${tag ? `<span class="cx2-chip cx2-k-${kind}">${esc(tag.toUpperCase())}</span>` : ''}<span class="cx2-chip cx2-k-cat">${catInfo.tab}</span>${dm && e.is_hidden ? '<span class="cx2-chip cx2-k-hostile">HIDDEN FROM PLAYERS</span>' : ''}${dm && link ? `<span class="cx2-chip cx2-k-other" title="Players see this after scanning that system">UNLOCKS ON SCAN: ${esc(link)}</span>` : ''}${linksOn() ? partOfChips(e) : ''}</div>
                 <div class="cx2-meta">FILED BY ${esc((author && author.username || 'UNKNOWN').toUpperCase())}${e.created_at ? ' · ' + fmtDate(e.created_at) : ''} · ~${readMinutes(e)} MIN READ</div>
             </div>
             <div class="cx2-acts">
                 <button type="button" class="cx2-btn" onclick="window.openCodexFullscreen('${e.id}')">⛶ FULL SCREEN</button>
                 ${dm ? `<button type="button" class="cx2-btn cx2-amber" onclick="window.editCodexEntry('${e.id}')">EDIT</button>
                 <button type="button" class="cx2-btn cx2-dimbtn" onclick="window.cx2ToggleHidden('${e.id}')">${e.is_hidden ? 'SHOW' : 'HIDE'}</button>
+                ${linksOn() ? moveSelect(e) : ''}
                 <button type="button" class="cx2-btn cx2-red" aria-label="Delete entry" onclick="window.deleteCodexEntry('${e.id}')">✕</button>` : ''}
             </div>
         </div>
         <div class="cx2-text">${body.html}</div>
+        ${linksOn() ? dmBox(e) : ''}
         <div class="cx2-foot">
             ${e.doc_data && e.doc_name ? `<button type="button" class="cx2-btn" onclick="window.openCodexAttachment('${e.id}')">📎 ${esc(e.doc_name)} (${esc((e.doc_type || 'FILE').toUpperCase())})</button>` : '<span class="cx2-dim">NO ATTACHMENTS</span>'}
             <span class="cx2-grow"></span>
@@ -415,9 +434,189 @@ window.cx2NewEntry = async function () {
 window.cx2ToggleHidden = async function (id) {
     if (!isDm()) return;
     const e = (globalCodexEntriesCache || []).find(x => x.id === id); if (!e) return;
+    // Players have no Session Prep tab, so showing a prep entry reaches nobody.
+    if (e.is_hidden && e.category === 'prep' && window.showConfirmModal &&
+        !(await window.showConfirmModal('This file is in Session Prep, which players never see. Showing it changes nothing for them until it is moved to another tab (MOVE TO). Show it anyway?'))) return;
     const { error } = await db.from('codex_entries').update({ is_hidden: !e.is_hidden }).eq('id', id);
     if (error) { alert('Could not change who sees this entry: ' + error.message); return; }
     e.is_hidden = !e.is_hidden;
+    renderV2();
+    window.codexAnnounceChange();
+};
+
+/* --- Linked files + DM notes (switch 'codex_links'; see the header) --- */
+const byId = (id) => (globalCodexEntriesCache || []).find(x => x.id === id);
+function linksOn() { return isDm() && window.codexRestyleOn() && typeof window.isFeatureOn === 'function' && window.isFeatureOn('codex_links'); }
+window.codexLinksOn = linksOn;
+function childrenOf(id) { return (S.links || []).filter(l => l.master_id === id && byId(l.child_id)).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).map(l => byId(l.child_id)); }
+function mastersOf(id) { return (S.links || []).filter(l => l.child_id === id && byId(l.master_id)).map(l => byId(l.master_id)); }
+window.codexChildrenOf = childrenOf; window.codexMastersOf = mastersOf; // tests
+function tabName(cat) { const c = CATS.find(x => x.key === cat); return c ? c.tab : String(cat || '').toUpperCase(); }
+
+async function loadLinkData() {
+    if (!isDm()) { S.links = []; S.notes = {}; return; }
+    const [l, n] = await Promise.all([
+        db.from('codex_links').select('*'),
+        db.from('codex_dm_notes').select('*')
+    ]);
+    if (l && !l.error) S.links = l.data || [];
+    if (n && !n.error) { S.notes = {}; (n.data || []).forEach(r => { S.notes[r.entry_id] = r.notes || ''; }); }
+    const panel = document.getElementById('term-panel-codex');
+    if (window.codexRestyleOn() && panel && panel.classList.contains('cx2-on') && !S.editing) renderV2();
+}
+window.codexLoadLinkData = loadLinkData;
+
+// Live sync. Players only listen; the DM's browser announces.
+let syncCh = null, syncTimer = null;
+function ensureSync() {
+    if (syncCh || typeof db === 'undefined' || !db || typeof db.channel !== 'function') return;
+    syncCh = db.channel('codex_sync');
+    syncCh.on('broadcast', { event: 'changed' }, () => {
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(() => { if (typeof loadCodexEntries === 'function') loadCodexEntries(); }, 400);
+    });
+    syncCh.subscribe();
+}
+window.codexSyncReset = function () { syncCh = null; ensureSync(); }; // tests
+window.codexAnnounceChange = function () {
+    if (!isDm() || !syncCh || !window.isFeatureOn || !window.isFeatureOn('codex_links')) return;
+    try { const p = syncCh.send({ type: 'broadcast', event: 'changed', payload: {} }); if (p && p.then) p.then(() => {}, () => {}); } catch (e) {}
+};
+
+function partOfChips(e) {
+    return mastersOf(e.id).map(m => `<button type="button" class="cx2-chip cx2-k-part" title="Open the master file" onclick="window.cx2Goto('${m.id}')">PART OF: ${esc(String(m.title || 'Untitled').toUpperCase())}</button>`).join('');
+}
+function moveSelect(e) {
+    const opts = CATS.filter(c => c.key !== e.category).map(c => `<option value="${c.key}">${c.tab}</option>`).join('');
+    return `<label class="cx2-move"><span class="cx2-sr">Move this entry to another tab</span><select onchange="window.cx2MoveTo('${e.id}', this.value); this.value='';"><option value="">MOVE TO…</option>${opts}</select></label>`;
+}
+function statusChip(c) {
+    if (c.category === 'prep') return '<span class="cx2-chip cx2-k-neutral" title="Players never see the Session Prep tab">PREP TAB</span>';
+    if (c.is_hidden) return '<span class="cx2-chip cx2-k-hostile">HIDDEN</span>';
+    if (linkOf(c)) return '<span class="cx2-chip cx2-k-other" title="Shown, but players need to scan its system first">SCAN-LOCKED</span>';
+    return '<span class="cx2-chip cx2-k-ally">PLAYERS SEE IT</span>';
+}
+function dmBox(e) {
+    const kids = childrenOf(e.id);
+    const rows = kids.map(c => `<div class="cx2-lrow">
+            <button type="button" class="cx2-lopen" onclick="window.cx2Goto('${c.id}')">${esc(c.title || 'Untitled')}</button>
+            <span class="cx2-chip cx2-k-cat">${tabName(c.category)}</span>${statusChip(c)}
+            <span class="cx2-grow"></span>
+            <button type="button" class="cx2-btn cx2-dimbtn cx2-sm" onclick="window.cx2ToggleHidden('${c.id}')">${c.is_hidden ? 'SHOW' : 'HIDE'}</button>
+            <button type="button" class="cx2-btn cx2-red cx2-sm" aria-label="Unlink ${esc(c.title || '')}" title="Unlink (the file itself is kept)" onclick="window.cx2Unlink('${c.id}', '${e.id}')">✕</button>
+        </div>`).join('');
+    const has = Object.prototype.hasOwnProperty.call(S.notes, e.id) && String(S.notes[e.id]).trim();
+    let notes;
+    if (S.notesEditing === e.id) {
+        notes = `<textarea id="cx2-notes-input" class="cx2-notes-input" rows="8" placeholder="Secrets, rulings, what this NPC really knows... never sent to players." oninput="window.__cx2.notesDraft = this.value">${esc(S.notesDraft)}</textarea>
+            <div class="cx2-dmacts"><button type="button" class="cx2-btn cx2-amber cx2-sm" onclick="window.cx2SaveNotes('${e.id}')">SAVE NOTES</button><button type="button" class="cx2-btn cx2-dimbtn cx2-sm" onclick="window.cx2EditNotes(null)">CANCEL</button></div>`;
+    } else {
+        notes = has ? `<div class="cx2-notes codex-markdown">${window.renderCodexMarkdown(String(S.notes[e.id]), 'cx2-nchart').html}</div>` : '<div class="cx2-dim cx2-pad">No DM notes on this file.</div>';
+        notes += `<div class="cx2-dmacts"><button type="button" class="cx2-btn cx2-amber cx2-sm" onclick="window.cx2EditNotes('${e.id}')">${has ? 'EDIT NOTES' : '+ ADD DM NOTES'}</button></div>`;
+    }
+    return `<section class="cx2-dmbox" aria-label="DM only">
+        <div class="cx2-ttl cx2-amber-ttl"><span>LINKED FILES (${kids.length})</span><span class="cx2-dmacts-inline">
+            <button type="button" class="cx2-btn cx2-amber cx2-sm" onclick="window.cx2OpenPicker('${e.id}', 'children')">+ ADD FILES</button>
+            <button type="button" class="cx2-btn cx2-soft cx2-sm" onclick="window.cx2OpenPicker('${e.id}', 'masters')">PART OF…</button></span></div>
+        ${kids.length ? `<div class="cx2-lrows">${rows}</div>` : '<div class="cx2-dim cx2-pad">No files are linked to this one. + ADD FILES links NPCs, species or documents to it; PART OF… links this file to a master doc.</div>'}
+        <div class="cx2-ttl cx2-amber-ttl"><span>DM NOTES</span><span>NEVER SHOWN TO PLAYERS</span></div>
+        ${notes}
+    </section>`;
+}
+
+// Open any entry, in whatever tab it lives in.
+window.cx2Goto = async function (id) {
+    const e = byId(id); if (!e) return;
+    if (!(await leaveEditor())) return;
+    if (window.codexSearchFilter && !matchesSearch(e)) window.codexSearchFilter = '';
+    S.selected[e.category] = id;
+    S.view = 'read';
+    window.switchCodexCategory(e.category);
+    const reader = document.getElementById('cx2-reader'); if (reader) reader.scrollTop = 0;
+};
+window.cx2MoveTo = async function (id, cat) {
+    if (!isDm() || !cat || !CATS.some(c => c.key === cat)) return;
+    const e = byId(id); if (!e || e.category === cat) return;
+    const upd = { category: cat };
+    if (cat === 'prep') upd.is_hidden = true; // Session Prep entries are always hidden
+    const { error } = await db.from('codex_entries').update(upd).eq('id', id);
+    if (error) { alert('Could not move this entry: ' + error.message); return; }
+    Object.assign(e, upd);
+    if (window.showToast) window.showToast(`Moved to ${tabName(cat)}${upd.is_hidden ? ' (hidden)' : ''}.`);
+    window.codexAnnounceChange();
+    await window.cx2Goto(id);
+};
+window.cx2Unlink = async function (childId, masterId) {
+    if (!isDm()) return;
+    const l = (S.links || []).find(x => x.child_id === childId && x.master_id === masterId); if (!l) return;
+    const { error } = await db.from('codex_links').delete().eq('id', l.id);
+    if (error) { alert('Could not unlink: ' + error.message); return; }
+    S.links = S.links.filter(x => x.id !== l.id);
+    renderV2();
+};
+window.cx2EditNotes = function (id) {
+    S.notesEditing = id || null;
+    S.notesDraft = id ? (S.notes[id] || '') : '';
+    renderV2();
+    if (id) { const t = document.getElementById('cx2-notes-input'); if (t) t.focus(); }
+};
+window.cx2SaveNotes = async function (id) {
+    if (!isDm()) return;
+    const notes = String(S.notesDraft || '');
+    const { error } = await db.from('codex_dm_notes').upsert({ entry_id: id, notes, updated_at: new Date().toISOString() }, { onConflict: 'entry_id' });
+    if (error) { alert('Could not save the DM notes: ' + error.message); return; }
+    S.notes[id] = notes; S.notesEditing = null; S.notesDraft = '';
+    renderV2();
+};
+
+// Picker: choose this entry's linked files ('children') or its masters ('masters').
+window.cx2OpenPicker = function (id, mode) {
+    const e = byId(id); if (!e || !isDm()) return;
+    const linked = new Set((S.links || []).filter(l => mode === 'children' ? l.master_id === id : l.child_id === id).map(l => mode === 'children' ? l.child_id : l.master_id));
+    S.pick = { id, mode, chosen: new Set(linked), q: '' };
+    let ov = document.getElementById('cx2-pick');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'cx2-pick'; ov.className = 'cx2-pick-ov'; document.body.appendChild(ov); }
+    ov.innerHTML = `<div class="cx2-pick cx2-panel" role="dialog" aria-modal="true" aria-labelledby="cx2-pick-h">
+        <div class="cx2-ttl cx2-amber-ttl"><span id="cx2-pick-h">${mode === 'children' ? 'FILES LINKED TO' : 'MASTER DOCS FOR'}: ${esc(String(e.title || '').toUpperCase())}</span></div>
+        <label class="cx2-search cx2-pick-search"><span class="cx2-sr">Filter entries</span><input type="text" id="cx2-pick-q" placeholder="Filter by title or tag" autocomplete="off" oninput="window.cx2PickFilter(this.value)"></label>
+        <div class="cx2-pick-list" id="cx2-pick-list"></div>
+        <div class="cx2-dmacts"><span class="cx2-dim" id="cx2-pick-count"></span><span class="cx2-grow"></span>
+            <button type="button" class="cx2-btn cx2-dimbtn" onclick="window.cx2ClosePicker()">CANCEL</button>
+            <button type="button" class="cx2-btn cx2-amber" onclick="window.cx2SavePicker()">SAVE LINKS</button></div>
+    </div>`;
+    ov.style.display = 'flex';
+    ov.onclick = (ev) => { if (ev.target === ov) window.cx2ClosePicker(); };
+    renderPickList();
+    const q = document.getElementById('cx2-pick-q'); if (q) q.focus();
+};
+function renderPickList() {
+    const P = S.pick, box = document.getElementById('cx2-pick-list'); if (!P || !box) return;
+    const q = P.q;
+    box.innerHTML = CATS.map(c => {
+        const items = window.applySavedOrder('codex_' + c.key, (globalCodexEntriesCache || []).filter(x => x.category === c.key && x.id !== P.id))
+            .filter(x => !q || [x.title, x.subtitle].some(t => t && String(t).toLowerCase().includes(q)));
+        if (!items.length) return '';
+        return `<div class="cx2-pick-cat">${c.tab}</div>` + items.map(x => `<label class="cx2-pick-row"><input type="checkbox" ${P.chosen.has(x.id) ? 'checked' : ''} onchange="window.cx2PickToggle('${x.id}', this.checked)"><span>${esc(x.title || 'Untitled')}</span>${x.is_hidden ? '<span class="cx2-chip cx2-k-hostile">HIDDEN</span>' : ''}</label>`).join('');
+    }).join('') || '<div class="cx2-empty">Nothing matches.</div>';
+    const n = document.getElementById('cx2-pick-count'); if (n) n.textContent = `${P.chosen.size} SELECTED`;
+}
+window.cx2PickFilter = function (v) { if (S.pick) { S.pick.q = String(v || '').toLowerCase().trim(); renderPickList(); } };
+window.cx2PickToggle = function (id, on) { if (!S.pick) return; if (on) S.pick.chosen.add(id); else S.pick.chosen.delete(id); const n = document.getElementById('cx2-pick-count'); if (n) n.textContent = `${S.pick.chosen.size} SELECTED`; };
+window.cx2ClosePicker = function () { S.pick = null; const ov = document.getElementById('cx2-pick'); if (ov) ov.style.display = 'none'; };
+window.cx2SavePicker = async function () {
+    const P = S.pick; if (!P || !isDm()) return;
+    const kids = P.mode === 'children';
+    const mine = (S.links || []).filter(l => kids ? l.master_id === P.id : l.child_id === P.id);
+    const other = (l) => kids ? l.child_id : l.master_id;
+    const drop = mine.filter(l => !P.chosen.has(other(l))).map(l => l.id);
+    const have = new Set(mine.map(other));
+    const add = [...P.chosen].filter(x => !have.has(x)).map((x, i) => kids
+        ? { child_id: x, master_id: P.id, sort_order: Date.now() + i }
+        : { child_id: P.id, master_id: x, sort_order: Date.now() + i });
+    if (drop.length) { const { error } = await db.from('codex_links').delete().in('id', drop); if (error) { alert('Could not remove links: ' + error.message); return; } }
+    if (add.length) { const { error } = await db.from('codex_links').insert(add); if (error) { alert('Could not add links: ' + error.message); return; } }
+    window.cx2ClosePicker();
+    await loadLinkData();
     renderV2();
 };
 
@@ -481,6 +680,10 @@ window.onHook('codex-entry-saved', 'codex-v2', () => {
 window.onHook('codex-entry-deleted', 'codex-v2', (id) => {
     if (window.codexRestyleOn()) { Object.keys(S.selected).forEach(k => { if (S.selected[k] === id) delete S.selected[k]; }); }
 });
+// Links/notes + live sync: db.js loadCodexEntries announces codex-loaded.
+window.onHook('codex-loaded', 'codex-v2', () => { ensureSync(); if (isDm()) loadLinkData(); });
+window.onHook('codex-entry-saved', 'codex-v2-sync', () => window.codexAnnounceChange(), 60);
+window.onHook('codex-entry-deleted', 'codex-v2-sync', () => window.codexAnnounceChange(), 60);
 window.onHook('codex-fullscreen-closed', 'codex-v2', () => {
     if (window.codexRestyleOn() && !S.editing) renderV2(); // its charts were drawn again if the pane shares any
 });

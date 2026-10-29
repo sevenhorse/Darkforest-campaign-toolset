@@ -1522,6 +1522,34 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .cx2-facts dt { font-family: 'Oxanium', sans-serif; font-size: 10px; letter-spacing: 0.16em; color: var(--cx-dim); padding-top: 3px; }
 .cx2-facts dd { margin: 0; }
 .cx2-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 24px; border-top: 1px solid rgba(0, 225, 255, 0.14); font-size: 10px; letter-spacing: 0.14em; }
+/* Linked files + DM notes (js/codex-v2.js, switch 'codex_links', DM only) */
+.cx2-k-part { color: #ffc861; border-color: rgba(255, 200, 97, 0.6); }
+.cx2-move select { height: 32px; margin: 0; padding: 0 8px; font-family: inherit; font-size: 10px; letter-spacing: 0.12em; background: #061015; color: #9fe9f5; border: 1px solid rgba(0, 225, 255, 0.4); cursor: pointer; }
+.cx2-dmbox { margin: 0 24px 18px; border: 1px solid rgba(255, 170, 0, 0.35); background: rgba(255, 170, 0, 0.03); }
+.cx2-dmbox .cx2-ttl { position: static; background: rgba(20, 14, 4, 0.6); align-items: center; }
+.cx2-dmacts-inline { display: flex; gap: 6px; }
+.cx2-btn.cx2-sm { height: 26px; padding: 0 9px; font-size: 9px; }
+.cx2-btn.cx2-red.cx2-sm { width: 26px !important; }
+.cx2-lrows { display: flex; flex-direction: column; }
+.cx2-lrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.cx2-lopen { background: transparent; border: 0; padding: 4px 0; color: #e8f6fa; font-family: inherit; font-size: 12.5px; letter-spacing: 0.04em; text-align: left; cursor: pointer; }
+.cx2-lopen:hover { color: #ffc861; text-decoration: underline; }
+.cx2-pad { padding: 10px 12px; font-size: 11px; letter-spacing: 0.06em; }
+.cx2-notes { padding: 10px 14px; font-size: 13.5px; line-height: 1.6; }
+.cx2-notes-input { display: block; width: calc(100% - 24px); margin: 10px 12px 0; min-height: 140px; font-family: inherit; font-size: 12.5px; line-height: 1.5; background: #050b0e; color: #e8f6fa; border: 1px solid rgba(255, 170, 0, 0.45); box-sizing: border-box; }
+.cx2-dmacts { display: flex; gap: 6px; align-items: center; padding: 8px 12px 10px; }
+.cx2-pick-ov { position: fixed; inset: 0; z-index: 5200; display: none; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.6); }
+.cx2-pick { width: min(560px, calc(100vw - 32px)); max-height: 80vh; display: flex; flex-direction: column; font-family: 'Oxanium', 'Rajdhani', 'Segoe UI', system-ui, sans-serif; color: #d4e4ea; --cx-cyan: #00e1ff; --cx-dim: #6b8590; --cx-line: rgba(0, 225, 255, 0.3); }
+.cx2-pick.cx2-panel { background: rgba(6, 14, 18, 0.985); }
+.cx2-pick .cx2-ttl { position: static; }
+.cx2-pick .cx2-dmacts .cx2-btn { width: auto; flex: 0 0 auto; }
+#cx2-pick-count { white-space: nowrap; font-size: 10px; letter-spacing: 0.14em; }
+.cx2-pick-search { margin: 10px 12px; flex: 0 0 auto; }
+.cx2-pick-list { flex: 1 1 auto; overflow-y: auto; padding: 0 12px; }
+.cx2-pick-cat { font-size: 9px; letter-spacing: 0.2em; color: var(--cx-cyan); padding: 10px 0 4px; border-bottom: 1px solid rgba(0, 225, 255, 0.15); }
+.cx2-pick-row { display: flex; align-items: center; gap: 8px; padding: 6px 2px; font-size: 12px; cursor: pointer; }
+.cx2-pick-row input { width: auto; margin: 0; }
+.cx2-pick-row:hover { background: rgba(0, 225, 255, 0.06); }
 /* DM form, borrowed into the reading pane while editing */
 #codex-dm-creator-panel.cx2-form { background: transparent !important; border: 0 !important; max-height: none !important; overflow: visible !important; padding: 14px 20px !important; font-family: 'Oxanium', sans-serif; }
 #codex-dm-creator-panel.cx2-form #codex-creator-heading { color: #ffcf7a !important; border-bottom: 0 !important; font-size: 13px; letter-spacing: 0.08em; }
@@ -1559,6 +1587,8 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
     .cx2-btn { height: 44px; }
     .cx2-foot { padding: 10px 12px; }
     .cx2-edhelp { display: none; }
+    .cx2-dmbox { margin: 0 12px 14px; }
+    .cx2-btn.cx2-sm { height: 40px; }
 }
 
 /* ===== Phase 6d: Battle Map command bar + left column (js/battle-chrome.js, switch 'battle_chrome') ===== */

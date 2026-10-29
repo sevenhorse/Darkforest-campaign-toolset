@@ -399,7 +399,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-25.03';
+window.DARKFOREST_BUILD = '2026-10-29.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -908,6 +908,8 @@ async function loadCodexEntries() {
     if (typeof renderCodexMatrix === 'function') renderCodexMatrix();
     if (typeof populateTerritoryFactionSelect === 'function') populateTerritoryFactionSelect();
     if (typeof window.populateHyperlaneFactionSelect === 'function') window.populateHyperlaneFactionSelect();
+    // js/codex-v2.js: DM link/notes data + the live codex_sync channel.
+    window.runHooks('codex-loaded');
 }
 
 async function checkAnomalyProximity(ship) {
@@ -1321,7 +1323,8 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      'app_settings', 'encounter_presets',
      'scene_maps', // Scene Map scenes (marks live inside the row)
      'scene_object_presets'], // the DM's saved Scene Map objects
-    ['ship_markers', 'system_hazards'],
+    ['ship_markers', 'system_hazards',
+     'codex_links', 'codex_dm_notes'], // children of codex_entries; RLS DM only
     // battle_tokens / battle_events (undo log) / battle_reinforcements are children of battle_encounters.
     // scene_tokens are children of scene_maps.
     ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events', 'battle_reinforcements', 'scene_tokens'],
@@ -1332,6 +1335,7 @@ window.FULL_BACKUP_TABLE_GROUPS = [
 window.FULL_BACKUP_PK_COLUMN = {
     character_skills: 'character_id',
     character_personal_log: 'profile_id',
+    codex_dm_notes: 'entry_id',
     planetary_modifiers: 'body_id',
     system_ownership_overrides: 'system_id',
     app_settings: 'feature_key'
