@@ -2231,7 +2231,10 @@ window.chatSoundKind = function(log) {
 window.chatContentHtml = function(log) {
     const raw = String((log && log.content) || '');
     if (log && !log.sender_id && window.DOMPurify) return window.DOMPurify.sanitize(raw);
-    return window.escapeHtml(raw);
+    // Typed messages are stored already escaped (sendChatMessage, since
+    // 2026-09-24); older rows are raw. Decode the five entities escapeHtml
+    // makes, then escape once, so both show exactly as typed.
+    return window.escapeHtml(raw.replace(/&(lt|gt|quot|#39|amp);/g, (m, k) => ({ lt: '<', gt: '>', quot: '"', '#39': "'", amp: '&' }[k])));
 };
 // Roll breakdowns are app-built HTML (bold totals, line breaks): cleaned, not escaped.
 window.chatBreakdownHtml = function(html) {
@@ -2284,11 +2287,14 @@ window.renderChatFeed = function() {
     else if (tab.startsWith('pm:')) source = window.pmLogsCache[tab.slice(3)] || [];
 
     let html = '';
+    const seenRollGroups = new Set(); // a private dice-tray roll is one row per DM; show it once
     source.forEach(log => {
+        const gid = log.message_type === 'roll' && log.roll_data && log.roll_data.gid;
+        if (gid) { if (seenRollGroups.has(gid)) return; seenRollGroups.add(gid); }
         const sender = allProfiles.find(p => p.id === log.sender_id); const senderName = window.escapeHtml(sender ? (sender.username || 'Commander') : 'Unknown');
         const isDM = !!log.recipient_id; let headerColor = isDM ? '#c778dd' : '#00e5a3'; let prefix = isDM ? '🔒 [PRIVATE]' : '🌐';
         if (log.message_type === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
-        if (log.message_type === 'roll') { headerColor = '#ff6b6b'; prefix = '🎲 [ROLL]'; }
+        if (log.message_type === 'roll') { headerColor = log.recipient_id ? '#c778dd' : '#ff6b6b'; prefix = log.recipient_id ? '🎲🔒 [PRIVATE ROLL]' : '🎲 [ROLL]'; }
         if (log.message_type === 'ping') { headerColor = '#00e1ff'; prefix = '📍 [PING]'; }
         let contentHTML = window.chatContentHtml(log);
         if (log.message_type === 'roll' && log.roll_data) { contentHTML = `<strong style="font-size:12px;">${contentHTML}</strong><br><span style="font-size:9px; color:#6b826a;">${window.chatBreakdownHtml(log.roll_data.breakdown)}</span>`; }

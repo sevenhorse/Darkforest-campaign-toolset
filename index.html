@@ -12,7 +12,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono&display=swap">
-    <link rel="stylesheet" href="style.css?v=3.81">
+    <link rel="stylesheet" href="style.css?v=3.82">
     <!-- Phase 6c: lets the Three.js model loaders (GLTFLoader/DRACOLoader,
          loaded on demand by js/ship-models.js) resolve their bare 'three'
          import to the SAME pinned r170 build js/battle-3d.js uses. Nothing
@@ -1230,6 +1230,7 @@
                 <div style="display: flex; gap: 6px;">
                     <label for="comms-message-input" style="display:none;">Message</label>
                     <input type="text" id="comms-message-input" placeholder="Transmit message..." style="flex: 2; margin: 0; padding: 6px;" onkeypress="if(event.key === 'Enter') window.sendChatMessage()">
+                    <button type="button" class="btn-reveal dt-open" onclick="window.openDiceTray(this)" title="Dice tray" aria-label="Open the dice tray" style="flex: 0 0 auto; width: auto; margin: 0; padding: 6px 8px; font-size: 12px;">🎲</button>
                     <button class="btn-reveal" onclick="window.sendChatMessage()" style="flex: 1; margin: 0; padding: 6px; font-size: 10px;">SEND</button>
                 </div>
             </div>
@@ -1289,6 +1290,7 @@
                                 <div style="display:flex; gap:6px; margin-bottom:12px;">
                                     <label for="bm-comms-message-input" style="display:none;">Message</label>
                                     <input type="text" id="bm-comms-message-input" placeholder="Transmit message..." style="flex:2; margin:0; padding:6px; font-size:10px;" onkeypress="if(event.key === 'Enter') window.sendChatMessage('bm-comms-message-input')">
+                                    <button type="button" class="btn-reveal dt-open" onclick="window.openDiceTray(this)" title="Dice tray" aria-label="Open the dice tray" style="flex:0 0 auto; width:auto; margin:0; padding:6px 8px; font-size:12px;">🎲</button>
                                     <button class="btn-reveal" onclick="window.sendChatMessage('bm-comms-message-input')" style="flex:1; margin:0; padding:6px; font-size:9px;">SEND</button>
                                 </div>
 
@@ -1644,10 +1646,11 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.90"></script>
+    <script src="js/db.js?v=3.91"></script>
     <script src="js/audio.js?v=3.21"></script>
-    <script src="js/ui.js?v=3.59"></script>
-    <script src="js/combat.js?v=3.85"></script>
+    <script src="js/ui.js?v=3.60"></script>
+    <script src="js/dice-tray.js?v=1.0"></script>
+    <script src="js/combat.js?v=3.86"></script>
     <script src="js/squadrons.js?v=1.14"></script>
     <script src="js/strike-craft-designer.js?v=1.2"></script>
     <script src="js/colonies.js?v=3.24"></script>

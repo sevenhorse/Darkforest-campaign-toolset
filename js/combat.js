@@ -2756,9 +2756,10 @@ window.renderArsenalDiceFeed = function() {
     const rolls = window.diceLogsList || [];
     if (rolls.length === 0) { container.innerHTML = '<span style="font-size:10px; color:#6b826a;">No rolls yet this session.</span>'; return; }
     let html = '';
-    rolls.slice(-8).reverse().forEach(log => {
+    const seen = new Set(); // one row per DM for a private dice-tray roll: show it once
+    rolls.filter(l => { const g = l.roll_data && l.roll_data.gid; if (!g) return true; if (seen.has(g)) return false; seen.add(g); return true; }).slice(-8).reverse().forEach(log => {
         const sender = allProfiles.find(p => p.id === log.sender_id);
-        const senderName = sender ? (sender.username || 'Commander') : 'Unknown';
+        const senderName = window.escapeHtml(sender ? (sender.username || 'Commander') : 'Unknown');
         html += `<div style="background:rgba(6,9,7,0.6); padding:6px; border-left:2px solid #ff6b6b; border-radius:2px; margin-bottom:4px;">
             <div style="font-size:9px; color:#ff6b6b; margin-bottom:2px;">🎲 <strong>${senderName}</strong></div>
             <div style="font-size:10px; color:#d4c5a9;"><strong>${window.chatContentHtml(log)}</strong>${log.roll_data ? `<br><span style="font-size:9px; color:#6b826a;">${window.chatBreakdownHtml(log.roll_data.breakdown)}</span>` : ''}</div>

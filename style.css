@@ -1524,6 +1524,23 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .cx2-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 24px; border-top: 1px solid rgba(0, 225, 255, 0.14); font-size: 10px; letter-spacing: 0.14em; }
 /* Linked files + DM notes (js/codex-v2.js, switch 'codex_links', DM only) */
 .cx2-k-part { color: #ffc861; border-color: rgba(255, 200, 97, 0.6); }
+/* Dice tray (js/dice-tray.js) */
+.dt-pop { position: fixed; z-index: 5300; display: none; width: min(300px, calc(100vw - 32px)); box-sizing: border-box; padding: 10px; background: #040605; border: 1px solid #00e5a3; box-shadow: 0 0 18px rgba(0, 229, 163, 0.18); font-size: 10px; color: #d4c5a9; }
+.dt-head { display: flex; justify-content: space-between; align-items: center; color: #00e5a3; letter-spacing: 0.18em; margin-bottom: 8px; }
+.dt-x { width: auto !important; margin: 0 !important; padding: 2px 7px !important; font-size: 10px; background: transparent; border: 1px solid #3c4e36; color: #6b826a; }
+.dt-dice { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 8px; }
+.dt-die { width: auto !important; margin: 0 !important; padding: 7px 0 !important; font-size: 10px; background: #0a1410; border: 1px solid #3c4e36; color: #9fb4a0; cursor: pointer; }
+.dt-die.on { border-color: #00e5a3; color: #04110c; background: #00e5a3; font-weight: 700; }
+.dt-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.dt-row label { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 8.5px; letter-spacing: 0.14em; color: #6b826a; }
+.dt-step { display: flex; }
+.dt-step button { width: 26px !important; margin: 0 !important; padding: 4px 0 !important; background: #0a1410; border: 1px solid #3c4e36; color: #00e5a3; font-size: 12px; cursor: pointer; }
+.dt-step input { width: 100%; min-width: 0; margin: 0 !important; padding: 4px !important; text-align: center; font-size: 11px; border-left: 0 !important; border-right: 0 !important; }
+.dt-priv { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: #c778dd; cursor: pointer; }
+.dt-priv input { width: auto; margin: 0; }
+.dt-roll { width: 100%; margin: 0 !important; padding: 8px !important; font-size: 11px; letter-spacing: 0.1em; }
+.dt-last { margin-top: 8px; color: #00e5a3; font-size: 10px; word-break: break-word; }
+@media (max-width: 768px) { .dt-die, .dt-step button { min-height: 40px; } .dt-roll { min-height: 44px; } }
 /* NEW badges (js/codex-v2.js, switch 'codex_new_badges', players) */
 .cx2-k-new { color: #04110c; background: #00e5a3; border-color: #00e5a3; font-weight: 700; }
 .cx2-newcount { font-style: normal; font-size: 8.5px; letter-spacing: 0.12em; padding: 1px 5px; color: #04110c; background: #00e5a3; }
