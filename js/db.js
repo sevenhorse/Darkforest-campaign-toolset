@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-29.03';
+window.DARKFOREST_BUILD = '2026-10-29.04';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -676,6 +676,7 @@ async function fetchUserProfile(user) {
         if (strikeCraftTabBtn) strikeCraftTabBtn.style.display = 'flex';
         document.getElementById('dm-time-controls-box').style.display = 'block';
         document.getElementById('dm-scratchpad-toggle-btn').style.display = 'inline-block';
+        const markBtn = document.getElementById('session-mark-btn'); if (markBtn) markBtn.style.display = 'inline-block';
         document.getElementById('territory-tool-toggle-btn').style.display = 'inline-block';
         document.getElementById('codex-dm-creator-panel').style.display = 'block';
         const cargoCatalogDmEditor = document.getElementById('cargo-catalog-dm-editor');

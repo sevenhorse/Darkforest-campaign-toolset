@@ -106,6 +106,7 @@ function apply() {
     borrow(byId('universe-clock-display'), byId('gc-clock'));
     ['openFullDossierTerminal', 'openFullCargoTerminal', 'toggleCommsArray'].forEach(fn => borrow(btnByClick(fn), byId('gc-term')));
     borrow(byId('dm-scratchpad-toggle-btn'), byId('gc-term'));
+    borrow(byId('session-mark-btn'), byId('gc-term'));
     const audio = byId('audio-controls-toggle-btn');
     borrow(audio ? audio.parentNode : null, byId('gc-audio'));
     const menu = byId('gc-acct-menu');

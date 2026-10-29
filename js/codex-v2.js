@@ -451,6 +451,8 @@ window.cx2ToggleHidden = async function (id) {
     e.is_hidden = !e.is_hidden;
     renderV2();
     window.codexAnnounceChange();
+    // Session timeline (js/session-timeline.js): reveals are landmarks for the write-up.
+    if (typeof window.logTimeline === 'function') window.logTimeline(e.is_hidden ? 'hide' : 'reveal', e.title || '', e.id);
 };
 
 /* --- NEW badges (switch 'codex_new_badges'; see the header) --- */

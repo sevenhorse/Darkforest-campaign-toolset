@@ -12,7 +12,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23040605'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233c4e36' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%233c4e36' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%236b826a'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono&display=swap">
-    <link rel="stylesheet" href="style.css?v=3.82">
+    <link rel="stylesheet" href="style.css?v=3.83">
     <!-- Phase 6c: lets the Three.js model loaders (GLTFLoader/DRACOLoader,
          loaded on demand by js/ship-models.js) resolve their bare 'three'
          import to the SAME pinned r170 build js/battle-3d.js uses. Nothing
@@ -1066,6 +1066,8 @@
                 <button onclick="window.openFullCargoTerminal()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e1ff; color: #00e1ff; font-size: 10px;">CARGO</button>
                 <button onclick="window.toggleCommsArray()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #00e1ff; color: #00e1ff; font-size: 10px;">COMMS</button>
                 <button id="dm-scratchpad-toggle-btn" onclick="window.toggleDmScratchpad()" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ff3333; color: #ff6b6b; font-size: 10px; display:none;">SCRATCHPAD</button>
+                <!-- DM only: drop a timestamped landmark for session write-ups (js/session-timeline.js) -->
+                <button id="session-mark-btn" onclick="window.openTimelineBox(this)" title="Mark this moment for the session write-up" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #ffaa00; color: #ffaa00; font-size: 10px; display:none;">📍 MARK</button>
                 <!-- Player tutorial (2026-09-24): replays the guided tour, js/tutorial.js -->
                 <button id="tutorial-btn" onclick="window.startTutorial()" title="Replay the guided tour of the interface" style="width: auto; margin: 0; padding: 4px 10px; background: #040605; border-color: #3c4e36; color: #6b826a; font-size: 10px;">? TUTORIAL</button>
                 <span id="user-role" class="role-badge">Authenticating...</span>
@@ -1646,10 +1648,11 @@
     </div>
 
     <!-- MAIN JAVASCRIPT LINKS -->
-    <script src="js/db.js?v=3.91"></script>
+    <script src="js/db.js?v=3.92"></script>
     <script src="js/audio.js?v=3.21"></script>
     <script src="js/ui.js?v=3.60"></script>
     <script src="js/dice-tray.js?v=1.0"></script>
+    <script src="js/session-timeline.js?v=1.0"></script>
     <script src="js/combat.js?v=3.86"></script>
     <script src="js/squadrons.js?v=1.14"></script>
     <script src="js/strike-craft-designer.js?v=1.2"></script>
@@ -1677,11 +1680,11 @@
     <script src="js/tactical-hud.js?v=1.2"></script>
     <script src="js/battle-3d.js?v=1.10"></script>
     <script src="js/ship-models.js?v=1.3"></script>
-    <script src="js/codex-v2.js?v=1.7"></script>
+    <script src="js/codex-v2.js?v=1.8"></script>
     <script src="js/terminal-tabs.js?v=1.0"></script>
     <script src="js/designers-v2.js?v=1.2"></script>
     <script src="js/fleet-v2.js?v=1.2"></script>
-    <script src="js/galaxy-chrome.js?v=1.1"></script>
+    <script src="js/galaxy-chrome.js?v=1.2"></script>
     <script src="js/crew-v2.js?v=1.4"></script>
     <script src="js/personal-log.js?v=1.0"></script>
     <script src="js/polish-v2.js?v=1.0"></script>

@@ -1524,6 +1524,18 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 .cx2-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 24px; border-top: 1px solid rgba(0, 225, 255, 0.14); font-size: 10px; letter-spacing: 0.14em; }
 /* Linked files + DM notes (js/codex-v2.js, switch 'codex_links', DM only) */
 .cx2-k-part { color: #ffc861; border-color: rgba(255, 200, 97, 0.6); }
+/* Session timeline box (js/session-timeline.js; reuses the dice tray frame) */
+.dt-pop.tl-pop { border-color: #ffaa00; box-shadow: 0 0 18px rgba(255, 170, 0, 0.15); }
+.dt-pop.tl-pop .dt-head { color: #ffaa00; }
+.tl-hint { display: block; font-size: 9px; color: #6b826a; margin-bottom: 4px; }
+.tl-pop input[type="text"] { width: 100%; box-sizing: border-box; margin: 0 0 8px !important; font-size: 11px; }
+.tl-list { margin-top: 10px; max-height: 180px; overflow-y: auto; border-top: 1px dashed #3c4e36; padding-top: 6px; }
+.tl-row { display: flex; gap: 6px; align-items: baseline; padding: 3px 0; font-size: 10px; }
+.tl-time { color: #6b826a; flex: 0 0 auto; }
+.tl-kind { flex: 0 0 auto; font-size: 9px; color: #ffaa00; }
+.tl-kind.tl-reveal { color: #00e5a3; } .tl-kind.tl-hide { color: #ff6b6b; }
+.tl-note { color: #d4c5a9; word-break: break-word; }
+.tl-empty { color: #6b826a; font-size: 10px; }
 /* Dice tray (js/dice-tray.js) */
 .dt-pop { position: fixed; z-index: 5300; display: none; width: min(300px, calc(100vw - 32px)); box-sizing: border-box; padding: 10px; background: #040605; border: 1px solid #00e5a3; box-shadow: 0 0 18px rgba(0, 229, 163, 0.18); font-size: 10px; color: #d4c5a9; }
 .dt-head { display: flex; justify-content: space-between; align-items: center; color: #00e5a3; letter-spacing: 0.18em; margin-bottom: 8px; }
