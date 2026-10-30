@@ -63,15 +63,18 @@ function rollDamageDice(diceStr, modifierStr, explodes, noBonus) {
    js/combat.js advanceCombatRound). No-op outside an active battle.
 
    Ordnance: a salvo launches with turns_remaining=3. Each tick it gets one
-   PD interception attempt; if it survives, turns_remaining drops by 1. On
+   chance to be intercepted (see PD below); if it survives, turns_remaining drops by 1. On
    the 3 -> 2 tick a multi-pattern salvo splits into 6 independent payloads.
    At 0 it impacts via resolveShipDamage.
 
    PD: every off-cooldown, ammo-holding is_point_defense weapon on the grid
-   joins one shared per-round pool. Ordnance is resolved first (the target's
-   own or an allied escort's PD, by live distance to the target); what is
-   left fires at enemy strike craft, using each squadron's own grid token
-   position. Any nonzero PD hit destroys a payload outright (no payload
+   joins one shared per-round pool (one shot per mount per round).
+   Ordnance is resolved first, most urgent payload first: pass 1 gives every
+   payload one shot (the target's own PD, else an in-range escort's, by live
+   distance to the target; then an Intercept Munitions squadron if that
+   missed), pass 2 spends leftover PD on second shots. What is left fires at
+   enemy strike craft, using each squadron's own grid token position. A PD
+   shot that passes its to-hit roll destroys a payload outright (no payload
    toughness stat). Squadrons without a grid token are skipped (fails open).
 */
 /* AI ships pick their own stance each round (DM rule): hull under 25% ->
@@ -223,10 +226,16 @@ window.processBattleRoundAutomations = async function() {
     // for a threatened ship). opts.enemyOnly: PD of the OPPOSING side
     // (anti-fighter fire), so a ship never shoots down its own squadrons.
     // A weapon with no range has unlimited reach. Returns pool index or -1.
+    // opts.preferVesselId: that ship's own PD is used first (a ship defends
+    // itself before its escorts spend shots on it).
     function findEligiblePD(targetPos, ownerIds, opts) {
         const enemyOnly = !!(opts && opts.enemyOnly);
-        for (let i = 0; i < pdPool.length; i++) {
+        const prefer = opts && opts.preferVesselId;
+        const only = opts && opts.onlyVesselId; // own-PD pass: nobody else's mounts
+        const order = prefer ? pdPool.map((e, i) => i).sort((a, b) => (pdPool[b].vesselId === prefer) - (pdPool[a].vesselId === prefer) || a - b) : pdPool.map((e, i) => i);
+        for (const i of order) {
             const entry = pdPool[i];
+            if (only && entry.vesselId !== only) continue;
             const sameOwner = window.ownerIdsShareOwner(entry.ownerIds, ownerIds);
             if (enemyOnly ? sameOwner : !sameOwner) continue;
             const v = globalShipMarkersCache.find(m => m.id === entry.vesselId);
@@ -321,7 +330,7 @@ window.processBattleRoundAutomations = async function() {
         return { entry, roll };
     }
 
-    // --- Age & resolve in-flight ordnance ---
+    // --- In-flight ordnance: interception passes, then aging/impacts ---
     // Each salvo/squadron/ship below is wrapped in its own try/catch so one
     // failure (e.g. a transient DB error) doesn't discard every other
     // result or skip the chat log and UI refresh in advanceCombatRound.
@@ -330,35 +339,76 @@ window.processBattleRoundAutomations = async function() {
     // saved with the battle row so every client's 3D view plays the right effect.
     const ordnanceOutcomes = {};
     const markOutcome = (salvo, o) => { if (salvo && salvo.salvo_id) ordnanceOutcomes[salvo.salvo_id] = { o, r: battle.round_number || null }; };
-    for (const salvo of (battle.in_flight_ordnance || [])) {
+
+    /* Interception, before any missile moves or hits (DM rule 2026-10-30):
+       - Most urgent first: payloads closest to impact (lowest
+         turns_remaining) are shot at first; ties keep launch order.
+       - Pass 1: every payload gets one ship-PD shot. First each target's
+         OWN PD shoots at the payloads aimed at it, then escorts' in-range
+         PD covers payloads that got no shot (so two missiles at one ship
+         can't use up a neighbour's PD while the neighbour's own missile
+         goes unanswered). Then an Intercept Munitions squadron tries any
+         payload still alive.
+       - Pass 2: PD still unused takes second shots at payloads that
+         survived pass 1, again most urgent first.
+       - Only PD left after both passes fires at enemy strike craft. */
+    const ordList = battle.in_flight_ordnance || [];
+    const destroyedPayloads = new Set(); // salvo objects shot down this round
+    const live = [];
+    ordList.forEach((salvo, idx) => {
+        const targetVessel = globalShipMarkersCache.find(m => m.id === salvo.target_vessel_id);
+        const targetPos = targetVessel ? window.getBattleTokenPosition(targetVessel.id) : null;
+        if (targetVessel && targetPos) live.push({ salvo, idx, targetVessel, targetPos });
+    });
+    live.sort((a, b) => (Number(a.salvo.turns_remaining) || 0) - (Number(b.salvo.turns_remaining) || 0) || a.idx - b.idx);
+    const shotAt = new Set(); // payloads that got a pass-1 ship-PD shot
+    const shipPdShot = (L, second, ownOnly) => {
+        const engagement = fireEligiblePD(L.targetPos, window.vesselOwnerIds(L.targetVessel), { preferVesselId: L.targetVessel.id, onlyVesselId: ownOnly ? L.targetVessel.id : null });
+        if (!engagement) return false;
+        shotAt.add(L.salvo);
+        if (engagement.roll.total > 0) {
+            chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} ${second ? 'takes a second shot and intercepts' : 'intercepts'} a payload inbound on ${L.targetVessel.name} from ${L.salvo.source_vessel_name} (${engagement.roll.total} dmg) — destroyed!`);
+            destroyedPayloads.add(L.salvo); markOutcome(L.salvo, 'intercept');
+            return true;
+        }
+        chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} ${second ? 'takes a second shot at' : 'fires at'} an inbound payload — misses.`);
+        return false;
+    };
+    for (const L of live) {
+      try { shipPdShot(L, false, true); } catch (err) { console.error('processBattleRoundAutomations: own-PD pass failed for a payload', L.salvo, err); }
+    }
+    for (const L of live) {
+      try { if (!shotAt.has(L.salvo)) shipPdShot(L, false, false); } catch (err) { console.error('processBattleRoundAutomations: escort-PD pass failed for a payload', L.salvo, err); }
+    }
+    for (const L of live) {
       try {
+        if (destroyedPayloads.has(L.salvo)) continue;
+        // An Intercept Munitions squadron gets a shot if ship PD didn't kill it.
+        const sqEngagement = fireEligibleSquadronIntercept(L.targetPos, window.vesselOwnerIds(L.targetVessel));
+        if (sqEngagement && sqEngagement.roll.total > 0) {
+            chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} shoots down a payload inbound on ${L.targetVessel.name} from ${L.salvo.source_vessel_name} (${sqEngagement.roll.total} dmg) — destroyed!`);
+            destroyedPayloads.add(L.salvo); markOutcome(L.salvo, 'intercept');
+        } else if (sqEngagement) {
+            chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} fires at an inbound payload — misses.`);
+        }
+      } catch (err) { console.error('processBattleRoundAutomations: squadron intercept pass failed for a payload', L.salvo, err); }
+    }
+    for (const L of live) {
+      try {
+        if (!destroyedPayloads.has(L.salvo)) shipPdShot(L, true);
+      } catch (err) { console.error('processBattleRoundAutomations: interception pass 2 failed for a payload', L.salvo, err); }
+    }
+
+    // --- Age & resolve what got through ---
+    for (const salvo of ordList) {
+      try {
+        if (destroyedPayloads.has(salvo)) continue; // shot down above, dropped from survivingOrdnance
         const targetVessel = globalShipMarkersCache.find(m => m.id === salvo.target_vessel_id);
         const targetPos = targetVessel ? window.getBattleTokenPosition(targetVessel.id) : null;
         if (!targetVessel || !targetPos) {
             chatLines.push(`💨 [ORDNANCE] ${salvo.source_weapon_name} from ${salvo.source_vessel_name} loses its lock (${salvo.target_vessel_name} is no longer on the grid) and fizzles.`);
             markOutcome(salvo, 'fizzle');
             continue;
-        }
-
-        const engagement = fireEligiblePD(targetPos, window.vesselOwnerIds(targetVessel));
-        if (engagement && engagement.roll.total > 0) {
-            chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} intercepts a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${engagement.roll.total} dmg) — destroyed!`);
-            markOutcome(salvo, 'intercept');
-            continue; // payload destroyed, dropped from survivingOrdnance
-        }
-        if (engagement) {
-            chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} fires at an inbound payload — misses.`);
-        }
-
-        // An Intercept Munitions squadron gets a shot if ship PD didn't kill it.
-        const sqEngagement = fireEligibleSquadronIntercept(targetPos, window.vesselOwnerIds(targetVessel));
-        if (sqEngagement && sqEngagement.roll.total > 0) {
-            chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} shoots down a payload inbound on ${targetVessel.name} from ${salvo.source_vessel_name} (${sqEngagement.roll.total} dmg) — destroyed!`);
-            markOutcome(salvo, 'intercept');
-            continue; // payload destroyed, dropped from survivingOrdnance
-        }
-        if (sqEngagement) {
-            chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} fires at an inbound payload — misses.`);
         }
 
         const turnsLeft = salvo.turns_remaining - 1;
