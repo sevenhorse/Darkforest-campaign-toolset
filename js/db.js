@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-10-29.04';
+window.DARKFOREST_BUILD = '2026-10-30.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -519,23 +519,29 @@ window.renderFeatureSwitchPanel = function() {
 // (app_settings 'combat_balance_config', read by window.combatBalanceConfig).
 window.combatBalancePanelHtml = function() {
     if (!window.appSettingsCache || !window.appSettingsCache.combat_balance_config || typeof window.combatBalanceConfig !== 'function') return '';
-    const pct = window.combatBalanceConfig().damage_bonus_pct;
+    const cfg = window.combatBalanceConfig(), pct = cfg.damage_bonus_pct;
     return `<div style="border:1px solid #2a3a2a; padding:6px; margin-bottom:6px; background:#050805;">
         <div style="font-size:10px; color:#00e5a3; font-weight:bold;">Combat balance</div>
         <div style="font-size:9px; color:#6b826a;">Hidden damage bonus on every ship and strike craft weapon roll, as a % of the dice average (100 = 1d10 gets +5). Players never see it. 0 turns it off.</div>
         <label style="font-size:10px; color:#d4c5a9;">Bonus % <input id="combat-bonus-pct" type="number" min="0" max="500" step="5" value="${pct}" style="width:70px; font-size:10px;"></label>
-        <button type="button" onclick="window.saveCombatBalanceConfig()" style="font-size:9px; padding:2px 8px; width:auto;">SAVE</button>
+        <div style="font-size:9px; color:#6b826a; margin-top:6px;">Point defense miss chance, % per shot (missiles, strike craft, intercepting squadrons). Player side = player-owned or Friendly ships.</div>
+        <label style="font-size:10px; color:#d4c5a9;">Player PD miss % <input id="combat-pd-miss-player" type="number" min="0" max="100" step="0.01" value="${cfg.pd_miss_player_pct}" style="width:70px; font-size:10px;"></label>
+        <label style="font-size:10px; color:#d4c5a9;">Enemy PD miss % <input id="combat-pd-miss-enemy" type="number" min="0" max="100" step="0.01" value="${cfg.pd_miss_enemy_pct}" style="width:70px; font-size:10px;"></label>
+        <button type="button" id="combat-balance-save" onclick="window.saveCombatBalanceConfig()" style="font-size:9px; padding:2px 8px; width:auto;">SAVE</button>
     </div>`;
 };
 window.saveCombatBalanceConfig = async function() {
     if (currentUserRole !== 'dm') return;
     const el = document.getElementById('combat-bonus-pct');
     const pct = Math.max(0, Math.min(500, parseInt(el && el.value, 10) || 0));
-    const value = JSON.stringify({ damage_bonus_pct: pct });
+    const missIn = (id, d) => { const e = document.getElementById(id); const n = parseFloat(e && e.value); return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n * 100) / 100)) : d; };
+    const cur = window.combatBalanceConfig();
+    const value = JSON.stringify({ damage_bonus_pct: pct, pd_miss_player_pct: missIn('combat-pd-miss-player', cur.pd_miss_player_pct), pd_miss_enemy_pct: missIn('combat-pd-miss-enemy', cur.pd_miss_enemy_pct) });
     const { error } = await db.from('app_settings').update({ value, updated_at: new Date().toISOString() }).eq('feature_key', 'combat_balance_config');
     if (error) { alert('Failed to save combat balance: ' + error.message); return; }
     if (window.appSettingsCache.combat_balance_config) window.appSettingsCache.combat_balance_config.value = value;
-    if (el) { el.value = pct; const b = el.parentElement && el.parentElement.nextElementSibling; if (b) b.textContent = 'SAVED'; }
+    if (el) el.value = pct;
+    const b = document.getElementById('combat-balance-save'); if (b) b.textContent = 'SAVED';
 };
 
 let db = null;

@@ -1430,14 +1430,20 @@ window.unclassifiedBadgeHtml = function(v) {
    Computed from the dice string at roll time; stacks with the visible
    modifier; never shown in breakdowns. Not applied to personal (character)
    weapons or Healing. Tuned in app_settings 'combat_balance_config'
-   {damage_bonus_pct} (DM Tools -> MAINT -> Feature Switches); missing row = 100. */
+   {damage_bonus_pct} (DM Tools -> MAINT -> Feature Switches); missing row = 100.
+   Same row, DM rule 2026-10-30: point defense can miss. pd_miss_player_pct
+   (default 33.33 = 1 in 3) for the player side, pd_miss_enemy_pct (default
+   50) for everyone else; see window.pdShotMisses (js/battle-automation.js). */
+const PD_MISS_DEFAULTS = { player: 33.33, enemy: 50 };
 window.combatBalanceConfig = function() {
+    const pctOr = (x, d) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? Math.min(n, 100) : d; };
     try {
         const row = window.appSettingsCache && window.appSettingsCache.combat_balance_config;
         const v = row && row.value ? JSON.parse(row.value) : {};
         const pct = Number(v.damage_bonus_pct);
-        return { damage_bonus_pct: Number.isFinite(pct) && pct >= 0 ? pct : 100 };
-    } catch (e) { return { damage_bonus_pct: 100 }; }
+        return { damage_bonus_pct: Number.isFinite(pct) && pct >= 0 ? pct : 100,
+            pd_miss_player_pct: pctOr(v.pd_miss_player_pct, PD_MISS_DEFAULTS.player), pd_miss_enemy_pct: pctOr(v.pd_miss_enemy_pct, PD_MISS_DEFAULTS.enemy) };
+    } catch (e) { return { damage_bonus_pct: 100, pd_miss_player_pct: PD_MISS_DEFAULTS.player, pd_miss_enemy_pct: PD_MISS_DEFAULTS.enemy }; }
 };
 window.hiddenDamageBonus = function(numDice, faces) {
     const n = parseInt(numDice, 10) || 0, f = parseInt(faces, 10) || 0;

@@ -11,6 +11,29 @@
 // Adds the hidden calibration bonus (window.hiddenDamageBonus, js/combat.js)
 // unless noBonus is set; the bonus is not shown in breakdownText.
 // Returns { total, breakdownText }.
+/* PD miss chance (DM rule 2026-10-30). Point defense used to hit on any
+   nonzero roll, i.e. always. Now each PD shot (ship PD at ordnance, ship
+   PD at strike craft, Intercept Munitions squadrons) first rolls to hit:
+   the player side misses pd_miss_player_pct % of the time (default 1 in 3),
+   everyone else pd_miss_enemy_pct % (default 50). Player side = owned by any
+   non-DM account, or tagged Friendly (a squadron also counts its carrier).
+   A miss still spends the shot (ammo, cooldown, the round). */
+window.vesselOnPlayerSide = function(vessel, carrier) {
+    const isPlayerish = (v) => {
+        if (!v) return false;
+        if (v.iff === 'friendly') return true;
+        const profs = typeof allProfiles !== 'undefined' ? allProfiles : [];
+        return window.vesselOwnerIds(v).some(id => { const p = profs.find(x => x.id === id); return p && p.role !== 'dm'; });
+    };
+    return isPlayerish(vessel) || isPlayerish(carrier);
+};
+window.pdMissPct = function(vessel, carrier) {
+    const cfg = window.combatBalanceConfig();
+    const pct = window.vesselOnPlayerSide(vessel, carrier) ? cfg.pd_miss_player_pct : cfg.pd_miss_enemy_pct;
+    return Number.isFinite(pct) ? pct : 0;
+};
+window.pdShotMisses = function(vessel, carrier) { return Math.random() * 100 < window.pdMissPct(vessel, carrier); };
+
 function rollDamageDice(diceStr, modifierStr, explodes, noBonus) {
     const diceRegex = /^(\d*)d(\d+)$/i;
     const match = (diceStr || '1d10').trim().match(diceRegex);
@@ -221,7 +244,8 @@ window.processBattleRoundAutomations = async function() {
         const entry = pdPool.splice(idx, 1)[0];
         const pdVessel = globalShipMarkersCache.find(m => m.id === entry.vesselId);
         const pdWpn = pdVessel.ship_weapons[entry.weaponIdx];
-        const roll = rollDamageDice(pdWpn.dice, pdWpn.modifier, pdWpn.explodes);
+        let roll = rollDamageDice(pdWpn.dice, pdWpn.modifier, pdWpn.explodes);
+        if (window.pdShotMisses(pdVessel)) roll = { ...roll, total: 0, missed: true }; // to-hit roll failed: callers log "misses"
         if (pdWpn.ammo > 0) pdWpn.ammo -= 1;
         // A nonzero cooldown_period (opt-in) keeps the weapon out of the pool
         // for that many extra rounds; without one it fires once per round.
@@ -274,7 +298,10 @@ window.processBattleRoundAutomations = async function() {
         const idx = findEligibleSquadronIntercept(targetPos, ownerIds);
         if (idx < 0) return null;
         const entry = squadronInterceptPool.splice(idx, 1)[0];
-        const roll = rollDamageDice(entry.wpn.dice, entry.wpn.modifier, entry.wpn.explodes);
+        let roll = rollDamageDice(entry.wpn.dice, entry.wpn.modifier, entry.wpn.explodes);
+        const sqShipForSide = globalShipMarkersCache.find(m => m.id === entry.sqShipId);
+        const carrierForSide = globalShipMarkersCache.find(m => m.id === entry.carrierId);
+        if (window.pdShotMisses(sqShipForSide, carrierForSide)) roll = { ...roll, total: 0, missed: true };
         // Cooldown is stored on the live deployed squadron, looked up by
         // carrierId/sqIdx (entry.wpn is a shared catalog object).
         if (entry.wpn.cooldown_period > 0) {
