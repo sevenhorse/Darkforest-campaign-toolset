@@ -52,6 +52,7 @@ function catalogSummary(x) {
 const factGrid = (f) => f.length
     ? `<div class="dz-facts">${f.map(c => `<div class="dz-fact"><span>${esc(c.k)}</span><b style="color:${c.c}">${esc(c.v)}</b></div>`).join('')}</div>`
     : '<div class="dz-empty">No effects configured.</div>';
+const AUG_TYPE_TONE = { cybernetic: '', synthetic: 'ok', genetic: 'gold' };
 function catalogKind(o) {
     return Object.assign({
         filters: true, search: (x) => `${x.name || ''} ${x.description || ''}`,
@@ -60,9 +61,9 @@ function catalogKind(o) {
             return ordered(o.orderKey + '_pending', all.filter(x => x.status === 'draft')).concat(ordered(o.orderKey + '_approved', all.filter(x => x.status === 'approved')));
         },
         group: (x) => x.status === 'draft' ? 'pending' : 'approved',
-        chips: (x) => [x.status === 'draft' ? ['PENDING', 'amber'] : ['APPROVED', 'ok']],
-        rowMeta: (x) => `${o.meta(x)} · ${catalogSummary(x)}`,
-        kicker: (x) => `${o.noun} · ${o.meta(x)}`,
+        chips: (x) => [x.status === 'draft' ? ['PENDING', 'amber'] : ['APPROVED', 'ok']].concat(o.typeChip ? [o.typeChip(x)] : []),
+        rowMeta: (x) => `${o.typeChip && x.augment_type ? String(x.augment_type).toUpperCase() + ' · ' : ''}${o.meta(x)} · ${catalogSummary(x)}`,
+        kicker: (x) => `${o.noun} · ${o.typeChip && x.augment_type ? String(x.augment_type).toUpperCase() + ' · ' : ''}${o.meta(x)}`,
         body(x) {
             const proposer = profiles().find(p => p.id === x.created_by);
             return `${x.description ? `<p class="dz-desc">${esc(x.description)}</p>` : ''}${factGrid(catalogFacts(x))}
@@ -132,7 +133,10 @@ const KINDS = {
         list: () => (typeof augmentDefinitionsList !== 'undefined' ? augmentDefinitionsList : []),
         can: (x) => typeof canManageAugment === 'function' && canManageAugment(x),
         orderKey: 'augments', propose: 'openNewAugmentModal', edit: 'openEditAugmentModal', approve: 'approveAugment', del: 'deleteAugmentDefinition', move: 'moveAugmentDefinitionOrder',
-        meta: (x) => ((x.slots || []).map(s => (window.AUGMENT_SLOT_LABELS || {})[s] || s).join(', ') || 'NO SLOTS TAGGED').toUpperCase()
+        meta: (x) => ((x.slots || []).map(s => (window.AUGMENT_SLOT_LABELS || {})[s] || s).join(', ') || 'NO SLOTS TAGGED').toUpperCase(),
+        // Type (cybernetic / synthetic / genetic): a chip and a second filter row.
+        typeOf: (x) => x.augment_type || 'untyped',
+        typeChip: (x) => x.augment_type ? [String(x.augment_type).toUpperCase(), AUG_TYPE_TONE[x.augment_type] || ''] : ['UNTYPED', 'red']
     }),
     gear: catalogKind({
         host: () => byId('term-panel-geardesigner'), title: 'GEAR', sub: 'PERSONAL GEAR CATALOG', noun: 'GEAR', plural: 'gear', hook: 'gear-designer-rendered',
@@ -215,7 +219,7 @@ const KINDS = {
 
 // Per-kind view state; survives redraws (window.__dz for tests).
 const S = window.__dz = window.__dz || {};
-Object.keys(KINDS).forEach(k => { S[k] = Object.assign({ filter: 'all', sel: null, q: '', view: 'list', mode: 'view', known: null }, S[k] || {}); });
+Object.keys(KINDS).forEach(k => { S[k] = Object.assign({ filter: 'all', tfilter: 'all', sel: null, q: '', view: 'list', mode: 'view', known: null }, S[k] || {}); });
 const moved = {}; // form / extra nodes moved into the view: node -> { parent, next }
 
 window.designersRestyleOn = function () { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('designers_restyle'); };
@@ -255,6 +259,7 @@ function ensureRoot(kind) {
                 <button type="button" class="dz-btn" data-act="new">${K.newButton.label}</button>
             </div>
             ${K.filters ? `<div class="dz-filters" role="tablist" aria-label="Filter ${K.plural}"></div>` : ''}
+            ${K.typeOf ? `<div class="dz-filters dz-tfilters" role="tablist" aria-label="Filter ${K.plural} by type"></div>` : ''}
             <div class="dz-body"></div><div class="dz-extra"></div>`;
         root.dataset.built = '1';
     }
@@ -283,7 +288,8 @@ function render(kind) {
         if (fresh) { st.sel = fresh.id; st.mode = 'view'; st.view = 'detail'; }
     }
     const q = (st.q || '').trim().toLowerCase();
-    const match = (x) => !q || K.search(x).toLowerCase().includes(q);
+    const tmatch = (x) => !K.typeOf || st.tfilter === 'all' || K.typeOf(x) === st.tfilter;
+    const match = (x) => tmatch(x) && (!q || K.search(x).toLowerCase().includes(q));
     const groups = K.filters ? { all: items, pending: items.filter(x => K.group(x) === 'pending'), approved: items.filter(x => K.group(x) === 'approved') } : { all: items };
     const shown = (groups[st.filter] || items).filter(match);
     if (!shown.some(x => x.id === st.sel)) st.sel = shown.length ? shown[0].id : null;
@@ -292,6 +298,15 @@ function render(kind) {
     if (K.filters) {
         root.querySelector('.dz-filters').innerHTML = [['all', 'ALL', ''], ['pending', 'PENDING', 'amber'], ['approved', 'APPROVED', 'ok']].map(([key, label, tone]) =>
             `<button type="button" role="tab" class="dz-ftab${st.filter === key ? ' on' : ''}" data-filter="${key}" aria-selected="${st.filter === key}">${label} <b class="${tone}">${groups[key].filter(match).length}</b></button>`).join('');
+    }
+    const tbar = K.typeOf ? root.querySelector('.dz-tfilters') : null;
+    if (tbar) {
+        const inStatus = groups[st.filter] || items;
+        const qm = (x) => !q || K.search(x).toLowerCase().includes(q);
+        const types = [['all', 'ALL TYPES', '']].concat((window.AUGMENT_TYPES || []).map(t => [t, t.toUpperCase(), AUG_TYPE_TONE[t] === 'gold' ? 'amber' : AUG_TYPE_TONE[t]]));
+        if (items.some(x => K.typeOf(x) === 'untyped')) types.push(['untyped', 'UNTYPED', '']);
+        tbar.innerHTML = types.map(([key, label, tone]) =>
+            `<button type="button" role="tab" class="dz-ftab${st.tfilter === key ? ' on' : ''}" data-tfilter="${key}" aria-selected="${st.tfilter === key}">${label} <b class="${tone}">${inStatus.filter(x => qm(x) && (key === 'all' || K.typeOf(x) === key)).length}</b></button>`).join('');
     }
     const thumb = (x) => {
         const ref = K.thumb ? K.thumb(x) : null;
@@ -340,6 +355,7 @@ document.addEventListener('click', (e) => {
     if (!btn || btn.disabled || btn.closest('.dz-formslot') || btn.closest('.dz-extra')) return;
     const kind = root.dataset.kind, K = KINDS[kind], st = S[kind];
     if (btn.dataset.filter) { st.filter = btn.dataset.filter; render(kind); return; }
+    if (btn.dataset.tfilter) { st.tfilter = btn.dataset.tfilter; render(kind); return; }
     if (btn.dataset.sel) { st.sel = btn.dataset.sel; st.mode = 'view'; st.view = 'detail'; render(kind); return; }
     const act = btn.dataset.act;
     if (!act) return;

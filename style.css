@@ -2608,3 +2608,6 @@ body.pc-on .scv-box.pc-collapsed { min-width: 0; }
 body.pc-on #hud-overlay-header { flex-wrap: wrap; row-gap: 6px; }
 body.pc-on #hud-overlay-header .hud-tabs { flex: 1 0 100%; flex-wrap: nowrap; }
 body.pc-on #hud-overlay-header .pc-ctl { margin-left: auto; }
+
+/* Augment type filter row (2026-11-06): keep each tab on one line; the bar scrolls on phones. */
+.dz-tfilters .dz-ftab { white-space: nowrap; flex: 0 0 auto; }

@@ -250,7 +250,7 @@
             const installed = augments.filter(ca => ca.slot === slot);
             const choices = typeof window.getApprovedAugmentsForSlot === 'function' ? window.getApprovedAugmentsForSlot(slot) : [];
             let pickerOptions = '<option value="">— No catalog augment / narrative only —</option>';
-            choices.forEach(a => { pickerOptions += `<option value="${a.id}">${a.name}</option>`; });
+            choices.forEach(a => { pickerOptions += `<option value="${a.id}">${a.name}${a.augment_type && typeof window.augmentTypeLabel === 'function' ? ` (${window.augmentTypeLabel(a)})` : ''}</option>`; });
 
             let installedHtml = installed.length === 0 ? '<span style="font-size:9px; color:#6b826a;">Nothing installed.</span>' : '';
             installed.forEach(ca => {

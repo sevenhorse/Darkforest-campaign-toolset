@@ -1165,7 +1165,7 @@ window.renderAugmentSlots = function() {
         const installed = augments.filter(ca => ca.slot === slot);
         const choices = typeof window.getApprovedAugmentsForSlot === 'function' ? window.getApprovedAugmentsForSlot(slot) : [];
         let pickerOptions = '<option value="">— No catalog augment / narrative only —</option>';
-        choices.forEach(a => { pickerOptions += `<option value="${a.id}">${a.name}</option>`; });
+        choices.forEach(a => { pickerOptions += `<option value="${a.id}">${a.name}${a.augment_type ? ` (${window.augmentTypeLabel(a)})` : ''}</option>`; });
 
         let installedHtml = installed.length === 0 ? '<span style="font-size:9px; color:#6b826a;">Nothing installed.</span>' : '';
         installed.forEach(ca => {
@@ -1174,6 +1174,8 @@ window.renderAugmentSlots = function() {
             installedHtml += `<div style="background:#030403; padding:5px 6px; border:1px solid #3c4e36; border-radius:2px; margin-bottom:3px; display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
                 <div style="flex:1;">
                     ${def ? `<strong style="color:#00e5a3; font-size:10px;">${def.name}</strong>` : `<strong style="color:#6b826a; font-size:10px;">${title}</strong>`}
+                    ${def && def.augment_type ? `<span style="font-size:8px; letter-spacing:0.12em; color:${window.AUGMENT_TYPE_COLORS[def.augment_type] || '#6b826a'};"> ${window.augmentTypeLabel(def).toUpperCase()}</span>` : ''}
+                    ${def && typeof window.augmentRecoveryPerk === 'function' && window.augmentRecoveryPerk(myProf, def) ? `<div style="font-size:9px; color:#c9962f;">Recovers from this surgery twice as fast (${window.augmentRecoveryPerk(myProf, def)})</div>` : ''}
                     ${ca.notes ? `<div style="font-size:9px; color:#d4c5a9;">${ca.notes}</div>` : ''}
                 </div>
                 <button onclick="window.removeCharacterAugment('${ca.id}')" title="Remove" style="width:auto; margin:0; padding:2px 6px; font-size:9px; border-color:#ff6b6b; color:#ff6b6b;">✕</button>

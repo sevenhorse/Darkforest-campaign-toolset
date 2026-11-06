@@ -31,6 +31,23 @@
 let augmentDefinitionsList = [];
 window.AUGMENT_SLOT_KEYS = ['head', 'torso', 'l_arm', 'r_arm', 'l_leg', 'r_leg', 'internal'];
 window.AUGMENT_SLOT_LABELS = { head: 'Head', torso: 'Torso', l_arm: 'Left Arm', r_arm: 'Right Arm', l_leg: 'Left Leg', r_leg: 'Right Leg', internal: 'Internal' };
+// Augment TYPE (DM, 2026-11-06): every augment is cybernetic, synthetic or
+// genetic (augment_definitions.augment_type; null = untyped, older rows or
+// proposals from an old client). The three Magos perks each halve surgery
+// recovery for one type -- augmentRecoveryPerk() finds the one a character has.
+window.AUGMENT_TYPES = ['cybernetic', 'synthetic', 'genetic'];
+window.AUGMENT_TYPE_LABELS = { cybernetic: 'Cybernetic', synthetic: 'Synthetic', genetic: 'Genetic' };
+window.AUGMENT_TYPE_COLORS = { cybernetic: '#00e1ff', synthetic: '#00e5a3', genetic: '#c9962f' };
+window.AUGMENT_TYPE_MAGOS = { genetic: 'Magos Biologis', cybernetic: 'Magos Dominus', synthetic: 'Magos Explorator' };
+window.augmentTypeLabel = function(a) { return a && a.augment_type ? (window.AUGMENT_TYPE_LABELS[a.augment_type] || a.augment_type) : ''; };
+// The Magos perk (if any) on a profile that speeds recovery for this augment's type.
+window.augmentRecoveryPerk = function(prof, def) {
+    if (!prof || !def || !def.augment_type) return null;
+    const want = window.AUGMENT_TYPE_MAGOS[def.augment_type];
+    if (!want || typeof window.findPerkDefinition !== 'function') return null;
+    const hit = (prof.perks || []).map(cp => window.findPerkDefinition(cp.perk_definition_id)).find(d => d && String(d.name || '').toLowerCase() === want.toLowerCase());
+    return hit ? hit.name : null;
+};
 
 async function loadAugmentDefinitions() {
     const { data } = await db.from('augment_definitions').select('*').order('created_at', { ascending: true });
@@ -146,7 +163,7 @@ window.renderAugmentDesignerPanel = window.withAfterHooks('augment-designer-rend
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
                         <strong style="color:${a.status === 'draft' ? '#ffaa00' : '#00e5a3'}; font-size:12px;">${a.name}</strong>
-                        <span style="font-size:9px; color:#6b826a;"> — ${slotTags} ${a.status === 'draft' ? '· PENDING REVIEW' : ''}</span>
+                        <span style="font-size:9px; color:#6b826a;"> — ${a.augment_type ? `<span style="color:${window.AUGMENT_TYPE_COLORS[a.augment_type] || '#6b826a'};">${window.augmentTypeLabel(a).toUpperCase()}</span> · ` : ''}${slotTags} ${a.status === 'draft' ? '· PENDING REVIEW' : ''}</span>
                         <div style="font-size:10px; color:#d4c5a9; margin-top:2px;">${a.description || ''}</div>
                         <div style="font-size:9px; margin-top:4px;">${effectsLine}</div>
                         ${proposer ? `<span class="author-tag">proposed by: ${proposer.username || 'Commander'}</span>` : ''}
@@ -265,6 +282,13 @@ window.deleteAugmentDefinition = async function(id) {
             <input type="text" id="aug-edit-name" style="border-color:#c778dd;">
             <label for="aug-edit-desc" style="font-size:9px; color:#6b826a;">Description</label>
             <textarea id="aug-edit-desc" rows="2" style="border-color:#c778dd;"></textarea>
+            <label for="aug-edit-type" style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Type (the Magos perks speed recovery for one type each):</label>
+            <select id="aug-edit-type" style="border-color:#c778dd;">
+                <option value="">— Pick a type —</option>
+                <option value="cybernetic">Cybernetic (machine parts)</option>
+                <option value="synthetic">Synthetic (grown or artificial organic)</option>
+                <option value="genetic">Genetic (gene editing)</option>
+            </select>
 
             <label style="font-size:9px; color:#6b826a; margin-top:6px; display:block;">Installable Slot(s):</label>
             <div style="display:flex; gap:4px; margin-bottom:2px;">
@@ -323,10 +347,13 @@ window.deleteAugmentDefinition = async function(id) {
             const flavorOnly = document.getElementById('aug-edit-flavoronly').checked;
             const slots = Array.from(document.querySelectorAll('.aug-slot-cb:checked')).map(cb => cb.value);
             if (slots.length === 0) { alert("Tag at least one installable slot (or click ALL for a universal augment)."); return; }
+            const augType = document.getElementById('aug-edit-type').value;
+            if (!augType) { alert("Pick a type: cybernetic, synthetic or genetic."); return; }
             const payload = {
                 name,
                 description: document.getElementById('aug-edit-desc').value.trim(),
                 slots,
+                augment_type: augType,
                 flavor_only: flavorOnly,
                 shield_max_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('aug-edit-shieldbonus').value) || 0),
                 dr_bonus: flavorOnly ? 0 : (parseInt(document.getElementById('aug-edit-drbonus').value) || 0),
@@ -361,6 +388,7 @@ window.deleteAugmentDefinition = async function(id) {
         document.getElementById('aug-edit-name').value = '';
         document.getElementById('aug-edit-desc').value = '';
         document.getElementById('aug-slot-checkboxes').innerHTML = slotCheckboxesHtml([]);
+        document.getElementById('aug-edit-type').value = '';
         document.getElementById('aug-edit-flavoronly').checked = false;
         document.getElementById('aug-mechanical-section').style.display = 'block';
         document.getElementById('aug-edit-shieldbonus').value = '0';
@@ -382,6 +410,7 @@ window.deleteAugmentDefinition = async function(id) {
         document.getElementById('aug-edit-name').value = a.name || '';
         document.getElementById('aug-edit-desc').value = a.description || '';
         document.getElementById('aug-slot-checkboxes').innerHTML = slotCheckboxesHtml(a.slots || []);
+        document.getElementById('aug-edit-type').value = a.augment_type || '';
         document.getElementById('aug-edit-flavoronly').checked = !!a.flavor_only;
         document.getElementById('aug-mechanical-section').style.display = a.flavor_only ? 'none' : 'block';
         document.getElementById('aug-edit-shieldbonus').value = a.shield_max_bonus || 0;
