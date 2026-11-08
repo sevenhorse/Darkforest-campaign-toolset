@@ -416,6 +416,7 @@ window.deployShipTemplate = async function(id, opts) {
         });
     }
     window.openEditTemplateModal = function(id) {
+        if (typeof window.refreshFactionSuggestions === 'function') window.refreshFactionSuggestions();
         const t = findAnyTemplateById(id);
         if (!t) return;
         ensureModal();
@@ -647,6 +648,7 @@ window.deployShipTemplate = async function(id, opts) {
    deploy machinery as the public Ship Designer above via findAnyTemplateById. */
 // Announces 'secretrepo-rendered' (js/designers-v2.js redraws the restyled view).
 window.renderSecretRepositoryPanel = window.withAfterHooks('secretrepo-rendered', function() {
+    if (typeof window.refreshFactionSuggestions === 'function') window.refreshFactionSuggestions();
     if (currentUserRole !== 'dm') return;
     const container = document.getElementById('secret-templates-list-container');
     if (!container) return;
@@ -743,6 +745,7 @@ window.saveNewSecretTemplate = async function() {
         // here instead, which is what makes it visible in players' Vessel
         // Deck once deployed -- see window.canViewVesselDeck (js/combat.js).
         iff: document.getElementById('new-secret-template-iff').value || 'hostile',
+        faction: (document.getElementById('new-secret-template-faction') || { value: '' }).value.trim() || null, // 2026-11-08: Vessel Deck faction tabs
         // DM-AI-for-NPCs build (this session): the "add new secret template"
         // form has no dedicated AI-controlled checkbox of its own (unlike
         // vessel_class/iff, which have selects on this form already) --
@@ -762,6 +765,7 @@ window.saveNewSecretTemplate = async function() {
     document.getElementById('new-secret-template-hardened').value = '0';
     document.getElementById('new-secret-template-vesselclass').value = '';
     document.getElementById('new-secret-template-iff').value = 'hostile';
+    if (document.getElementById('new-secret-template-faction')) document.getElementById('new-secret-template-faction').value = '';
     document.getElementById('new-secret-template-copysource').value = '';
     window.clearNewTemplateCopyHint();
     if (stationCheckbox) { stationCheckbox.checked = false; window.toggleStationFields('new-secret-template'); }
@@ -826,6 +830,7 @@ function buildTemplateCopySnapshot(source, isLiveDeployed) {
         is_station: !!source.is_station,
         vessel_class: source.vessel_class || '',
         iff: source.iff || 'hostile',
+        faction: source.faction || '',
         ship_weapons: weapons,
         ship_decks: decks,
         ship_hangar: hangar,
@@ -845,6 +850,7 @@ function applyStatSnapshotToNewTemplateForm(snapshot, sourceLabel) {
     document.getElementById('new-secret-template-speed').value = snapshot.tactical_speed;
     document.getElementById('new-secret-template-vesselclass').value = snapshot.vessel_class;
     document.getElementById('new-secret-template-iff').value = snapshot.iff;
+    if (document.getElementById('new-secret-template-faction')) document.getElementById('new-secret-template-faction').value = snapshot.faction || '';
     const stationCheckbox = document.getElementById('new-secret-template-station');
     if (stationCheckbox) { stationCheckbox.checked = snapshot.is_station; window.toggleStationFields('new-secret-template'); }
 
@@ -1092,6 +1098,7 @@ window.renderSecretRepoEditorPanel = function() {
                     <option value="neutral" ${t.iff === 'neutral' ? 'selected' : ''}>◌ Neutral</option>
                     <option value="friendly" ${t.iff === 'friendly' ? 'selected' : ''}>✓ Friendly</option>
                 </select></div>
+                <div><label for="repo-edit-faction" style="font-size:9px; color:#c9962f;" title="Ships deployed from this design start in this faction (Vessel Deck tabs). Blank = unassigned.">Faction (Vessel Deck tabs):</label><input type="text" id="repo-edit-faction" list="vf-faction-list" placeholder="Unassigned" value="${(window.escapeHtml || String)(t.faction || '')}" style="border-color:#c9962f;"></div>
                 <div style="display:flex; gap:10px; align-items:flex-end;">
                     <div style="flex:1;"><label for="repo-edit-speed" style="font-size:9px; color:#ffaaaa;">Tactical Speed:</label><input type="number" id="repo-edit-speed" value="${t.tactical_speed || 160}" min="0" style="border-color:#ff3333; text-align:center;"></div>
                     <div style="flex:1;"><label for="repo-edit-crew" style="font-size:9px; color:#ffaaaa;" title="Crew complement (food). Blank = default.">Crew:</label><input type="number" id="repo-edit-crew" value="${t.crew === null || t.crew === undefined ? '' : t.crew}" min="0" placeholder="default" style="border-color:#ff3333; text-align:center;"></div>
@@ -1256,6 +1263,7 @@ window.saveSecretRepoIdentityStats = async function() {
         is_station: isStation,
         vessel_class: document.getElementById('repo-edit-vesselclass').value || null,
         iff: document.getElementById('repo-edit-iff').value || null,
+        faction: (document.getElementById('repo-edit-faction') || { value: '' }).value.trim() || null,
         ai_controlled: document.getElementById('repo-edit-ai-controlled').checked,
         image_url: window.getMediaPickerValue('repo')
     };

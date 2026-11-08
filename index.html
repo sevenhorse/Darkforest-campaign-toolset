@@ -404,6 +404,7 @@
                         <button class="btn-reveal" onclick="window.broadcastVesselStatus()" style="width: auto; margin: 0; padding: 6px 15px; font-size: 10px;">BROADCAST STATUS TO COMMS</button>
                     </div>
                     <div id="vessel-finder" class="vf-root"></div>
+                    <datalist id="vf-faction-list"></datalist>
 
                     <div class="cargo-subtabs" style="margin-bottom:12px;">
                         <button class="cargo-subtab-btn active" id="vessel-subtab-core" onclick="window.switchVesselSubtab('core')">Core Diagnostics & Weapons</button>
@@ -775,6 +776,10 @@
                                         <option value="neutral">◌ Neutral</option>
                                         <option value="friendly">✓ Friendly</option>
                                     </select>
+                                </div>
+                                <div style="margin-top:4px;">
+                                    <label for="new-secret-template-faction" style="font-size:9px; color:#c9962f;" title="Ships deployed from this design start in this faction (Vessel Deck tabs). Blank = unassigned.">Faction (Vessel Deck tabs)</label>
+                                    <input type="text" id="new-secret-template-faction" list="vf-faction-list" placeholder="Unassigned" style="font-size:10px; margin:2px 0; border-color:#c9962f;">
                                 </div>
                                 <button class="btn-remove" onclick="window.saveNewSecretTemplate()" style="width:100%; margin-top:6px; font-size:10px;">+ STORE IN REPOSITORY</button>
                             </div>
@@ -1654,11 +1659,11 @@
     <script src="js/ui.js?v=3.61"></script>
     <script src="js/dice-tray.js?v=1.0"></script>
     <script src="js/session-timeline.js?v=1.0"></script>
-    <script src="js/combat.js?v=3.88"></script>
+    <script src="js/combat.js?v=3.89"></script>
     <script src="js/squadrons.js?v=1.14"></script>
     <script src="js/strike-craft-designer.js?v=1.2"></script>
     <script src="js/colonies.js?v=3.24"></script>
-    <script src="js/ship-designer.js?v=3.44"></script>
+    <script src="js/ship-designer.js?v=3.45"></script>
     <script src="js/perk-designer.js?v=3.19"></script>
     <script src="js/augment-designer.js?v=1.8"></script>
     <script src="js/gear-designer.js?v=1.5"></script>

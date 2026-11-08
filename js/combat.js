@@ -554,7 +554,7 @@ window.renderVesselFinder = function(all) {
                 <button type="button" class="dz-btn dim" id="vf-faction-btn" style="display:none;">SET FACTION</button>
             </div>
             <div class="vf-row vf-faction-row" id="vf-faction-row" style="display:none;">
-                <input type="text" id="vf-faction-input" list="vf-faction-list" placeholder="Faction (blank = unassigned)" aria-label="Faction name"><datalist id="vf-faction-list"></datalist>
+                <input type="text" id="vf-faction-input" list="vf-faction-list" placeholder="Faction (blank = unassigned)" aria-label="Faction name">
                 <button type="button" class="dz-btn" id="vf-faction-one">THIS VESSEL</button>
                 <button type="button" class="dz-btn" id="vf-faction-shown"></button>
             </div>
@@ -580,13 +580,31 @@ window.renderVesselFinder = function(all) {
     favBtn.setAttribute('aria-pressed', String(!!fav)); favBtn.disabled = !cur;
     root.querySelector('#vf-faction-btn').style.display = isDm ? '' : 'none';
     if (!isDm) root.querySelector('#vf-faction-row').style.display = 'none';
-    root.querySelector('#vf-faction-list').innerHTML = Object.keys(counts).concat(window.VESSEL_FACTION_SUGGESTIONS || []).filter((f, i, a) => a.indexOf(f) === i).sort().map(f => `<option value="${esc(f)}">`).join('');
+    window.refreshFactionSuggestions(Object.keys(counts));
     const nShown = window.vesselFinderApply(all).length;
     root.querySelector('#vf-faction-shown').textContent = `ALL ${nShown} LISTED`;
     if (isDm && cur) { const v = globalShipMarkersCache.find(m => m.id === cur); const inp = root.querySelector('#vf-faction-input'); if (inp && document.activeElement !== inp && root.dataset.factionFor !== cur) { inp.value = window.vesselFactionOf(v); root.dataset.factionFor = cur; } }
 };
 // Faction names offered in the DM's faction box, alongside any already in use.
 window.VESSEL_FACTION_SUGGESTIONS = ['Galactic Human Coalition', 'Jeraptha Republic', 'Sangheili Commonwealth', "Arbiter's Sangheili", 'Roccasta Swarm', 'Vesperans', 'Trisolarans', 'Elders'];
+// Fills the one shared <datalist id="vf-faction-list"> (index.html) used by every
+// faction box: the finder, EDIT BASE STATS, the template editors and the
+// Secret Repository forms. Offers the suggestions plus every faction already
+// on a ship or template the viewer has loaded.
+window.refreshFactionSuggestions = function(extra) {
+    const dl = document.getElementById('vf-faction-list');
+    if (!dl) return;
+    const esc = window.escapeHtml || (x => String(x));
+    // Players only get the factions of ships they can access (passed in by the
+    // finder), never the full list, so no enemy faction name reaches their page.
+    if (currentUserRole !== 'dm') { const own = (extra || []).filter(Boolean); dl.innerHTML = own.map(f => `<option value="${esc(f)}">`).join(''); return; }
+    const seen = [].concat(extra || [], window.VESSEL_FACTION_SUGGESTIONS || [],
+        (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).map(m => m.faction),
+        (typeof shipTemplatesList !== 'undefined' ? shipTemplatesList : []).map(t => t.faction),
+        (typeof secretShipTemplatesList !== 'undefined' ? secretShipTemplatesList : []).map(t => t.faction))
+        .map(f => String(f || '').trim()).filter(Boolean);
+    dl.innerHTML = seen.filter((f, i) => seen.indexOf(f) === i).sort((a, b) => a.localeCompare(b)).map(f => `<option value="${esc(f)}">`).join('');
+};
 window.setVesselFaction = async function(ids, faction) {
     if (currentUserRole !== 'dm' || !ids || !ids.length) return;
     const val = String(faction || '').trim() || null;
@@ -1509,6 +1527,7 @@ window.resetShipStats = async function(vesselId) {
         });
     }
     window.openEditMaxStatsModal = function(vesselId) {
+        if (typeof window.refreshFactionSuggestions === 'function') window.refreshFactionSuggestions();
         const vessel = globalShipMarkersCache.find(m => m.id === vesselId);
         if (!vessel) return;
         ensureModal();
