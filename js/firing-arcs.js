@@ -346,19 +346,23 @@ function avgDamage(w) {
 }
 // The heading an AI ship should take to bring its biggest arc-limited
 // (non-turret, non-PD) weapon to bear on targetPos (grid px, token top-left
-// like getBattleTokenPosition). null = nothing to turn for.
+// like getBattleTokenPosition). With only turrets ready, it faces the target
+// nose-on (turret center 0). null = no ready gun, nothing to turn for.
 window.aiDesiredFacing = function(vessel, tok, targetVessel) {
     if (!arcsOn() || !vessel || !tok || vessel.is_strike_craft) return null;
-    let best = null, bestScore = -1;
+    let best = null, bestScore = -1, anyGun = false;
     (vessel.ship_weapons || []).forEach(w => {
         if (!w || w.is_point_defense) return;
         if ((w.cooldown || 0) > 0 || w.ammo === 0) return;
+        anyGun = true;
         const arc = window.weaponArc(w, vessel);
         if (!ARC_PRESETS[arc].windows) return;
         const s = avgDamage(w);
         if (s > bestScore) { bestScore = s; best = arc; }
     });
-    if (!best) return null;
+    // DM 2026-11-08: a ship whose ready guns are all turrets (nothing
+    // arc-limited to line up) still points its nose at what it is shooting at.
+    if (!best) { if (!anyGun) return null; best = 'turret'; }
     const tt = tokenForVessel(targetVessel.id);
     if (!tt) return null;
     const bearing = window.compassBearing(tokenCenter(tok), tokenCenter(tt));
