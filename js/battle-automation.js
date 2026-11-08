@@ -114,13 +114,13 @@ window.pickSquadronAutoStance = function(sq, sqShip, ctx) {
     const roles = (db0.weapons || []).map(w => w.role);
     const hasPD = roles.includes('point_defense'), hasAF = roles.includes('anti_fighter');
     const tokens = ctx.tokens || [];
-    const myIds = window.vesselOwnerIds(sqShip);
+    const myIds = window.vesselSideIds(sqShip);
     const selfPos = window.getBattleTokenPosition(sqShip.id);
     if (!selfPos) return sq.ai_auto_pick || 'attack_capitals';
     const enemies = [];
     tokens.forEach(t => {
         const m = globalShipMarkersCache.find(x => x.id === t.ship_marker_id);
-        if (!m || m.id === sqShip.id || window.ownerIdsShareOwner(window.vesselOwnerIds(m), myIds)) return;
+        if (!m || m.id === sqShip.id || !window.sidesAreEnemies(window.vesselSideIds(m), myIds)) return;
         enemies.push({ m, d: Math.hypot(t.x - selfPos.x, t.y - selfPos.y) });
     });
     const reach = window.SQUADRON_AUTO_REACH;
@@ -131,7 +131,7 @@ window.pickSquadronAutoStance = function(sq, sqShip, ctx) {
         const threat = (ctx.ordnance || []).some(o => {
             const tgt = globalShipMarkersCache.find(x => x.id === o.target_vessel_id);
             const src = globalShipMarkersCache.find(x => x.id === o.source_vessel_id);
-            return tgt && window.ownerIdsShareOwner(window.vesselOwnerIds(tgt), myIds) && !(src && window.ownerIdsShareOwner(window.vesselOwnerIds(src), myIds));
+            return tgt && window.ownerIdsShareOwner(window.vesselSideIds(tgt), myIds) && !(src && window.ownerIdsShareOwner(window.vesselSideIds(src), myIds));
         });
         if (threat) return 'intercept_munitions';
         if (fightersNear) return 'attack_strike_craft';
@@ -187,12 +187,12 @@ window.processBattleRoundAutomations = async function() {
             // within 75% of strike-craft gun reach.
             if (pick === 'intercept_munitions') {
                 const sPos = window.getBattleTokenPosition(sqShip.id);
-                const myIds = window.vesselOwnerIds(sqShip);
+                const myIds = window.vesselSideIds(sqShip);
                 let guard = null, guardD = Infinity;
                 (battle.in_flight_ordnance || []).forEach(o => {
                     const tgt = globalShipMarkersCache.find(x => x.id === o.target_vessel_id);
                     const src = globalShipMarkersCache.find(x => x.id === o.source_vessel_id);
-                    if (!tgt || !window.ownerIdsShareOwner(window.vesselOwnerIds(tgt), myIds) || (src && window.ownerIdsShareOwner(window.vesselOwnerIds(src), myIds))) return;
+                    if (!tgt || !window.ownerIdsShareOwner(window.vesselSideIds(tgt), myIds) || (src && window.ownerIdsShareOwner(window.vesselSideIds(src), myIds))) return;
                     const p = window.getBattleTokenPosition(tgt.id);
                     if (p && sPos && Math.hypot(p.x - sPos.x, p.y - sPos.y) < guardD) { guardD = Math.hypot(p.x - sPos.x, p.y - sPos.y); guard = p; }
                 });
@@ -218,7 +218,7 @@ window.processBattleRoundAutomations = async function() {
             if (!w.is_point_defense) return;
             if ((w.cooldown || 0) > 0) return; // hard skip: no one to confirm a cooldown override on an automated tick
             if (w.ammo === 0) return;
-            pdPool.push({ vesselId: v.id, weaponIdx: wIdx, position: { x: tok.x, y: tok.y }, ownerIds: window.vesselOwnerIds(v) });
+            pdPool.push({ vesselId: v.id, weaponIdx: wIdx, position: { x: tok.x, y: tok.y }, ownerIds: window.vesselSideIds(v) });
         });
     });
 
@@ -236,8 +236,9 @@ window.processBattleRoundAutomations = async function() {
         for (const i of order) {
             const entry = pdPool[i];
             if (only && entry.vesselId !== only) continue;
-            const sameOwner = window.ownerIdsShareOwner(entry.ownerIds, ownerIds);
-            if (enemyOnly ? sameOwner : !sameOwner) continue;
+            // ownerIds here are combat-side ids (vesselSideIds). Anti-fighter
+            // fire only comes from a real enemy side (neutrals stay out).
+            if (enemyOnly ? !window.sidesAreEnemies(entry.ownerIds, ownerIds) : !window.ownerIdsShareOwner(entry.ownerIds, ownerIds)) continue;
             const v = globalShipMarkersCache.find(m => m.id === entry.vesselId);
             const w = v && v.ship_weapons[entry.weaponIdx];
             if (!w) continue;
@@ -288,7 +289,7 @@ window.processBattleRoundAutomations = async function() {
             let wpnIdx = dbStats.weapons.findIndex((w, i) => w.role === 'point_defense' && squadronWeaponCooldown(sq, i) === 0);
             if (wpnIdx < 0) wpnIdx = dbStats.weapons.findIndex((w, i) => squadronWeaponCooldown(sq, i) === 0);
             if (wpnIdx < 0) return; // every weapon on cooldown -- no interception offered this round
-            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], wpnIdx, ownerIds: window.vesselOwnerIds(sqShip), position: pos, sqShipId: sqShip.id });
+            squadronInterceptPool.push({ carrierId: v.id, sqIdx, sqName: sq.name, wpn: dbStats.weapons[wpnIdx], wpnIdx, ownerIds: window.vesselSideIds(sqShip), position: pos, sqShipId: sqShip.id });
         });
     });
 
@@ -363,7 +364,7 @@ window.processBattleRoundAutomations = async function() {
     live.sort((a, b) => (Number(a.salvo.turns_remaining) || 0) - (Number(b.salvo.turns_remaining) || 0) || a.idx - b.idx);
     const shotAt = new Set(); // payloads that got a pass-1 ship-PD shot
     const shipPdShot = (L, second, ownOnly) => {
-        const engagement = fireEligiblePD(L.targetPos, window.vesselOwnerIds(L.targetVessel), { preferVesselId: L.targetVessel.id, onlyVesselId: ownOnly ? L.targetVessel.id : null });
+        const engagement = fireEligiblePD(L.targetPos, window.vesselSideIds(L.targetVessel), { preferVesselId: L.targetVessel.id, onlyVesselId: ownOnly ? L.targetVessel.id : null });
         if (!engagement) return false;
         shotAt.add(L.salvo);
         if (engagement.roll.total > 0) {
@@ -384,7 +385,7 @@ window.processBattleRoundAutomations = async function() {
       try {
         if (destroyedPayloads.has(L.salvo)) continue;
         // An Intercept Munitions squadron gets a shot if ship PD didn't kill it.
-        const sqEngagement = fireEligibleSquadronIntercept(L.targetPos, window.vesselOwnerIds(L.targetVessel));
+        const sqEngagement = fireEligibleSquadronIntercept(L.targetPos, window.vesselSideIds(L.targetVessel));
         if (sqEngagement && sqEngagement.roll.total > 0) {
             chatLines.push(`🛡️ [SQUADRON INTERCEPT] ${sqEngagement.entry.sqName} shoots down a payload inbound on ${L.targetVessel.name} from ${L.salvo.source_vessel_name} (${sqEngagement.roll.total} dmg) — destroyed!`);
             destroyedPayloads.add(L.salvo); markOutcome(L.salvo, 'intercept');
@@ -523,7 +524,7 @@ window.processBattleRoundAutomations = async function() {
             const targetPos = window.getBattleTokenPosition(sqShip.id);
             if (!targetPos) return; // no grid token this round: can't range-check, skip
             // enemyOnly: the opposing side's PD fires at this strike craft.
-            const engagement = fireEligiblePD(targetPos, window.vesselOwnerIds(sqShip), { enemyOnly: true });
+            const engagement = fireEligiblePD(targetPos, window.vesselSideIds(sqShip), { enemyOnly: true });
             if (!engagement) return;
             if (engagement.roll.total <= 0) {
                 chatLines.push(`🛡️ [POINT DEFENSE] ${engagement.pdVessel.name}'s ${engagement.pdWpn.name} fires at ${sq.name} — misses.`);
@@ -610,7 +611,7 @@ window.processBattleRoundAutomations = async function() {
             let candidates = tokens
                 .map(tok => globalShipMarkersCache.find(m => m.id === tok.ship_marker_id))
                 .filter(Boolean)
-                .filter(m => m.id !== sqShip.id && !m.is_hidden && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(sqShip))); // fog: hidden vessels aren't targets
+                .filter(m => m.id !== sqShip.id && !m.is_hidden && window.sidesAreEnemies(window.vesselSideIds(m), window.vesselSideIds(sqShip))); // fog: hidden vessels aren't targets
 
             if (stance === 'attack_strike_craft') {
                 candidates = candidates.filter(m => m.is_strike_craft);
@@ -722,7 +723,7 @@ window.processBattleRoundAutomations = async function() {
         const candidates = tokens
             .map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id))
             .filter(Boolean)
-            .filter(m => m.id !== v.id && !m.is_hidden && !window.ownerIdsShareOwner(window.vesselOwnerIds(m), window.vesselOwnerIds(v)));
+            .filter(m => m.id !== v.id && !m.is_hidden && window.sidesAreEnemies(window.vesselSideIds(m), window.vesselSideIds(v))); // sides by IFF (db.js vesselCombatSide); neutral ships are never targets, and a neutral AI ship finds none
 
         if (candidates.length === 0) {
             chatLines.push(`🤖 [AI CONTROLLED] ${v.name} has no eligible enemy target on the grid this round -- holds position.`);

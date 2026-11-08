@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-08.04';
+window.DARKFOREST_BUILD = '2026-11-08.05';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -1283,6 +1283,39 @@ window.ownerIdsShareOwner = function(idsA, idsB) {
     if (idsA.length === 0 && idsB.length === 0) return true;
     return idsA.some(id => idsB.includes(id));
 };
+
+/* COMBAT SIDES (DM decision 2026-11-08): who fights whom is decided by IFF,
+   not by who owns the ship. Every DM ship shares the DM's account, so the old
+   owner rule put every NPC on one team (an Arbiter fleet could never fight
+   Loyalists). Used by AI targeting, point defense, interceptor screens and
+   Messenger uplink (js/battle-automation.js, js/battle-map.js).
+     - Strike craft take their carrier's side.
+     - A ship with any player owner is on the players' side.
+     - Otherwise IFF: friendly -> players' side (allied NPCs), neutral ->
+       neutral, hostile or unset -> hostile.
+   Neutral ships stay out: the AI never targets them and neutral AI ships hold
+   fire. Players can still shoot anything by hand.
+   vesselSideIds returns a one-item array so it drops into ownerIdsShareOwner
+   ("same side"); sidesAreEnemies is the "fair target" test. */
+window.vesselCombatSide = function(vessel, _depth) {
+    if (!vessel) return 'hostile';
+    if (vessel.is_strike_craft && vessel.parent_id && !(_depth > 3)) {
+        const carrier = (typeof globalShipMarkersCache !== 'undefined' ? globalShipMarkersCache : []).find(m => m.id === vessel.parent_id);
+        if (carrier && carrier !== vessel) return window.vesselCombatSide(carrier, (_depth || 0) + 1);
+    }
+    const profs = typeof allProfiles !== 'undefined' ? (allProfiles || []) : [];
+    if (window.vesselOwnerIds(vessel).some(id => { const p = profs.find(x => x.id === id); return p && p.role !== 'dm'; })) return 'players';
+    if (vessel.iff === 'friendly') return 'players';
+    if (vessel.iff === 'neutral') return 'neutral';
+    return 'hostile';
+};
+window.vesselSideIds = function(vessel) { return ['side:' + window.vesselCombatSide(vessel)]; };
+window.sidesAreEnemies = function(idsA, idsB) {
+    const a = (idsA || [])[0], b = (idsB || [])[0];
+    if (!a || !b || a === b) return false;
+    return a !== 'side:neutral' && b !== 'side:neutral';
+};
+window.vesselsAreEnemies = function(a, b) { return window.sidesAreEnemies(window.vesselSideIds(a), window.vesselSideIds(b)); };
 
 window.snapToCommander = function(userId) {
     let ship = globalShipMarkersCache.find(m => window.vesselHasOwner(m, userId));

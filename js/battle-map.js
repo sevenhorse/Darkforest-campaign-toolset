@@ -78,7 +78,7 @@ function getUplinkedEnemyIds(forOwnerIds) {
     const messengerPositions = [];
     tokens.forEach(t => {
         const marker = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
-        if (!marker || !marker.is_strike_craft || !window.ownerIdsShareOwner(window.vesselOwnerIds(marker), forOwnerIds)) return;
+        if (!marker || !marker.is_strike_craft || !window.ownerIdsShareOwner(window.vesselSideIds(marker), forOwnerIds)) return;
         const carrier = globalShipMarkersCache.find(c => c.id === marker.parent_id);
         const sq = carrier && (carrier.ship_deployed || []).find(s => s.id === marker.squadron_id);
         if (sq && sq.type === 'messenger') messengerPositions.push({ x: t.x, y: t.y });
@@ -87,7 +87,7 @@ function getUplinkedEnemyIds(forOwnerIds) {
     if (messengerPositions.length === 0) return uplinked;
     tokens.forEach(t => {
         const target = globalShipMarkersCache.find(m => m.id === t.ship_marker_id);
-        if (!target || window.ownerIdsShareOwner(window.vesselOwnerIds(target), forOwnerIds)) return; // only enemy ships get uplinked
+        if (!target || !window.sidesAreEnemies(window.vesselSideIds(target), forOwnerIds)) return; // only enemy ships get uplinked (sides by IFF)
         const isClose = messengerPositions.some(mp => Math.hypot(mp.x - t.x, mp.y - t.y) <= window.BATTLE_RANGE_TIERS.SHORT);
         if (isClose) uplinked.add(target.id);
     });
@@ -110,7 +110,7 @@ function getEffectiveWeaponRange(wpn, firerVessel, targetVessel) {
     const baseRange = (wpn && wpn.range) || 0; // 0 = unlimited
 
     if (firerVessel && targetVessel && baseRange >= tiers.MEDIUM) {
-        const uplinked = getUplinkedEnemyIds(window.vesselOwnerIds(firerVessel));
+        const uplinked = getUplinkedEnemyIds(window.vesselSideIds(firerVessel));
         if (uplinked.has(targetVessel.id)) return 0; // unlimited this round
     }
 
