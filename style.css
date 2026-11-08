@@ -2002,6 +2002,16 @@ button.cx2-chip { cursor: pointer; font-family: inherit; padding: 3px 8px; }
 #vz-root #vessel-decks-container { max-height: none !important; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
 #vz-root #vessel-decks-container > div { margin: 0 !important; background: #071216 !important; border-color: rgba(0, 225, 255, 0.25) !important; }
 #vz-root #vessel-weapons-container, #vz-root #vessel-embarked-container, #vz-root #vessel-deployed-container { max-height: none !important; }
+/* Vessel Deck finder (2026-11-08): search, favorite, faction tabs above the picker (js/combat.js). Reuses the dz- designer pieces. */
+.vf-root { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.vf-root:empty { display: none; }
+.vf-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.vf-root :is(.dz-btn, .dz-ftab) { font-family: inherit; margin: 0; width: auto; text-transform: none; }
+.vf-tabs { flex-wrap: nowrap; overflow-x: auto; }
+.vf-tabs .dz-ftab { flex: 0 0 auto; white-space: nowrap; }
+.vf-faction-row input { flex: 1 1 220px; margin: 0 !important; height: 34px; }
+#vz-root .vf-root { margin-bottom: 0; }
+@media screen and (max-width: 768px) { .vf-root .dz-search { flex: 1 1 100%; } .vf-root .dz-btn, .vf-tabs .dz-ftab { min-height: 44px; } }
 #vz-slot-status > #vessel-ownership-container:empty, #vz-slot-status > #vessel-salvage-container:empty, #vz-slot-status > #vessel-manufacturing-container:empty { display: none; }
 @media screen and (max-width: 768px) {
     .vz-pick { flex: 1 1 100%; } .vz-pick select { width: 100% !important; flex: 1; }

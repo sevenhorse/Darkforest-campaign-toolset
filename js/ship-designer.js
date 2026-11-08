@@ -265,6 +265,7 @@ window.deployShipTemplate = async function(id, opts) {
         // editable afterward per-deployment via the Vessel Deck's EDIT BASE
         // STATS modal (js/combat.js), independent of the source template.
         iff: t.iff || null,
+        faction: t.faction || null, // 2026-11-08: Vessel Deck faction tabs, same carry-from-template pattern
         // DM-AI-for-NPCs build (this session): same carry-from-template
         // pattern as vessel_class/iff just above -- also still editable
         // afterward per-deployment via the Vessel Deck's EDIT BASE STATS
@@ -354,6 +355,8 @@ window.deployShipTemplate = async function(id, opts) {
             </div>
             ${window.renderMediaPickerHtml('tmpl', '', 'Ship image (optional) — upload or paste a link')}
             <div id="tmpl-edit-iff-wrap" style="display:none;">
+                <label for="tmpl-edit-faction" style="font-size:9px; color:#c9962f;" title="Ships deployed from this design start in this faction (Vessel Deck tabs). Blank = unassigned.">Faction (carried to deployed ships)</label>
+                <input type="text" id="tmpl-edit-faction" list="vf-faction-list" placeholder="Unassigned" style="border-color:#c9962f;">
                 <label for="tmpl-edit-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) -- controls whether players can see/edit a deployed copy of this template in their Vessel Deck. Friendly is visible alongside a player's own ships; Neutral/Hostile/unset stay DM-only. DM-only field.">IFF Designation (DM only)</label>
                 <select id="tmpl-edit-iff" style="border-color:#ff6b6b;">
                     <option value="">-- Unset (DM-only) --</option>
@@ -392,6 +395,7 @@ window.deployShipTemplate = async function(id, opts) {
                 is_station: isStation,
                 vessel_class: document.getElementById('tmpl-edit-vesselclass').value || null,
                 iff: document.getElementById('tmpl-edit-iff').value || null,
+                faction: document.getElementById('tmpl-edit-faction').value.trim() || null,
                 ai_controlled: document.getElementById('tmpl-edit-ai-controlled').checked,
                 image_url: window.getMediaPickerValue('tmpl')
             };
@@ -430,6 +434,7 @@ window.deployShipTemplate = async function(id, opts) {
         document.getElementById('tmpl-edit-crew').value = (t.crew === null || t.crew === undefined) ? '' : t.crew;
         document.getElementById('tmpl-edit-vesselclass').value = t.vessel_class || '';
         document.getElementById('tmpl-edit-iff').value = t.iff || '';
+        document.getElementById('tmpl-edit-faction').value = t.faction || '';
         const iffWrap = document.getElementById('tmpl-edit-iff-wrap');
         if (iffWrap) iffWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         const aiWrap = document.getElementById('tmpl-edit-ai-wrap');

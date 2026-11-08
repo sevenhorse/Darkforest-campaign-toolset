@@ -70,6 +70,7 @@ function ensureRoot() {
                 <label class="vz-pick">SWITCH VESSEL <span id="vz-select-slot"></span></label>
                 <span id="vz-broadcast-slot"></span>
             </div>
+            <div id="vz-finder-slot"></div>
             <nav class="df-subtabs vz-tabs" id="vz-tabs" aria-label="Vessel sections"></nav>
             ${TABS.map(([k]) => `<div class="vz-pane" id="vz-pane-${k}" data-tab="${k}">
                 ${k === 'status' ? '<div class="vz-glance" id="vz-glance"></div>' : ''}
@@ -104,6 +105,7 @@ function render() {
 
     // Header: the old vessel picker + broadcast button move in, as they are.
     borrow(byId('vessel-deck-select'), byId('vz-select-slot'));
+    borrow(byId('vessel-finder'), byId('vz-finder-slot')); // search / favorites / faction tabs (combat.js)
     const bc = panel.querySelector('button[onclick*="broadcastVesselStatus"]');
     borrow(bc, byId('vz-broadcast-slot'));
     Object.keys(PLACES).forEach(tab => PLACES[tab]().forEach(n => borrow(n, byId('vz-slot-' + tab))));

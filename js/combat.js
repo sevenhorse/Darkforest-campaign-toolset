@@ -454,12 +454,146 @@ window.broadcastTerminalCargoManifest = async function() {
 window.populateVesselDeckSelect = function() {
     const select = document.getElementById('vessel-deck-select');
     if (!select) return;
+    const prev = select.value;
+    const all = globalShipMarkersCache.filter(m => window.canAccessVesselDeck(m));
+    const shown = window.vesselFinderApply ? window.vesselFinderApply(all) : all;
+    const VF = window.__vf || {};
+    const esc = window.escapeHtml || (x => String(x));
+    const opt = m => `<option value="${m.id}">${window.isVesselFavorite && window.isVesselFavorite(m.id) ? '★ ' : ''}${esc(m.name)}</option>`;
     let html = '';
-    globalShipMarkersCache.forEach(m => {
-        if (!window.canAccessVesselDeck(m)) return;
-        html += `<option value="${m.id}">${m.name}</option>`;
-    });
-    select.innerHTML = html || '<option value="">No accessible vessels found</option>';
+    if (!all.length) html = '<option value="">No accessible vessels found</option>';
+    else if (!shown.length) html = '<option value="">No vessels match</option>';
+    else if (VF.tab === 'all' && window.vesselFactionOf) {
+        // ALL tab: grouped by faction (A-Z), unassigned last.
+        const groups = {};
+        shown.forEach(m => { const f = window.vesselFactionOf(m) || ''; (groups[f] = groups[f] || []).push(m); });
+        const keys = Object.keys(groups).sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+        html = keys.length === 1 && keys[0] === '' ? groups[''].map(opt).join('')
+            : keys.map(k => `<optgroup label="${esc(k || 'Unassigned')}">${groups[k].map(opt).join('')}</optgroup>`).join('');
+    } else html = shown.map(opt).join('');
+    select.innerHTML = html;
+    // Keep the vessel you were on if it is still listed.
+    if (prev && shown.some(m => m.id === prev)) select.value = prev;
+    if (typeof window.renderVesselFinder === 'function') window.renderVesselFinder(all);
+};
+
+/* --- VESSEL FINDER (2026-11-08) ---
+   Search, favorites and faction tabs above the Vessel Deck picker. Faction is
+   ship_markers.faction (free text, carried from ship_templates.faction on
+   deploy). Favorites are per account (vessel_favorites, RLS: own rows only).
+   The current tab and search are a per-device convenience (localStorage).
+   The finder only filters the dropdown; it never changes what a player can
+   access (canAccessVesselDeck runs first). Tabs are built from the vessels
+   this viewer can access, so a player never sees an enemy faction's tab. */
+window.__vf = window.__vf || (() => { let s = null; try { s = JSON.parse(window.safeLocalGet ? window.safeLocalGet('vessel_finder', 'null') : 'null'); } catch (e) {} return Object.assign({ tab: 'all', q: '' }, s || {}); })();
+window.vesselFavoriteIds = window.vesselFavoriteIds || new Set();
+window.vesselFactionOf = function(m) { return String((m && m.faction) || '').trim(); };
+window.isVesselFavorite = function(id) { return window.vesselFavoriteIds.has(id); };
+function vfSave() { try { if (window.safeLocalSet) window.safeLocalSet('vessel_finder', JSON.stringify({ tab: window.__vf.tab, q: window.__vf.q })); } catch (e) {} }
+const vfSort = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
+window.vesselFinderApply = function(list) {
+    const VF = window.__vf; const q = String(VF.q || '').trim().toLowerCase();
+    let out = list.slice();
+    if (VF.tab === 'fav') out = out.filter(m => window.isVesselFavorite(m.id));
+    else if (VF.tab === 'none') out = out.filter(m => !window.vesselFactionOf(m));
+    else if (VF.tab && VF.tab.indexOf('f:') === 0) { const f = VF.tab.slice(2); out = out.filter(m => window.vesselFactionOf(m) === f); }
+    if (q) out = out.filter(m => [m.name, window.vesselFactionOf(m), m.vessel_class, m.is_station ? 'station' : '', m.is_strike_craft ? 'strike craft' : ''].join(' ').toLowerCase().includes(q));
+    return out.sort(vfSort);
+};
+window.loadVesselFavorites = async function() {
+    if (typeof db === 'undefined' || !currentUserId) return;
+    const { data, error } = await db.from('vessel_favorites').select('ship_id').eq('user_id', currentUserId);
+    if (error) return;
+    window.vesselFavoriteIds = new Set((data || []).map(r => r.ship_id));
+    if (document.getElementById('vessel-deck-select')) window.populateVesselDeckSelect();
+};
+window.toggleVesselFavorite = async function(id) {
+    if (!id || !currentUserId) return;
+    const on = window.isVesselFavorite(id);
+    if (on) window.vesselFavoriteIds.delete(id); else window.vesselFavoriteIds.add(id);
+    window.populateVesselDeckSelect();
+    const res = on ? await db.from('vessel_favorites').delete().eq('user_id', currentUserId).eq('ship_id', id)
+                   : await db.from('vessel_favorites').insert({ user_id: currentUserId, ship_id: id });
+    if (res && res.error) { // put it back
+        if (on) window.vesselFavoriteIds.add(id); else window.vesselFavoriteIds.delete(id);
+        window.populateVesselDeckSelect();
+        alert('Could not save the favorite: ' + res.error.message);
+    }
+};
+// After a filter change: rebuild the list; if the selected vessel changed, show it.
+function vfRefresh() {
+    const select = document.getElementById('vessel-deck-select');
+    const before = select ? select.value : '';
+    vfSave(); window.populateVesselDeckSelect();
+    if (select && select.value && select.value !== before) window.renderVesselDeck();
+}
+window.renderVesselFinder = function(all) {
+    const root = document.getElementById('vessel-finder');
+    if (!root) return;
+    const VF = window.__vf; const esc = window.escapeHtml || (x => String(x));
+    all = all || globalShipMarkersCache.filter(m => window.canAccessVesselDeck(m));
+    const counts = {}; let none = 0;
+    all.forEach(m => { const f = window.vesselFactionOf(m); if (f) counts[f] = (counts[f] || 0) + 1; else none++; });
+    const favN = all.filter(m => window.isVesselFavorite(m.id)).length;
+    const factions = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+    // A tab whose faction no longer exists falls back to ALL.
+    if (VF.tab.indexOf('f:') === 0 && !counts[VF.tab.slice(2)]) { VF.tab = 'all'; vfSave(); }
+    if (VF.tab === 'none' && !none) { VF.tab = 'all'; vfSave(); }
+    const tab = (key, label, n) => `<button type="button" class="dz-ftab${VF.tab === key ? ' on' : ''}" role="tab" aria-selected="${VF.tab === key}" data-vftab="${esc(key)}">${esc(label)} <b>${n}</b></button>`;
+    const tabs = [tab('fav', '★ FAVORITES', favN), tab('all', 'ALL', all.length)]
+        .concat(factions.map(f => tab('f:' + f, f.toUpperCase(), counts[f])))
+        .concat(none && factions.length ? [tab('none', 'UNASSIGNED', none)] : []).join('');
+    const select = document.getElementById('vessel-deck-select');
+    const cur = select && select.value;
+    const isDm = currentUserRole === 'dm';
+    if (!root.dataset.built) {
+        root.dataset.built = '1';
+        root.innerHTML = `<div class="vf-row">
+                <label class="dz-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg><input type="search" id="vf-search" placeholder="Search vessels" aria-label="Search vessels" autocomplete="off"></label>
+                <button type="button" class="dz-btn" id="vf-fav-btn"></button>
+                <button type="button" class="dz-btn dim" id="vf-faction-btn" style="display:none;">SET FACTION</button>
+            </div>
+            <div class="vf-row vf-faction-row" id="vf-faction-row" style="display:none;">
+                <input type="text" id="vf-faction-input" list="vf-faction-list" placeholder="Faction (blank = unassigned)" aria-label="Faction name"><datalist id="vf-faction-list"></datalist>
+                <button type="button" class="dz-btn" id="vf-faction-one">THIS VESSEL</button>
+                <button type="button" class="dz-btn" id="vf-faction-shown"></button>
+            </div>
+            <div class="dz-filters vf-tabs" id="vf-tabs" role="tablist" aria-label="Filter vessels"></div>`;
+        const search = root.querySelector('#vf-search');
+        search.value = VF.q || '';
+        search.addEventListener('input', () => { VF.q = search.value; vfRefresh(); });
+        root.querySelector('#vf-tabs').addEventListener('click', e => { const b = e.target.closest('[data-vftab]'); if (!b) return; VF.tab = b.dataset.vftab; vfRefresh(); });
+        root.querySelector('#vf-fav-btn').addEventListener('click', () => { const s = document.getElementById('vessel-deck-select'); if (s && s.value) window.toggleVesselFavorite(s.value); });
+        root.querySelector('#vf-faction-btn').addEventListener('click', () => { const r = document.getElementById('vf-faction-row'); r.style.display = r.style.display === 'none' ? '' : 'none'; window.renderVesselFinder(); });
+        root.querySelector('#vf-faction-one').addEventListener('click', () => { const s = document.getElementById('vessel-deck-select'); if (s && s.value) window.setVesselFaction([s.value], root.querySelector('#vf-faction-input').value); });
+        root.querySelector('#vf-faction-shown').addEventListener('click', () => {
+            const shown = window.vesselFinderApply(globalShipMarkersCache.filter(m => window.canAccessVesselDeck(m)));
+            const val = root.querySelector('#vf-faction-input').value.trim();
+            if (!shown.length || !confirm(`Set the faction of all ${shown.length} listed vessel(s) to "${val || 'unassigned'}"?`)) return;
+            window.setVesselFaction(shown.map(m => m.id), val);
+        });
+    }
+    root.querySelector('#vf-tabs').innerHTML = tabs;
+    const fav = cur && window.isVesselFavorite(cur);
+    const favBtn = root.querySelector('#vf-fav-btn');
+    favBtn.textContent = fav ? '★ FAVORITED' : '☆ FAVORITE';
+    favBtn.setAttribute('aria-pressed', String(!!fav)); favBtn.disabled = !cur;
+    root.querySelector('#vf-faction-btn').style.display = isDm ? '' : 'none';
+    if (!isDm) root.querySelector('#vf-faction-row').style.display = 'none';
+    root.querySelector('#vf-faction-list').innerHTML = Object.keys(counts).concat(window.VESSEL_FACTION_SUGGESTIONS || []).filter((f, i, a) => a.indexOf(f) === i).sort().map(f => `<option value="${esc(f)}">`).join('');
+    const nShown = window.vesselFinderApply(all).length;
+    root.querySelector('#vf-faction-shown').textContent = `ALL ${nShown} LISTED`;
+    if (isDm && cur) { const v = globalShipMarkersCache.find(m => m.id === cur); const inp = root.querySelector('#vf-faction-input'); if (inp && document.activeElement !== inp && root.dataset.factionFor !== cur) { inp.value = window.vesselFactionOf(v); root.dataset.factionFor = cur; } }
+};
+// Faction names offered in the DM's faction box, alongside any already in use.
+window.VESSEL_FACTION_SUGGESTIONS = ['Galactic Human Coalition', 'Jeraptha Republic', 'Sangheili Commonwealth', "Arbiter's Sangheili", 'Roccasta Swarm', 'Vesperans', 'Trisolarans', 'Elders'];
+window.setVesselFaction = async function(ids, faction) {
+    if (currentUserRole !== 'dm' || !ids || !ids.length) return;
+    const val = String(faction || '').trim() || null;
+    const { error } = await db.from('ship_markers').update({ faction: val }).in('id', ids);
+    if (error) { alert('Failed to set faction: ' + error.message); return; }
+    globalShipMarkersCache.forEach(m => { if (ids.includes(m.id)) m.faction = val; });
+    window.populateVesselDeckSelect();
 };
 
 // window.canAccessVesselDeck (below getIffColor): "friendly" mirrors the
@@ -699,6 +833,7 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
 
 // Announces 'vessel-deck-rendered' (js/fleet-v2.js refreshes the restyled header on it).
 window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function() {
+    if (typeof window.renderVesselFinder === 'function') { try { window.renderVesselFinder(); } catch (e) {} }
     // Firing arcs: Arc dropdown in the "Mount New Weapon System" form (kept across re-renders).
     if (typeof window.ensureArcSelect === 'function') { const cur = document.getElementById('new-ship-wpn-arc'); window.ensureArcSelect('new-ship-wpn-loc', 'new-ship-wpn-arc', cur ? cur.value : ''); }
     const select = document.getElementById('vessel-deck-select');
@@ -1292,6 +1427,8 @@ window.resetShipStats = async function(vesselId) {
             </div>
             ${window.renderMediaPickerHtml('maxstats', '', 'Ship image (optional) — upload or paste a link')}
             <div id="maxstats-dm-wrap" style="display:none; margin-top:6px; padding-top:8px; border-top:1px dashed #3c4e36;">
+                <label for="maxstats-faction" style="font-size:9px; color:#c9962f;" title="Groups this vessel into a faction tab in the Vessel Deck finder. Blank = unassigned.">Faction (Vessel Deck tabs)</label>
+                <input type="text" id="maxstats-faction" list="vf-faction-list" placeholder="Unassigned" style="border-color:#c9962f;">
                 <label for="maxstats-iff" style="font-size:9px; color:#ff6b6b;" title="IFF (Identify Friend/Foe) -- controls whether players can see/edit this vessel in their own Vessel Deck. Friendly is visible alongside a player's own ships; Neutral/Hostile/unset stay DM-only. DM-only field.">IFF Designation (DM only)</label>
                 <select id="maxstats-iff" style="border-color:#ff6b6b;">
                     <option value="">-- Unset (DM-only) --</option>
@@ -1331,6 +1468,7 @@ window.resetShipStats = async function(vesselId) {
                 // Read regardless of DM-only visibility: openEditMaxStatsModal pre-fills
                 // these from the vessel, so a non-DM save writes them back unchanged.
                 iff: document.getElementById('maxstats-iff').value || null,
+                faction: document.getElementById('maxstats-faction').value.trim() || null,
                 is_hidden: document.getElementById('maxstats-hidden').checked,
                 ai_controlled: document.getElementById('maxstats-ai-controlled').checked,
                 // Same read-back-unchanged rule as the fields above.
@@ -1387,6 +1525,7 @@ window.resetShipStats = async function(vesselId) {
         cmdSel.innerHTML = typeof window.commanderOptionsHtml === 'function' ? window.commanderOptionsHtml(vessel.commander_profile_id || '') : '<option value="">-- No commander --</option>';
         if (vessel.commander_profile_id && !cmdSel.value) cmdSel.insertAdjacentHTML('beforeend', `<option value="${vessel.commander_profile_id}" selected>(unknown character)</option>`);
         document.getElementById('maxstats-iff').value = vessel.iff || '';
+        document.getElementById('maxstats-faction').value = vessel.faction || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
         document.getElementById('maxstats-galaxy-visible').checked = !vessel.hide_from_galaxy_map;
