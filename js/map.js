@@ -93,7 +93,33 @@ function systemCanHaveBodies(s) {
     return !!(s.custom_bodies && s.custom_bodies.length > 0);
 }
 window.getSystemBodies = function(system) { return applyPlanetaryOverrides(getSystemBodiesRaw(system)); };
+// Generated (or custom) bodies, plus any DM-added extras for a procedural
+// system (system_extra_bodies, loaded in js/db.js). Custom systems hold their
+// extras in custom_bodies, so they are never given these.
+const extraBodiesMemo = {};
 function getSystemBodiesRaw(system) {
+    const base = getSystemBodiesBase(system);
+    if (system.custom_bodies && system.custom_bodies.length > 0) return base;
+    if (system.type === 'Nebula') return base;
+    const extra = (window.globalSystemExtraBodiesCache || {})[system.id];
+    if (!extra || !extra.length) return base;
+    // Memo on the cache array itself: a reload swaps the array and rebuilds;
+    // otherwise callers get the same objects every frame, like generated bodies.
+    const m = extraBodiesMemo[system.id];
+    if (m && m.src === extra && m.base === base) return m.bodies;
+    let r = base.reduce((mx, b) => Math.max(mx, b.radius || 0), system.type === 'Black Hole' ? 40 : 15);
+    const added = extra.map((b, k) => {
+        r = b.radius ? Math.max(r, b.radius) : r + 40;
+        return { isStar: false, size: 1.2, type: 'Terrestrial', color: '#4287f5', gravity: '1.0 G', atmosphere: 'Unknown', resources: 'Unknown Scans',
+            ...b, id: b.id || `${system.id}-x${k}`, radius: b.radius || r,
+            baseAngle: b.baseAngle != null ? b.baseAngle : 0.7 + k * 2.1,
+            speed: b.speed || (0.0002 / (base.length + k + 1)), parentSystem: system };
+    });
+    const bodies = base.concat(added);
+    extraBodiesMemo[system.id] = { src: extra, base, bodies };
+    return bodies;
+}
+function getSystemBodiesBase(system) {
     // custom_bodies must be checked BEFORE the Nebula short-circuit: a custom
     // star with the Dense Nebula hazard also gets type 'Nebula' (derived from
     // hazard in loadGalaxyData). Procedural nebulae never have custom_bodies.

@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-06.01';
+window.DARKFOREST_BUILD = '2026-11-08.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -712,6 +712,7 @@ async function fetchUserProfile(user) {
     initPersonalLabelsRealtimeChannel();
     initHyperlanesRealtimeChannel();
     initSystemOwnershipRealtimeChannel();
+    initSystemExtraBodiesRealtimeChannel();
     if (typeof initBattleEncountersRealtimeChannel === 'function') initBattleEncountersRealtimeChannel();
     if (typeof initBattlefieldSalvageRealtimeChannel === 'function') initBattlefieldSalvageRealtimeChannel();
     if (typeof initSavedFleetsRealtimeChannel === 'function') initSavedFleetsRealtimeChannel();
@@ -742,6 +743,7 @@ async function fetchUserProfile(user) {
     if (typeof loadPlanetaryModifiers === 'function') loadPlanetaryModifiers();
     if (typeof loadPersonalLabels === 'function') loadPersonalLabels();
     loadSystemOwnershipOverrides();
+    loadSystemExtraBodies();
     if (typeof loadBattleEncounters === 'function') loadBattleEncounters();
     if (typeof loadBattlefieldSalvage === 'function') loadBattlefieldSalvage();
     if (typeof loadSavedFleets === 'function') loadSavedFleets();
@@ -927,6 +929,21 @@ async function loadSystemOwnershipOverrides() {
     if (typeof window.applySystemOwnershipOverrides === 'function') window.applySystemOwnershipOverrides();
     if (window.selectedTarget && window.selectedTarget.type === 'star' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
 }
+
+// Extra planets for PROCEDURAL systems (system_extra_bodies). A procedural
+// system has no star_systems row to hold custom_bodies, so a planet the DM
+// adds to one (e.g. the Aumari world moved into Arm Gamma-3098) lives here.
+// getSystemBodiesRaw (js/map.js) appends them after the generated bodies;
+// ids default to <system_id>-x<index> so planetary_modifiers can override them.
+window.globalSystemExtraBodiesCache = {}; // system_id -> [body, ...]
+async function loadSystemExtraBodies() {
+    const { data, error } = await db.from('system_extra_bodies').select('*');
+    if (error) return; // keep the last good cache
+    window.globalSystemExtraBodiesCache = {};
+    if (data) data.forEach(row => { if (Array.isArray(row.bodies) && row.bodies.length) window.globalSystemExtraBodiesCache[row.system_id] = row.bodies; });
+    if (window.selectedTarget && window.selectedTarget.type === 'star' && typeof window.renderHUDTelemetry === 'function') window.renderHUDTelemetry();
+}
+window.loadSystemExtraBodies = loadSystemExtraBodies;
 
 async function loadCodexEntries() {
     const { data } = await db.from('codex_entries').select('*').order('created_at', { ascending: false });
@@ -1209,6 +1226,13 @@ function initSystemOwnershipRealtimeChannel() {
         .subscribe();
 }
 
+let systemExtraBodiesRealtimeChannel = null;
+function initSystemExtraBodiesRealtimeChannel() {
+    systemExtraBodiesRealtimeChannel = db.channel('system_extra_bodies_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'system_extra_bodies' }, () => { loadSystemExtraBodies(); })
+        .subscribe();
+}
+
 /* --- HYPERLANES: REAL-TIME SYNC --- */
 let hyperlanesRealtimeChannel = null;
 function initHyperlanesRealtimeChannel() {
@@ -1345,7 +1369,7 @@ window.exportCampaignBackup = function() {
 window.FULL_BACKUP_TABLE_GROUPS = [
     ['profiles'],
     ['campaign_objectives', 'perk_definitions', 'augment_definitions', 'gear_definitions', 'hazard_definitions',
-     'hyperlanes', 'star_systems', 'system_ownership_overrides', 'territories', 'planetary_modifiers', 'personal_labels',
+     'hyperlanes', 'star_systems', 'system_ownership_overrides', 'system_extra_bodies', 'territories', 'planetary_modifiers', 'personal_labels',
      'campaign_clock', 'saved_fleets', 'manufacturing_blueprints', 'strike_craft_templates', 'ship_templates',
      'codex_entries', 'characters', 'colonies', 'battle_encounters', 'chat_logs', 'player_notes',
      'cargo_item_catalog', // no table references it
@@ -1368,6 +1392,7 @@ window.FULL_BACKUP_PK_COLUMN = {
     codex_dm_notes: 'entry_id',
     planetary_modifiers: 'body_id',
     system_ownership_overrides: 'system_id',
+    system_extra_bodies: 'system_id',
     app_settings: 'feature_key'
 };
 // Tables with a column that references another row in the SAME table.
