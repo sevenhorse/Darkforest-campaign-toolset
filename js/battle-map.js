@@ -647,14 +647,20 @@ function battleTokenHpColor(vessel) {
 }
 
 /* Token border color by faction, from the viewer's point of view: own ship
-   cyan, another player's green, DM/NPC red. "Player-owned" = any owner
+   cyan, another player's green; DM/NPC ships by combat side (allied green,
+   neutral amber, hostile red). "Player-owned" = any owner
    profile with role !== 'dm' (the same test used app-wide). The DM sees
    only green/red. */
 function battleTokenFactionColor(vessel) {
     if (!vessel) return '#6b826a';
     const ownerProfs = window.vesselOwnerIds(vessel).map(id => (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === id)).filter(Boolean);
     const isPlayerOwned = ownerProfs.some(p => p.role !== 'dm');
-    if (!isPlayerOwned) return '#ff3333';           // DM/NPC-owned (or unowned) — hostile/neutral
+    if (!isPlayerOwned) {
+        // DM/NPC ship: colour by combat side (2026-11-10, with sides-by-IFF). It used to be
+        // red for every NPC, so an allied fleet looked hostile. Same palette as before.
+        const side = typeof window.vesselCombatSide === 'function' ? window.vesselCombatSide(vessel) : 'hostile';
+        return side === 'players' ? '#00e5a3' : side === 'neutral' ? '#c9962f' : '#ff3333'; // allied NPC green, neutral amber, hostile red
+    }
     if (window.vesselHasOwner(vessel, currentUserId)) return '#00e1ff'; // I'm one of its owners
     return '#00e5a3';                                // another player's vessel (I'm not a co-owner) — ally
 }
