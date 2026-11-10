@@ -223,7 +223,24 @@ window.stagerUpdateEntity = function(key, field, value) {
     else if (field === 'iff') { if (value === '__template') delete e.overrides.iff; else e.overrides.iff = value || null; }
     else if (field === 'is_hidden') e.overrides.is_hidden = !!value;
     else if (field === 'ai_controlled') { if (value === '__template') delete e.overrides.ai_controlled; else e.overrides.ai_controlled = value === 'on'; }
+    else if (field === 'faction') { const f = String(value || '').trim(); if (f) e.overrides.faction = f; else delete e.overrides.faction; } // 2026-11-10: Vessel Deck faction tab for the spawned ship
     markDirty(); renderStager();
+};
+// Gives this ship's faction to every template ship in the preset with the same
+// friend/foe setting (two fleets built from the same designs: set one ship per side).
+window.stagerFactionForSide = function(key) {
+    const e = stagerPreset && stagerPreset.data.entities.find(x => x.key === key);
+    if (!e || e.source.kind !== 'template') return;
+    const side = describeEntity(e).iff || null, f = (e.overrides && e.overrides.faction) || '';
+    let n = 0;
+    stagerPreset.data.entities.forEach(x => {
+        if (x === e || x.source.kind !== 'template' || (describeEntity(x).iff || null) !== side) return;
+        x.overrides = x.overrides || {};
+        if (f) x.overrides.faction = f; else delete x.overrides.faction;
+        n++;
+    });
+    markDirty(); renderStager();
+    if (typeof window.showToast === 'function') window.showToast(`Faction ${f ? '"' + f + '"' : 'cleared'} on ${n} other ${side || 'unset'} ship${n === 1 ? '' : 's'}.`);
 };
 window.stagerRemoveEntity = function(key) {
     if (!stagerPreset) return;
@@ -252,6 +269,7 @@ window.stagerRemoveWave = function(id) {
 };
 
 function renderStager() {
+    if (typeof window.refreshFactionSuggestions === 'function') window.refreshFactionSuggestions(); // faction box suggestions
     const ov = ensureStagerOverlay();
     if (ov.style.display === 'none') return;
     const p = stagerPreset;
@@ -305,7 +323,10 @@ function renderStager() {
                     <option value="__template" ${ov.ai_controlled === undefined ? 'selected' : ''}>Template default</option>
                     <option value="on" ${ov.ai_controlled === true ? 'selected' : ''}>🤖 AI controlled</option>
                     <option value="off" ${ov.ai_controlled === false ? 'selected' : ''}>Manual</option>
-                </select>` : '<div style="font-size:9px; color:#6b826a; margin:4px 0;">Existing ship — it keeps its own stats and owners; only its starting spot (and hidden) come from the preset.</div>'}
+                </select>
+                <label for="stager-e-faction" style="font-size:9px; color:#6b826a;" title="Which Vessel Deck faction tab the spawned ship lands in. Blank = the design's own faction.">Faction (blank = design default${(templateById(selE.source.template_id) || {}).faction ? ': ' + presetEsc((templateById(selE.source.template_id) || {}).faction) : ''})</label>
+                <input type="text" id="stager-e-faction" list="vf-faction-list" value="${presetEsc(ov.faction || '')}" placeholder="Unassigned" onchange="window.stagerUpdateEntity('${selE.key}','faction',this.value)" style="font-size:10px;">
+                <button onclick="window.stagerFactionForSide('${selE.key}')" style="font-size:9px; margin-top:4px;" title="Copy this faction to every other ship in the preset with the same friend / foe setting">SAME FACTION FOR ALL ${presetEsc(String(d.iff || 'unset').toUpperCase())} SHIPS</button>` : '<div style="font-size:9px; color:#6b826a; margin:4px 0;">Existing ship — it keeps its own stats and owners; only its starting spot (and hidden) come from the preset.</div>'}
                 <label for="stager-e-hidden" style="font-size:10px; display:flex; align-items:center; gap:4px; margin-top:6px; cursor:pointer;"><input type="checkbox" id="stager-e-hidden" ${ov.is_hidden ? 'checked' : ''} onchange="window.stagerUpdateEntity('${selE.key}','is_hidden',this.checked)" style="margin:0; width:auto;"> 🫥 Hidden from players at launch</label>
                 <button class="layer-del" onclick="window.stagerRemoveEntity('${selE.key}')" style="margin-top:8px; font-size:9px;">✕ REMOVE FROM PRESET</button>`;
         }
@@ -436,6 +457,7 @@ async function deployPresetEntities(entities, waveId) {
             if (ov.iff !== undefined) overrides.iff = ov.iff;
             if (ov.is_hidden) overrides.is_hidden = true;
             if (ov.ai_controlled !== undefined) overrides.ai_controlled = !!ov.ai_controlled;
+            if (ov.faction) overrides.faction = String(ov.faction).trim();
             const id = await window.deployShipTemplate(e.source.template_id, { silent: true, overrides });
             if (id) placed.push({ id, pos }); else skipped.push(templateById(e.source.template_id).name);
         } else {
