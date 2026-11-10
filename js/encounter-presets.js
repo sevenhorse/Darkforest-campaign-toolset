@@ -222,6 +222,7 @@ window.stagerUpdateEntity = function(key, field, value) {
     if (field === 'wave') e.wave = Math.max(1, parseInt(value, 10) || 1);
     else if (field === 'iff') { if (value === '__template') delete e.overrides.iff; else e.overrides.iff = value || null; }
     else if (field === 'is_hidden') e.overrides.is_hidden = !!value;
+    else if (field === 'npc_ally') { if (value) e.overrides.npc_ally = true; else delete e.overrides.npc_ally; }
     else if (field === 'ai_controlled') { if (value === '__template') delete e.overrides.ai_controlled; else e.overrides.ai_controlled = value === 'on'; }
     else if (field === 'faction') { const f = String(value || '').trim(); if (f) e.overrides.faction = f; else delete e.overrides.faction; } // 2026-11-10: Vessel Deck faction tab for the spawned ship
     markDirty(); renderStager();
@@ -237,10 +238,11 @@ window.stagerFactionForSide = function(key) {
         if (x === e || x.source.kind !== 'template' || (describeEntity(x).iff || null) !== side) return;
         x.overrides = x.overrides || {};
         if (f) x.overrides.faction = f; else delete x.overrides.faction;
+        if (e.overrides && e.overrides.npc_ally) x.overrides.npc_ally = true; else delete x.overrides.npc_ally;
         n++;
     });
     markDirty(); renderStager();
-    if (typeof window.showToast === 'function') window.showToast(`Faction ${f ? '"' + f + '"' : 'cleared'} on ${n} other ${side || 'unset'} ship${n === 1 ? '' : 's'}.`);
+    if (typeof window.showToast === 'function') window.showToast(`Faction ${f ? '"' + f + '"' : 'cleared'}${e.overrides && e.overrides.npc_ally ? ' + Allied NPC' : ''} on ${n} other ${side || 'unset'} ship${n === 1 ? '' : 's'}.`);
 };
 window.stagerRemoveEntity = function(key) {
     if (!stagerPreset) return;
@@ -326,7 +328,8 @@ function renderStager() {
                 </select>
                 <label for="stager-e-faction" style="font-size:9px; color:#6b826a;" title="Which Vessel Deck faction tab the spawned ship lands in. Blank = the design's own faction.">Faction (blank = design default${(templateById(selE.source.template_id) || {}).faction ? ': ' + presetEsc((templateById(selE.source.template_id) || {}).faction) : ''})</label>
                 <input type="text" id="stager-e-faction" list="vf-faction-list" value="${presetEsc(ov.faction || '')}" placeholder="Unassigned" onchange="window.stagerUpdateEntity('${selE.key}','faction',this.value)" style="font-size:10px;">
-                <button onclick="window.stagerFactionForSide('${selE.key}')" style="font-size:9px; margin-top:4px;" title="Copy this faction to every other ship in the preset with the same friend / foe setting">SAME FACTION FOR ALL ${presetEsc(String(d.iff || 'unset').toUpperCase())} SHIPS</button>` : '<div style="font-size:9px; color:#6b826a; margin:4px 0;">Existing ship — it keeps its own stats and owners; only its starting spot (and hidden) come from the preset.</div>'}
+                <button onclick="window.stagerFactionForSide('${selE.key}')" style="font-size:9px; margin-top:4px;" title="Copy this ship's faction and Allied NPC setting to every other ship in the preset with the same friend / foe setting">SAME FACTION + ALLIED FLAG FOR ALL ${presetEsc(String(d.iff || 'unset').toUpperCase())} SHIPS</button>` : '<div style="font-size:9px; color:#6b826a; margin:4px 0;">Existing ship — it keeps its own stats and owners; only its starting spot (and hidden) come from the preset.</div>'}
+                ${selE.source.kind === 'template' ? `<label for="stager-e-ally" style="font-size:10px; display:flex; align-items:center; gap:4px; margin-top:6px; cursor:pointer;" title="With Friendly: fights on the players' side, but players cannot open it in their Vessel Deck."><input type="checkbox" id="stager-e-ally" ${ov.npc_ally ? 'checked' : ''} onchange="window.stagerUpdateEntity('${selE.key}','npc_ally',this.checked)" style="margin:0; width:auto;"> 🤝 Allied NPC (players can't open it)</label>` : ''}
                 <label for="stager-e-hidden" style="font-size:10px; display:flex; align-items:center; gap:4px; margin-top:6px; cursor:pointer;"><input type="checkbox" id="stager-e-hidden" ${ov.is_hidden ? 'checked' : ''} onchange="window.stagerUpdateEntity('${selE.key}','is_hidden',this.checked)" style="margin:0; width:auto;"> 🫥 Hidden from players at launch</label>
                 <button class="layer-del" onclick="window.stagerRemoveEntity('${selE.key}')" style="margin-top:8px; font-size:9px;">✕ REMOVE FROM PRESET</button>`;
         }
@@ -458,6 +461,7 @@ async function deployPresetEntities(entities, waveId) {
             if (ov.is_hidden) overrides.is_hidden = true;
             if (ov.ai_controlled !== undefined) overrides.ai_controlled = !!ov.ai_controlled;
             if (ov.faction) overrides.faction = String(ov.faction).trim();
+            if (ov.npc_ally) overrides.npc_ally = true;
             const id = await window.deployShipTemplate(e.source.template_id, { silent: true, overrides });
             if (id) placed.push({ id, pos }); else skipped.push(templateById(e.source.template_id).name);
         } else {

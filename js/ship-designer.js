@@ -266,6 +266,7 @@ window.deployShipTemplate = async function(id, opts) {
         // STATS modal (js/combat.js), independent of the source template.
         iff: t.iff || null,
         faction: t.faction || null, // 2026-11-08: Vessel Deck faction tabs, same carry-from-template pattern
+        npc_ally: !!t.npc_ally, // 2026-11-10: allied NPC (fights with the players, not openable by them)
         // DM-AI-for-NPCs build (this session): same carry-from-template
         // pattern as vessel_class/iff just above -- also still editable
         // afterward per-deployment via the Vessel Deck's EDIT BASE STATS
@@ -292,7 +293,12 @@ window.deployShipTemplate = async function(id, opts) {
     // opts.overrides (Encounter Presets): per-deployment field overrides
     // (iff / is_hidden / ai_controlled / hide_from_galaxy_map) written in the
     // same insert, so a hidden ship is never briefly visible.
-    if (opts.overrides && typeof opts.overrides === 'object') Object.assign(payload, opts.overrides);
+    if (opts.overrides && typeof opts.overrides === 'object') {
+        Object.assign(payload, opts.overrides);
+        // 2026-11-10: a friend/foe override also sets the token colour (it used to keep
+        // the design's colour, so two fleets built from one design looked the same).
+        if (opts.overrides.iff !== undefined && opts.overrides.color === undefined && !t.color && typeof window.getIffColor === 'function') payload.color = window.getIffColor(opts.overrides.iff);
+    }
     const { data, error } = await db.from('ship_markers').insert(payload).select().single();
     if (error) { alert("Failed to deploy vessel: " + error.message); return null; }
     // opts.silent (Encounter Presets, 2026-10-01): a preset launch deploys
@@ -369,6 +375,9 @@ window.deployShipTemplate = async function(id, opts) {
                 <label for="tmpl-edit-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer;" title="DM-AI-for-NPCs: when ON, a deployed copy of this vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round. DM-only field.">
                     <input type="checkbox" id="tmpl-edit-ai-controlled" style="margin:0;"> 🤖 AI Controlled (DM only)
                 </label>
+                <label for="tmpl-edit-npc-ally" style="font-size:10px; color:#00e5a3; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:6px;" title="Allied NPC: with Friendly IFF it still fights on the players' side, but players cannot open it (Vessel Deck, cargo, transfers). Leave off for a friendly ship the players may run.">
+                    <input type="checkbox" id="tmpl-edit-npc-ally" style="margin:0;"> 🤝 Allied NPC (players can't open it)
+                </label>
             </div>
             <div style="display:flex; gap:10px; margin-top:14px;">
                 <button id="tmpl-edit-cancel-btn" style="flex:1; margin-top:0;">CANCEL</button>
@@ -397,6 +406,7 @@ window.deployShipTemplate = async function(id, opts) {
                 iff: document.getElementById('tmpl-edit-iff').value || null,
                 faction: document.getElementById('tmpl-edit-faction').value.trim() || null,
                 ai_controlled: document.getElementById('tmpl-edit-ai-controlled').checked,
+                npc_ally: document.getElementById('tmpl-edit-npc-ally').checked,
                 image_url: window.getMediaPickerValue('tmpl')
             };
             // Directional armor (Phase 5): per-side max (only while the switch is on).
@@ -441,6 +451,7 @@ window.deployShipTemplate = async function(id, opts) {
         const aiWrap = document.getElementById('tmpl-edit-ai-wrap');
         if (aiWrap) aiWrap.style.display = (currentUserRole === 'dm') ? 'block' : 'none';
         document.getElementById('tmpl-edit-ai-controlled').checked = !!t.ai_controlled;
+        document.getElementById('tmpl-edit-npc-ally').checked = !!t.npc_ally;
         document.getElementById('tmpl-edit-station').checked = !!t.is_station;
         window.setMediaPickerValue('tmpl', t.image_url || '');
         if (typeof window.ensureModelPicker === 'function') window.ensureModelPicker('tmpl', t); // Phase 6c
@@ -1111,6 +1122,9 @@ window.renderSecretRepoEditorPanel = function() {
             <label for="repo-edit-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="DM-AI-for-NPCs: when ON, a deployed copy of this vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round.">
                 <input type="checkbox" id="repo-edit-ai-controlled" ${t.ai_controlled ? 'checked' : ''} style="margin:0;"> 🤖 AI Controlled
             </label>
+            <label for="repo-edit-npc-ally" style="font-size:10px; color:#00e5a3; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:6px;" title="Allied NPC: with Friendly IFF it still fights on the players' side, but players cannot open it (Vessel Deck, cargo, transfers). Leave off for a friendly ship the players may run.">
+                <input type="checkbox" id="repo-edit-npc-ally" ${t.npc_ally ? 'checked' : ''} style="margin:0;"> 🤝 Allied NPC (players can't open it)
+            </label>
             ${window.renderMediaPickerHtml('repo', t.image_url || '', 'Ship image (optional) — upload or paste a link')}
 
             <h4 style="margin:16px 0 6px 0; border-bottom:1px solid #3c4e36; padding-bottom:4px; color:#ff6b6b;">Base Stats (design max values)</h4>
@@ -1265,6 +1279,7 @@ window.saveSecretRepoIdentityStats = async function() {
         iff: document.getElementById('repo-edit-iff').value || null,
         faction: (document.getElementById('repo-edit-faction') || { value: '' }).value.trim() || null,
         ai_controlled: document.getElementById('repo-edit-ai-controlled').checked,
+        npc_ally: !!(document.getElementById('repo-edit-npc-ally') || {}).checked,
         image_url: window.getMediaPickerValue('repo')
     };
     // Directional armor (Phase 5): per-side max (only while the switch is on).

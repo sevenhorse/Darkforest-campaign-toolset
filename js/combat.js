@@ -634,7 +634,10 @@ window.canAccessVesselDeck = function(vessel) {
     if (currentUserRole === 'dm') return true;
     if (typeof window.isVesselVisibleToMe === 'function' && !window.isVesselVisibleToMe(vessel)) return false;
     if (window.vesselHasOwner(vessel, currentUserId)) return true;
-    if (vessel.iff === 'friendly') return true;
+    // Friendly NPCs are open to players, unless flagged npc_ally (DM 2026-11-10:
+    // "allied but not listed" -- an allied fleet fights with the players without
+    // filling their Vessel Deck). A player-owned ship is never affected.
+    if (vessel.iff === 'friendly' && !vessel.npc_ally) return true;
     const ownerProfs = window.vesselOwnerIds(vessel).map(id => (typeof allProfiles !== 'undefined' ? allProfiles : []).find(p => p.id === id)).filter(Boolean);
     return ownerProfs.some(p => p.role !== 'dm');
 };
@@ -1460,6 +1463,9 @@ window.resetShipStats = async function(vesselId) {
                 <label for="maxstats-ai-controlled" style="font-size:10px; color:#ff6b6b; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="DM-AI-for-NPCs: when ON, this deployed vessel fights on its own during Advance Round -- attacks the closest enemy in range, closes distance if needed, and re-prioritizes onto whoever hit it hardest this round. DM-only field.">
                     <input type="checkbox" id="maxstats-ai-controlled" style="margin:0;"> 🤖 AI Controlled — DM only
                 </label>
+                <label for="maxstats-npc-ally" style="font-size:10px; color:#00e5a3; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="Allied NPC: with Friendly IFF it still fights on the players' side, but players cannot open it (Vessel Deck, cargo, transfers). Leave off for a friendly ship the players may run.">
+                    <input type="checkbox" id="maxstats-npc-ally" style="margin:0;"> 🤝 Allied NPC (players can't open it) — DM only
+                </label>
                 <label for="maxstats-galaxy-visible" style="font-size:10px; color:#00e1ff; display:flex; align-items:center; gap:4px; cursor:pointer; margin-top:8px;" title="Ships deployed from the Battle Map (and encounter presets / hangar-launched strike craft) are Battle-Map-only. Tick this to put the ship on the galaxy map too -- e.g. a captured NPC you want to keep. It appears at its last galaxy position. DM-only field.">
                     <input type="checkbox" id="maxstats-galaxy-visible" style="margin:0;"> 🌌 Show on galaxy map — DM only
                 </label>
@@ -1489,6 +1495,7 @@ window.resetShipStats = async function(vesselId) {
                 faction: document.getElementById('maxstats-faction').value.trim() || null,
                 is_hidden: document.getElementById('maxstats-hidden').checked,
                 ai_controlled: document.getElementById('maxstats-ai-controlled').checked,
+                npc_ally: document.getElementById('maxstats-npc-ally').checked,
                 // Same read-back-unchanged rule as the fields above.
                 hide_from_galaxy_map: !document.getElementById('maxstats-galaxy-visible').checked,
                 image_url: window.getMediaPickerValue('maxstats'),
@@ -1547,6 +1554,7 @@ window.resetShipStats = async function(vesselId) {
         document.getElementById('maxstats-faction').value = vessel.faction || '';
         document.getElementById('maxstats-hidden').checked = !!vessel.is_hidden;
         document.getElementById('maxstats-ai-controlled').checked = !!vessel.ai_controlled;
+        document.getElementById('maxstats-npc-ally').checked = !!vessel.npc_ally;
         document.getElementById('maxstats-galaxy-visible').checked = !vessel.hide_from_galaxy_map;
         window.setMediaPickerValue('maxstats', vessel.image_url || '');
         if (typeof window.ensureModelPicker === 'function') window.ensureModelPicker('maxstats', vessel);
