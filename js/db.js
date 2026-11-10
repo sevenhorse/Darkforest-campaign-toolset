@@ -1391,9 +1391,12 @@ window.exportCampaignBackup = function() {
        becomes an orphan row; this client can't touch auth.users.
      - Needs the typed phrase RESTORE FULL CAMPAIGN plus a confirm modal.
      - Chat logs and player notes are included.
-   Not covered: the abandoned tables (celestial_bodies, stations,
-   explored_sectors, campaign_codex) and the music-tracks Storage bucket
-   (re-upload by hand via the Supabase dashboard if lost).
+   Not covered: the tables in FULL_BACKUP_SKIPPED_TABLES (each with its reason)
+   and the Storage buckets (re-upload by hand via the Supabase dashboard if lost).
+   EVERY table the app reads or writes must be in FULL_BACKUP_TABLE_GROUPS or
+   in FULL_BACKUP_SKIPPED_TABLES: harness block #94 fails otherwise. (Found
+   2026-11-10: battle_maps, session_timeline, the deck tables and the route
+   discovery tables had been added to the app but never to the backup.)
 
    FULL_BACKUP_TABLE_GROUPS is ordered by FK dependency: a group only
    references earlier groups. INSERT runs in this order, DELETE in reverse,
@@ -1410,15 +1413,30 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      'character_personal_log', // opt-in Dossier tracker; RLS = owner or DM (a DM backup sees every row)
      'app_settings', 'encounter_presets',
      'scene_maps', // Scene Map scenes (marks live inside the row)
-     'scene_object_presets'], // the DM's saved Scene Map objects
+     'scene_object_presets', // the DM's saved Scene Map objects
+     'battle_maps', // saved Battle Map terrain; encounter_presets point at these by id (no FK)
+     'deck_plans', 'deck_fights', // boarding: saved deck layouts and fights
+     'fow_reset_state', 'hyperlane_discovery'], // fog-of-war epoch + the routes the crew has found in it
     ['ship_markers', 'system_hazards',
-     'codex_links', 'codex_dm_notes'], // children of codex_entries; RLS DM only
+     'codex_links', 'codex_dm_notes', // children of codex_entries; RLS DM only
+     'session_timeline'], // DM marks; references profiles + codex_entries
     // battle_tokens / battle_events (undo log) / battle_reinforcements are children of battle_encounters.
     // scene_tokens are children of scene_maps.
-    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events', 'battle_reinforcements', 'scene_tokens'],
+    // deck_tokens are children of deck_fights.
+    ['fleet_groups', 'manufacturing_orders', 'battlefield_salvage', 'combat_tracker', 'battle_tokens', 'battle_events', 'battle_reinforcements', 'scene_tokens', 'deck_tokens'],
     ['character_arsenal', 'character_perks', 'character_augments', 'character_gear', 'character_skills']
 ];
-// Primary key column per table (default 'id'). The wipe step deletes every
+// Tables deliberately left out of the backup, each with its reason.
+window.FULL_BACKUP_SKIPPED_TABLES = {
+    codex_reads: 'per-player "have I read this" marks; RLS lets each user touch only their own rows, so a DM restore could not write them',
+    vessel_favorites: 'per-player Vessel Deck stars; same own-rows-only rule',
+    celestial_bodies: 'abandoned (planets live in star_systems.custom_bodies)',
+    stations: 'abandoned',
+    explored_sectors: 'abandoned',
+    campaign_codex: 'abandoned (replaced by codex_entries)'
+};
+// Primary key column per table (default 'id'). For a composite key any one
+// NOT NULL key column works (the wipe only needs "every row"). The wipe step deletes every
 // row with `.not(pkCol, 'is', null)`, which works for any PK type.
 window.FULL_BACKUP_PK_COLUMN = {
     character_skills: 'character_id',
@@ -1427,6 +1445,7 @@ window.FULL_BACKUP_PK_COLUMN = {
     planetary_modifiers: 'body_id',
     system_ownership_overrides: 'system_id',
     system_extra_bodies: 'system_id',
+    hyperlane_discovery: 'node_key', // composite PK (node_key, epoch)
     app_settings: 'feature_key'
 };
 // Tables with a column that references another row in the SAME table.
