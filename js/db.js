@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-10.04';
+window.DARKFOREST_BUILD = '2026-11-10.05';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -575,6 +575,8 @@ if (window.supabase) {
     const MERGE = { ship_markers: true, battle_tokens: true };
     const B = window.__dfBatch = { depth: 0, pending: { ship_markers: new Map(), battle_tokens: new Map() }, chat: [], stats: { merged: 0, sent: 0 } };
     const OK = { data: null, error: null };
+    const newUuid = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
     const replay = (table, calls) => calls.reduce((q, [m, args]) => q[m](...args), realFrom(table));
     async function flushTable(table) {
         const errors = [];
@@ -656,9 +658,21 @@ if (window.supabase) {
                 map.set(id, { ...(map.get(id) || {}), ...calls[0][1][0] });
                 return OK;
             }
-            if (table === 'chat_logs' && calls.length === 1 && calls[0][0] === 'insert' && calls[0][1][0]) {
+            // chat: insert(row), optionally followed by .select() and .single()/.maybeSingle()
+            // (broadcastRoll does that to show the roll locally straight away).
+            if (table === 'chat_logs' && calls[0] && calls[0][0] === 'insert' && calls[0][1][0] && calls.slice(1).every(c => ['select', 'single', 'maybeSingle'].includes(c[0]))) {
                 const rows = Array.isArray(calls[0][1][0]) ? calls[0][1][0] : [calls[0][1][0]];
-                if (rows.every(r => r && typeof r === 'object' && r.created_at === undefined && r.id === undefined)) { rows.forEach(r => B.chat.push({ ...r })); return OK; }
+                if (rows.every(r => r && typeof r === 'object' && r.created_at === undefined && r.id === undefined)) {
+                    const wantsRows = calls.some(c => c[0] === 'select'), one = calls.some(c => c[0] === 'single' || c[0] === 'maybeSingle');
+                    if (!wantsRows) { rows.forEach(r => B.chat.push({ ...r })); return OK; }
+                    // The caller wants the saved row back: give each row its id now, so the copy
+                    // shown locally and the row that arrives from the server are the same message.
+                    const made = rows.map(r => ({ ...r, id: newUuid() }));
+                    made.forEach(r => B.chat.push({ ...r }));
+                    const nowIso = new Date().toISOString();
+                    const back = made.map(r => ({ message_type: 'text', recipient_id: null, roll_data: null, ...r, created_at: nowIso }));
+                    return { data: one ? back[0] : back, error: null };
+                }
             }
             const errs = await flushTable(table); // keep order, and let reads see pending values
             if (errs.length) console.error('withWriteBatch: flush before a direct call failed', errs);
