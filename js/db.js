@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-08.05';
+window.DARKFOREST_BUILD = '2026-11-10.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -550,6 +550,138 @@ if (window.supabase) {
 } else {
     console.error("CRITICAL ERROR: Supabase CDN failed to load. Check internet connection or AdBlockers.");
 }
+
+/* WRITE BATCHING (2026-11-10): makes a big AI round fast.
+   An AI round used to send one database request per shot, per move and per
+   chat line, one after another (about 450 for a 50-ship fight), and every
+   ship_markers write makes every client reload the fleet.
+   window.withWriteBatch(fn) runs fn with those writes held back, then sends
+   them together when fn finishes:
+     - ship_markers / battle_tokens: `update(patch).eq('id', x)` calls are
+       merged per row (later values win) and sent once per row, in parallel.
+     - chat_logs: `insert(row)` calls are sent as ONE ordered call
+       (df_chat_bulk, which spaces the lines 1 ms apart on the server clock).
+   Everything else goes straight through, unchanged. Any other kind of call on
+   a batched table (a select, a delete, an insert of tokens) first sends what
+   is pending for that table, so reads always see the latest values and the
+   order of writes is kept. The code inside fn does not change at all: it
+   still writes `await db.from(...)...` and gets `{ error: null }` back.
+   Only window.processBattleRoundAutomations uses this (js/battle-automation.js).
+   Switch 'write_batching' (default ON; set its mode to 'off' to go back to
+   one request per write if a problem ever shows up). */
+(function () {
+    if (!db) return;
+    const realFrom = db.from.bind(db);
+    const MERGE = { ship_markers: true, battle_tokens: true };
+    const B = window.__dfBatch = { depth: 0, pending: { ship_markers: new Map(), battle_tokens: new Map() }, chat: [], stats: { merged: 0, sent: 0 } };
+    const OK = { data: null, error: null };
+    const replay = (table, calls) => calls.reduce((q, [m, args]) => q[m](...args), realFrom(table));
+    async function flushTable(table) {
+        const errors = [];
+        if (MERGE[table]) {
+            const rows = Array.from(B.pending[table].entries());
+            B.pending[table].clear();
+            for (let i = 0; i < rows.length; i += 12) { // 12 at a time: fast, without flooding the connection
+                const res = await Promise.all(rows.slice(i, i + 12).map(([id, patch]) => Promise.resolve(realFrom(table).update(patch).eq('id', id)).then(r => r, err => ({ error: err }))));
+                res.forEach(r => { B.stats.sent++; if (r && r.error) errors.push(r.error); });
+            }
+        } else if (table === 'chat_logs' && B.chat.length) {
+            const rows = B.chat.splice(0);
+            B.stats.sent++;
+            let r = null;
+            try { r = await db.rpc('df_chat_bulk', { p_rows: rows }); } catch (err) { r = { error: err }; }
+            if (r && r.error) { // function missing or refused: fall back to a plain insert, ordered by this device's clock
+                const base = Date.now();
+                const r2 = await Promise.resolve(realFrom('chat_logs').insert(rows.map((row, i) => ({ ...row, created_at: new Date(base + i).toISOString() })))).then(x => x, err => ({ error: err }));
+                if (r2 && r2.error) errors.push(r2.error);
+            }
+        }
+        return errors;
+    }
+    B.flush = async function () {
+        const errors = [];
+        for (const t of ['battle_tokens', 'ship_markers', 'chat_logs']) errors.push(...await flushTable(t));
+        if (errors.length) {
+            console.error('withWriteBatch: some writes failed', errors);
+            alert(`${errors.length} of this round's saves failed (${(errors[0] && errors[0].message) || 'network error'}). What you see may not match the database. Reload the page to resync.`);
+        }
+    };
+    /* SAVE-FAILED NOTICE (2026-11-10, switch 'save_failed_notice'): most writes in
+       the app never look at the result, so a save that fails (network drop, a
+       database rule saying no) looks exactly like one that worked until the page
+       reloads. With the switch on for this user, every write is watched and a
+       failure shows a red toast (and a console.error with the details). The
+       caller still gets the same result as before. Duplicate-row conflicts are
+       ignored (they are expected in a few places). */
+    const WRITE_OPS = ['insert', 'update', 'upsert', 'delete'];
+    let lastNoticeAt = 0, hiddenNotices = 0;
+    function noteFailedSave(table, calls, error) {
+        if (!error || error.code === '23505') return;
+        const op = (calls.find(c => WRITE_OPS.includes(c[0])) || ['write'])[0];
+        console.error(`Save failed: ${op} on ${table}`, error, calls);
+        B.stats.failed = (B.stats.failed || 0) + 1;
+        const now = Date.now();
+        if (now - lastNoticeAt < 4000) { hiddenNotices++; return; } // one toast every few seconds, not a wall of them
+        lastNoticeAt = now;
+        const more = hiddenNotices ? ` (+${hiddenNotices} more)` : ''; hiddenNotices = 0;
+        if (typeof window.showToast === 'function') window.showToast(`⚠ Save failed (${table.replace(/_/g, ' ')}): ${error.message || 'network error'}${more}. Reload if things look wrong.`, 'error');
+    }
+    function observed(table) {
+        const calls = [];
+        const settle = async () => {
+            const isWrite = calls.some(c => WRITE_OPS.includes(c[0]));
+            try { const r = await replay(table, calls); if (isWrite && r && r.error) noteFailedSave(table, calls, r.error); return r; }
+            catch (err) { if (isWrite) noteFailedSave(table, calls, err); throw err; }
+        };
+        return chainProxy(calls, settle);
+    }
+    // Records a chain of builder calls (.update(...).eq(...)) and runs `settle` when it
+    // is awaited. Supabase builders also do nothing until awaited, so timing is unchanged.
+    function chainProxy(calls, settle) {
+        const proxy = new Proxy({}, { get(_, prop) {
+            if (prop === 'then') return (res, rej) => settle().then(res, rej);
+            if (prop === 'catch') return (rej) => settle().catch(rej);
+            if (prop === 'finally') return (fn) => settle().finally(fn);
+            if (typeof prop !== 'string') return undefined;
+            return (...args) => { calls.push([prop, args]); return proxy; };
+        } });
+        return proxy;
+    }
+    function deferred(table) {
+        const calls = [];
+        const settle = async () => {
+            if (MERGE[table] && calls.length === 2 && calls[0][0] === 'update' && calls[1][0] === 'eq' && calls[1][1][0] === 'id' && calls[0][1][0] && typeof calls[0][1][0] === 'object') {
+                const id = calls[1][1][1], map = B.pending[table];
+                if (map.has(id)) B.stats.merged++;
+                map.set(id, { ...(map.get(id) || {}), ...calls[0][1][0] });
+                return OK;
+            }
+            if (table === 'chat_logs' && calls.length === 1 && calls[0][0] === 'insert' && calls[0][1][0]) {
+                const rows = Array.isArray(calls[0][1][0]) ? calls[0][1][0] : [calls[0][1][0]];
+                if (rows.every(r => r && typeof r === 'object' && r.created_at === undefined && r.id === undefined)) { rows.forEach(r => B.chat.push({ ...r })); return OK; }
+            }
+            const errs = await flushTable(table); // keep order, and let reads see pending values
+            if (errs.length) console.error('withWriteBatch: flush before a direct call failed', errs);
+            return replay(table, calls);
+        };
+        return chainProxy(calls, settle);
+    }
+    db.from = function (table) {
+        if (B.depth > 0 && (MERGE[table] || table === 'chat_logs')) return deferred(table);
+        if (typeof window.isFeatureOn === 'function' && window.isFeatureOn('save_failed_notice')) return observed(table);
+        return realFrom(table);
+    };
+    window.writeBatchingOn = function () {
+        const row = (window.appSettingsCache || {}).write_batching;
+        return !(row && row.mode === 'off');
+    };
+    window.withWriteBatch = async function (fn) {
+        if (!window.writeBatchingOn()) return fn();
+        B.depth++;
+        try { return await fn(); }
+        finally { B.depth--; if (B.depth === 0) await B.flush(); }
+    };
+})();
 
 // Session restore on refresh: Supabase persists the session in localStorage,
 // so at boot an existing session skips straight into fetchUserProfile, the

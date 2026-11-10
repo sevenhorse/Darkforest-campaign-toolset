@@ -150,7 +150,12 @@ window.pickSquadronAutoStance = function(sq, sqShip, ctx) {
     return sq.ai_auto_pick || 'attack_capitals';
 };
 
-window.processBattleRoundAutomations = async function() {
+// The round runs inside window.withWriteBatch (js/db.js): its hundreds of small
+// writes are merged and sent together at the end instead of one at a time.
+window.processBattleRoundAutomations = function() {
+    return typeof window.withWriteBatch === 'function' ? window.withWriteBatch(processBattleRoundAutomationsNow) : processBattleRoundAutomationsNow();
+};
+async function processBattleRoundAutomationsNow() {
     if (!window.globalBattleEncounterCache) return;
     const battle = window.globalBattleEncounterCache;
     const tokens = battle.tokens || [];
@@ -858,4 +863,4 @@ window.processBattleRoundAutomations = async function() {
 
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
-};
+}
