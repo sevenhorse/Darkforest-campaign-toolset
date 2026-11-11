@@ -297,7 +297,9 @@ window.deployShipTemplate = async function(id, opts) {
         Object.assign(payload, opts.overrides);
         // 2026-11-10: a friend/foe override also sets the token colour (it used to keep
         // the design's colour, so two fleets built from one design looked the same).
-        if (opts.overrides.iff !== undefined && opts.overrides.color === undefined && !t.color && typeof window.getIffColor === 'function') payload.color = window.getIffColor(opts.overrides.iff);
+        // 2026-11-11: applies even when the design has a colour of its own (every design in the
+        // live database does), or the override never showed: both fleets spawned cyan.
+        if (opts.overrides.iff !== undefined && opts.overrides.color === undefined && typeof window.getIffColor === 'function') payload.color = window.getIffColor(opts.overrides.iff);
     }
     const { data, error } = await db.from('ship_markers').insert(payload).select().single();
     if (error) { alert("Failed to deploy vessel: " + error.message); return null; }
