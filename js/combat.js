@@ -3724,6 +3724,8 @@ async function resolveRoundTickNow() {
                 flightLog.push(`⚠️ ${sq.name} hit BINGO FUEL — forced RTB to hangar!`);
                 klaxonTriggered = true;
                 sq.loiter = 4; // reset ready for next deployment
+                // AI auto-launch (js/squadrons.js) leaves a wing in the hangar for the round it came back in.
+                sq.rtb_round = (window.globalBattleEncounterCache && window.globalBattleEncounterCache.round_number) || 0;
                 hangar.push(sq);
                 recalledSquadronIds.push(sq.id);
                 changed = true;

@@ -77,8 +77,9 @@ window.getStrikeCraftStats = function(type) {
    shows on the map and in Initiative. If a battle is active, the token is
    also placed on the Battle Map grid (window.addSquadronToBattleMap). With no
    active battle there is no grid token; recall + relaunch adds one. */
-async function spawnSquadronToken(vessel, sq, hideFromOverworld) {
-    const { data: tokenRow, error: tokenError } = await db.from('ship_markers').insert({
+// The ship_markers row for a launched squadron's token.
+function squadronMarkerRow(vessel, sq, hideFromOverworld) {
+    return {
         owner_ids: window.vesselOwnerIds(vessel), name: sq.name,
         x: vessel.x + (Math.random() * 80 - 40), y: vessel.y + (Math.random() * 80 - 40),
         drive_type: 'sublight', color: '#ffaa00', tactical_speed: SQUADRON_TACTICAL_SPEED,
@@ -97,7 +98,10 @@ async function spawnSquadronToken(vessel, sq, hideFromOverworld) {
         // to is_hidden. DM rule: stays set until recalled and relaunched from
         // the Vessel Deck; does not clear when the battle ends.
         hide_from_galaxy_map: !!hideFromOverworld
-    }).select().single();
+    };
+}
+async function spawnSquadronToken(vessel, sq, hideFromOverworld) {
+    const { data: tokenRow, error: tokenError } = await db.from('ship_markers').insert(squadronMarkerRow(vessel, sq, hideFromOverworld)).select().single();
     if (tokenError) { console.error('Failed to spawn squadron token:', tokenError.message); }
 
     // is_npc: true even when player-owned: a squadron is not a character, so
@@ -130,6 +134,15 @@ async function despawnSquadronToken(squadronId) {
         await window.removeBattleTokenByMarkerId(markerRow.id);
     }
 
+    // Inside a write batch (the round tick) a reload would read ships before the
+    // end-of-batch save and put old values back, and with AI wings a dozen can
+    // return in one round. Drop the token from the local list and let the tick's
+    // own reload (after the batch) do the rest. A new array, not a splice: the
+    // round tick is looping over the old one.
+    if (window.__dfBatch && window.__dfBatch.depth > 0) {
+        if (markerRow) globalShipMarkersCache = globalShipMarkersCache.filter(m => m !== markerRow);
+        return;
+    }
     if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
     if (typeof loadCombatTracker === 'function') loadCombatTracker();
 }
@@ -267,6 +280,80 @@ window.launchSquadron = async function(vesselId, idx, hideFromOverworld) {
         // realtime channel.
         if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     }
+};
+
+/* AI auto-launch (roadmap item 3, switch 'ai_auto_launch'; DM decisions 2026-11-11).
+   Called once per round at the end of the AI phase (js/battle-automation.js),
+   so a new wing first acts on the following round.
+     - Who: every AI-controlled ship with a usable wing in its hangar. Not
+       stations, not neutral ships (neutral AI holds fire), not player ships.
+     - When: only with a visible, living enemy within LONG range (400 px) of the carrier.
+     - How many: 1 wing per carrier per round, and at most 20 AI wings on the
+       grid per side. A destroyed or returned wing frees its slot.
+     - Which: hangar order, skipping wings with no craft or no HP left.
+     - Fuel: unchanged. A wing returns after its 4 rounds and can launch again,
+       but not in the round it came back (rtb_round, set by the round tick).
+   All of a round's launches are written together: one ship_markers insert for
+   the wing tokens and one token save, however many carriers launch. AI wings
+   get no Initiative Tracker row (they act in the AI phase, not on a turn).
+   Returns [{ wing, carrier }] for the round's chat line. */
+window.AI_AUTO_LAUNCH = { range: 400, capPerSide: 20 };
+window.aiAutoLaunchOn = function () { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('ai_auto_launch'); };
+window.aiAutoLaunchWings = async function () {
+    const enc = window.globalBattleEncounterCache;
+    if (!enc || !window.aiAutoLaunchOn()) return [];
+    const { range, capPerSide } = window.AI_AUTO_LAUNCH;
+    const byId = new Map(globalShipMarkersCache.map(m => [m.id, m]));
+    const units = (enc.tokens || []).map(t => ({ t, v: byId.get(t.ship_marker_id) })).filter(u => u.v);
+    const out = { players: 0, hostile: 0, neutral: 0 }; // AI wings on the grid, per side
+    units.forEach(u => { if (!u.v.is_strike_craft) return; const c = byId.get(u.v.parent_id); if (c && c.ai_controlled) out[window.vesselCombatSide(u.v)]++; });
+    const roundNow = enc.round_number || 0;
+    const usable = (sq) => !!sq && (sq.count || 0) > 0 && (sq.hp || 0) > 0 && !(sq.rtb_round !== undefined && sq.rtb_round === roundNow);
+    const picks = [];
+    for (const u of units) {
+        const v = u.v;
+        if (!v.ai_controlled || v.is_strike_craft || v.is_station || (v.integrity_hull || 0) <= 0) continue;
+        const side = window.vesselCombatSide(v);
+        if (side === 'neutral' || out[side] >= capPerSide) continue;
+        const idx = (v.ship_hangar || []).findIndex(usable);
+        if (idx < 0) continue;
+        const enemyNear = units.some(e => e.v.id !== v.id && !e.v.is_hidden && (e.v.integrity_hull || 0) > 0 && window.vesselsAreEnemies(e.v, v) && Math.hypot(e.t.x - u.t.x, e.t.y - u.t.y) <= range);
+        if (!enemyNear) continue;
+        picks.push({ u, idx });
+        out[side]++;
+    }
+    if (!picks.length) return [];
+
+    // Hangar -> deployed on each carrier (same fields as window.launchSquadron).
+    const launched = [];
+    for (const { u, idx } of picks) {
+        const v = u.v, hangar = (v.ship_hangar || []).slice(), deployed = (v.ship_deployed || []).slice();
+        const sq = hangar.splice(idx, 1)[0];
+        sq.loiter = 4;
+        if (!sq.ai_stance) sq.ai_stance = 'auto';
+        delete sq.ai_auto_pick; delete sq.rtb_round;
+        deployed.push(sq);
+        launched.push({ u, sq, prevHangar: v.ship_hangar || [], prevDeployed: v.ship_deployed || [] });
+        v.ship_hangar = hangar; v.ship_deployed = deployed;
+    }
+    const { data: rows, error } = await db.from('ship_markers').insert(launched.map(l => squadronMarkerRow(l.u.v, l.sq, true))).select();
+    if (error || !rows) {
+        // No tokens were made: put the wings back and change nothing.
+        console.error('AI auto-launch: could not create the wing tokens', error);
+        launched.forEach(l => { l.u.v.ship_hangar = l.prevHangar; l.u.v.ship_deployed = l.prevDeployed; });
+        return [];
+    }
+    for (const l of launched) await db.from('ship_markers').update({ ship_hangar: l.u.v.ship_hangar, ship_deployed: l.u.v.ship_deployed }).eq('id', l.u.v.id);
+    const newTokens = [];
+    launched.forEach(l => {
+        const row = rows.find(r => r.squadron_id === l.sq.id);
+        if (!row) return;
+        if (!globalShipMarkersCache.some(m => m.id === row.id)) globalShipMarkersCache.push(row);
+        const pos = clampToGrid(l.u.t.x + (Math.random() * 60 - 30), l.u.t.y + (Math.random() * 60 - 30));
+        newTokens.push({ token_id: genBattleTokenId(), ship_marker_id: row.id, x: pos.x, y: pos.y, move_remaining: SQUADRON_TACTICAL_SPEED });
+    });
+    await saveBattleTokens((window.globalBattleEncounterCache.tokens || []).concat(newTokens));
+    return launched.map(l => ({ wing: l.sq.name, carrier: l.u.v.name }));
 };
 
 window.recallSquadron = async function(vesselId, idx) {
@@ -786,5 +873,6 @@ window.removeBattleTokenByMarkerId = async function(markerId) {
     const tok = tokens.find(t => t.ship_marker_id === markerId);
     if (!tok) return;
     await saveBattleTokens(tokens.filter(t => t.token_id !== tok.token_id));
+    if (window.__dfBatch && window.__dfBatch.depth > 0) return; // the round draws once at its end
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };

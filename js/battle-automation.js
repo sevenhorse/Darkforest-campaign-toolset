@@ -204,6 +204,7 @@ window.roundFoldSummary = function (F) {
     ['hostile', 'players', 'neutral'].forEach(side => { const t = F.shots[side]; if (t && t.n) parts.push(`${t.n} at ${label(side)} (${Math.round(t.dmg).toLocaleString('en-US')} dmg)`); });
     if (F.impacts) parts.push(`${F.impacts} ordnance impact${F.impacts === 1 ? '' : 's'}`);
     if (F.intercepts) parts.push(`${F.intercepts} payload${F.intercepts === 1 ? '' : 's'} intercepted`);
+    if (F.launches) parts.push(`${F.launches} wing${F.launches === 1 ? '' : 's'} launched`);
     const ships = F.kills.filter(k => !k.craft), wings = F.kills.filter(k => k.craft);
     if (ships.length) parts.push('lost: ' + ships.map(k => `${esc(k.name)} (${label(k.side)})`).join(', '));
     if (wings.length) parts.push(`${wings.length} wing${wings.length === 1 ? '' : 's'} destroyed`);
@@ -214,7 +215,7 @@ window.roundFoldSummary = function (F) {
 window.withRoundFold = async function (fn) {
     const B = window.__dfBatch, enc = window.globalBattleEncounterCache;
     if (window.__roundFold || !enc || !B || B.depth < 1 || !window.aiChatterFoldOn()) return fn();
-    const F = window.__roundFold = { round: enc.round_number || 1, shots: {}, kills: [], intercepts: 0, impacts: 0 };
+    const F = window.__roundFold = { round: enc.round_number || 1, shots: {}, kills: [], intercepts: 0, impacts: 0, launches: 0 };
     B.chatTag = { fold: F.round };
     try { return await fn(); }
     finally {
@@ -920,6 +921,19 @@ async function processBattleRoundAutomationsNow() {
         await db.from('battle_encounters').update({ in_flight_ordnance: survivingOrdnance, ordnance_outcomes: ordnanceOutcomes }).eq('id', battle.id);
     } catch (err) {
         console.error('processBattleRoundAutomations: failed to persist in_flight_ordnance', err);
+    }
+
+    // AI carriers launch (switch 'ai_auto_launch', js/squadrons.js). Last in the AI
+    // phase, so a new wing first acts next round. One chat line for the lot.
+    try {
+        const launches = typeof window.aiAutoLaunchWings === 'function' ? await window.aiAutoLaunchWings() : [];
+        if (launches.length) {
+            const shown = launches.slice(0, 6).map(l => `${l.wing} (${l.carrier})`).join(', ');
+            chatLines.push(`🛫 [FLIGHT OPS] 🤖 ${launches.length} wing${launches.length === 1 ? '' : 's'} launched: ${shown}${launches.length > 6 ? ` +${launches.length - 6} more` : ''}.`);
+            if (window.__roundFold) window.__roundFold.launches += launches.length;
+        }
+    } catch (err) {
+        console.error('processBattleRoundAutomations: AI auto-launch failed', err);
     }
 
     if (window.__roundFold) chatLines.forEach(line => {
