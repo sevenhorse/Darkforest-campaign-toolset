@@ -331,6 +331,12 @@ window.resetFowForAllPlayers = async function() {
    (isPositionSensorVisible). Returns a list of hit descriptors. */
 window.checkShipHazards = function(shipMarker) {
     if (!shipMarker) return [];
+    // Battle-Map-only ships (hide_from_galaxy_map: encounter presets, battle deploys,
+    // launched strike craft) have no real place on the galaxy map: they are created
+    // at the camera spot, often (0, 0) in the galactic core next to a pulsar. Checking
+    // them against galaxy hazards cooked every NPC in a battle each round (found
+    // 2026-11-11). Their hazards come from the battle map's own terrain instead.
+    if (shipMarker.hide_from_galaxy_map) return [];
     let hits = [];
 
     // Cheap distance test first; the sensor test loops every ship and this

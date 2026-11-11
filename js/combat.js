@@ -3625,7 +3625,20 @@ window.removeCombatant = async function(id) {
    initiative wraps, with no confirm dialog and no DM-only gate (a player may
    end the last turn of a round). Same core/wrapper split as
    resolveShipWeaponFire vs rollShipWeapon. */
+// The round tick runs inside window.withWriteBatch (js/db.js), like the AI round it
+// calls at the end: one save per ship and one chat call, instead of one request per
+// ship, per log line and per token, one after another (2026-11-11: a 53-ship tick
+// spent ~35 s here before the AI round even started).
 window.resolveRoundTick = async function() {
+    const anyChanged = typeof window.withWriteBatch === 'function' ? await window.withWriteBatch(resolveRoundTickNow) : await resolveRoundTickNow();
+    // Reload only once every write of the tick is saved: a reload started inside the
+    // batch could read the rows before the end-of-batch flush and put old values back.
+    if (anyChanged) {
+        if (typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
+        if (typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
+    }
+};
+async function resolveRoundTickNow() {
     let anyChanged = false;
     let klaxonTriggered = false;
 
@@ -3754,10 +3767,6 @@ window.resolveRoundTick = async function() {
     // No-op outside an active battle.
     if (typeof window.processBattleRoundAutomations === 'function') await window.processBattleRoundAutomations();
 
-    if (anyChanged) {
-        if(typeof window.loadGalaxyData === 'function') window.loadGalaxyData();
-        if(typeof window.renderVesselDeck === 'function') window.renderVesselDeck();
-    }
 
     if (klaxonTriggered && window.AudioEngine) {
         window.AudioEngine.playKlaxon();
@@ -3771,7 +3780,8 @@ window.resolveRoundTick = async function() {
         content: `⏭️ [TACTICAL] Combat round advanced. Cooldowns reduced. Heat dissipated. Strike craft loiter time degraded.`,
         message_type: 'system'
     });
-};
+    return anyChanged;
+}
 
 /* Human-facing wrapper around window.resolveRoundTick: adds the DM-only gate
    and confirm dialog. The per-turn engine (js/battle-map.js) calls

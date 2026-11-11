@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-10.05';
+window.DARKFOREST_BUILD = '2026-11-11.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -578,7 +578,21 @@ if (window.supabase) {
     const newUuid = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID()
         : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
     const replay = (table, calls) => calls.reduce((q, [m, args]) => q[m](...args), realFrom(table));
-    async function flushTable(table) {
+    // Flushes per table are chained: a read that asks for a flush while an earlier
+    // flush of the same table is still on the wire waits for it, so it never reads
+    // the old values (2026-11-11: a map reload that started inside a round read
+    // ship rows while the end-of-round flush was still sending them, and put the
+    // pre-round values back into the cache).
+    const inflight = {};
+    function flushTable(table) {
+        const prev = inflight[table] || Promise.resolve([]);
+        const next = prev.then(() => flushTableNow(table), () => flushTableNow(table));
+        inflight[table] = next;
+        next.then(() => { if (inflight[table] === next) delete inflight[table]; }, () => { if (inflight[table] === next) delete inflight[table]; });
+        return next;
+    }
+    B.inflight = inflight;
+    async function flushTableNow(table) {
         const errors = [];
         if (MERGE[table]) {
             const rows = Array.from(B.pending[table].entries());
@@ -601,8 +615,9 @@ if (window.supabase) {
         return errors;
     }
     B.flush = async function () {
-        const errors = [];
-        for (const t of ['battle_tokens', 'ship_markers', 'chat_logs']) errors.push(...await flushTable(t));
+        // All three start at once (and are marked in flight right away), so anything
+        // that reads one of these tables after the batch waits for its writes.
+        const errors = [].concat(...await Promise.all(['battle_tokens', 'ship_markers', 'chat_logs'].map(t => flushTable(t))));
         if (errors.length) {
             console.error('withWriteBatch: some writes failed', errors);
             alert(`${errors.length} of this round's saves failed (${(errors[0] && errors[0].message) || 'network error'}). What you see may not match the database. Reload the page to resync.`);
@@ -680,8 +695,14 @@ if (window.supabase) {
         };
         return chainProxy(calls, settle);
     }
+    // Outside a batch: a call on a batched table waits for any flush of it still on the wire.
+    function afterFlush(table) {
+        const calls = [];
+        return chainProxy(calls, async () => { try { await inflight[table]; } catch (e) {} return replay(table, calls); });
+    }
     db.from = function (table) {
         if (B.depth > 0 && (MERGE[table] || table === 'chat_logs')) return deferred(table);
+        if (inflight[table] && (MERGE[table] || table === 'chat_logs')) return afterFlush(table);
         if (typeof window.isFeatureOn === 'function' && window.isFeatureOn('save_failed_notice')) return observed(table);
         return realFrom(table);
     };
