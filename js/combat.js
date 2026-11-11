@@ -1919,6 +1919,7 @@ window.resolveShipWeaponFire = async function(vesselId, idx, targetId, volleys, 
         
     if (window.AudioEngine) window.AudioEngine.playShoot();
 
+    if (opts.auto && targetShip && typeof window.noteRoundFold === 'function') window.noteRoundFold({ k: 'shot', to: targetShip, dmg: total }); // round summary (fold_ai_chatter)
     if(typeof window.broadcastRoll === 'function') {
         const autoTag = opts.auto ? '🤖 [AI CONTROLLED] ' : '';
         await window.broadcastRoll(`${autoTag}[${vessel.name}] FIRES [${wpn.loc || 'Mount'}]${volleyTag}${targetString}`, breakdownString, total);
@@ -2925,7 +2926,8 @@ window.addArsenalItem = async function() {
 window.renderArsenalDiceFeed = function() {
     const container = document.getElementById('arsenal-dice-feed');
     if (!container) return;
-    const rolls = window.diceLogsList || [];
+    // Folded AI round detail (fold_ai_chatter) is left out, like in the Dice tab.
+    const rolls = (window.diceLogsList || []).filter(l => !(typeof window.chatFoldHides === 'function' && window.chatFoldHides(l)));
     if (rolls.length === 0) { container.innerHTML = '<span style="font-size:10px; color:#6b826a;">No rolls yet this session.</span>'; return; }
     let html = '';
     const seen = new Set(); // one row per DM for a private dice-tray roll: show it once
@@ -3630,7 +3632,8 @@ window.removeCombatant = async function(id) {
 // ship, per log line and per token, one after another (2026-11-11: a 53-ship tick
 // spent ~35 s here before the AI round even started).
 window.resolveRoundTick = async function() {
-    const anyChanged = typeof window.withWriteBatch === 'function' ? await window.withWriteBatch(resolveRoundTickNow) : await resolveRoundTickNow();
+    const run = () => (typeof window.withRoundFold === 'function' ? window.withRoundFold(resolveRoundTickNow) : resolveRoundTickNow()); // fold_ai_chatter
+    const anyChanged = typeof window.withWriteBatch === 'function' ? await window.withWriteBatch(run) : await run();
     // Reload only once every write of the tick is saved: a reload started inside the
     // batch could read the rows before the end-of-batch flush and put old values back.
     if (anyChanged) {

@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-11.02';
+window.DARKFOREST_BUILD = '2026-11-11.03';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -575,6 +575,10 @@ if (window.supabase) {
     const MERGE = { ship_markers: true, battle_tokens: true };
     const B = window.__dfBatch = { depth: 0, pending: { ship_markers: new Map(), battle_tokens: new Map() }, chat: [], stats: { merged: 0, sent: 0 } };
     const OK = { data: null, error: null };
+    // B.chatTag (set by window.withRoundFold, js/battle-automation.js): while it is set,
+    // every chat row held back by the batch gets these keys merged into its roll_data
+    // (e.g. { fold: 3 } = "detail of round 3", which the feeds fold away).
+    const tagChat = (r) => { if (B.chatTag) r.roll_data = { ...(r.roll_data || {}), ...B.chatTag }; return r; };
     const newUuid = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID()
         : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
     const replay = (table, calls) => calls.reduce((q, [m, args]) => q[m](...args), realFrom(table));
@@ -679,10 +683,10 @@ if (window.supabase) {
                 const rows = Array.isArray(calls[0][1][0]) ? calls[0][1][0] : [calls[0][1][0]];
                 if (rows.every(r => r && typeof r === 'object' && r.created_at === undefined && r.id === undefined)) {
                     const wantsRows = calls.some(c => c[0] === 'select'), one = calls.some(c => c[0] === 'single' || c[0] === 'maybeSingle');
-                    if (!wantsRows) { rows.forEach(r => B.chat.push({ ...r })); return OK; }
+                    if (!wantsRows) { rows.forEach(r => B.chat.push(tagChat({ ...r }))); return OK; }
                     // The caller wants the saved row back: give each row its id now, so the copy
                     // shown locally and the row that arrives from the server are the same message.
-                    const made = rows.map(r => ({ ...r, id: newUuid() }));
+                    const made = rows.map(r => tagChat({ ...r, id: newUuid() }));
                     made.forEach(r => B.chat.push({ ...r }));
                     const nowIso = new Date().toISOString();
                     const back = made.map(r => ({ message_type: 'text', recipient_id: null, roll_data: null, ...r, created_at: nowIso }));
@@ -983,14 +987,40 @@ window.checkSysScan = function(log) {
     return false;
 };
 
+/* Folded round detail (switch 'fold_ai_chatter', js/battle-automation.js): a big
+   battle writes hundreds of tagged rows per round. With the fold on for this
+   viewer they would fill the 75-row General window and the 50-row Dice window
+   with lines the feeds then hide, so the two loaders leave them out and the
+   newest detail is fetched on its own (for the Combat tab's "Round N detail"
+   bars). Without the switch both loaders work exactly as before. */
+const FOLD_DETAIL_LIMIT = 400;
+let chatHistoryLoadedFolded = null; // fold state the last loadChatLogs ran with
+function chatFoldOnForMe() { return typeof window.aiChatterFoldOn === 'function' && window.aiChatterFoldOn(); }
+// The newest folded rows: rolls (for the Dice list) or everything else (for the General list).
+async function loadFoldDetailRows(rolls) {
+    let q = db.from('chat_logs').select('*').is('recipient_id', null).not('roll_data->fold', 'is', null);
+    q = rolls ? q.eq('message_type', 'roll') : q.neq('message_type', 'roll');
+    const { data, error } = await q.order('created_at', { ascending: false }).limit(FOLD_DETAIL_LIMIT);
+    if (error) { console.warn('loadFoldDetailRows failed', error); return []; }
+    return (data || []).reverse();
+}
+function mergeChatRows(list, extra) {
+    const have = new Set(list.map(l => l.id).filter(id => id !== undefined));
+    return list.concat(extra.filter(l => !have.has(l.id))).sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+}
+
 async function loadChatLogs() {
     // "General Broadcast" channel only — dice rolls and PMs are fetched
     // separately (loadDiceLogs / loadPmLogs), each with their own limit.
-    const { data } = await db.from('chat_logs').select('*')
-        .is('recipient_id', null).neq('message_type', 'roll')
-        .order('created_at', { ascending: false }).limit(75);
-    if (data) { 
-        chatLogsList = data.reverse(); 
+    const fold = chatFoldOnForMe();
+    let q = db.from('chat_logs').select('*').is('recipient_id', null).neq('message_type', 'roll');
+    if (fold) q = q.is('roll_data->fold', null);
+    const { data } = await q.order('created_at', { ascending: false }).limit(75);
+    if (data) {
+        let rows = data.reverse();
+        if (fold) rows = mergeChatRows(rows, await loadFoldDetailRows(false));
+        chatLogsList = rows;
+        chatHistoryLoadedFolded = fold;
         if (chatLogsList.length === 0) chatLogsList = [{ sender_id: null, content: '📡 [SYSTEM] Intrepid Horizon secure mainframe linked.', message_type: 'system' }];
         chatLogsList.forEach(log => window.checkSysScan(log));
         if (typeof renderChatFeed === 'function') renderChatFeed(); 
@@ -998,9 +1028,24 @@ async function loadChatLogs() {
 }
 
 async function loadDiceLogs() {
-    const { data } = await db.from('chat_logs').select('*').eq('message_type', 'roll').order('created_at', { ascending: false }).limit(50);
-    if (data) window.diceLogsList = data.reverse();
+    const fold = chatFoldOnForMe();
+    let q = db.from('chat_logs').select('*').eq('message_type', 'roll');
+    if (fold) q = q.is('roll_data->fold', null);
+    const { data } = await q.order('created_at', { ascending: false }).limit(50);
+    if (data) {
+        let rows = data.reverse();
+        if (fold) rows = mergeChatRows(rows, await loadFoldDetailRows(true));
+        window.diceLogsList = rows;
+    }
 }
+// The switches load after the first chat fetch at sign-in, and the DM can flip
+// this one mid-session: reload the history when the fold state it was loaded
+// with no longer matches.
+document.addEventListener('darkforest:features-changed', () => {
+    if (chatHistoryLoadedFolded === null || chatHistoryLoadedFolded === chatFoldOnForMe()) return;
+    const hadDice = !!window.diceLogsList;
+    (async () => { await loadChatLogs(); if (hadDice) { await loadDiceLogs(); if (typeof renderChatFeed === 'function') renderChatFeed(); if (typeof window.renderArsenalDiceFeed === 'function') window.renderArsenalDiceFeed(); } })();
+});
 
 async function loadPmLogs(partnerId) {
     const { data } = await db.from('chat_logs').select('*')

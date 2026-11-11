@@ -420,6 +420,7 @@ window.checkBattleTokenDestroyed = async function(vessel) {
     if (typeof window.sendBattleBroadcast === 'function') window.sendBattleBroadcast('fx', { k: 'boom', marker: vessel.id, x: tok.x, y: tok.y });
     const remaining = tokens.filter(t => t.token_id !== tok.token_id);
     await saveBattleTokens(remaining);
+    if (typeof window.noteRoundFold === 'function') window.noteRoundFold({ k: 'kill', v: vessel }); // round summary (fold_ai_chatter)
     await db.from('chat_logs').insert({ sender_id: null, content: `💥 [TACTICAL BATTLE MAP] ${vessel.name} destroyed — removed from the engagement.`, message_type: 'system' });
 
     // Battlefield Salvage spawns at the first remaining player-owned vessel

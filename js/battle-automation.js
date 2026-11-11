@@ -153,7 +153,76 @@ window.pickSquadronAutoStance = function(sq, sqShip, ctx) {
 // The round runs inside window.withWriteBatch (js/db.js): its hundreds of small
 // writes are merged and sent together at the end instead of one at a time.
 window.processBattleRoundAutomations = function() {
-    return typeof window.withWriteBatch === 'function' ? window.withWriteBatch(processBattleRoundAutomationsNow) : processBattleRoundAutomationsNow();
+    const run = () => window.withRoundFold(processBattleRoundAutomationsNow);
+    return typeof window.withWriteBatch === 'function' ? window.withWriteBatch(run) : run();
+};
+
+/* FOLD THE AI CHATTER (roadmap item 1, DM 2026-11-11; switch 'fold_ai_chatter').
+   A big AI round posts hundreds of chat lines (every AI shot is a roll line).
+   With the switch on for the browser that runs the round (the DM's), every
+   chat row the round produces is tagged roll_data.fold = <round number> by the
+   write batch (js/db.js B.chatTag), and ONE summary line is posted after them:
+     ⚔️ [ROUND 3] 41 shots · 24 at Sangheili Commonwealth (1,240 dmg) · ... · lost: ...
+   Feeds (js/ui.js) hide tagged rows from General and Dice and show them in the
+   Combat tab, collapsed per round, for any viewer who has the switch on. Rows
+   are never dropped. Only automated lines are tagged: the tag is set only while
+   the round tick / AI round is running. Needs write batching (it rides on the
+   batch); with 'write_batching' off the round posts as it always did.
+   DM decisions: counts per side with destroyed ships named; player-fired shots
+   are never folded; everyone sees the summary, detail stays in Combat.
+   Ship guns have no to-hit roll, so the summary counts shots and damage. */
+window.__roundFold = null;
+window.aiChatterFoldOn = function () { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('fold_ai_chatter'); };
+// Combat code reports what happened: { k: 'shot', to: vessel, dmg } | { k: 'kill', v: vessel } | { k: 'intercept' } | { k: 'impact' }
+window.noteRoundFold = function (ev) {
+    const F = window.__roundFold;
+    if (!F || !ev) return;
+    if (ev.k === 'shot' && ev.to) {
+        const side = window.vesselCombatSide(ev.to);
+        const t = F.shots[side] = F.shots[side] || { n: 0, dmg: 0 };
+        t.n++; t.dmg += Math.max(0, Number(ev.dmg) || 0);
+    } else if (ev.k === 'kill' && ev.v) {
+        if (!F.kills.some(x => x.id === ev.v.id)) F.kills.push({ id: ev.v.id, name: ev.v.name, side: window.vesselCombatSide(ev.v), craft: !!ev.v.is_strike_craft });
+    } else if (ev.k === 'intercept') F.intercepts++;
+    else if (ev.k === 'impact') F.impacts++;
+};
+// What to call a side in the summary: the most common faction among its ships in this battle.
+function roundFoldSideLabel(side, extraShips) {
+    const enc = window.globalBattleEncounterCache;
+    const ships = ((enc && enc.tokens) || []).map(t => globalShipMarkersCache.find(m => m.id === t.ship_marker_id)).filter(Boolean).concat(extraShips || []);
+    const counts = {};
+    ships.forEach(v => { if (v.is_strike_craft || window.vesselCombatSide(v) !== side) return; const f = String(v.faction || '').trim(); if (f) counts[f] = (counts[f] || 0) + 1; });
+    const best = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))[0];
+    return best || (side === 'players' ? 'the allied fleet' : side === 'hostile' ? 'the hostile fleet' : 'neutral ships');
+}
+window.roundFoldSummary = function (F) {
+    const esc = window.escapeHtml || (x => String(x));
+    const killed = F.kills.map(k => globalShipMarkersCache.find(m => m.id === k.id)).filter(Boolean);
+    const label = (side) => esc(roundFoldSideLabel(side, killed));
+    const total = Object.values(F.shots).reduce((n, t) => n + t.n, 0);
+    const parts = [total ? `${total} shot${total === 1 ? '' : 's'}` : 'no shots fired'];
+    ['hostile', 'players', 'neutral'].forEach(side => { const t = F.shots[side]; if (t && t.n) parts.push(`${t.n} at ${label(side)} (${Math.round(t.dmg).toLocaleString('en-US')} dmg)`); });
+    if (F.impacts) parts.push(`${F.impacts} ordnance impact${F.impacts === 1 ? '' : 's'}`);
+    if (F.intercepts) parts.push(`${F.intercepts} payload${F.intercepts === 1 ? '' : 's'} intercepted`);
+    const ships = F.kills.filter(k => !k.craft), wings = F.kills.filter(k => k.craft);
+    if (ships.length) parts.push('lost: ' + ships.map(k => `${esc(k.name)} (${label(k.side)})`).join(', '));
+    if (wings.length) parts.push(`${wings.length} wing${wings.length === 1 ? '' : 's'} destroyed`);
+    return `⚔️ [ROUND ${F.round}] ${parts.join(' · ')}.`;
+};
+// Runs fn with the round's chat folded. Must be called inside window.withWriteBatch.
+// Nested calls (the AI round inside the round tick) join the outer fold.
+window.withRoundFold = async function (fn) {
+    const B = window.__dfBatch, enc = window.globalBattleEncounterCache;
+    if (window.__roundFold || !enc || !B || B.depth < 1 || !window.aiChatterFoldOn()) return fn();
+    const F = window.__roundFold = { round: enc.round_number || 1, shots: {}, kills: [], intercepts: 0, impacts: 0 };
+    B.chatTag = { fold: F.round };
+    try { return await fn(); }
+    finally {
+        B.chatTag = null; window.__roundFold = null;
+        // Posted untagged and last, so it lands after the detail it sums up.
+        try { await db.from('chat_logs').insert({ sender_id: null, content: window.roundFoldSummary(F), message_type: 'system' }); }
+        catch (err) { console.error('withRoundFold: could not post the round summary', err); }
+    }
 };
 async function processBattleRoundAutomationsNow() {
     if (!window.globalBattleEncounterCache) return;
@@ -853,6 +922,10 @@ async function processBattleRoundAutomationsNow() {
         console.error('processBattleRoundAutomations: failed to persist in_flight_ordnance', err);
     }
 
+    if (window.__roundFold) chatLines.forEach(line => {
+        if (/\[POINT DEFENSE\].*intercepts a payload|\[SQUADRON INTERCEPT\].*shoots down a payload/.test(line)) window.noteRoundFold({ k: 'intercept' });
+        else if (/\[ORDNANCE IMPACT\]/.test(line)) window.noteRoundFold({ k: 'impact' });
+    });
     for (const line of chatLines) {
       try {
         await db.from('chat_logs').insert({ sender_id: null, content: line, message_type: 'system' });

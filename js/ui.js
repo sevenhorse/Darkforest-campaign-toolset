@@ -2116,8 +2116,18 @@ window.renderCommsTabBar = window.withAfterHooks('comms-tabs-rendered', window.r
 // keeps only battle messages, recognised by the tags combat code already
 // writes ([AI STANCE], [ORDNANCE], [INITIATIVE] ...) and the FIRES / ATTACKS
 // roll titles. No new schema; it never gets its own unread badge.
-const COMBAT_LOG_RE = /\[(AI STANCE|AI CONTROLLED|AI AUTO|TACTICAL BATTLE MAP|TACTICAL|WEAPONS DISABLED|INITIATIVE|POINT DEFENSE|ORDNANCE|ORDNANCE IMPACT|AOE SPLASH|SYSTEM LOCKDOWN|OUT OF RANGE|OUT OF ARC|NO SHOT|NO LOCK|FLIGHT OPS|DECK DESTROYED|DECK FIGHT|DECK HAZARD|SQUADRON INTERCEPT|SQUADRON|SINGLE WARHEAD|BATTLE|ROUND|TERRAIN|DEBRIS|ION SURGE|ANTIMATTER|REACTIVE ARMOR|ABLATIVE ARMOR|KIA REPORT|FOG OF WAR|TACTICS|AIRLOCK VENT|RESUPPLY|RELOAD|REPAIR LOG|INSUFFICIENT AMMO|NO SUPPLY|NO RESERVE|MANUAL DICE|EMPTY)\]|BOARDING RESOLVED|\] FIRES |\] ATTACKS /;
+const COMBAT_LOG_RE = /\[(AI STANCE|AI CONTROLLED|AI AUTO|TACTICAL BATTLE MAP|TACTICAL|WEAPONS DISABLED|INITIATIVE|POINT DEFENSE|ORDNANCE|ORDNANCE IMPACT|AOE SPLASH|SYSTEM LOCKDOWN|OUT OF RANGE|OUT OF ARC|NO SHOT|NO LOCK|FLIGHT OPS|DECK DESTROYED|DECK FIGHT|DECK HAZARD|SQUADRON INTERCEPT|SQUADRON|SINGLE WARHEAD|BATTLE|ROUND(?: \d+)?|TERRAIN|DEBRIS|ION SURGE|ANTIMATTER|REACTIVE ARMOR|ABLATIVE ARMOR|KIA REPORT|FOG OF WAR|TACTICS|AIRLOCK VENT|RESUPPLY|RELOAD|REPAIR LOG|INSUFFICIENT AMMO|NO SUPPLY|NO RESERVE|MANUAL DICE|EMPTY)\]|BOARDING RESOLVED|\] FIRES |\] ATTACKS /;
 window.isCombatLog = function(log) { return !!log && !log.recipient_id && COMBAT_LOG_RE.test(String(log.content || '')); };
+// Folded AI chatter (js/battle-automation.js withRoundFold, switch 'fold_ai_chatter'):
+// a row tagged roll_data.fold = <round> is round detail. For a viewer with the
+// switch on it is hidden from General and Dice and shown in the Combat tab,
+// collapsed per round. Without the switch every row shows as before.
+window.chatFoldRound = function(log) { const f = log && log.roll_data && log.roll_data.fold; return (f === undefined || f === null) ? null : f; };
+window.chatFoldHides = function(log) { return window.chatFoldRound(log) !== null && typeof window.isFeatureOn === 'function' && window.isFeatureOn('fold_ai_chatter'); };
+window.__foldOpen = window.__foldOpen || new Set(); // keys of round-detail groups the viewer has opened
+window.toggleChatFold = function(key) { if (window.__foldOpen.has(key)) window.__foldOpen.delete(key); else window.__foldOpen.add(key); window.__foldKeepScroll = true; window.renderChatFeed(); };
+let foldRenderTimer = null;
+function scheduleFoldRender() { if (foldRenderTimer) return; foldRenderTimer = setTimeout(() => { foldRenderTimer = null; window.renderChatFeed(); if (typeof window.renderCommsTabBar === 'function') window.renderCommsTabBar(); }, 150); }
 function combatFeedSource() {
     const seen = new Set();
     return (chatLogsList || []).concat(window.diceLogsList || [])
@@ -2193,6 +2203,9 @@ window.appendLocalChatLog = function(log) {
         if (!alreadyIn(chatLogsList)) { chatLogsList.push(log); window.checkSysScan(log); }
     }
 
+    // Round detail arrives hundreds of rows at a time: no unread badge, no ping, and
+    // one redraw for the burst instead of one per row (only the Combat tab shows them).
+    if (window.chatFoldHides(log)) { if (window.activeCommsTab === 'combat') scheduleFoldRender(); return; }
     if (tabKey === window.activeCommsTab || (window.activeCommsTab === 'combat' && window.isCombatLog(log))) {
         window.renderChatFeed();
     } else {
@@ -2216,7 +2229,7 @@ window.handleIncomingChatLog = function(newLog) {
     // realtime handler also fires for the sender's own INSERT (echoed back
     // by Supabase), and sendChatMessage() already appends it locally
     // without a sound, so chirping here too would double-fire on send.
-    if (window.AudioEngine && newLog.sender_id !== currentUserId) window.AudioEngine.notify(window.chatSoundKind(newLog));
+    if (window.AudioEngine && newLog.sender_id !== currentUserId && !window.chatFoldHides(newLog)) window.AudioEngine.notify(window.chatSoundKind(newLog));
     window.appendLocalChatLog(newLog);
 };
 // Which notification sound a chat row makes (js/audio.js notify): people's
@@ -2290,9 +2303,26 @@ window.renderChatFeed = function() {
 
     let html = '';
     const seenRollGroups = new Set(); // a private dice-tray roll is one row per DM; show it once
+    // Folded round detail: hidden in General/Dice; in Combat, each run of rows from one
+    // round becomes one clickable "Round N detail" bar (closed unless the viewer opened it).
+    const foldOn = typeof window.isFeatureOn === 'function' && window.isFeatureOn('fold_ai_chatter');
+    let foldRun = null; // { round, key, count, open, at } for the run being read
+    const closeFoldRun = () => {
+        if (!foldRun) return;
+        const bar = `<button type="button" class="chat-fold-bar" onclick="window.toggleChatFold('${foldRun.key}')" aria-expanded="${foldRun.open}" style="display:block; width:100%; text-align:left; margin:0; background:rgba(6,9,7,0.6); border:0; border-left:2px solid #6b826a; border-radius:2px; padding:6px; font-size:10px; color:#6b826a; cursor:pointer;">${foldRun.open ? '▾' : '▸'} Round ${window.escapeHtml(String(foldRun.round))} detail — ${foldRun.count} line${foldRun.count === 1 ? '' : 's'}</button>`;
+        html = html.slice(0, foldRun.at) + bar + html.slice(foldRun.at);
+        foldRun = null;
+    };
     source.forEach(log => {
         const gid = log.message_type === 'roll' && log.roll_data && log.roll_data.gid;
         if (gid) { if (seenRollGroups.has(gid)) return; seenRollGroups.add(gid); }
+        const fold = foldOn ? window.chatFoldRound(log) : null;
+        if (fold !== null) {
+            if (tab !== 'combat') return; // General and Dice never show round detail
+            if (!foldRun || foldRun.round !== fold) { closeFoldRun(); const key = `${fold}:${log.id !== undefined ? log.id : log.created_at}`; foldRun = { round: fold, key, count: 0, open: window.__foldOpen.has(key), at: html.length }; }
+            foldRun.count++;
+            if (!foldRun.open) return;
+        } else closeFoldRun();
         const sender = allProfiles.find(p => p.id === log.sender_id); const senderName = window.escapeHtml(sender ? (sender.username || 'Commander') : 'Unknown');
         const isDM = !!log.recipient_id; let headerColor = isDM ? '#c778dd' : '#00e5a3'; let prefix = isDM ? '🔒 [PRIVATE]' : '🌐';
         if (log.message_type === 'system') { headerColor = '#6b826a'; prefix = '⚙️'; }
@@ -2303,9 +2333,11 @@ window.renderChatFeed = function() {
         if (log.message_type === 'ping' && log.roll_data) { contentHTML = `${contentHTML} <button class="layer-edit" onclick="window.jumpToPingLocation(${Number(log.roll_data.x) || 0}, ${Number(log.roll_data.y) || 0})" style="padding:2px 8px; font-size:9px; margin-left:6px;">JUMP TO LOCATION</button>`; }
         html += `<div style="background: rgba(6,9,7,0.6); padding: 6px; border-left: 2px solid ${headerColor}; border-radius: 2px;"><div style="font-size: 9px; color: ${headerColor}; margin-bottom: 2px;">${prefix} <strong>${log.message_type === 'system' ? 'SYSTEM' : senderName}</strong></div><div style="font-size: 11px; color: #d4c5a9;${log.message_type === 'system' ? ' white-space: pre-line;' : ''}">${contentHTML}</div></div>`;
     });
+    closeFoldRun();
     const finalHtml = html || '<span style="font-size:10px; color:#6b826a;">No messages in this channel yet.</span>';
-    if (feed) { feed.innerHTML = finalHtml; feed.scrollTop = feed.scrollHeight; }
-    if (bmFeed) { bmFeed.innerHTML = finalHtml; bmFeed.scrollTop = bmFeed.scrollHeight; }
+    // Opening or closing a round-detail bar keeps the reader where they were.
+    const keep = !!window.__foldKeepScroll; window.__foldKeepScroll = false;
+    [feed, bmFeed].forEach(el => { if (!el) return; const top = el.scrollTop; el.innerHTML = finalHtml; el.scrollTop = keep ? top : el.scrollHeight; });
 };
 
 window.populateCommsRecipients = function() {

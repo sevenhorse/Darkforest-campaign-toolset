@@ -612,6 +612,7 @@ window.resolveSquadronWeaponFire = async function(vesselId, sqIdx, wpnIdx, targe
 
     if (window.AudioEngine) window.AudioEngine.playShoot();
 
+    if (opts.auto && targetShip && typeof window.noteRoundFold === 'function') window.noteRoundFold({ k: 'shot', to: targetShip, dmg: total }); // round summary (fold_ai_chatter)
     if(typeof window.broadcastRoll === 'function') {
         const autoTag = opts.auto ? '🤖 [AI STANCE] ' : '';
         await window.broadcastRoll(`${autoTag}[${sq.name}] FIRES ${wpn.name} (x${volleys})${targetString}`, breakdownString, total);
