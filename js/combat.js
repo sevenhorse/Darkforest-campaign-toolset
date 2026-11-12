@@ -33,7 +33,7 @@ window.snapToCatalogName = function(name) {
 window.refreshCatalogDatalist = function() {
     let dl = document.getElementById('cargo-catalog-names');
     if (!dl) { dl = document.createElement('datalist'); dl.id = 'cargo-catalog-names'; document.body.appendChild(dl); }
-    dl.innerHTML = cargoItemCatalogList.map(c => `<option value="${String(c.name || '').replace(/"/g, '&quot;')}"></option>`).join('');
+    dl.innerHTML = cargoItemCatalogList.map(c => `<option value="${window.escapeHtml(c.name || '')}"></option>`).join('');
 };
 
 window.loadCargoItemCatalog = async function() {
@@ -56,7 +56,7 @@ window.renderCargoCatalogOptionsHtml = function() {
         bySection[sec].push(item);
     });
     return Object.keys(bySection).sort().map(sec => {
-        const opts = bySection[sec].map(item => `<option value="${item.id}">${item.name}${item.unit ? ' (' + item.unit + ')' : ''}</option>`).join('');
+        const opts = bySection[sec].map(item => `<option value="${item.id}">${window.escapeHtml(item.name)}${item.unit ? ' (' + window.escapeHtml(item.unit) + ')' : ''}</option>`).join('');
         return `<optgroup label="${sec}">${opts}</optgroup>`;
     }).join('');
 };
@@ -121,7 +121,7 @@ window.renderCargoCatalogDmList = function() {
         .filter(b => b.output_type === 'cargo_item').map(b => String((b.output_payload && b.output_payload.name) || '').toLowerCase()));
     const kindTag = (c) => c.issue_kind === 'weapon' ? ' <span style="color:#ffaa00;" title="Issued to a character\'s Arsenal">· weapon</span>'
         : (c.issue_kind === 'gear' ? ' <span style="color:#9fe9f5;" title="Issued to a character\'s Gear">· gear</span>' : '');
-    container.innerHTML = cargoItemCatalogList.map(c => `<div class="catalog-dm-row" data-catalog-id="${c.id}" style="display:flex; justify-content:space-between; align-items:center; gap:4px; font-size:9px; padding:3px 0; border-bottom:1px solid #1c261a;"><span style="flex:1;">${c.name} <span style="color:#6b826a;">(${c.category}${c.unit ? ', ' + c.unit : ''})</span>${kindTag(c)}${built.has(String(c.name || '').toLowerCase()) ? '' : ' <span style="color:#c9962f;" title="No manufacturing blueprint builds this item">· no blueprint</span>'}</span>${typeof window.openCatalogItemEditor === 'function' ? `<button onclick="window.openCatalogItemEditor('${c.id}')" title="Edit how this item is issued to characters" style="font-size:8px; padding:1px 5px; width:auto; margin:0;">⚙</button>` : ''}<button onclick="window.deleteCargoCatalogItem('${c.id}')" style="font-size:8px; padding:1px 5px; width:auto; margin:0;">✕</button></div>`).join('');
+    container.innerHTML = cargoItemCatalogList.map(c => `<div class="catalog-dm-row" data-catalog-id="${c.id}" style="display:flex; justify-content:space-between; align-items:center; gap:4px; font-size:9px; padding:3px 0; border-bottom:1px solid #1c261a;"><span style="flex:1;">${window.escapeHtml(c.name)} <span style="color:#6b826a;">(${c.category}${c.unit ? ', ' + c.unit : ''})</span>${kindTag(c)}${built.has(String(c.name || '').toLowerCase()) ? '' : ' <span style="color:#c9962f;" title="No manufacturing blueprint builds this item">· no blueprint</span>'}</span>${typeof window.openCatalogItemEditor === 'function' ? `<button onclick="window.openCatalogItemEditor('${c.id}')" title="Edit how this item is issued to characters" style="font-size:8px; padding:1px 5px; width:auto; margin:0;">⚙</button>` : ''}<button onclick="window.deleteCargoCatalogItem('${c.id}')" style="font-size:8px; padding:1px 5px; width:auto; margin:0;">✕</button></div>`).join('');
 };
 
 window.sanitizeCargo = function(inv) {
@@ -172,7 +172,7 @@ window.populateCargoVesselSelect = function() {
     let html = '';
     globalShipMarkersCache.forEach(m => {
         if (typeof window.canAccessVesselDeck === 'function' && !window.canAccessVesselDeck(m)) return;
-        html += `<option value="${m.id}">${m.name} (X: ${Math.round(m.x)}, Y: ${Math.round(m.y)})</option>`;
+        html += `<option value="${m.id}">${window.escapeHtml(m.name)} (X: ${Math.round(m.x)}, Y: ${Math.round(m.y)})</option>`;
     });
     select.innerHTML = html || '<option value="">No accessible vessels found</option>';
     if (prev && Array.from(select.options).some(o => o.value === prev)) select.value = prev;
@@ -258,10 +258,10 @@ window.renderTerminalCargoDeck = function() {
             const upDisabled = index === 0 ? 'disabled' : '';
             const downDisabled = index === currentCategoryItems.length - 1 ? 'disabled' : '';
             html += `
-                <div class="note-card cargo-row" data-cargo-idx="${index}" data-cargo-name="${String(item.name || '').replace(/"/g, '&quot;')}" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403;">
+                <div class="note-card cargo-row" data-cargo-idx="${index}" data-cargo-name="${window.escapeHtml(item.name || '')}" style="display:flex; justify-content:space-between; align-items:center; padding:8px; margin-bottom:6px; background:#030403;">
                     <div style="flex:2;">
-                        <strong style="color:#00e5a3; font-size:12px;">${item.name}</strong>
-                        <div style="font-size:10px; color:#6b826a;">Unit Type: ${item.unit || 'units'}</div>
+                        <strong style="color:#00e5a3; font-size:12px;">${window.escapeHtml(item.name)}</strong>
+                        <div style="font-size:10px; color:#6b826a;">Unit Type: ${window.escapeHtml(item.unit || 'units')}</div>
                     </div>
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span class="reorder-arrows">
@@ -662,7 +662,7 @@ window.revealVesselIfHidden = async function(vessel) {
     if (!vessel || !vessel.is_hidden) return;
     vessel.is_hidden = false;
     await db.from('ship_markers').update({ is_hidden: false }).eq('id', vessel.id);
-    await db.from('chat_logs').insert({ sender_id: null, content: `💥 [FOG OF WAR] ${vessel.name} reveals its position by opening fire!`, message_type: 'system' });
+    await db.from('chat_logs').insert({ sender_id: null, content: `💥 [FOG OF WAR] ${window.escapeHtml(vessel.name)} reveals its position by opening fire!`, message_type: 'system' });
 };
 
 window.switchVesselSubtab = function(subtab) {
@@ -775,8 +775,8 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         let targetOptions = '<option value="">-- No Target --</option>';
         // Out-of-arc and terrain-blocked targets stay listed but greyed + unselectable.
         targetCandidates.forEach(m => { targetOptions += (m.out_of_arc || m.terrain_block)
-            ? `<option value="${m.id}" disabled style="color:#5a5a5a;">${m.is_strike_craft ? '🛩️ ' : ''}${m.name} (${m.out_of_arc ? 'out of arc' : (/nebula/i.test(m.terrain_block) ? 'in nebula' : 'blocked')})</option>`
-            : `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
+            ? `<option value="${m.id}" disabled style="color:#5a5a5a;">${m.is_strike_craft ? '🛩️ ' : ''}${window.escapeHtml(m.name)} (${m.out_of_arc ? 'out of arc' : (/nebula/i.test(m.terrain_block) ? 'in nebula' : 'blocked')})</option>`
+            : `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${window.escapeHtml(m.name)}</option>`; });
 
         let wDmgType = window.normalizeDamageType(w.damage_type || window.inferLegacyDamageType(w.name));
         let wDmgInfo = window.DAMAGE_TYPES[wDmgType];
@@ -794,15 +794,15 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
         // Fails open (no badge, fires normally) if the assigned deck was deleted.
         let assignedDeck = w.assigned_deck_id ? (vessel.ship_decks || []).find(d => d.id === w.assigned_deck_id) : null;
         let deckDestroyed = !!(assignedDeck && assignedDeck.hp <= 0);
-        let deckBadge = assignedDeck ? `<span style="font-size:8px; color:${deckDestroyed ? '#ff3333' : '#6b826a'}; border:1px solid ${deckDestroyed ? '#ff3333' : '#3c4e36'}; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Tied to the ${assignedDeck.name} deck — a destroyed deck can't fire its assigned weapons">🔧 ${assignedDeck.name}${deckDestroyed ? ' DESTROYED' : ''}</span>` : '';
+        let deckBadge = assignedDeck ? `<span style="font-size:8px; color:${deckDestroyed ? '#ff3333' : '#6b826a'}; border:1px solid ${deckDestroyed ? '#ff3333' : '#3c4e36'}; border-radius:2px; padding:1px 4px; margin-left:4px;" title="Tied to the ${window.escapeHtml(assignedDeck.name)} deck — a destroyed deck can't fire its assigned weapons">🔧 ${window.escapeHtml(assignedDeck.name)}${deckDestroyed ? ' DESTROYED' : ''}</span>` : '';
         let fireDisabledAttr = deckDestroyed ? 'disabled' : '';
         let fireDisabledStyle = deckDestroyed ? ' opacity:0.4; cursor:not-allowed;' : '';
-        let fireDisabledTitle = deckDestroyed ? `title="${assignedDeck.name} deck destroyed — cannot fire"` : '';
+        let fireDisabledTitle = deckDestroyed ? `title="${window.escapeHtml(assignedDeck.name)} deck destroyed — cannot fire"` : '';
         wHtml += `
         <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ff3333;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                 <div>
-                    <strong style="color:#ff6b6b; font-size:12px;">[${w.loc || 'Unmounted'}] ${w.name}</strong>${classBadge}${pdBadge}${rangeBadge}${typeof window.weaponArcBadgeHtml === 'function' ? window.weaponArcBadgeHtml(w, vessel) : ''}${cooldownPeriodBadge}${singlePatternBadge}${deckBadge}
+                    <strong style="color:#ff6b6b; font-size:12px;">[${window.escapeHtml(w.loc || 'Unmounted')}] ${window.escapeHtml(w.name)}</strong>${classBadge}${pdBadge}${rangeBadge}${typeof window.weaponArcBadgeHtml === 'function' ? window.weaponArcBadgeHtml(w, vessel) : ''}${cooldownPeriodBadge}${singlePatternBadge}${deckBadge}
                     <div style="font-size:10px; color:#d4c5a9;">${w.dice} ${w.modifier} ${w.explodes ? '💥' : ''} · ${w.gun_count || 1}x Guns · <span class="dmg-tooltip" style="color:${wDmgInfo.color}; cursor:help;" title="${window.getDamageTypeTooltip(wDmgType)}">${wDmgType} ⓘ</span></div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
@@ -898,7 +898,7 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
     const newWpnDeckSelect = document.getElementById('new-ship-wpn-deck');
     if (newWpnDeckSelect) {
         const decks = vessel.ship_decks || [];
-        newWpnDeckSelect.innerHTML = '<option value="">-- Not deck-gated --</option>' + decks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        newWpnDeckSelect.innerHTML = '<option value="">-- Not deck-gated --</option>' + decks.map(d => `<option value="${d.id}">${window.escapeHtml(d.name)}</option>`).join('');
     }
 
     if (healthContainer) {
@@ -938,7 +938,7 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
                 dHtml += `
                 <div style="margin-bottom: 8px; background: #030403; padding: 6px; border: 1px solid #00e1ff; border-radius: 2px;">
                     <div style="display:flex; justify-content:space-between; font-size:10px; color:#00e1ff; margin-bottom:2px;">
-                        <strong>${d.name} ${typeLabel}</strong><span>${d.hp} / ${d.max_hp}</span>
+                        <strong>${window.escapeHtml(d.name)} ${typeLabel}</strong><span>${d.hp} / ${d.max_hp}</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                         <span class="reorder-arrows">
@@ -976,13 +976,13 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
                     ownerCheckboxesHtml += `
                         <label style="display:flex; align-items:center; gap:5px; font-size:10px; color:#d4c5a9; cursor:pointer; padding:2px 0;">
                             <input type="checkbox" ${checked} onchange="window.toggleVesselOwner('${vessel.id}', '${p.id}', this.checked)">
-                            ${p.username || 'Commander'}${p.role === 'dm' ? ' [DM]' : ''}
+                            ${window.escapeHtml(p.username || 'Commander')}${p.role === 'dm' ? ' [DM]' : ''}
                         </label>`;
                 });
                 let ownerOptions = '';
                 allProfiles.forEach(p => {
                     const isCurrent = currentOwnerIds.includes(p.id);
-                    ownerOptions += `<option value="${p.id}" ${isCurrent && currentOwnerIds[0] === p.id ? 'selected' : ''}>${p.username || 'Commander'}${isCurrent ? ' (current owner)' : ''}</option>`;
+                    ownerOptions += `<option value="${p.id}" ${isCurrent && currentOwnerIds[0] === p.id ? 'selected' : ''}>${window.escapeHtml(p.username || 'Commander')}${isCurrent ? ' (current owner)' : ''}</option>`;
                 });
                 ownershipContainer.innerHTML = `
                 <div style="background:#030403; padding:8px; border:1px solid #ff6b6b; border-radius:2px; margin-top:10px;">
@@ -1098,8 +1098,8 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
                 eHtml += `
                 <div class="note-card" style="padding:6px; margin-bottom:4px; background:#030403; border-color:#00e1ff; display:flex; justify-content:space-between; align-items:center;">
                     <div>
-                        <strong style="color:#00e1ff; font-size:11px;">${sq.name}</strong>
-                        <div style="font-size:9px; color:#6b826a;">${dbStats.label} | Units: ${window.squadronCountLabel(sq)} | HP: ${sq.hp} / ${sq.max_hp}</div>
+                        <strong style="color:#00e1ff; font-size:11px;">${window.escapeHtml(sq.name)}</strong>
+                        <div style="font-size:9px; color:#6b826a;">${window.escapeHtml(dbStats.label)} | Units: ${window.squadronCountLabel(sq)} | HP: ${sq.hp} / ${sq.max_hp}</div>
                     </div>
                     <div style="display:flex; gap:6px;">
                         <!-- Overworld-visibility fix (live-session feature request,
@@ -1127,7 +1127,7 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
             deployed.forEach((sq, idx) => {
                 let dbStats = window.getStrikeCraftStats(sq.type); // see hangar loop above
                 let wpnOptions = '';
-                dbStats.weapons.forEach((w, wIdx) => { wpnOptions += `<option value="${wIdx}">${w.weapon_class === 'ordnance' ? '☠ ' : ''}${w.name} (${w.dice})${w.range ? ` [📏${w.range}]` : ''}${w.cooldown_period ? ` [⏱${w.cooldown_period}]` : ''}</option>`; });
+                dbStats.weapons.forEach((w, wIdx) => { wpnOptions += `<option value="${wIdx}">${w.weapon_class === 'ordnance' ? '☠ ' : ''}${window.escapeHtml(w.name)} (${w.dice})${w.range ? ` [📏${w.range}]` : ''}${w.cooldown_period ? ` [⏱${w.cooldown_period}]` : ''}</option>`; });
 
                 // Range is measured from the squadron's own battle-map token (sqShipSelf),
                 // not the carrier's. The weapon and target selects are siblings, so the
@@ -1139,7 +1139,7 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
                 // Same no-battle fallback filter for hidden vessels as renderShipWeaponsHtml.
                 const initialCandidates = initialScoped || globalShipMarkersCache.filter(m => m.id !== vessel.id && (typeof window.isVesselVisibleToMe !== 'function' || window.isVesselVisibleToMe(m)));
                 let targetOptions = '<option value="">-- Target --</option>';
-                initialCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${m.name}</option>`; });
+                initialCandidates.forEach(m => { targetOptions += `<option value="${m.id}">${m.is_strike_craft ? '🛩️ ' : ''}${window.escapeHtml(m.name)}</option>`; });
 
                 // An AI stance takes over this squadron's fire entirely: the manual
                 // weapon/target/FIRE row is replaced by a status readout, so a squadron
@@ -1185,8 +1185,8 @@ window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function
                 <div class="note-card" style="padding:8px; margin-bottom:6px; background:#030403; border-color:#ffaa00;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                         <div>
-                            <strong style="color:#ffaa00; font-size:12px;">🛫 ${sq.name}</strong>
-                            <div style="font-size:9px; color:#d4c5a9;">${dbStats.label} | Units: ${window.squadronCountLabel(sq)} | HP: ${sq.hp} / ${sq.max_hp}</div>
+                            <strong style="color:#ffaa00; font-size:12px;">🛫 ${window.escapeHtml(sq.name)}</strong>
+                            <div style="font-size:9px; color:#d4c5a9;">${window.escapeHtml(dbStats.label)} | Units: ${window.squadronCountLabel(sq)} | HP: ${sq.hp} / ${sq.max_hp}</div>
                             <div style="display:flex; align-items:center; gap:4px; margin-top:4px;">
                                 <span style="font-size:9px; color:#ff6b6b;">BINGO FUEL LOITER: ${sq.loiter}/4</span>
                                 <button onclick="window.modifySquadronLoiter('${vessel.id}', ${idx}, -1)" style="padding:0 4px; font-size:9px;">-</button>
@@ -1643,7 +1643,7 @@ async function applySystemLockdown(targetShip, wpn) {
         targetShip.disabled_weapons_until = PERM;
         targetShip.disabled_sensors_until = PERM;
         targetShip.disabled_engines_until = PERM;
-        log = ` [SYSTEM LOCKDOWN] ${targetShip.name} is PERMANENTLY DISABLED (${targetShip.is_strike_craft ? 'strike craft' : 'Escort-class'}, no check).`;
+        log = ` [SYSTEM LOCKDOWN] ${window.escapeHtml(targetShip.name)} is PERMANENTLY DISABLED (${targetShip.is_strike_craft ? 'strike craft' : 'Escort-class'}, no check).`;
     } else {
         const dc = wpn.system_lockdown.checkDC || 16;
         const checkRoll = Math.floor(Math.random() * 20) + 1;
@@ -1653,9 +1653,9 @@ async function applySystemLockdown(targetShip, wpn) {
             const duration = Math.floor(Math.random() * 4) + 1; // 1d4 rounds
             targetShip[pickedField] = Math.max(targetShip[pickedField] || 0, duration);
             const label = pickedField === 'disabled_weapons_until' ? 'WEAPONS' : (pickedField === 'disabled_sensors_until' ? 'SENSORS' : 'ENGINES');
-            log = ` [SYSTEM LOCKDOWN] ${targetShip.name} fails a DC${dc} check (rolled ${checkRoll}) — ${label} disabled for ${duration} round(s)!`;
+            log = ` [SYSTEM LOCKDOWN] ${window.escapeHtml(targetShip.name)} fails a DC${dc} check (rolled ${checkRoll}) — ${label} disabled for ${duration} round(s)!`;
         } else {
-            log = ` [SYSTEM LOCKDOWN] ${targetShip.name} resists (rolled ${checkRoll} vs DC${dc}).`;
+            log = ` [SYSTEM LOCKDOWN] ${window.escapeHtml(targetShip.name)} resists (rolled ${checkRoll} vs DC${dc}).`;
         }
     }
     try {
@@ -2083,7 +2083,7 @@ window.reassignVesselOwnership = async function(vesselId) {
     try {
         await db.from('chat_logs').insert({
             sender_id: null,
-            content: `⚔️ BOARDING RESOLVED: "${vessel.name}" has been captured — ownership transferred to ${newOwnerName}.`,
+            content: `⚔️ BOARDING RESOLVED: "${window.escapeHtml(vessel.name)}" has been captured — ownership transferred to ${window.escapeHtml(newOwnerName)}.`,
             message_type: 'system'
         });
     } catch (e) { /* chat log is best-effort, don't block the transfer on it */ }
@@ -2361,9 +2361,9 @@ window.renderManualDamagePanel = function() {
         .filter(Boolean);
 
     firerSel.innerHTML = '<option value="">-- Select firing ship --</option>' +
-        firerCandidates.map(m => `<option value="${m.id}">${m.name}${(m.ship_weapons || []).length === 0 ? ' (no weapons installed)' : ''}</option>`).join('');
+        firerCandidates.map(m => `<option value="${m.id}">${window.escapeHtml(m.name)}${(m.ship_weapons || []).length === 0 ? ' (no weapons installed)' : ''}</option>`).join('');
     targetSel.innerHTML = '<option value="">-- Select target ship --</option>' +
-        targetCandidates.map(m => `<option value="${m.id}">${m.is_strike_craft ? '🛩 ' : ''}${m.name}</option>`).join('');
+        targetCandidates.map(m => `<option value="${m.id}">${m.is_strike_craft ? '🛩 ' : ''}${window.escapeHtml(m.name)}</option>`).join('');
 
     if (prevFirer && firerCandidates.some(m => m.id === prevFirer)) firerSel.value = prevFirer;
     if (prevTarget && targetCandidates.some(m => m.id === prevTarget)) targetSel.value = prevTarget;
@@ -2378,7 +2378,7 @@ window.populateManualDamageWeapons = function() {
     const vessel = globalShipMarkersCache.find(m => m.id === firerSel.value);
     const weapons = (vessel && vessel.ship_weapons) || [];
     wpnSel.innerHTML = '<option value="">-- Unlisted / no specific weapon --</option>' +
-        weapons.map((w, idx) => `<option value="${idx}">${w.name} (${w.dice}${w.ammo === 0 ? ' — EMPTY' : ''}${w.cooldown > 0 ? ' — ON COOLDOWN' : ''})</option>`).join('');
+        weapons.map((w, idx) => `<option value="${idx}">${window.escapeHtml(w.name)} (${w.dice}${w.ammo === 0 ? ' — EMPTY' : ''}${w.cooldown > 0 ? ' — ON COOLDOWN' : ''})</option>`).join('');
     window.onManualDamageWeaponChange();
 };
 
@@ -2784,7 +2784,7 @@ window.deleteShipWeapon = async function(vesselId, idx) {
             db.from('ship_markers').update({ ship_decks: vessel.ship_decks }).eq('id', vessel.id);
         }
         const deckSel = document.getElementById('wpn-edit-deck');
-        deckSel.innerHTML = '<option value="">-- Not deck-gated --</option>' + vessel.ship_decks.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        deckSel.innerHTML = '<option value="">-- Not deck-gated --</option>' + vessel.ship_decks.map(d => `<option value="${d.id}">${window.escapeHtml(d.name)}</option>`).join('');
         deckSel.value = wpn.assigned_deck_id || '';
 
         overlay.style.display = 'flex';
@@ -2849,7 +2849,7 @@ window.renderArsenal = function() {
             }
             html += `
                 <div class="arsenal-row" data-arsenal-id="${w.id}">
-                    <div><strong style="color:#ffaa00; font-size:11px;">${w.name}</strong>${ammoLabel}</div>
+                    <div><strong style="color:#ffaa00; font-size:11px;">${window.escapeHtml(w.name)}</strong>${ammoLabel}</div>
                     <span style="font-size:13px; font-weight:bold; color:#d4c5a9; text-align:center;">${w.dice}</span>
                     <span style="font-size:10px; color:#d4c5a9; text-align:center;">${w.modifier}</span>
                     <span style="font-size:10px; text-align:center;" title="Explodes">${w.explodes ? '💥' : ''}</span>
@@ -3084,7 +3084,7 @@ window.rollArsenalWeapon = async function(id) {
 
     let breakdownString = `
         <div style="margin-top:4px; padding:4px; border-left:2px solid #ffaa00; background:rgba(255,170,0,0.1);">
-            <strong>Arsenal Weapon:</strong> ${wpn.name}<br>
+            <strong>Arsenal Weapon:</strong> ${window.escapeHtml(wpn.name)}<br>
             <strong>Base Output:</strong> ${breakdown.join(' + ')} = <strong style="color:#ff3333;">${total} Dmg</strong>
         </div>
     `;
@@ -3187,7 +3187,7 @@ function rollExplodingDie(faces, canExplode, explodeThreshold) {
         if (!sel) return;
         const targets = groundCombatTargets();
         sel.innerHTML = targets.length
-            ? targets.map(c => `<option value="${c.id}">${c.name}</option>`).join('')
+            ? targets.map(c => `<option value="${c.id}">${window.escapeHtml(c.name)}</option>`).join('')
             : '<option value="">No eligible combatants in the Initiative Tracker</option>';
     }
 
@@ -3347,7 +3347,7 @@ window.resolveArsenalAttack = async function(weaponId) {
     let resultHtml = `
         <div style="margin-top:4px; padding:4px; border-left:2px solid #ff3333; background:rgba(255,51,51,0.1);">
             <strong>To-Hit:</strong> ${atkBreakdown.join(' + ')} = <strong style="color:#ffaa00;">${atkTotal}</strong><br>
-            <strong>Defense:</strong> ${defLabel} = <strong style="color:#00e1ff;">${defTotal}</strong><br>
+            <strong>Defense:</strong> ${window.escapeHtml(defLabel)} = <strong style="color:#00e1ff;">${defTotal}</strong><br>
             <strong style="color:${hit ? '#00e5a3' : '#ff3333'};">${hit ? '✅ HIT' : '❌ MISS'}</strong>
         </div>`;
 
@@ -3566,7 +3566,7 @@ window.renderCombatTracker = function() {
             html += `
                 <div class="note-card ct-row" data-combatant-id="${c.id}" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; padding:6px;">
                     <div>
-                        <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${c.name}${fuelBadge}</strong>
+                        <strong style="color:#00e5a3; font-size:11px;">[Init: ${c.initiative}] ${window.escapeHtml(c.name)}${fuelBadge}</strong>
                         <p style="margin:2px 0 0 0; font-size:10px; color:#6b826a;">HP/Status: ${c.hp}</p>
                     </div>
                     ${canRemove ? `<button class="layer-del" onclick="window.removeCombatant('${c.id}')" style="padding:2px 6px; font-size:9px;">${currentUserRole === 'dm' && c.owner_id !== currentUserId ? 'X' : 'LEAVE'}</button>` : ''}
@@ -3672,7 +3672,7 @@ async function resolveRoundTickNow() {
                         let curHull = vessel.integrity_hull !== undefined ? vessel.integrity_hull : 300;
                         vessel.integrity_hull = Math.max(0, curHull - selfRoll.total);
                         hullChanged = true;
-                        flightLog.push(`⚡ ${w.name} overloads from consecutive firing — ${selfRoll.total} ${dmgSpec.damage_type || 'Heat'} dmg to own Hull.`);
+                        flightLog.push(`⚡ ${window.escapeHtml(w.name)} overloads from consecutive firing — ${selfRoll.total} ${dmgSpec.damage_type || 'Heat'} dmg to own Hull.`);
                     }
                     w.fired_prev_round = true;
                 } else {
@@ -3721,7 +3721,7 @@ async function resolveRoundTickNow() {
                 });
             }
             if (sq.loiter <= 0) {
-                flightLog.push(`⚠️ ${sq.name} hit BINGO FUEL — forced RTB to hangar!`);
+                flightLog.push(`⚠️ ${window.escapeHtml(sq.name)} hit BINGO FUEL — forced RTB to hangar!`);
                 klaxonTriggered = true;
                 sq.loiter = 4; // reset ready for next deployment
                 // AI auto-launch (js/squadrons.js) leaves a wing in the hangar for the round it came back in.
@@ -3756,7 +3756,7 @@ async function resolveRoundTickNow() {
         if (flightLog.length > 0) {
             await db.from('chat_logs').insert({
                 sender_id: null,
-                content: `🚨 [FLIGHT OPS] ${vessel.name}: ${flightLog.join(' ')}`,
+                content: `🚨 [FLIGHT OPS] ${window.escapeHtml(vessel.name)}: ${flightLog.join(' ')}`,
                 message_type: 'system'
             });
         }
