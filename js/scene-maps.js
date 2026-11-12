@@ -202,7 +202,7 @@ window.sceneGoLive = async function () {
         await touchScene(cur, { is_active: false });
     }
     await touchScene(sc, { is_active: true });
-    try { await db.from('chat_logs').insert({ sender_id: null, content: `🎭 [SCENE] On screen now: ${sc.name}.`, message_type: 'system' }); } catch (e) {}
+    try { await db.from('chat_logs').insert({ sender_id: null, content: `🎭 [SCENE] On screen now: ${sc.name}.`, message_type: 'system' }); } catch (e) { console.error('scene-maps.js: posting the scene message failed', e); }
     renderScene();
 };
 window.sceneEnd = async function () {
@@ -640,7 +640,7 @@ function onDown(ev) {
         return;
     }
     if (ev.preventDefault) ev.preventDefault();
-    try { if (S.drag.el.setPointerCapture && ev.pointerId != null) S.drag.el.setPointerCapture(ev.pointerId); } catch (e) {}
+    try { if (S.drag.el.setPointerCapture && ev.pointerId != null) S.drag.el.setPointerCapture(ev.pointerId); } catch (e) { /* pointer capture is optional */ }
 }
 function onMove(ev) {
     const d = S.drag; if (!d) return;

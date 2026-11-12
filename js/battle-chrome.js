@@ -151,5 +151,5 @@ function sync() {
 window.battleChromeSync = sync;
 
 window.onBattleMapRender('battle-chrome', sync, 50);
-document.addEventListener('darkforest:features-changed', () => { try { sync(); } catch (e) {} });
+document.addEventListener('darkforest:features-changed', () => { try { sync(); } catch (e) { console.error('battle-chrome.js: sync after a switch change failed', e); } });
 })();

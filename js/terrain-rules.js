@@ -190,7 +190,7 @@ window.terrainApplyDebris = async function (vessel, debrisLen) {
     const roll = window.terrainDebrisRoll(debrisLen);
     if (!roll || !roll.total) return roll;
     if (typeof window.applyTerrainHullDamage === 'function') await window.applyTerrainHullDamage(vessel, roll.total);
-    try { await db.from('chat_logs').insert({ sender_id: null, content: `🪨 [DEBRIS] ${vessel.name} ploughs through wreckage (${Math.round(debrisLen)} px): ${roll.text} hull damage.`, message_type: 'system' }); } catch (e) {}
+    try { await db.from('chat_logs').insert({ sender_id: null, content: `🪨 [DEBRIS] ${vessel.name} ploughs through wreckage (${Math.round(debrisLen)} px): ${roll.text} hull damage.`, message_type: 'system' }); } catch (e) { console.error('terrain-rules.js: posting the debris message failed', e); }
     return roll;
 };
 // AI moves (moveTokenToward is synchronous) queue their debris here; the
@@ -213,7 +213,7 @@ window.setBattleTerrainRules = async function (on) {
     const { error } = await db.from('battle_encounters').update({ map }).eq('id', e.id);
     if (error) { alert('Could not change terrain rules: ' + error.message); return false; }
     e.map = map;
-    try { await db.from('chat_logs').insert({ sender_id: null, content: `🪐 [TERRAIN] Terrain rules are now ${on ? 'ON' : 'OFF'} for "${e.name}".`, message_type: 'system' }); } catch (err) {}
+    try { await db.from('chat_logs').insert({ sender_id: null, content: `🪐 [TERRAIN] Terrain rules are now ${on ? 'ON' : 'OFF'} for "${e.name}".`, message_type: 'system' }); } catch (err) { console.error('terrain-rules.js: posting the terrain message failed', err); }
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     return true;
 };
@@ -324,5 +324,5 @@ function ensureUi() {
 }
 window.terrainRulesUi = ensureUi;
 window.onBattleMapRender('terrain-rules', ensureUi, 70);
-document.addEventListener('darkforest:features-changed', () => { try { ensureUi(); } catch (e) {} });
+document.addEventListener('darkforest:features-changed', () => { try { ensureUi(); } catch (e) { console.error('terrain-rules.js: drawing the controls after a switch change failed', e); } });
 })();

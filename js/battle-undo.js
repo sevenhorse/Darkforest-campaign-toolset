@@ -347,12 +347,12 @@ async function applyBattleEvent(ev, direction) {
     // 6. Refresh what other modules cache, mark the step, tell the table.
     if ((ch.ship_markers || []).some(c => c.op !== 'update') && typeof window.loadGalaxyData === 'function') await window.loadGalaxyData();
     if ((ch.battlefield_salvage || []).length && typeof window.loadBattlefieldSalvage === 'function') await window.loadBattlefieldSalvage();
-    if ((ch.combat_tracker || []).length && typeof loadCombatTracker === 'function') { try { await loadCombatTracker(); } catch (e) {} }
+    if ((ch.combat_tracker || []).length && typeof loadCombatTracker === 'function') { try { await loadCombatTracker(); } catch (e) { console.error('battle-undo.js: reloading the Initiative Tracker failed', e); } }
     if ((ch.battle_reinforcements || []).length && typeof window.refreshPendingReinforcements === 'function') await window.refreshPendingReinforcements(true);
     const { error: markErr } = await db.from('battle_events').update({ undone: direction === 'undo' }).eq('id', ev.id);
     if (markErr) console.error('undo log: could not mark the step', markErr);
     await db.from('chat_logs').insert({ sender_id: null, content: `${direction === 'undo' ? '⏪ [BATTLE] DM undid' : '⏩ [BATTLE] DM redid'}: ${ev.label}`, message_type: 'system' });
-    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
+    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) { console.error('battle-undo.js: redrawing the Vessel Deck failed', e); } }
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
     return true;
 }

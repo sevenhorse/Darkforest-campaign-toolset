@@ -33,7 +33,7 @@ window.safeLocalSet = function(key, value) {
     try { localStorage.setItem(key, value); return true; } catch (e) { return false; }
 };
 window.safeLocalRemove = function(key) {
-    try { localStorage.removeItem(key); } catch (e) {}
+    try { localStorage.removeItem(key); } catch (e) { /* storage blocked: nothing to remove */ }
 };
 window.escapeHtml = function(str) {
     return String(str === null || str === undefined ? '' : str)
@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-12.01';
+window.DARKFOREST_BUILD = '2026-11-12.02';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -702,7 +702,7 @@ if (window.supabase) {
     // Outside a batch: a call on a batched table waits for any flush of it still on the wire.
     function afterFlush(table) {
         const calls = [];
-        return chainProxy(calls, async () => { try { await inflight[table]; } catch (e) {} return replay(table, calls); });
+        return chainProxy(calls, async () => { try { await inflight[table]; } catch (e) { /* a failed flush is reported by the flush itself */ } return replay(table, calls); });
     }
     db.from = function (table) {
         if (B.depth > 0 && (MERGE[table] || table === 'chat_logs')) return deferred(table);
@@ -1228,7 +1228,7 @@ async function sendMyPresence() {
 }
 
 function initPresenceChannel(userProfile) {
-    if (presenceChannel) { try { presenceChannel.unsubscribe(); } catch (e) {} } // defends against duplicate channels if this ever gets called twice
+    if (presenceChannel) { try { presenceChannel.unsubscribe(); } catch (e) { /* channel already closed */ } } // defends against duplicate channels if this ever gets called twice
     window.myPresenceProfile = { username: userProfile.username, role: userProfile.role, avatar_url: userProfile.avatar_url };
     const ch = presenceChannel = db.channel('online_map_users', { config: { presence: { key: currentUserId } } });
     realtimeChannel = presenceChannel;

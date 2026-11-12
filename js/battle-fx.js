@@ -142,7 +142,7 @@ function playBattleImpactSound(targetVesselId) {
     lastBattleImpactSoundAt = now;
     const target = globalShipMarkersCache.find(m => m.id === targetVesselId);
     const shieldsUp = !!(target && (target.integrity_shields || 0) > 0);
-    setTimeout(() => { try { shieldsUp ? ae.playShieldHit() : ae.playHullHit(); } catch (e) {} }, 180);
+    setTimeout(() => { try { shieldsUp ? ae.playShieldHit() : ae.playHullHit(); } catch (e) { /* a sound that cannot play is not an error */ } }, 180);
 }
 
 // Beam family (Energy, Ion, Exotic, Antimatter, Heat; see

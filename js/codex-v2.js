@@ -172,7 +172,7 @@ function teardown() {
     restoreForm();
     destroyCharts();
 }
-function destroyCharts() { (S.charts || []).forEach(c => { try { c.destroy(); } catch (e) {} }); S.charts = []; }
+function destroyCharts() { (S.charts || []).forEach(c => { try { c.destroy(); } catch (e) { /* chart already gone */ } }); S.charts = []; }
 
 // The DM form lives in the old deck; it's borrowed while editing.
 let formHome = null;
@@ -326,7 +326,7 @@ function wireDrag(listEl, cat) {
     listEl.addEventListener('dragstart', (ev) => {
         const row = rowOf(ev); if (!row) return;
         dragId = row.dataset.id; row.classList.add('cx2-dragging');
-        try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', dragId); } catch (e) {}
+        try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', dragId); } catch (e) { /* some browsers refuse drag data: the drag still works */ }
     });
     listEl.addEventListener('dragover', (ev) => {
         const row = rowOf(ev); if (!row || !dragId) return;
@@ -531,7 +531,7 @@ function ensureSync() {
 window.codexSyncReset = function () { syncCh = null; ensureSync(); }; // tests
 window.codexAnnounceChange = function () {
     if (!isDm() || !syncCh || !window.isFeatureOn || !window.isFeatureOn('codex_links')) return;
-    try { const p = syncCh.send({ type: 'broadcast', event: 'changed', payload: {} }); if (p && p.then) p.then(() => {}, () => {}); } catch (e) {}
+    try { const p = syncCh.send({ type: 'broadcast', event: 'changed', payload: {} }); if (p && p.then) p.then(() => {}, () => {}); } catch (e) { console.error('codex-v2.js: telling other browsers the Codex changed failed', e); }
 };
 
 function partOfChips(e) {

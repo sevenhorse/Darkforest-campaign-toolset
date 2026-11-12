@@ -97,7 +97,7 @@ function render() {
     }).join('');
 
     const active = document.querySelector('#tt-pages .df-subtab.on') || document.querySelector('#tt-groups .df-tab.on');
-    if (active && typeof active.scrollIntoView === 'function') { try { active.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {} }
+    if (active && typeof active.scrollIntoView === 'function') { try { active.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* scrollIntoView options unsupported: skip it */ } }
     watchSidebar();
 }
 window.renderTerminalTabs = render;

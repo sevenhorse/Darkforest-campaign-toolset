@@ -42,7 +42,7 @@ window.battleMapTouchLocked = function () {
 };
 window.setBattleMapLock = function (on) {
     locked = !!on;
-    try { localStorage.setItem(LOCK_KEY, locked ? '1' : '0'); } catch (e) {}
+    try { localStorage.setItem(LOCK_KEY, locked ? '1' : '0'); } catch (e) { /* storage blocked: not remembered */ }
     sync();
 };
 window.toggleBattleMapLock = function () { window.setBattleMapLock(!locked); };
@@ -110,6 +110,6 @@ window.battleMobileSync = sync;
 // Run after every Battle Map render (battle-chrome may rebuild the bar).
 window.onBattleMapRender('battle-mobile', sync, 90);
 window.onHook('grid-tools-changed', 'battle-mobile', sync); // MEASURE / SELECT lift the lock
-window.addEventListener('resize', () => { try { sync(); } catch (e) {} });
-document.addEventListener('darkforest:features-changed', () => { try { sync(); } catch (e) {} });
+window.addEventListener('resize', () => { try { sync(); } catch (e) { console.error('battle-mobile.js: sync on resize failed', e); } });
+document.addEventListener('darkforest:features-changed', () => { try { sync(); } catch (e) { console.error('battle-mobile.js: sync after a switch change failed', e); } });
 })();

@@ -326,10 +326,10 @@ function tutorialGo(i) {
     const drawer = document.getElementById('mobile-nav-drawer');
     if (tutorialIsMobile() && drawer && typeof window.toggleMobileNav === 'function') {
         let el = null;
-        try { el = typeof step.target === 'function' ? step.target() : (step.target ? tutorialQuery(step.target) : null); } catch (e) {}
+        try { el = typeof step.target === 'function' ? step.target() : (step.target ? tutorialQuery(step.target) : null); } catch (e) { console.error('tutorial.js: finding a step target failed', e); }
         const inDrawer = !!(el && drawer.contains(el));
         window.toggleMobileNav(inDrawer);
-        if (inDrawer) { tutorialState.opened.add('drawer'); try { el.scrollIntoView({ block: 'center' }); } catch (e) {} }
+        if (inDrawer) { tutorialState.opened.add('drawer'); try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* scrollIntoView options unsupported: skip it */ } }
     }
 
     // Bring the target into view if it's scrolled out of sight (e.g. the
@@ -338,7 +338,7 @@ function tutorialGo(i) {
     try {
         const t = typeof step.target === 'function' ? step.target() : (step.target ? tutorialQuery(step.target) : null);
         if (t && t.id !== 'canvas-container') t.scrollIntoView({ block: 'nearest', inline: 'center' });
-    } catch (e) {}
+    } catch (e) { console.error('tutorial.js: placing the tutorial card failed', e); }
 
     const { card } = tutorialEnsureEls();
     card.querySelector('#tutorial-card-count').textContent = `STEP ${i + 1} / ${tutorialState.steps.length}`;
@@ -382,7 +382,7 @@ window.startTutorial = function(opts) {
 window.endTutorial = function() {
     if (!tutorialState.active) return;
     tutorialState.active = false;
-    try { localStorage.setItem(tutorialState.seenKey, 'true'); } catch (e) {}
+    try { localStorage.setItem(tutorialState.seenKey, 'true'); } catch (e) { /* storage blocked: the tour may show again */ }
     const { blocker, spot, card } = tutorialEnsureEls();
     blocker.style.display = 'none'; spot.style.display = 'none'; card.style.display = 'none';
     document.removeEventListener('keydown', tutorialOnKey);

@@ -1363,7 +1363,7 @@ async function startQueuedOrder(order, atHours) {
     const { data, error } = await db.from('manufacturing_orders').update({ status: 'in_progress', started_at_hours: atHours }).eq('id', order.id).eq('status', 'queued').select();
     if (error || !data || !data.length) return false;
     Object.assign(order, { status: 'in_progress', started_at_hours: atHours });
-    try { await window.postSystemLog(`🏭 [MANUFACTURING] A production line freed up — "${order.blueprint_name}" started (${(order.duration_hours || 0).toFixed(1)}h).`); } catch (e) {}
+    try { await window.postSystemLog(`🏭 [MANUFACTURING] A production line freed up — "${order.blueprint_name}" started (${(order.duration_hours || 0).toFixed(1)}h).`); } catch (e) { console.error('manufacturing.js: posting the production-line message failed', e); }
     return true;
 }
 // Runs every source's lines forward to `newHours`: finishes due orders in

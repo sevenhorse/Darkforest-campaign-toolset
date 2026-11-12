@@ -70,14 +70,14 @@ async function loadAllForDm() {
         const { data } = await db.from('character_personal_log').select('*');
         PL.all = {};
         (data || []).forEach(r => { PL.all[r.profile_id] = clean(r, r.profile_id); });
-    } catch (e) {}
+    } catch (e) { console.error('personal-log.js: loading the log failed', e); }
 }
 async function saveNow() {
     clearTimeout(PL.saveTimer);
     if (!PL.row || typeof db === 'undefined') return;
     const r = PL.row;
     const payload = { profile_id: r.profile_id, enabled: r.enabled, partners: r.partners, offspring: r.offspring, offspring_notes: r.offspring_notes, updated_at: new Date().toISOString() };
-    try { await db.from('character_personal_log').upsert(payload, { onConflict: 'profile_id' }); } catch (e) {}
+    try { await db.from('character_personal_log').upsert(payload, { onConflict: 'profile_id' }); } catch (e) { console.error('personal-log.js: saving the log failed', e); }
     if (isDm()) PL.all[r.profile_id] = clean(payload, r.profile_id);
 }
 function saveSoon() { clearTimeout(PL.saveTimer); PL.saveTimer = setTimeout(saveNow, 600); }

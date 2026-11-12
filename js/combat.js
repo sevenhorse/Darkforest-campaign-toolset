@@ -485,11 +485,11 @@ window.populateVesselDeckSelect = function() {
    The finder only filters the dropdown; it never changes what a player can
    access (canAccessVesselDeck runs first). Tabs are built from the vessels
    this viewer can access, so a player never sees an enemy faction's tab. */
-window.__vf = window.__vf || (() => { let s = null; try { s = JSON.parse(window.safeLocalGet ? window.safeLocalGet('vessel_finder', 'null') : 'null'); } catch (e) {} return Object.assign({ tab: 'all', q: '' }, s || {}); })();
+window.__vf = window.__vf || (() => { let s = null; try { s = JSON.parse(window.safeLocalGet ? window.safeLocalGet('vessel_finder', 'null') : 'null'); } catch (e) { /* bad or blocked saved state: use the defaults */ } return Object.assign({ tab: 'all', q: '' }, s || {}); })();
 window.vesselFavoriteIds = window.vesselFavoriteIds || new Set();
 window.vesselFactionOf = function(m) { return String((m && m.faction) || '').trim(); };
 window.isVesselFavorite = function(id) { return window.vesselFavoriteIds.has(id); };
-function vfSave() { try { if (window.safeLocalSet) window.safeLocalSet('vessel_finder', JSON.stringify({ tab: window.__vf.tab, q: window.__vf.q })); } catch (e) {} }
+function vfSave() { try { if (window.safeLocalSet) window.safeLocalSet('vessel_finder', JSON.stringify({ tab: window.__vf.tab, q: window.__vf.q })); } catch (e) { /* storage blocked: not remembered */ } }
 const vfSort = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
 window.vesselFinderApply = function(list) {
     const VF = window.__vf; const q = String(VF.q || '').trim().toLowerCase();
@@ -854,7 +854,7 @@ window.renderShipWeaponsHtml = function(vessel, opts) {
 
 // Announces 'vessel-deck-rendered' (js/fleet-v2.js refreshes the restyled header on it).
 window.renderVesselDeck = window.withAfterHooks('vessel-deck-rendered', function() {
-    if (typeof window.renderVesselFinder === 'function') { try { window.renderVesselFinder(); } catch (e) {} }
+    if (typeof window.renderVesselFinder === 'function') { try { window.renderVesselFinder(); } catch (e) { console.error('combat.js: drawing the vessel finder failed', e); } }
     // Firing arcs: Arc dropdown in the "Mount New Weapon System" form (kept across re-renders).
     if (typeof window.ensureArcSelect === 'function') { const cur = document.getElementById('new-ship-wpn-arc'); window.ensureArcSelect('new-ship-wpn-loc', 'new-ship-wpn-arc', cur ? cur.value : ''); }
     const select = document.getElementById('vessel-deck-select');

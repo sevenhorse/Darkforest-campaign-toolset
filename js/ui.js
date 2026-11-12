@@ -707,7 +707,7 @@ window.resetUiLayout = function() {
     // browser is excluded: DRADIS scans ('scanned'), discovered trade routes
     // ('discovered_hyperlane'), the clock, and the FOW reset marker (wiping
     // that alone would look like a new DM reset and wipe scans next load).
-    let storedKeys = []; try { storedKeys = Object.keys(localStorage); } catch (e) {}
+    let storedKeys = []; try { storedKeys = Object.keys(localStorage); } catch (e) { /* storage blocked: nothing stored */ }
     storedKeys.forEach(k => { if (k.startsWith('odyssey_') && !k.includes('universe_time') && !k.includes('scanned') && !k.includes('fow_reset_epoch') && !k.includes('discovered_hyperlane')) window.safeLocalRemove(k); });
     location.reload();
 };
@@ -1835,7 +1835,7 @@ window.openCodexFullscreen = window.withAfterHooks('codex-fullscreen-opened', fu
     // attached, and canvas ids are per-entry (codex-chart-0, -1, ...) so
     // reopening a different entry would collide with the last one's
     // leftover instances otherwise.
-    (window.activeCodexCharts || []).forEach(c => { try { c.destroy(); } catch (e) {} });
+    (window.activeCodexCharts || []).forEach(c => { try { c.destroy(); } catch (e) { /* chart already gone */ } });
     window.activeCodexCharts = [];
 
     const rendered = (typeof window.renderCodexMarkdown === 'function')
@@ -1859,7 +1859,7 @@ window.openCodexFullscreen = window.withAfterHooks('codex-fullscreen-opened', fu
 
 window.closeCodexFullscreen = window.withAfterHooks('codex-fullscreen-closed', function() {
     document.getElementById('codex-fullscreen-reader').style.display = 'none';
-    (window.activeCodexCharts || []).forEach(c => { try { c.destroy(); } catch (e) {} });
+    (window.activeCodexCharts || []).forEach(c => { try { c.destroy(); } catch (e) { /* chart already gone */ } });
     window.activeCodexCharts = [];
 });
 

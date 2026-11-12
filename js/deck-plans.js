@@ -307,7 +307,7 @@ async function setShipDeckStatus(vesselId, deckId, status) {
     const { error } = await db.from('ship_markers').update({ ship_decks: decks }).eq('id', vesselId);
     if (error) { console.error('deck status update failed', error); return false; }
     v.ship_decks = decks;
-    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
+    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) { console.error('deck-plans.js: redrawing the Vessel Deck failed', e); } }
     return true;
 }
 window.deckSetShipDeckStatus = setShipDeckStatus;
@@ -355,7 +355,7 @@ async function offerTransfer(vessel, boarders) {
     vessel.owner_ids = [pick];
     const name = (players.find(p => p.id === pick) || {}).username || 'Commander';
     await postDeckChat(`⚔️ BOARDING RESOLVED: "${vessel.name}" has been captured — ownership transferred to ${name}.`);
-    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
+    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) { console.error('deck-plans.js: redrawing the Vessel Deck failed', e); } }
     if (typeof window.showToast === 'function') window.showToast(`Ownership of ${vessel.name} transferred.`);
     return true;
 }

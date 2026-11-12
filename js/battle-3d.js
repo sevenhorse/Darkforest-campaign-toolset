@@ -68,7 +68,7 @@ function isPhone() {
 }
 window.battle3dPreferredView = function () {
     let v = null;
-    try { v = localStorage.getItem(VIEW_KEY); } catch (e) {}
+    try { v = localStorage.getItem(VIEW_KEY); } catch (e) { /* storage blocked: use the default */ }
     if (v === 'command' || v === 'classic') return v;
     return isPhone() ? 'classic' : 'command';
 };
@@ -77,7 +77,7 @@ window.battle3dActive = function () {
     return window.battle3dAvailable() && !!window.globalBattleEncounterCache && window.battle3dPreferredView() === 'command';
 };
 window.setBattleView = function (v) {
-    try { localStorage.setItem(VIEW_KEY, v === 'command' ? 'command' : 'classic'); } catch (e) {}
+    try { localStorage.setItem(VIEW_KEY, v === 'command' ? 'command' : 'classic'); } catch (e) { /* storage blocked: not remembered */ }
     if (typeof window.renderBattleMapPanel === 'function') window.renderBattleMapPanel();
 };
 window.toggleBattleView = function () {
@@ -88,7 +88,7 @@ window.toggleBattleView = function () {
 const QUALITY_KEY = 'darkforest_battle_quality';
 window.battle3dQuality = function () {
     let q = null;
-    try { q = localStorage.getItem(QUALITY_KEY); } catch (e) {}
+    try { q = localStorage.getItem(QUALITY_KEY); } catch (e) { /* storage blocked: use the default */ }
     if (q === 'high' || q === 'low') return q;
     return isPhone() ? 'low' : 'high';
 };
@@ -100,7 +100,7 @@ function applyQuality() {
     requestRender();
 }
 window.setBattle3dQuality = function (q) {
-    try { localStorage.setItem(QUALITY_KEY, q === 'low' ? 'low' : 'high'); } catch (e) {}
+    try { localStorage.setItem(QUALITY_KEY, q === 'low' ? 'low' : 'high'); } catch (e) { /* storage blocked: not remembered */ }
     applyQuality(); updateToolbar();
 };
 
@@ -117,7 +117,7 @@ function tokCenter(tok) {
 }
 function hash(str) { let h = 0; str = String(str || ''); for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return Math.abs(h); }
 function factionColor(v) {
-    try { if (typeof battleTokenFactionColor === 'function') return battleTokenFactionColor(v); } catch (e) {}
+    try { if (typeof battleTokenFactionColor === 'function') return battleTokenFactionColor(v); } catch (e) { console.error('battle-3d.js: token colour failed', e); }
     return '#00e1ff';
 }
 function canControl(v) { return !!v && (currentUserRole === 'dm' || window.vesselHasOwner(v, currentUserId)); }
@@ -265,7 +265,7 @@ function initScene() {
     Object.assign(B3, { renderer, scene, camera });
     buildFloor(null);
     resetCamera();
-    try { window.addEventListener('resize', () => { resize(); requestRender(); }); } catch (e) {}
+    try { window.addEventListener('resize', () => { resize(); requestRender(); }); } catch (e) { /* no window resize events here: nothing to do */ }
 }
 /* --- Floor + map terrain (Phase 7, js/battle-maps.js) --- */
 function own(obj) { obj.traverse(o => { o.userData.ownGeo = true; o.userData.ownMat = true; }); return obj; }
@@ -574,7 +574,7 @@ function requestModel(spec) {
     B3.models[spec.ref] = 'loading';
     window.loadShipModel(spec.ref).then(data => {
         B3.models[spec.ref] = data;
-        try { if (window.battle3dActive() && B3.renderer) syncScene(); } catch (e) {}
+        try { if (window.battle3dActive() && B3.renderer) syncScene(); } catch (e) { console.error('battle-3d.js: scene sync failed', e); }
     }, () => { B3.models[spec.ref] = 'failed'; });
 }
 function hullFor(kind, color, ghost, spec) {
@@ -933,13 +933,13 @@ function stepFx(now) {
         f.obj.visible = true;
         const k = (now - f.t0) / f.life;
         if (k >= 1) { ended.push(f); return false; }
-        try { if (f.update) f.update(k, f); } catch (e) {}
+        try { if (f.update) f.update(k, f); } catch (e) { console.error('battle-3d.js: effect update failed', e); }
         return true;
     });
     ended.forEach(f => {
         B3.groups.fx.remove(f.obj);
         disposeFx(f.obj);
-        if (f.onEnd) { try { f.onEnd(); } catch (e) {} }
+        if (f.onEnd) { try { f.onEnd(); } catch (e) { console.error('battle-3d.js: effect end failed', e); } }
     });
 }
 function disposeFx(obj) {
@@ -1253,7 +1253,7 @@ function ptrList() { return Object.values(B3.pointers); }
 function onDown(e) {
     if (!B3.renderer || !window.battle3dActive()) return;
     B3.pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
-    if (e.target && e.target.setPointerCapture && e.pointerId !== undefined) { try { e.target.setPointerCapture(e.pointerId); } catch (err) {} }
+    if (e.target && e.target.setPointerCapture && e.pointerId !== undefined) { try { e.target.setPointerCapture(e.pointerId); } catch (err) { /* pointer capture is optional */ } }
     const ps = ptrList();
     if (ps.length === 2) {
         cancelDrag();
@@ -1529,11 +1529,11 @@ window.battle3dApplyMiniSheet = applyMiniSheet;
 window.onBattleMapRender('battle-3d', () => { syncView(); applyMiniSheet(); }, 40);
 window.onHook('tv2-select', 'battle-3d', () => { if (window.battle3dActive() && B3.renderer) syncScene(); });
 try {
-    document.addEventListener('darkforest:features-changed', () => { if (window.globalBattleEncounterCache) { try { syncView(); } catch (e) {} } });
+    document.addEventListener('darkforest:features-changed', () => { if (window.globalBattleEncounterCache) { try { syncView(); } catch (e) { console.error('battle-3d.js: view sync after a switch change failed', e); } } });
     document.addEventListener('keydown', e => {
         if (e.key !== 'Escape' || !window.battle3dActive()) return;
         if (B3.drag) cancelDrag();
         else if (B3.tape) clearTape();
     });
-} catch (e) {}
+} catch (e) { console.error('battle-3d.js: startup failed', e); }
 })();

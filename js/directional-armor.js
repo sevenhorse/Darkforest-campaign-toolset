@@ -232,7 +232,7 @@ window.manualDamageSideSource = function(firerId) {
 
 document.addEventListener('darkforest:features-changed', () => {
     window.ensureManualDamageSidePicker();
-    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
+    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) { console.error('directional-armor.js: redrawing the Vessel Deck failed', e); } }
 });
 
 // Full undo (Phase 4a): the per-side +/- buttons are undoable steps too.

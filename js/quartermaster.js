@@ -99,7 +99,7 @@ async function putInHold(v, name, qty, unit, bucket) {
     await saveCargo(v, cargo);
 }
 async function log(content) {
-    try { await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content }); } catch (e) {}
+    try { await db.from('chat_logs').insert({ sender_id: null, message_type: 'system', content }); } catch (e) { console.error('quartermaster.js: posting the chat line failed', e); }
 }
 async function refreshAll() {
     if (typeof loadAllProfiles === 'function') await loadAllProfiles();

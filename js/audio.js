@@ -38,12 +38,12 @@ window.AudioEngine = (function() {
     }
     function setSfxVolume(v) {
         sfxVolume = Math.max(0, Math.min(1, parseFloat(v)));
-        try { localStorage.setItem('darkforest_sfx_volume', String(sfxVolume)); } catch (e) {}
+        try { localStorage.setItem('darkforest_sfx_volume', String(sfxVolume)); } catch (e) { /* storage blocked: the setting just is not remembered */ }
         if (sfxGainNode) sfxGainNode.gain.value = sfxMuted ? 0 : sfxVolume;
     }
     function setSfxMuted(b) {
         sfxMuted = !!b;
-        try { localStorage.setItem('darkforest_sfx_muted', sfxMuted ? 'true' : 'false'); } catch (e) {}
+        try { localStorage.setItem('darkforest_sfx_muted', sfxMuted ? 'true' : 'false'); } catch (e) { /* storage blocked: the setting just is not remembered */ }
         if (sfxGainNode) sfxGainNode.gain.value = sfxMuted ? 0 : sfxVolume;
     }
     // Notification sounds by kind, each with its own per-device switch in
@@ -60,7 +60,7 @@ window.AudioEngine = (function() {
     }
     function setNotifyOn(kind, on) {
         const key = NOTIFY_KEYS[kind]; if (!key) return;
-        try { localStorage.setItem(key, on ? 'on' : 'off'); } catch (e) {}
+        try { localStorage.setItem(key, on ? 'on' : 'off'); } catch (e) { /* storage blocked: the setting just is not remembered */ }
     }
     // Small synth helpers: a pitch-swept tone and a filtered noise burst.
     // t0/dur are seconds from now.

@@ -25,7 +25,7 @@ const TV = {
     rosterCollapsed: false
 };
 window.__tv2 = TV;
-try { TV.rosterCollapsed = localStorage.getItem('darkforest_tv2_roster_collapsed') === '1'; } catch (e) {}
+try { TV.rosterCollapsed = localStorage.getItem('darkforest_tv2_roster_collapsed') === '1'; } catch (e) { /* storage blocked: use the default */ }
 
 function tvOn() { return typeof window.isFeatureOn === 'function' && window.isFeatureOn('tactical_v2_ui'); }
 window.tv2Active = function() { return tvOn() && !!window.globalBattleEncounterCache; };
@@ -75,7 +75,7 @@ window.tv2Select = window.withAfterHooks('tv2-select', function(vesselId, opts) 
         if (el && wrap && typeof wrap.scrollTo === 'function') {
             const c = tvCenter(tok);
             const scale = typeof BATTLE_GRID_SCALE !== 'undefined' ? BATTLE_GRID_SCALE : 1.5;
-            try { wrap.scrollTo({ left: c.x * scale - wrap.clientWidth / 2, top: c.y * scale - wrap.clientHeight / 2, behavior: 'smooth' }); } catch (e) {}
+            try { wrap.scrollTo({ left: c.x * scale - wrap.clientWidth / 2, top: c.y * scale - wrap.clientHeight / 2, behavior: 'smooth' }); } catch (e) { /* smooth scroll unsupported: skip it */ }
         }
     }
 });
@@ -180,7 +180,7 @@ function renderRoster() {
 }
 window.tv2ToggleRoster = function() {
     TV.rosterCollapsed = !TV.rosterCollapsed;
-    try { localStorage.setItem('darkforest_tv2_roster_collapsed', TV.rosterCollapsed ? '1' : '0'); } catch (e) {}
+    try { localStorage.setItem('darkforest_tv2_roster_collapsed', TV.rosterCollapsed ? '1' : '0'); } catch (e) { /* storage blocked: not remembered */ }
     renderRoster();
 };
 

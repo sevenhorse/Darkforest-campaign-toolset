@@ -511,6 +511,6 @@ document.addEventListener('darkforest:features-changed', () => {
     updateArcReviewButton();
     if (!arcsOn()) window.hideArcWedges();
     // (battle-map.js re-renders the Battle Map on this same event.)
-    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) {} }
+    if (typeof window.renderVesselDeck === 'function') { try { window.renderVesselDeck(); } catch (e) { console.error('firing-arcs.js: redrawing the Vessel Deck failed', e); } }
 });
 window.updateArcReviewButton = updateArcReviewButton;

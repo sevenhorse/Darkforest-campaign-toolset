@@ -377,7 +377,7 @@ function handleRemoteBattleFx(p) {
     if (p.k === 'fire') {
         if (!visible(p.src) || !visible(p.dst)) return;
         // Receivers hear the shot too; the impact sound follows it.
-        if (window.AudioEngine && window.AudioEngine.playShoot) { try { window.AudioEngine.playShoot(); } catch (e) {} }
+        if (window.AudioEngine && window.AudioEngine.playShoot) { try { window.AudioEngine.playShoot(); } catch (e) { /* a sound that cannot play is not an error */ } }
         window.playWeaponFireEffect(p.src, p.dst, p.col || undefined, p.dmg || undefined, true);
     } else if (p.k === 'boom') {
         if (p.marker && !visible(p.marker)) return;
@@ -916,7 +916,7 @@ const renderBattleMapPanelCore = function() {
             const turnKey = `${encounter.id}:${encounter.round_number || 1}:${encounter.current_turn_index}`;
             if (!isDm && !encounter.pending_round_tick && curVessel && window.vesselHasOwner(curVessel, currentUserId) && lastAnnouncedTurnKey !== turnKey) {
                 lastAnnouncedTurnKey = turnKey;
-                if (window.AudioEngine && window.AudioEngine.playTurnStart) { try { window.AudioEngine.playTurnStart(); } catch (e) {} }
+                if (window.AudioEngine && window.AudioEngine.playTurnStart) { try { window.AudioEngine.playTurnStart(); } catch (e) { /* a sound that cannot play is not an error */ } }
             }
             if (turnInfo && encounter.pending_round_tick) {
                 turnInfo.innerText = `Round ${encounter.round_number || 1} complete — ⏳ awaiting DM to resolve the round`;

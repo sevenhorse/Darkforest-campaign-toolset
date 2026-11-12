@@ -66,7 +66,7 @@ window.bridgeConfig = function () {
 };
 window.bridgeUserOn = function () { try { return localStorage.getItem(USER_KEY) === 'on'; } catch (e) { return false; } };
 window.setBridgeUserOn = function (on) {
-    try { localStorage.setItem(USER_KEY, on ? 'on' : 'off'); } catch (e) {}
+    try { localStorage.setItem(USER_KEY, on ? 'on' : 'off'); } catch (e) { /* storage blocked: not remembered */ }
     if (!on && BW.open) window.closeBridge();
     renderBottomButtons();
 };
@@ -230,7 +230,7 @@ async function fetchPart(cfg, path, onBytes) {
     return buf;
 }
 async function clearOldCaches(cfg) {
-    try { const cache = await caches.open(CACHE_NAME); for (const req of await cache.keys()) if (!req.url.includes('/' + cfg.version + '/')) await cache.delete(req); } catch (e) {}
+    try { const cache = await caches.open(CACHE_NAME); for (const req of await cache.keys()) if (!req.url.includes('/' + cfg.version + '/')) await cache.delete(req); } catch (e) { console.error('bridge-walk.js: clearing old cached bridge files failed', e); }
 }
 function load(cfg) {
     if (BW.loaded && BW.loaded.version === cfg.version) return Promise.resolve(BW.loaded);
@@ -448,7 +448,7 @@ function drawHolo(force) {
     if (battleRunning()) src = document.querySelector('#battle-map-panel canvas');
     if (!src) src = document.getElementById('galaxyCanvas');
     if (src && src.width && src.height) {
-        try { const s = Math.max(W / src.width, H / src.height); const w = src.width * s, h = src.height * s; g.globalAlpha = 0.95; g.drawImage(src, (W - w) / 2, (H - h) / 2, w, h); g.globalAlpha = 1; } catch (e) {}
+        try { const s = Math.max(W / src.width, H / src.height); const w = src.width * s, h = src.height * s; g.globalAlpha = 0.95; g.drawImage(src, (W - w) / 2, (H - h) / 2, w, h); g.globalAlpha = 1; } catch (e) { console.error('bridge-walk.js: drawing the loading picture failed', e); }
     }
     g.strokeStyle = 'rgba(0,225,255,0.9)'; g.lineWidth = 6; g.strokeRect(6, 6, W - 12, H - 12);
     g.font = '600 34px Oxanium, sans-serif'; g.fillStyle = battleRunning() ? '#ff7a85' : '#7fe8ff';
@@ -712,7 +712,7 @@ window.uploadBridgeFiles = async function (files, title, shipId) {
         const old = window.bridgeConfig();
         await saveConfig({ version, parts, nav: navPath, bytes, title: title || 'Intrepid Horizon', ship_id: shipId || null, uploaded_at: new Date().toISOString() });
         // the previous version's files are no longer used: free the space (best effort)
-        if (old && old.version !== version) { try { await db.storage.from(BUCKET).remove([...(old.parts || []), old.nav].filter(Boolean)); } catch (e) {} }
+        if (old && old.version !== version) { try { await db.storage.from(BUCKET).remove([...(old.parts || []), old.nav].filter(Boolean)); } catch (e) { console.error('bridge-walk.js: removing the old uploaded bridge files failed', e); } }
         say('Done. Opening the bridge…');
         BW.loaded = null; BW.scene = null;
         setTimeout(() => window.openBridge(), 300);

@@ -269,7 +269,7 @@ function ensureDrawer() {
     q.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); window.toggleCodexDrawer(false); } });
     return d;
 }
-function destroyCharts() { (D.charts || []).forEach(c => { try { c.destroy(); } catch (e) {} }); D.charts = []; }
+function destroyCharts() { (D.charts || []).forEach(c => { try { c.destroy(); } catch (e) { /* chart already gone */ } }); D.charts = []; }
 function matches(e) {
     if (!D.q) return true;
     return [e.title, e.subtitle, e.content].some(t => t && String(t).toLowerCase().includes(D.q));

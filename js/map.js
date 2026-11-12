@@ -1727,7 +1727,7 @@ window.initGalaxyEngine = function() {
                 g.longPressed = true;
                 window.camera.isDragging = false;
                 handlePointerDown(g.x, g.y, g.target, false);
-                if ((window.draggedMarker || window.draggedStar) && navigator.vibrate) { try { navigator.vibrate(30); } catch (_) {} }
+                if ((window.draggedMarker || window.draggedStar) && navigator.vibrate) { try { navigator.vibrate(30); } catch (_) { /* vibration is optional */ } }
             }, TOUCH_LONG_PRESS_MS);
             touchGesture = g;
         } else if (e.touches.length >= 2) {
@@ -2259,7 +2259,7 @@ window.initGalaxyEngine = function() {
         } catch (err) {
             if (Date.now() - lastRenderErrorAt > 5000) console.error('Galaxy map frame failed (map keeps running):', err);
             lastRenderErrorAt = Date.now();
-            try { resize(); } catch (_) {}
+            try { resize(); } catch (_) { console.error('map.js: resizing the map failed', _); }
         }
         requestAnimationFrame(renderLoop);
     }

@@ -18,7 +18,7 @@ function apply() {
     const on = window.polishRestyleOn();
     const was = document.body.classList.contains('px-on');
     document.body.classList.toggle('px-on', on);
-    if (on !== was && typeof window.renderHUDTelemetry === 'function') { try { window.renderHUDTelemetry(); } catch (e) {} }
+    if (on !== was && typeof window.renderHUDTelemetry === 'function') { try { window.renderHUDTelemetry(); } catch (e) { console.error('polish-v2.js: redrawing telemetry failed', e); } }
 }
 window.applyPolishRestyle = apply;
 document.addEventListener('darkforest:features-changed', apply);

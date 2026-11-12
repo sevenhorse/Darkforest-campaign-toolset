@@ -231,7 +231,7 @@ window.saveStrikeCraftIdentity = async function() {
     Object.assign(t, payload);
     STRIKE_CRAFT_DB[t.key] = { label: t.label, base_hp: t.base_hp, weapons: t.weapons || [], _dbId: t.id, ...chassisModelFields(t) };
     window.renderStrikeCraftEditorPanel();
-    if (typeof window.battle3dActive === 'function' && window.battle3dActive()) { try { window.renderBattleMapPanel(); } catch (e) {} }
+    if (typeof window.battle3dActive === 'function' && window.battle3dActive()) { try { window.renderBattleMapPanel(); } catch (e) { console.error('strike-craft-designer.js: redrawing the Battle Map failed', e); } }
     window.renderStrikeCraftDesignerPanel();
     window.renderSquadronTypeOptions();
     if (window.AudioEngine) window.AudioEngine.playPing();
