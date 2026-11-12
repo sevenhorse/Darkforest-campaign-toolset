@@ -422,7 +422,7 @@ window.handleMediaPickerUpload = async function(prefix, input) {
 // to force stale browsers to reload: bump it on every deploy that changes how
 // data is stored, then (once live) raise min_client_build to match, so older
 // cached copies show a "reload" banner instead of writing incompatible data.
-window.DARKFOREST_BUILD = '2026-11-11.05';
+window.DARKFOREST_BUILD = '2026-11-12.01';
 window.appSettingsCache = {};
 window.isFeatureOn = function(key) {
     const row = window.appSettingsCache[key];
@@ -1631,7 +1631,8 @@ window.FULL_BACKUP_TABLE_GROUPS = [
      'fow_reset_state', 'hyperlane_discovery'], // fog-of-war epoch + the routes the crew has found in it
     ['ship_markers', 'system_hazards',
      'codex_links', 'codex_dm_notes', // children of codex_entries; RLS DM only
-     'session_timeline'], // DM marks; references profiles + codex_entries
+     'session_timeline', // DM marks; references profiles + codex_entries
+     'heat_log'], // heat gauge entries (js/heat-gauge.js); created_by references profiles
     // battle_tokens / battle_events (undo log) / battle_reinforcements are children of battle_encounters.
     // scene_tokens are children of scene_maps.
     // deck_tokens are children of deck_fights.

@@ -295,6 +295,8 @@ window.updateCalendarDisplay = function() {
     if (clockTicker) clockTicker.innerText = timeStr;
     if (modalClock) modalClock.innerText = timeStr;
 };
+// Announced so add-ons that follow the clock (js/heat-gauge.js) can redraw.
+window.updateCalendarDisplay = window.withAfterHooks('clock-display', window.updateCalendarDisplay);
 
 window.processTimeAdvancement = async function(oldHours, newHours) {
     let daysPassed = Math.floor(newHours / 24) - Math.floor(oldHours / 24);
